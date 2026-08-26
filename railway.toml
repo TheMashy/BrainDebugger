@@ -1,0 +1,20 @@
+# Déploiement Railway.
+#
+# Variables à définir dans le projet :
+#   HOST=0.0.0.0            obligatoire — sinon le conteneur n'est pas joignable
+#   BD_PASSWORD=…           OBLIGATOIRE — sans lui le serveur refuse de démarrer
+#   BD_DB=/data/braindebugger.db   dans un volume, sinon tout est perdu au redéploiement
+#   ANTHROPIC_API_KEY=sk-ant-…     si le backend Claude est utilisé
+#
+# PORT est fourni par Railway, ne pas le définir.
+# Monter un volume sur /data avant le premier déploiement.
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

@@ -12,12 +12,19 @@ Tout tourne sur ta machine. Aucun compte, aucun serveur, aucune synchro.
 ## Démarrer
 
 ```bash
-npm start
-# → http://127.0.0.1:4173
+npm start   # → http://127.0.0.1:4173
+npm test    # 25 tests sur le calcul, sans dépendance
 ```
 
-Aucune dépendance à installer. SQLite est intégré à Node 22 (`node:sqlite`), le
-serveur est en `node:http`, le front est du JS natif. `npm install` ne télécharge rien.
+SQLite est intégré à Node 22 (`node:sqlite`), le serveur est en `node:http`, le front est
+du JS natif. Les modes `scripted` et `ollama` n'ont **aucune dépendance**.
+
+Le mode Claude a besoin d'un paquet :
+
+```bash
+npm install @anthropic-ai/sdk
+export ANTHROPIC_API_KEY=sk-ant-...   # ou colle la clé dans Réglages
+```
 
 Prérequis : **Node ≥ 22.5**.
 
@@ -32,6 +39,39 @@ Format attendu : l'export d'une grille annuelle mois × jours (Google Sheets, Ex
 L'importeur reconnaît les blocs par année, les lignes de mois (`Jan`…`Dec`), et
 récupère au passage les **ancres d'étalonnage** (`8 Good` + description) si elles
 sont présentes dans la feuille.
+
+## Déployer (Railway, Fly, un VPS)
+
+Par défaut le serveur écoute sur `127.0.0.1` : rien ne sort de la machine. Pour l'héberger,
+il faut ouvrir cette écoute — et à partir de là, **c'est un mot de passe qui protège ton
+journal, plus l'isolement réseau**. Le serveur refuse de démarrer si `HOST` n'est pas une
+adresse locale et que `BD_PASSWORD` n'est pas défini. Échouer au lancement est le seul
+comportement acceptable : un avertissement dans un README ne protège personne.
+
+Variables :
+
+| Variable | Rôle |
+|---|---|
+| `HOST=0.0.0.0` | requis, sinon le conteneur n'est pas joignable |
+| `BD_PASSWORD` | **requis** dès que `HOST` n'est pas local |
+| `BD_DB=/data/braindebugger.db` | requis, dans un volume — sinon tout est perdu au redéploiement |
+| `PORT` | fourni par l'hébergeur, ne pas le définir |
+| `BD_SECRET` | facultatif ; sans lui la clé de session dérive du mot de passe |
+| `ANTHROPIC_API_KEY` | si le backend Claude est utilisé |
+
+Sur Railway : **monte un volume sur `/data` avant le premier déploiement**, sinon la base
+part à chaque build. `railway.toml` fixe le reste (Nixpacks, `npm start`, sonde `/healthz`).
+
+Le verrou est un mot de passe unique, cookie de session signé en HMAC, `HttpOnly`,
+`SameSite=Lax`, `Secure` derrière HTTPS, avec freinage progressif après cinq échecs.
+C'est du mono-utilisateur : il n'y a pas de comptes, pas d'inscription, pas de partage.
+
+**Ce que l'hébergement change vraiment.** En local, personne d'autre que toi ne peut lire
+la base. Hébergé, elle vit sur le disque de quelqu'un d'autre, et l'hébergeur y a un accès
+technique. Le mot de passe arrête les inconnus, pas l'infrastructure. Si tu héberges pour
+toi seul, c'est un compromis de confort raisonnable. Si un jour d'autres personnes y
+écrivent, ça devient de l'hébergement de données de santé pour autrui — et en France, la
+certification HDS entre dans le cadre (§9).
 
 ---
 
@@ -104,10 +144,19 @@ Et un centre fixe *correct* ne suffit pas non plus — le carré signé amplifie
 basse plus que la queue haute, il reste une dérive résiduelle. Seule la référence
 glissante donne une pente lisible.
 
-**Épisodes** — non chevauchants : un jour déjà compris dans un épisode en cours n'en
-ouvre pas un nouveau. Le retour à la référence doit **tenir `sustain` jours** (2 par
-défaut) : avec 62 % des journées au-dessus de la référence, un rebond d'un seul jour
-est quasi garanti par le taux de base et ne dit rien.
+**Épisodes** — trois règles, chacune corrigeant une manière de mentir avec le chiffre :
+
+1. **Non chevauchants.** Un jour déjà compris dans un épisode en cours n'en ouvre pas
+   un nouveau, sinon le nombre d'épisodes gonfle et la médiane s'effondre.
+2. **Le retour doit tenir `sustain` jours** (2 par défaut). Avec la majorité des
+   journées au-dessus de la référence, un rebond d'un seul jour est quasi garanti par
+   le taux de base et ne dit rien. Passer de 1 à 2 jours fait tomber la part « sous
+   4 jours » de 81 % à 58 % : moins flatteur, vrai.
+3. **L'horizon classe, il ne découpe pas.** Une période basse continue de 40 jours est
+   *un* épisode non résolu, pas deux. Et un épisode ouvert trop près de la fin des
+   données est **censuré**, pas « jamais remonté » : on n'a pas encore le recul pour
+   trancher. L'épisode en cours est toujours dans ce cas — c'est précisément celui
+   qu'on regarde un mauvais soir. Le compter comme non résolu serait faux et alarmiste.
 
 ---
 
@@ -137,21 +186,59 @@ Le serveur écoute sur `127.0.0.1` et pas `0.0.0.0` : un journal intime ne doit 
 
 Par défaut : **aucun**. Les relances sont scriptées, rien ne quitte la machine.
 
-- **Ollama local** — conversation réelle, tout reste sur le disque. Demande une installation.
-- **API distante** — le texte des journées part chez un tiers. C'est le seul mode où
-  les données sortent. L'interface le dit explicitement.
+| Backend | Sort de la machine | Installation |
+|---|---|---|
+| `scripted` *(défaut)* | rien | aucune |
+| `anthropic` | le texte du chat | `npm install @anthropic-ai/sdk` + une clé |
+| `ollama` | rien | Ollama + un modèle |
 
-Si un backend distant tombe, le serveur retombe sur les relances scriptées **et le
-signale**. Une panne silencieuse serait un mensonge sur l'endroit où partent les données.
+**Ce que le mode Claude envoie, exactement :** la conversation du jour, plus le *texte*
+des N dernières journées écrites (réglable, 14 par défaut, 0 pour rien). Jamais les notes,
+jamais les statistiques, jamais les épisodes. Le Miroir n'est que du calcul et de la
+recherche locale — il ne fait aucun appel réseau, quel que soit le backend. C'est la
+frontière qui rend le compromis acceptable : ce qui sort, c'est ce qu'on vient d'écrire,
+pas quatre ans d'historique chiffré.
+
+Requête : `claude-opus-5`, réflexion adaptative, effort réglable (bas par défaut — la
+latence compte plus que la profondeur quand quelqu'un attend une réponse le soir), et le
+repli serveur `fallbacks: "default"` armé. Ce dernier point n'est pas cosmétique : sur ce
+produit, un refus de modèle tomberait exactement au pire moment.
+
+**La réponse est streamée.** Sans streaming, il y a plusieurs secondes de silence avant
+que le compagnon écrive quoi que ce soit, et l'illusion de quelqu'un en face tombe. Les
+fragments sont mis en file et drainés à cadence constante côté navigateur, pour que la
+frappe reste régulière quelle que soit la vitesse du modèle.
+
+Si un backend distant tombe — ou si le modèle décline — le serveur retombe sur les
+relances scriptées **et le signale**, et l'interface remonte le numéro d'aide. Une panne
+silencieuse serait un mensonge sur l'endroit où partent les données ; un silence après un
+refus serait pire.
 
 ---
+
+## Les vues
+
+- **Ce soir** — le compagnon, la conversation, la note du jour avec les ancres sous les yeux.
+- **Année** — la grille mois × jours, le cumul commutable entre les trois centres, et les
+  repères de vie (saisie et affichage en pointillés sur la courbe).
+- **Miroir** — les trois mécanismes, avec navigation jour par jour dans tout l'historique.
+- **Recherche** — BM25 sur le corpus, termes surlignés, bande des 14 jours suivants.
+- **Réglages** — compagnon, voix, backend, plancher, tenue du retour, export.
+
+## Tests
+
+`npm test` — 25 tests sur `server/stats.js`, sans dépendance (`node:test`). C'est la
+partie où la justesse compte : un bug dans les épisodes est un mensonge à quelqu'un
+qui va mal. Les tests couvrent la référence glissante et son repli, la reproduction
+exacte de la formule de contraste, la segmentation des épisodes, la tenue du retour,
+la censure à droite, les années bissextiles.
 
 ## Ce qui n'est pas fait
 
 - Embeddings locaux (`transformers.js`) — à faire quand le corpus texte dépassera
   quelques centaines d'entrées. `search.js` est isolé pour être remplacé sans toucher au reste.
 - Bot Discord (capture `#psy` + `/note`).
-- Table `events` remplie : le schéma et l'affichage sur la courbe existent, la saisie non.
+- Notification du soir : ouverte au §10 du spec, non tranchée.
 
 ## Ce que ce n'est pas
 

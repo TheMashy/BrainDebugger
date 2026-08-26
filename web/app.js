@@ -1,5 +1,7 @@
 import { PETS, petMarkup } from './pets.js';
-import { deltaColor, noteColor, lineChart, bandMarkup, SATURATION } from './charts.js';
+import { toPNG, PetTalk } from './pet.js';
+import { VOICES, Blip } from './blips.js';
+import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
 
 /* ============================= socle ============================= */
 
@@ -12,11 +14,18 @@ const fmtDay = d => {
   return `${Number(dd)} ${MONTHS_FR[Number(m) - 1].toLowerCase()} ${y}`;
 };
 const fmtTime = ts => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const dayShift = (d, n) => {
+  const [y, m, dd] = d.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, dd) + n * 86400000).toISOString().slice(0, 10);
+};
 
 async function api(path, body) {
   const res = await fetch(path, body
     ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     : undefined);
+  // session expirée ou déconnexion : on repasse par le verrou au lieu
+  // d'empiler des erreurs dans la console
+  if (res.status === 401) { location.href = '/login'; throw new Error('session expirée'); }
   const j = await res.json();
   if (j.error) throw new Error(j.error);
   return j;
@@ -54,32 +63,13 @@ document.addEventListener('mouseover', e => {
   }, { once: true });
 });
 
-/* --------- voix (Web Speech API, 100% navigateur) --------- */
-const Voice = {
-  list: [],
-  load() {
-    this.list = speechSynthesis.getVoices();
-    return this.list;
-  },
-  speak(text) {
-    if (!S?.settings.voiceEnabled || !window.speechSynthesis) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    const v = this.list.find(x => x.voiceURI === S.settings.voiceURI);
-    if (v) u.voice = v;
-    u.lang = v?.lang ?? 'fr-FR';
-    u.rate = S.settings.voiceRate ?? 1;
-    u.pitch = S.settings.voicePitch ?? 1;
-    speechSynthesis.speak(u);
-  }
-};
-if (window.speechSynthesis) {
-  Voice.load();
-  speechSynthesis.onvoiceschanged = () => Voice.load();
-}
+/** La voix du compagnon : un blip par syllabe (web/blips.js), pas de synthèse vocale. */
+const speakChar = c => Blip.tick(c, S.settings);
 
 function syncHeader() {
-  $('#dayline').textContent = `${S.stats.days} jours · ${S.stats.firstDate} → ${S.stats.lastDate}`;
+  $('#dayline').textContent = S.stats.days
+    ? `${S.stats.days} jours · ${S.stats.firstDate} → ${S.stats.lastDate}`
+    : 'aucune journée enregistrée';
 }
 
 async function saveSettings(patch) {
@@ -88,65 +78,90 @@ async function saveSettings(patch) {
   return settings;
 }
 
-/* ============================= vue : ce soir ============================= */
+/* ============================= vue : parler =============================
+
+   Une seule page pour le rituel du soir : tu parles, le compagnon relance,
+   tes propres mots d'avant remontent tout seuls, et tu notes.
+   La recherche n'est pas un onglet : chercher est une corvee, se voir rappeler
+   ses mots ne l'est pas. -- SPEC 2.2
+                                                                            */
+
+let ECHOES = { items: [], textCount: 0 };
 
 async function renderTonight() {
   const t = S.today;
   const note = S.entry?.note ?? null;
-  const ref = S.stats.reference;
-  const anchors = S.anchors;
+  const s = S.settings;
 
   $('#view').innerHTML = `
     <div class="tonight">
       <div class="card petcard">
-        <div class="art">${petMarkup(S.settings)}</div>
-        <div class="name">${esc(S.settings.petName)}</div>
+        <div class="art" id="art" tabindex="0" role="button"
+             aria-label="Changer l'image du compagnon">${petMarkup(s)}</div>
+        <input type="file" id="petPick" accept="image/*" hidden>
+        <div class="name">${esc(s.petName)}</div>
         <div class="role">il écoute, il ne note pas</div>
-        <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px;align-items:center">
+        <div style="margin-top:13px;display:flex;flex-direction:column;gap:7px;align-items:center">
+          <button class="voicetoggle" id="voiceBtn" aria-pressed="${s.blipEnabled}">
+            <span class="ico"></span>${s.blipEnabled ? esc(VOICES.find(v => v.id === s.blipVoice)?.name ?? 'il parle') : 'muet'}
+          </button>
           <span class="pill">${S.stats.streak} jour${S.stats.streak > 1 ? 's' : ''} d'affilée</span>
-          <span class="pill ${S.settings.chatBackend === 'scripted' ? '' : 'warn'}">
-            ${S.settings.chatBackend === 'scripted' ? 'hors-ligne · aucun modèle' : esc(S.settings.chatBackend)}
-          </span>
         </div>
       </div>
 
-      <div>
+      <div class="stack">
         <div class="card">
           <h2>${fmtDay(t)}</h2>
           <p class="sub">Raconte comme ça vient. Tes mots sont enregistrés tels quels.</p>
           <div class="thread" id="thread"></div>
           <div class="composer">
-            <textarea id="input" rows="1" placeholder="Écris ici…"></textarea>
+            <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
             <button class="btn primary" id="send">Envoyer</button>
           </div>
         </div>
 
-        <div class="card">
-          <h2>La note du jour</h2>
-          <p class="sub">C'est toi qui notes, jamais ${esc(S.settings.petName)}.
-            ${ref !== null ? `Ta référence glissante est à <b class="mono">${ref}</b>.` : ''}</p>
-          <div class="notestrip" id="notestrip">
-            ${Array.from({ length: 11 }, (_, n) => `
-              <button data-n="${n}" aria-pressed="${note === n}"
-                style="${note === n ? `background:${noteColor(n, ref ?? 6)}` : ''}"
-                data-tip="${anchors.find(a => a.note === n) ? esc(anchors.find(a => a.note === n).descr) : `${n}/10`}">${n}</button>`).join('')}
+        <div id="echoes"></div>
+
+        <div class="card notecard">
+          <div class="head">
+            <h2>La note d'aujourd'hui</h2>
+            <span class="ritual">Note avant de te coucher.</span>
           </div>
-          ${anchors.length ? `<div class="anchors">
-            ${anchors.map(a => `<div class="anchor">
-              <span class="n" style="background:${noteColor(a.note, ref ?? 6)}">${a.note}</span>
-              <span class="l"><b style="color:var(--ink)">${esc(a.label)}</b> — ${esc(a.descr)}</span>
-            </div>`).join('')}
+          <p class="sub">C'est dans le lit qu'on voit le mieux la journée entière — et c'est toi qui notes,
+            jamais ${esc(s.petName)}.${S.stats.reference !== null ? ` Ta référence glissante est à <b class="mono">${S.stats.reference}</b>.` : ''}</p>
+
+          <div class="noteface">
+            <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
+              ${note ?? '—'}<span class="sl">/10</span>
+            </div>
+            <div class="say" id="noteSay">${noteSay(note)}</div>
+          </div>
+
+          <div class="notestrip" id="notestrip">
+            ${Array.from({ length: 11 }, (_, n) => {
+              const c = noteScaleRGB(n);
+              const on = note === n;
+              return `<button data-n="${n}" aria-pressed="${on}" style="background:rgb(${c})"
+                data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
+            }).join('')}
+          </div>
+          <div class="scaleends"><span>0 · le pire</span><span>5 · moyen</span><span>10 · le meilleur</span></div>
+
+          ${S.anchors.length ? `<div class="anchors">
+            ${S.anchors.map(a => `<div class="anchor">
+              <span class="n" style="background:rgb(${noteScaleRGB(a.note)})">${a.note}</span>
+              <span class="l"><b>${esc(a.label)}</b> — ${esc(a.descr)}</span></div>`).join('')}
             <p class="faint" style="font-size:11.5px;margin:8px 0 0">
-              Tes propres repères, importés du tableur. Ils gardent l'échelle stable d'une année sur l'autre.
-            </p>
+              Tes propres repères. Ils gardent l'échelle stable d'une année sur l'autre.</p>
           </div>` : ''}
         </div>
       </div>
     </div>`;
 
   drawThread();
+  drawEchoes();
 
-  $('#notestrip').addEventListener('click', async e => {
+  $('#notestrip').onclick = async e => {
     const b = e.target.closest('button[data-n]');
     if (!b) return;
     const n = Number(b.dataset.n);
@@ -155,18 +170,56 @@ async function renderTonight() {
     syncHeader();
     renderTonight();
     toast(`Journée notée ${n}/10`);
-  });
+  };
+
+  $('#voiceBtn').onclick = async e => {
+    // capture AVANT le await : le DOM vide currentTarget des que le handler rend
+    // la main, ce qui arrive au premier await d'une fonction async.
+    const b = e.currentTarget;
+    const on = !S.settings.blipEnabled;
+    await saveSettings({ blipEnabled: on });
+    b.setAttribute('aria-pressed', String(on));
+    const v = VOICES.find(x => x.id === S.settings.blipVoice);
+    b.innerHTML = `<span class="ico"></span>${on ? esc(v?.name ?? 'il parle') : 'muet'}`;
+    if (on) Blip.preview(S.settings.blipVoice, S.settings);   // le clic autorise l'audio
+  };
+
+  // n'importe quelle image -> PNG carre normalise
+  $('#art').onclick = () => $('#petPick').click();
+  $('#art').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#petPick').click(); } };
+  $('#petPick').onchange = async e => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 12 * 1024 * 1024) return toast('Fichier trop lourd (max 12 Mo)');
+    try {
+      const png = await toPNG(f, 256);
+      await saveSettings({ petImage: png, petSprite: 'custom' });
+      renderTonight();
+      toast('Nouveau compagnon');
+    } catch (err) { toast(err.message); }
+  };
 
   const input = $('#input');
-  input.addEventListener('input', () => {
+  input.oninput = () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
-  });
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-  });
-  $('#send').addEventListener('click', send);
+    scheduleEchoes(input.value);
+  };
+  input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  $('#send').onclick = send;
   input.focus();
+}
+
+const noteFaceStyle = n => n === null || n === undefined
+  ? 'background:var(--panel-3);color:var(--ink-faint)'
+  : `background:rgb(${noteScaleRGB(n)});color:#08110c`;
+
+function noteSay(n) {
+  if (n === null || n === undefined) return "Tu n'as pas encore noté cette journée.";
+  const a = S.anchors.find(x => x.note === n);
+  if (a) return `<b>${esc(a.label)}</b> — ${esc(a.descr)}`;
+  const near = S.anchors.filter(x => x.note < n).sort((x, y) => y.note - x.note)[0];
+  return near ? `Au-dessus de <b>${esc(near.label)}</b> (${near.note}).` : `Noté ${n} sur 10.`;
 }
 
 function drawThread() {
@@ -176,9 +229,29 @@ function drawThread() {
     th.innerHTML = `<div class="empty">Rien pour aujourd'hui.<br>Écris un mot, ${esc(S.settings.petName)} répondra.</div>`;
     return;
   }
-  th.innerHTML = S.messages.map(m => `
-    <div class="msg ${m.role}">${esc(m.text)}<span class="t">${fmtTime(m.ts)}</span></div>`).join('');
+  th.innerHTML = S.messages.map(m =>
+    `<div class="msg ${m.role}"><span class="tx">${esc(m.text)}</span><span class="t">${fmtTime(m.ts)}</span></div>`
+  ).join('');
   th.scrollTop = th.scrollHeight;
+}
+
+/** Lit un flux SSE renvoyé par fetch et appelle `on(event, data)` par trame. */
+async function readSSE(res, on) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const frames = buf.split('\n\n');
+    buf = frames.pop() ?? '';
+    for (const f of frames) {
+      const ev = f.match(/^event: (.+)$/m)?.[1];
+      const raw = f.match(/^data: (.+)$/m)?.[1];
+      if (ev && raw) { try { on(ev, JSON.parse(raw)); } catch { /* trame partielle */ } }
+    }
+  }
 }
 
 async function send() {
@@ -188,101 +261,289 @@ async function send() {
   input.value = '';
   input.style.height = 'auto';
   $('#send').disabled = true;
+  PetTalk.stop();
 
-  // affichage optimiste : ce que tu écris apparait tout de suite
+  // affichage optimiste : ce que tu écris apparaît tout de suite
   S.messages.push({ ts: new Date().toISOString(), role: 'user', text });
   drawThread();
+  refreshEchoes(text);
+
+  let typing = null;
 
   try {
-    const r = await api('/api/message', { text, date: S.today });
-    S.messages = r.messages;
-    drawThread();
-    const last = r.messages[r.messages.length - 1];
-    if (last?.role === 'pet') Voice.speak(last.text);
-    if (r.degraded) toast(`Modèle injoignable — repli hors-ligne (${r.degraded.slice(0, 60)})`);
+    const res = await fetch('/api/message/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, date: S.today })
+    });
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+    await readSSE(res, (ev, data) => {
+      if (ev === 'error') { toast(data.error); return; }
+
+      if (ev === 'user') {
+        S.messages = data.messages;
+        drawThread();
+        // bulle vide dans laquelle le compagnon va écrire
+        const th = $('#thread');
+        const el = document.createElement('div');
+        el.className = 'msg pet';
+        el.innerHTML = '<span class="tx"></span>';
+        th.appendChild(el);
+        th.scrollTop = th.scrollHeight;
+        Blip.reset();
+        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'), { onChar: speakChar });
+        return;
+      }
+
+      if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
+
+      if (ev === 'done') {
+        PetTalk.endStream();
+        S.messages = data.messages;
+
+        if (data.refused) {
+          toast('Le modèle a décliné — le compagnon hors-ligne a pris la main.');
+          showHelpline();
+        } else if (data.degraded) {
+          toast(`Modèle injoignable — repli hors-ligne (${String(data.degraded).slice(0, 60)})`);
+        }
+      }
+    });
+
+    await typing;
+    drawThread();                       // repose les horodatages définitifs
   } catch (err) {
+    PetTalk.stop();
     toast(String(err.message));
   } finally {
-    $('#send').disabled = false;
-    input.focus();
+    const b = $('#send');
+    if (b) b.disabled = false;
+    $('#input')?.focus();
   }
 }
 
-/* ============================= vue : année ============================= */
+/**
+ * Si le modèle décline, on ne laisse pas un blanc. Le numéro d'aide devient
+ * visible sur la page où la personne est déjà en train d'écrire.
+ */
+function showHelpline() {
+  if ($('#helpline')) return;
+  const el = document.createElement('div');
+  el.className = 'helpline';
+  el.id = 'helpline';
+  el.innerHTML = "Si tu as besoin de parler à quelqu'un maintenant : <b>3114</b>, gratuit, 24h/24, partout en France.";
+  $('#thread')?.after(el);
+}
 
-let CENTER = 'relative';
+/* --------- echos : tes mots d'avant, sans avoir rien demande --------- */
+
+let _echoTimer = null;
+function scheduleEchoes(text) {
+  clearTimeout(_echoTimer);
+  _echoTimer = setTimeout(() => refreshEchoes(text), 700);
+}
+
+async function refreshEchoes(text) {
+  const t = String(text ?? '').trim();
+  if (t.length < 12) { ECHOES = { ...ECHOES, items: [] }; return drawEchoes(); }
+  try {
+    ECHOES = await api('/api/echoes', { text: t, date: S.today, limit: 3 });
+    drawEchoes();
+  } catch { /* les echos ne doivent jamais casser la saisie */ }
+}
+
+function drawEchoes() {
+  const el = $('#echoes');
+  if (!el) return;
+  if (!ECHOES.items?.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="card echoes">
+    <h2>Tu as déjà écrit ça</h2>
+    <p class="sub">Remonté tout seul pendant que tu écris. La bande montre les 14 jours qui ont suivi,
+      tels qu'ils ont été. Le jour cerclé est le retour à la référence.</p>
+    ${ECHOES.items.map(it => `<div class="simitem">
+      <div class="hd">
+        <span class="d">${fmtDay(it.date)}</span>
+        <span class="pill" style="background:rgba(${noteScaleRGB(it.note ?? 5)},.2);color:rgb(${noteScaleRGB(it.note ?? 5)});border-color:transparent">${it.note ?? '—'}/10</span>
+        <span class="faint" style="font-size:11.5px">${it.terms.map(esc).join(' · ')}</span>
+      </div>
+      <p class="q">${highlight(it.text.slice(0, 240), it.terms)}${it.text.length > 240 ? '…' : ''}</p>
+      ${bandMarkup(it.band)}
+    </div>`).join('')}
+  </div>`;
+}
+
+/**
+ * Premier lancement : aucune donnée. On ne montre pas une page vide avec des
+ * tirets — on dit ce qui manque et par où commencer.
+ */
+function renderNoData(why) {
+  $('#view').innerHTML = `<div class="card" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+    <div style="width:84px;height:84px;flex:none">${petMarkup(S.settings)}</div>
+    <div style="flex:1;min-width:240px">
+      <h2 style="margin:0 0 5px">Rien à afficher</h2>
+      <p class="sub" style="margin:0 0 13px">${esc(why)}</p>
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn primary" data-goview="tonight">Noter aujourd'hui</button>
+      </div>
+      <p class="faint" style="font-size:12px;margin:13px 0 0">
+        Si tu as déjà un historique dans un tableur :
+        <span class="mono">node server/import-csv.js ton-export.csv</span>
+      </p>
+    </div>
+  </div>`;
+  $('#view').onclick = e => {
+    const v = e.target.closest('[data-goview]');
+    if (v) go(v.dataset.goview);
+  };
+}
+
+/* ============================= vue : année =============================
+
+   Trois lectures des memes notes, chacune avec son metier :
+     - la grille  : ou etaient les journees
+     - l'ecart quotidien : signe(x)·x²/2,5, l'expansion qui fait ressortir les extremes
+     - le cumul   : somme des ecarts LINEAIRES a l'etalon, dont la pente est lisible
+   Le carre sert au quotidien, le lineaire au cumul. Cumuler le carre ecrase la forme.
+                                                                          */
+
 let SERIES = null;
-
-const CENTERS = {
-  fixed:    { key: 'cumFixed',    label: 'centre 5 (ta formule)' },
-  global:   { key: 'cumGlobal',   label: 'centre médiane globale' },
-  relative: { key: 'cumRelative', label: 'centre référence glissante' }
-};
+let CUMMODE = 'etalon';
+let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
 async function renderYear(year) {
+  if (!S.stats.days) return renderNoData('Les courbes ont besoin de journées notées.');
   year = year ?? Number(S.stats.lastDate.slice(0, 4));
   SERIES ??= await api('/api/series');
   const grid = await api(`/api/year?year=${year}`);
   const years = S.stats.years;
+  const eta = SERIES.etalon;
 
-  const drift = k => SERIES[k][SERIES[k].length - 1] / SERIES[k].length;
-  const fmtDrift = k => (drift(k) > 0 ? '+' : '') + drift(k).toFixed(3);
+  const cumKey = CUMMODE === 'etalon' ? 'cumEtalon' : 'cumDeltaRef';
+  const drift = SERIES[cumKey][SERIES[cumKey].length - 1] / SERIES[cumKey].length;
 
   $('#view').innerHTML = `
-    <div class="card">
-      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:16px">
-        <h2 style="margin:0">Grille</h2>
-        <div class="centerpick" style="margin:0 0 0 auto">
-          ${years.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
+    <div class="stack">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:15px">
+          <h2 style="margin:0">Grille</h2>
+          <div class="centerpick" style="margin:0 0 0 auto">
+            ${years.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
+          </div>
+        </div>
+        <div class="gridwrap">${gridMarkup(grid)}</div>
+        <div class="legend">
+          <span>pire</span>
+          ${Array.from({ length: 17 }, (_, i) => `<i style="background:${deltaColor(-SATURATION + (i / 16) * 2 * SATURATION)}"></i>`).join('')}
+          <span>meilleur</span>
+          <span style="margin-left:12px">écart à la référence glissante, saturé à ±${SATURATION}</span>
+          <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
         </div>
       </div>
-      <div class="gridwrap">${gridMarkup(grid)}</div>
-      <div class="legend">
-        <span>pire</span>
-        ${Array.from({ length: 17 }, (_, i) => {
-          const d = -SATURATION + (i / 16) * 2 * SATURATION;
-          return `<i style="background:${deltaColor(d)}"></i>`;
-        }).join('')}
-        <span>meilleur</span>
-        <span style="margin-left:14px">écart à la référence glissante, saturé à ±${SATURATION}</span>
-        <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
-      </div>
-    </div>
 
-    <div class="card">
-      <h2>Cumul du contraste</h2>
-      <p class="sub">
-        Ta formule <span class="mono">signe(x)·x²/2,5</span> appliquée jour après jour, puis cumulée.
-        Ce qui change entre les trois, c'est uniquement <b>x</b> — l'écart à quoi.
-      </p>
-      <div class="centerpick">
-        ${Object.entries(CENTERS).map(([k, c]) => `
-          <button data-center="${k}" aria-pressed="${CENTER === k}">
-            ${c.label}<span class="drift">${fmtDrift(c.key)}/j</span>
-          </button>`).join('')}
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px">
+          <h2 style="margin:0">Écart quotidien</h2>
+          <div class="centerpick" style="margin:0 0 0 auto">
+            <button data-daily="year" aria-pressed="${!DAILYALL}">${year}</button>
+            <button data-daily="all" aria-pressed="${DAILYALL}">tout</button>
+          </div>
+        </div>
+        <p class="sub">Ta formule <span class="mono">signe(n−5)·(n−5)²/2,5</span>, jour par jour.
+          Une journée à 6 pèse <span class="mono">0,4</span>, une journée à 9 pèse <span class="mono">6,4</span> :
+          l'expansion quadratique écrase le milieu et fait sortir les extrêmes. Pas de cumul ici.</p>
+        ${(() => {
+          const idx = DAILYALL
+            ? SERIES.date.map((_, i) => i)
+            : SERIES.date.map((d, i) => d.startsWith(String(year)) ? i : -1).filter(i => i >= 0);
+          return dailyChart(idx.map(i => SERIES.date[i]), idx.map(i => SERIES.contrastFixed[i]),
+                            { height: 240, events: SERIES.events });
+        })()}
       </div>
-      ${lineChart(SERIES.date, SERIES[CENTERS[CENTER].key], { height: 230, events: SERIES.events })}
-      ${CENTER === 'fixed' ? `<p class="sub" style="margin:12px 0 0;color:var(--warn)">
-        Avec un centre figé à 5 et une moyenne réelle à ${(SERIES.note.reduce((a,b)=>a+b,0)/SERIES.note.length).toFixed(2)},
-        la courbe monte de <b class="mono">${drift('cumFixed').toFixed(3)}</b> point par jour sans que rien ne s'améliore.
-        La pente ne veut rien dire — c'est le biais décrit au §6 du spec.</p>` : ''}
-      ${CENTER === 'global' ? `<p class="sub" style="margin:12px 0 0">
-        Centre correct, dérive résiduelle de <b class="mono">${fmtDrift('cumGlobal')}</b>/j :
-        le carré signé amplifie ta queue basse plus que ta queue haute.</p>` : ''}
-      ${CENTER === 'relative' ? `<p class="sub" style="margin:12px 0 0">
-        La pente ne monte que si la période est meilleure que tes 365 derniers jours.
-        Dérive résiduelle <b class="mono">${fmtDrift('cumRelative')}</b>/j — c'est la seule des trois qui soit lisible.</p>` : ''}
+
+      <div class="card">
+        <h2>Cumul</h2>
+        <p class="sub">Somme courante de <span class="mono">note − étalon</span> — l'écart <b>linéaire</b>, pas le carré.
+          La pente se lit directement : elle monte quand la période est au-dessus de l'étalon.</p>
+        <div class="centerpick">
+          <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}">étalon fixe<span class="drift mono">${eta}</span></button>
+          <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}">référence glissante<span class="drift">365 j</span></button>
+          <label class="field" style="margin:0 0 0 auto;display:flex;align-items:center;gap:8px">
+            <span style="margin:0;font-size:12px">étalon</span>
+            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}" style="width:76px">
+          </label>
+        </div>
+        ${lineChart(SERIES.date, SERIES[cumKey], { height: 250, events: SERIES.events })}
+        <p class="sub" style="margin:13px 0 0">
+          ${CUMMODE === 'etalon'
+            ? `Ta moyenne réelle est à <b class="mono">${SERIES.mean}</b>, ta médiane à <b class="mono">${SERIES.globalMedian}</b>.
+               Avec un étalon à <b class="mono">${eta}</b>, la courbe dérive de <b class="mono">${drift > 0 ? '+' : ''}${drift.toFixed(3)}</b>/jour.
+               Plus l'étalon colle à ta moyenne, plus la pente ne dit que ce qui a vraiment changé.`
+            : `Ici l'étalon n'est pas figé : c'est la médiane de tes 365 derniers jours, recalculée chaque jour.
+               Dérive résiduelle <b class="mono">${drift > 0 ? '+' : ''}${drift.toFixed(3)}</b>/jour, sans rien avoir à régler à la main.`}
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Repères</h2>
+        <p class="sub">Déménagement, rupture, nouveau boulot, arrêt d'un traitement. Ils apparaissent en pointillés
+          sur les deux courbes. Sans eux, une inflexion n'est qu'une inflexion.</p>
+        <form id="evform" style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+          <label class="field" style="margin:0;flex:0 0 160px"><span>Date</span>
+            <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.stats.lastDate}" value="${S.today}"></label>
+          <label class="field" style="margin:0;flex:1 1 240px"><span>Quoi</span>
+            <input type="text" id="evlabel" required maxlength="120" placeholder="ex. changement de boulot"></label>
+          <button class="btn" type="submit">Ajouter</button>
+        </form>
+        ${SERIES.events.length
+          ? `<div style="display:flex;flex-direction:column;gap:1px">
+              ${SERIES.events.map(ev => `<div style="display:flex;align-items:baseline;gap:11px;padding:7px 0;border-top:1px solid var(--line-soft)">
+                <span class="mono faint" style="font-size:12px;flex:0 0 92px">${esc(ev.date)}</span>
+                <span style="flex:1">${esc(ev.label)}</span>
+                <button class="btn" data-delev="${ev.id}" style="padding:3px 9px;font-size:11.5px">retirer</button>
+              </div>`).join('')}
+            </div>`
+          : `<p class="sub" style="margin:0">Aucun repère pour l'instant.</p>`}
+      </div>
     </div>`;
 
-  // onclick (et non addEventListener) : chaque rendu remplace l'ecouteur
-  // au lieu de l'empiler. #view survit aux rendus, contrairement a son contenu.
   $('#view').onclick = async e => {
     const y = e.target.closest('[data-year]');
     if (y) return renderYear(Number(y.dataset.year));
-    const c = e.target.closest('[data-center]');
-    if (c) { CENTER = c.dataset.center; return renderYear(year); }
+    const c = e.target.closest('[data-cum]');
+    if (c) { CUMMODE = c.dataset.cum; return renderYear(year); }
+    const dl = e.target.closest('[data-daily]');
+    if (dl) { DAILYALL = dl.dataset.daily === 'all'; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
     if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
+    const del = e.target.closest('[data-delev]');
+    if (del) {
+      const { events } = await api('/api/events', { delete: Number(del.dataset.delev) });
+      SERIES.events = events;
+      return renderYear(year);
+    }
+  };
+
+  $('#etalon').onchange = async e => {
+    const v = Number(e.target.value);
+    if (!Number.isFinite(v) || v < 0 || v > 10) return toast('Étalon hors 0..10');
+    await saveSettings({ etalon: v });
+    SERIES = await api('/api/series');
+    CUMMODE = 'etalon';
+    renderYear(year);
+  };
+
+  $('#evform').onsubmit = async e => {
+    e.preventDefault();
+    const date = $('#evdate').value, label = $('#evlabel').value.trim();
+    if (!date || !label) return;
+    try {
+      const { events } = await api('/api/events', { date, label });
+      SERIES.events = events;
+      $('#evlabel').value = '';
+      await renderYear(year);
+      toast('Repère ajouté');
+    } catch (err) { toast(err.message); }
   };
 }
 
@@ -295,10 +556,9 @@ function gridMarkup(grid) {
       ${mo.days.map(d => {
         if (!d) return '<td></td>';
         const has = d.note !== null && d.note !== undefined;
-        const col = has ? deltaColor(d.delta) : null;
         return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}"
-          ${col ? `style="background:${col}"` : ''}
-          ${has ? `data-date="${d.date}" data-tip="${fmtDay(d.date)}\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}"` : ''}></td>`;
+          ${has ? `style="background:${deltaColor(d.delta)}" data-date="${d.date}"
+          data-tip="${fmtDay(d.date)}\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}"` : ''}></td>`;
       }).join('')}
       <td class="avg">${mo.avg ?? ''}</td>
     </tr>`).join('')}
@@ -307,15 +567,38 @@ function gridMarkup(grid) {
 
 /* ============================= vue : miroir ============================= */
 
+let MIRROR_DATE = null;
+
+/** Surligne les termes qui ont fait matcher. Montrer POURQUOI ca ressort. */
+function highlight(text, terms = []) {
+  let out = esc(text);
+  for (const t of terms) {
+    const re = new RegExp(`(^|[^a-zà-ÿ])(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[a-zà-ÿ]*)`, 'gi');
+    out = out.replace(re, '$1<mark>$2</mark>');
+  }
+  return out;
+}
+
 async function renderMirror(date) {
-  date = date ?? S.today;
+  if (!S.stats.days) return renderNoData('Le miroir a besoin de journées passées pour te montrer quoi que ce soit.');
+  date = date ?? MIRROR_DATE ?? S.today;
+  MIRROR_DATE = date;
   const m = await api(`/api/mirror?date=${date}`);
+  const prev = dayShift(date, -1), next = dayShift(date, 1);
+  const nav = `<div class="daynav">
+      <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
+      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      ${date !== S.today ? `<button class="wide" data-goto="${S.today}">aujourd'hui</button>` : ''}
+    </div>`;
 
   /* --- SPEC 4.1 : sous le plancher, aucune statistique. --- */
   if (m.floored) {
     $('#view').innerHTML = `
       <div class="card floorbox">
-        <h2>Aujourd'hui, pas de chiffres</h2>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:5px">
+          <h2 style="margin:0">Aujourd'hui, pas de chiffres</h2>
+          <div style="margin-left:auto">${nav}</div>
+        </div>
         <p class="sub" style="color:#c9a19b">
           Tu as noté ${m.note}/10. En dessous de ${m.floor.threshold}, cet outil ne sort aucune statistique.
           Un chiffre rassurant maintenant ne vaudrait rien.
@@ -344,7 +627,7 @@ async function renderMirror(date) {
           <button class="btn" id="backToChat">Parler à ${esc(S.settings.petName)}</button>
         </div>
       </div>` : ''}`;
-    $('#backToChat')?.addEventListener('click', () => go('tonight'));
+    wireMirror();
     return;
   }
 
@@ -358,14 +641,15 @@ async function renderMirror(date) {
       }</p></div>`;
   } else if (ep.insufficient) {
     epCard = `<div class="card"><h2>Preuve de résolution</h2>
-      <p class="sub">Seulement ${ep.count} journée${ep.count > 1 ? 's' : ''} comparable${ep.count > 1 ? 's' : ''} dans ton historique.
+      <p class="sub">Seulement ${ep.comparableCount} journée${ep.comparableCount > 1 ? 's' : ''} comparable${ep.comparableCount > 1 ? 's' : ''} dans ton historique.
       En dessous de ${ep.minComparable}, je n'ai rien à en tirer.</p></div>`;
   } else {
     epCard = `<div class="card">
       <h2>Preuve de résolution</h2>
       <p class="sub">
-        Les <b>${ep.count}</b> fois où tu es descendu à ${ep.note}/10 ou moins, voilà combien de temps
+        Les <b>${ep.comparableCount}</b> fois où tu es descendu à ${ep.note}/10 ou moins, voilà combien de temps
         il a fallu pour remonter au-dessus de ta référence — et pour y rester ${ep.sustain} jours.
+        ${ep.censoredCount ? `<br><span class="faint">L'épisode en cours n'est pas compté : il n'a pas encore assez de recul pour être jugé.</span>` : ''}
       </p>
       <div class="statgrid">
         <div class="s"><div class="k">Médiane</div><div class="v">${ep.medianDays}<span class="u"> jours</span></div></div>
@@ -376,6 +660,7 @@ async function renderMirror(date) {
       </div>
       <p class="sub" style="margin:16px 0 0;font-size:12px">
         La dernière colonne est la moitié honnête du chiffre. Sans elle, on ne montrerait que les fois où ça s'est arrangé.
+        ${ep.beyondHorizonDays?.length ? `Parmi elles, ${ep.beyondHorizonDays.length} sont finalement remontées, au bout de ${ep.beyondHorizonDays.join(', ')} jours.` : ''}
       </p>
     </div>`;
   }
@@ -386,15 +671,15 @@ async function renderMirror(date) {
     simCard = `<div class="card">
       <h2>${sim.mode === 'text' ? 'Tu as déjà écrit ça' : 'Les autres fois à ' + m.note + '/10'}</h2>
       <p class="sub">${sim.mode === 'text'
-        ? 'Recherche sur ton propre corpus. La bande montre les 14 jours qui ont suivi, tels qu\'ils ont été.'
-        : 'Pas encore assez de texte écrit pour comparer les mots — je compare les chiffres. La bande montre les 14 jours qui ont suivi.'}</p>
+        ? 'Recherche sur ton propre corpus. La bande montre les 14 jours qui ont suivi, tels qu\'ils ont été. Le jour cerclé est le retour à la référence.'
+        : 'Pas encore assez de texte écrit pour comparer les mots — je compare les chiffres. La bande montre les 14 jours qui ont suivi. Le jour cerclé est le retour à la référence.'}</p>
       ${sim.items.map(it => `<div class="simitem">
         <div class="hd">
           <span class="d">${fmtDay(it.date)}</span>
           <span class="pill">${it.note}/10</span>
           ${it.terms?.length ? `<span class="faint" style="font-size:11.5px">${it.terms.map(esc).join(' · ')}</span>` : ''}
         </div>
-        ${it.text ? `<p class="q">${esc(it.text.slice(0, 260))}${it.text.length > 260 ? '…' : ''}</p>` : ''}
+        ${it.text ? `<p class="q">${highlight(it.text.slice(0, 260), it.terms)}${it.text.length > 260 ? '…' : ''}</p>` : ''}
         ${bandMarkup(it.band)}
       </div>`).join('')}
     </div>`;
@@ -416,20 +701,29 @@ async function renderMirror(date) {
           ${m.note ?? '—'}<span style="font-size:16px;color:var(--ink-faint)">/10</span>
         </div>
       </div>
-      <div class="statgrid" style="flex:1">
+      <div class="statgrid" style="flex:1;min-width:220px">
         <div class="s"><div class="k">Référence glissante</div><div class="v">${m.reference ?? '—'}</div></div>
         <div class="s"><div class="k">Écart</div><div class="v">${m.delta > 0 ? '+' : ''}${m.delta ?? '—'}</div></div>
         <div class="s"><div class="k">Corpus texte</div><div class="v">${m.textCount ?? 0}<span class="u"> jours</span></div></div>
       </div>
+      ${nav}
     </div>
     ${epCard}${simCard}${yCard}`;
+  wireMirror();
+}
+
+function wireMirror() {
+  $('#view').onclick = e => {
+    const g = e.target.closest('[data-goto]');
+    if (g) return renderMirror(g.dataset.goto);
+    if (e.target.closest('#backToChat')) return go('tonight');
+  };
 }
 
 /* ============================= vue : réglages ============================= */
 
 async function renderSettings() {
   const s = S.settings;
-  const voices = Voice.load();
 
   $('#view').innerHTML = `
     <div class="row">
@@ -450,22 +744,23 @@ async function renderSettings() {
 
       <div class="card">
         <h2>La voix</h2>
-        <p class="sub">Synthèse du navigateur. Rien n'est envoyé nulle part.</p>
+        <p class="sub">Un blip par syllabe, comme dans un RPG. Pas de synthèse vocale : une voix
+          qui lit « qu'est-ce qui s'est passé aujourd'hui ? » sonne comme un serveur vocal,
+          et on ne se confie pas à un serveur vocal.</p>
         <label class="field"><span>
-          <input type="checkbox" id="voiceEnabled" ${s.voiceEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
-          Lire les réponses à voix haute</span></label>
-        <label class="field"><span>Voix (${voices.length} disponibles)</span>
-          <select id="voiceURI">
-            <option value="">— par défaut —</option>
-            ${voices.map(v => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === s.voiceURI ? 'selected' : ''}>${esc(v.name)} (${esc(v.lang)})</option>`).join('')}
-          </select></label>
-        <div class="row" style="gap:11px">
-          <label class="field"><span>Débit <b class="mono" id="rv">${s.voiceRate}</b></span>
-            <input type="range" id="voiceRate" min=".6" max="1.6" step=".05" value="${s.voiceRate}"></label>
-          <label class="field"><span>Hauteur <b class="mono" id="pv">${s.voicePitch}</b></span>
-            <input type="range" id="voicePitch" min=".5" max="1.8" step=".05" value="${s.voicePitch}"></label>
+          <input type="checkbox" id="blipEnabled" ${s.blipEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
+          Le compagnon fait du bruit quand il parle</span></label>
+        <div class="voicepick" id="voicepick">
+          ${VOICES.map(v => `<button data-voice="${v.id}" aria-pressed="${s.blipVoice === v.id}">
+            <b>${esc(v.name)}</b><span>${esc(v.hint)}</span></button>`).join('')}
         </div>
-        <button class="btn" id="tryVoice">Essayer</button>
+        <div class="row" style="gap:11px;margin-top:14px">
+          <label class="field"><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
+            <input type="range" id="blipPitch" min=".6" max="1.6" step=".05" value="${s.blipPitch}"></label>
+          <label class="field"><span>Volume <b class="mono" id="bv">${Math.round(s.blipVolume * 100)}%</b></span>
+            <input type="range" id="blipVolume" min="0" max="1" step=".05" value="${s.blipVolume}"></label>
+        </div>
+        <p class="sub" style="margin:0;font-size:12px">Clique un timbre pour l'écouter.</p>
       </div>
     </div>
 
@@ -475,13 +770,15 @@ async function renderSettings() {
       <label class="field"><span>Backend</span>
         <select id="chatBackend">
           <option value="scripted" ${s.chatBackend === 'scripted' ? 'selected' : ''}>Aucun modèle — relances scriptées (hors-ligne)</option>
+          <option value="anthropic" ${s.chatBackend === 'anthropic' ? 'selected' : ''}>Claude (API Anthropic)</option>
           <option value="ollama" ${s.chatBackend === 'ollama' ? 'selected' : ''}>Ollama local</option>
-          <option value="openai" ${s.chatBackend === 'openai' ? 'selected' : ''}>API distante (compatible OpenAI)</option>
         </select></label>
       <div id="backendCfg"></div>
-      <p class="sub" style="margin:4px 0 0;font-size:12px">
-        En « API distante », le texte de tes journées est envoyé à un serveur tiers. C'est le seul mode où tes données sortent d'ici.
-      </p>
+      ${s.chatBackend === 'anthropic' ? `<p class="sub" style="margin:10px 0 0;font-size:12.5px;color:var(--warn)">
+        Dans ce mode, <b>le texte de tes conversations part chez Anthropic</b>. Tes notes, tes
+        statistiques et tes 1698 journées chiffrées ne bougent pas : le Miroir est du calcul et
+        de la recherche, il ne fait aucun appel réseau. Seul ce que tu écris dans le chat sort d'ici.
+      </p>` : ''}
     </div>
 
     <div class="row">
@@ -498,12 +795,24 @@ async function renderSettings() {
       </div>
 
       <div class="card">
+        <h2>Le retour à la référence</h2>
+        <p class="sub">Combien de jours consécutifs au-dessus de la référence comptent comme une vraie remontée.
+          À 1 jour, un simple rebond suffit : avec la majorité de tes journées au-dessus de la référence,
+          le chiffre devient flatteur et ne dit plus rien.</p>
+        <label class="field"><span>Tenue exigée <b class="mono" id="sv">${s.sustain}</b> jour${s.sustain > 1 ? 's' : ''}</span>
+          <input type="range" id="sustain" min="1" max="5" step="1" value="${s.sustain}"></label>
+      </div>
+
+      <div class="card">
         <h2>Tes données</h2>
         <p class="sub">${S.stats.days} journées notées · ${S.stats.textDays} avec du texte · ${esc(S.stats.firstDate)} → ${esc(S.stats.lastDate)}</p>
         <p class="sub" style="font-size:12.5px">
           Tout est dans un fichier SQLite sur ce disque. Aucun compte, aucun serveur, aucune synchro.
         </p>
-        <button class="btn" id="export">Exporter en JSON</button>
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn" id="export">Exporter en JSON</button>
+          <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">Se déconnecter</button></form>
+        </div>
       </div>
     </div>`;
 
@@ -513,17 +822,32 @@ async function renderSettings() {
     $('#' + id)?.addEventListener(ev, async e => { await saveSettings({ [key]: get(e.target) }); });
 
   bind('petName', 'petName', 'change');
-  bind('voiceURI', 'voiceURI');
   bind('floorMode', 'floorMode');
   bind('floor', 'floor', 'change', el => Number(el.value));
-  bind('voiceEnabled', 'voiceEnabled', 'change', el => el.checked);
-  $('#voiceRate').addEventListener('input', async e => { $('#rv').textContent = e.target.value; await saveSettings({ voiceRate: Number(e.target.value) }); });
-  $('#voicePitch').addEventListener('input', async e => { $('#pv').textContent = e.target.value; await saveSettings({ voicePitch: Number(e.target.value) }); });
-  $('#tryVoice').addEventListener('click', () => Voice.speak(`Bonjour, moi c'est ${S.settings.petName}. Raconte-moi ta journée.`));
+  bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
+  $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
+
+  $('#voicepick')?.addEventListener('click', async e => {
+    const b = e.target.closest('[data-voice]');
+    if (!b) return;
+    await saveSettings({ blipVoice: b.dataset.voice });
+    for (const x of $('#voicepick').children) x.setAttribute('aria-pressed', String(x === b));
+    Blip.preview(b.dataset.voice, S.settings);      // le clic autorise l'audio
+  });
+  $('#blipPitch')?.addEventListener('input', async e => {
+    $('#bp').textContent = e.target.value;
+    await saveSettings({ blipPitch: Number(e.target.value) });
+  });
+  $('#blipPitch')?.addEventListener('change', () => Blip.preview(S.settings.blipVoice, S.settings));
+  $('#blipVolume')?.addEventListener('input', async e => {
+    $('#bv').textContent = Math.round(e.target.value * 100) + '%';
+    await saveSettings({ blipVolume: Number(e.target.value) });
+  });
+  $('#blipVolume')?.addEventListener('change', () => Blip.preview(S.settings.blipVoice, S.settings));
 
   $('#chatBackend').addEventListener('change', async e => {
     await saveSettings({ chatBackend: e.target.value });
-    renderBackendCfg();
+    renderSettings();
   });
 
   $('#spritepick').addEventListener('click', async e => {
@@ -557,11 +881,36 @@ async function renderSettings() {
   });
 }
 
-function renderBackendCfg() {
+async function renderBackendCfg() {
   const s = S.settings;
   const el = $('#backendCfg');
   if (!el) return;
-  if (s.chatBackend === 'ollama') {
+
+  if (s.chatBackend === 'anthropic') {
+    let info = { models: [], hasEnvKey: false };
+    try { info = await api('/api/models'); } catch { /* ignoré */ }
+    el.innerHTML = `<div class="row">
+      <label class="field"><span>Modèle</span>
+        <select id="anthropicModel">
+          ${info.models.map(m => `<option value="${esc(m.id)}" ${m.id === s.anthropicModel ? 'selected' : ''}>${esc(m.label)} — ${esc(m.note)}</option>`).join('')}
+        </select></label>
+      <label class="field"><span>Effort</span>
+        <select id="anthropicEffort">
+          <option value="low" ${s.anthropicEffort === 'low' ? 'selected' : ''}>bas — répond vite</option>
+          <option value="medium" ${s.anthropicEffort === 'medium' ? 'selected' : ''}>moyen</option>
+          <option value="high" ${s.anthropicEffort === 'high' ? 'selected' : ''}>élevé — réfléchit plus, répond moins vite</option>
+        </select></label>
+    </div>
+    <label class="field"><span>Clé API${info.hasEnvKey ? ' — <code>ANTHROPIC_API_KEY</code> détectée, laisse vide pour l\'utiliser' : ''}</span>
+      <input type="password" id="apiKey" value="${esc(s.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
+    <label class="field"><span>Mémoire — <b class="mono">${s.memoryDays}</b> journée${s.memoryDays > 1 ? 's' : ''} passée${s.memoryDays > 1 ? 's' : ''} transmise${s.memoryDays > 1 ? 's' : ''}</span>
+      <input type="range" id="memoryDays" min="0" max="30" step="1" value="${s.memoryDays}"></label>
+    <p class="sub" style="margin:0;font-size:12px">
+      Ce qui donne la continuité : sans mémoire, il repart de zéro chaque soir. Seul le
+      <b>texte</b> de ces journées est transmis — jamais tes notes, jamais tes statistiques.
+      À 0, il ne connaît que la conversation du jour.
+    </p>`;
+  } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
       <label class="field"><span>URL Ollama</span><input type="text" id="ollamaUrl" value="${esc(s.ollamaUrl)}"></label>
       <label class="field"><span>Modèle</span><input type="text" id="ollamaModel" value="${esc(s.ollamaModel)}"></label>
@@ -574,14 +923,23 @@ function renderBackendCfg() {
     <label class="field"><span>Clé API</span><input type="password" id="apiKey" value="${esc(s.apiKey)}"></label>`;
   } else { el.innerHTML = ''; return; }
 
-  for (const id of ['ollamaUrl', 'ollamaModel', 'apiUrl', 'apiModel', 'apiKey']) {
+  for (const id of ['ollamaUrl', 'ollamaModel', 'apiKey', 'anthropicModel', 'anthropicEffort']) {
     $('#' + id)?.addEventListener('change', async e => { await saveSettings({ [id]: e.target.value }); });
   }
+  $('#memoryDays')?.addEventListener('change', async e => {
+    await saveSettings({ memoryDays: Number(e.target.value) });
+    renderSettings();
+  });
 }
 
 /* ============================= routage ============================= */
 
-const VIEWS = { tonight: renderTonight, year: () => renderYear(), mirror: () => renderMirror(), settings: renderSettings };
+const VIEWS = {
+  tonight: renderTonight,
+  year: () => renderYear(),
+  mirror: () => renderMirror(),
+  settings: renderSettings
+};
 
 function syncNav() {
   for (const b of document.querySelectorAll('nav button')) {
@@ -593,6 +951,7 @@ async function go(v) {
   view = v;
   syncNav();
   $('#view').onclick = null;
+  PetTalk.stop();
   $('#view').innerHTML = '<div class="empty">…</div>';
   try { await VIEWS[v](); }
   catch (err) { $('#view').innerHTML = `<div class="card"><h2>Erreur</h2><p class="sub">${esc(err.message)}</p></div>`; }

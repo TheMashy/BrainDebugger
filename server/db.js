@@ -61,18 +61,22 @@ export const DEFAULT_SETTINGS = {
   petName: 'Cerf',
   petSprite: 'deer',          // id integre, ou 'custom'
   petImage: null,             // data URL si petSprite === 'custom'
-  voiceURI: null,             // Web Speech API
-  voiceRate: 1,
-  voicePitch: 1,
-  voiceEnabled: false,
-  chatBackend: 'scripted',    // 'scripted' | 'ollama' | 'openai'
+  blipEnabled: true,          // la voix du compagnon : un blip par syllabe
+  blipVoice: 'aa',            // identifiant de timbre (voir web/blips.js)
+  blipPitch: 1,               // 0.6 .. 1.6
+  blipVolume: 0.7,            // 0 .. 1
+  chatBackend: 'scripted',    // 'scripted' | 'anthropic' | 'ollama'
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'qwen2.5:7b',
-  apiUrl: '',
-  apiKey: '',
-  apiModel: '',
+  apiKey: '',                 // cle Anthropic ; repli sur ANTHROPIC_API_KEY
+  anthropicModel: 'claude-opus-5',
+  anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
+  memoryDays: 14,             // journees passees transmises au compagnon (0 = aucune)
   floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
   floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
+  sustain: 2,                 // jours consecutifs >= reference pour valider un retour
+  etalon: 5.7,                // constante de calage du cumul (null = mediane globale)
+  cumMode: 'etalon',          // 'etalon' | 'reference'
   contrastCenter: 'reference' // 'fixed5' (formule tableur) | 'reference' (glissante)
 };
 

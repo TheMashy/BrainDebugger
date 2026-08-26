@@ -3,9 +3,9 @@ import {
   addMessage, messagesForDate, allEvents, addEvent, deleteEvent,
   allAnchors, setAnchor
 } from './db.js';
-import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, CONTRAST_SATURATION } from './stats.js';
+import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { buildIndex, search } from './search.js';
-import { reply } from './chat.js';
+import { reply, memoryBlock, ANTHROPIC_MODELS } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ---------- */
 let _cache = null;
@@ -13,11 +13,28 @@ export function invalidate() { _cache = null; }
 function series() {
   if (!_cache) {
     const rows = allEntries();
-    const s = buildSeries(rows);
+    const s = buildSeries(rows, { etalon: getSettings().etalon });
     const textDocs = rows.filter(r => r.text && r.text.trim()).map(r => ({ id: r.date, text: r.text }));
     _cache = { rows, series: s, byDate: indexByDate(s), index: buildIndex(textDocs), textCount: textDocs.length };
   }
   return _cache;
+}
+
+/**
+ * Les journees ecrites les plus recentes, dans les mots exacts de l'utilisateur.
+ * Uniquement du TEXTE : jamais les statistiques, jamais les episodes. Le
+ * compagnon n'a pas a connaitre les chiffres -- c'est le Miroir qui les montre.
+ */
+export function recentMemory(date) {
+  const s = getSettings();
+  const days = Number(s.memoryDays ?? 0);
+  if (!days) return null;
+  const rows = db.prepare(`
+    SELECT date, note, text FROM entries
+    WHERE date < ? AND text IS NOT NULL AND TRIM(text) <> ''
+    ORDER BY date DESC LIMIT ?
+  `).all(date, days).reverse();
+  return memoryBlock(rows);
 }
 
 export function today() {
@@ -71,6 +88,9 @@ export const routes = {
     };
   },
 
+  /** Les N dernieres journees ecrites, pour donner de la continuite au compagnon. */
+  'GET /api/models': () => ({ models: ANTHROPIC_MODELS, hasEnvKey: !!process.env.ANTHROPIC_API_KEY }),
+
   'POST /api/message': async ({ body }) => {
     const text = String(body.text ?? '').trim();
     if (!text) return { error: 'texte vide' };
@@ -81,10 +101,13 @@ export const routes = {
     invalidate();
 
     const history = messagesForDate(date).map(m => ({ role: m.role, text: m.text }));
-    const r = await reply(history, getSettings());
+    const r = await reply(history, getSettings(), { memory: recentMemory(date) });
 
     addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
-    return { messages: messagesForDate(date), backend: r.backend, degraded: r.degraded ?? null };
+    return {
+      messages: messagesForDate(date), backend: r.backend,
+      degraded: r.degraded ?? null, refused: r.refused ?? false
+    };
   },
 
   'GET /api/messages': ({ query }) => ({ messages: messagesForDate(query.date ?? today()) }),
@@ -111,9 +134,15 @@ export const routes = {
       contrastFixed: s.map(x => x.contrastFixed),
       contrastGlobal: s.map(x => x.contrastGlobal),
       contrastRelative: s.map(x => x.contrastRelative),
+      midValue: s.map(x => x.midValue),
+      cumEtalon: s.map(x => x.cumEtalon),
+      cumDeltaRef: s.map(x => x.cumDeltaRef),
       cumFixed: s.map(x => x.cumFixed),
       cumGlobal: s.map(x => x.cumGlobal),
       cumRelative: s.map(x => x.cumRelative),
+      etalon: getSettings().etalon ?? median(s.map(x => x.note).sort((a, b) => a - b)),
+      globalMedian: median(s.map(x => x.note).sort((a, b) => a - b)),
+      mean: s.length ? Math.round(s.reduce((a, b) => a + b.note, 0) / s.length * 1000) / 1000 : null,
       events: allEvents()
     };
   },
@@ -148,7 +177,7 @@ export const routes = {
     }
 
     // 1. PREUVE DE RESOLUTION
-    const sustain = Number(query.sustain ?? 2);
+    const sustain = Number(query.sustain ?? s.sustain ?? 2);
     const ep = note === null ? { applicable: false, reason: 'no_note' }
                              : episodes(ser, note, { horizon: 60, sustain });
     if (ep.applicable && ep.count < MIN_COMPARABLE) {
@@ -186,6 +215,28 @@ export const routes = {
     }
 
     return { date, note, reference, delta: cur?.delta ?? null, floored: false, floor, yesterday, episodes: ep, similar, textCount };
+  },
+
+  /**
+   * Echos : les entrees passees proches de ce qui est en train d'etre ecrit.
+   * Appele pendant la saisie, pas sur une action de recherche -- SPEC 2.2.
+   * Chercher est une corvee ; se voir rappeler ses propres mots ne l'est pas.
+   */
+  'POST /api/echoes': ({ body }) => {
+    const { index, rows, byDate, series: ser, textCount } = series();
+    const text = String(body.text ?? '').trim();
+    const exclude = new Set([body.date ?? today()]);
+    if (text.length < 12 || textCount < 2) return { items: [], textCount };
+    const hits = search(index, text, { limit: Number(body.limit ?? 3), exclude });
+    return {
+      textCount,
+      items: hits.filter(h => h.score > 0.6).map(h => ({
+        date: h.id, score: h.score, terms: h.terms,
+        note: byDate.get(h.id)?.note ?? null,
+        text: rows.find(r => r.date === h.id)?.text ?? '',
+        band: followUp(ser, h.id, 14)
+      }))
+    };
   },
 
   'GET /api/search': ({ query }) => {
@@ -229,3 +280,39 @@ export const routes = {
     messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages ORDER BY ts').all()
   })
 };
+
+
+/**
+ * Envoi d'un message avec reponse streamee.
+ *
+ * `send(event, data)` ecrit un evenement SSE. Sequence :
+ *   user  -> le message de l'utilisateur est enregistre
+ *   delta -> fragments de texte, au fil de la generation
+ *   done  -> message complet enregistre, etat du backend
+ */
+export async function streamMessage(body, send) {
+  const text = String(body.text ?? '').trim();
+  if (!text) { send('error', { error: 'texte vide' }); return; }
+
+  const date = body.date ?? today();
+  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text });
+  invalidate();
+  send('user', { messages: messagesForDate(date) });
+
+  const history = messagesForDate(date).map(m => ({ role: m.role, text: m.text }));
+  const settings = getSettings();
+
+  const r = await reply(history, settings, {
+    memory: recentMemory(date),
+    onText: chunk => send('delta', { text: chunk })
+  });
+
+  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
+  send('done', {
+    messages: messagesForDate(date),
+    backend: r.backend,
+    model: r.model ?? null,
+    degraded: r.degraded ?? null,
+    refused: r.refused ?? false
+  });
+}
