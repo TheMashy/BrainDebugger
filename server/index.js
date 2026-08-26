@@ -197,6 +197,30 @@ const server = createServer(async (req, res) => {
   }
 });
 
+server.on('error', err => {
+  // Sans ça, un port occupé ou interdit sort une stack Node brute, et sur un
+  // hébergeur on ne voit qu'un conteneur mort sans raison.
+  const why = {
+    EADDRINUSE: `Le port ${PORT} est déjà utilisé.`,
+    EACCES: `Interdiction d'écouter sur le port ${PORT} (ports < 1024 réservés).`,
+    EADDRNOTAVAIL: `L'adresse ${HOST} n'existe pas sur cette machine.`
+  }[err.code] ?? `${err.code ?? ''} ${err.message}`.trim();
+  process.stderr.write([
+    '',
+    '  ════════════════════════════════════════════════════════════',
+    '  IMPOSSIBLE D\'OUVRIR L\'ÉCOUTE',
+    '',
+    `  ${why}`,
+    '',
+    `  tentative : ${HOST}:${PORT}`,
+    `  PORT      : ${process.env.PORT ? `fourni par l'environnement (${process.env.PORT})` : 'non défini, valeur par défaut 4173'}`,
+    `  HOST      : ${process.env.HOST ? `défini à ${process.env.HOST}` : (PLATFORM ? `déduit de ${PLATFORM}` : 'non défini, valeur par défaut 127.0.0.1')}`,
+    '  ════════════════════════════════════════════════════════════',
+    '', ''
+  ].join('\n'));
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
   const local = auth.isLoopback(HOST);
   // Bannière volontairement bavarde : sur un hébergeur, c'est la seule fenêtre
