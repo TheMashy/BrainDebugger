@@ -1,9 +1,10 @@
 import {
-  db, getSettings, setSettings, allEntries, getEntry, setNote,
+  db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, messagesForDate, allEvents, addEvent, deleteEvent,
   allAnchors, setAnchor
 } from './db.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
+import { inspectCSV, applyImport } from './import-csv.js';
 import { buildIndex, search } from './search.js';
 import { reply, memoryBlock, ANTHROPIC_MODELS } from './chat.js';
 
@@ -71,7 +72,7 @@ export const routes = {
     const last = ser.length ? ser[ser.length - 1] : null;
     return {
       today: t,
-      settings: s,
+      settings: publicSettings(s),
       entry,
       anchors: allAnchors(),
       messages: messagesForDate(t),
@@ -255,6 +256,33 @@ export const routes = {
     };
   },
 
+  /**
+   * Import d'un historique tableur depuis l'interface -- SPEC 8, etape 1.
+   * En deux temps : un apercu qui ne touche a rien, puis l'ecriture. Ecraser
+   * des annees de notes sur un simple choix de fichier serait indefendable.
+   */
+  'POST /api/import': ({ body }) => {
+    const csv = String(body.csv ?? '');
+    if (!csv.trim()) return { error: 'fichier vide' };
+
+    const existing = new Map(allEntries().filter(r => r.note !== null).map(r => [r.date, r.note]));
+    let report;
+    try { report = inspectCSV(csv, { existing }); }
+    catch (err) { return { error: `CSV illisible : ${err.message}` }; }
+
+    if (!report.total) {
+      return { error: "Aucune journée reconnue. Le format attendu est une grille année par année, avec une ligne par mois (Jan, Feb, …) et les notes en colonnes 1 à 31." };
+    }
+    if (!body.apply) {
+      const { entries, ...preview } = report;
+      return { preview };
+    }
+    const written = applyImport(report.entries, report.anchors);
+    invalidate();
+    const { entries, ...preview } = report;
+    return { imported: written, preview };
+  },
+
   'GET /api/events': () => ({ events: allEvents() }),
   'POST /api/events': ({ body }) => {
     if (body.delete) { deleteEvent(Number(body.delete)); return { events: allEvents() }; }
@@ -263,7 +291,16 @@ export const routes = {
     return { events: allEvents() };
   },
 
-  'POST /api/settings': ({ body }) => ({ settings: setSettings(body) }),
+  'POST /api/settings': ({ body }) => {
+    // Une chaine vide ne doit pas effacer la cle par accident : le champ est
+    // vide dans l'interface puisqu'on ne la renvoie jamais. L'effacement est
+    // une action explicite.
+    const patch = { ...body };
+    if (patch.apiKey === '' && !body.clearKey) delete patch.apiKey;
+    if (body.clearKey) patch.apiKey = '';
+    delete patch.clearKey;
+    return { settings: publicSettings(setSettings(patch)) };
+  },
 
   'POST /api/anchors': ({ body }) => {
     if (body.note === undefined) return { error: 'note requise' };

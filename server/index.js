@@ -233,6 +233,7 @@ server.listen(PORT, HOST, () => {
   node        ${process.versions.node}
   base        ${DB_PATH}
   verrou      ${auth.enabled() ? 'actif' : 'aucun'}
+  clé Claude  ${process.env.ANTHROPIC_API_KEY ? 'fournie par l\'environnement' : 'aucune (mode hors-ligne)'}
   santé       /healthz
   ─────────────────────────────────────────
 `);

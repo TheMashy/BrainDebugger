@@ -99,11 +99,32 @@ export const DEFAULT_SETTINGS = {
 
 export function getSettings() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
+  const stored = new Set(rows.map(r => r.key));
   const out = { ...DEFAULT_SETTINGS };
   for (const r of rows) {
     try { out[r.key] = JSON.parse(r.value); } catch { /* ignore */ }
   }
+  // Une cle fournie par l'environnement et aucun backend choisi : on part sur
+  // Claude. Sinon la cle est en place, tout fonctionne, et il faut quand meme
+  // deviner qu'il reste une case a cocher quelque part.
+  if (!stored.has('chatBackend') && process.env.ANTHROPIC_API_KEY) out.chatBackend = 'anthropic';
   return out;
+}
+
+/**
+ * Version transmissible au navigateur.
+ * La cle API n'en fait JAMAIS partie : elle est stockee en base et n'a aucune
+ * raison de repartir vers le client a chaque chargement. On envoie seulement
+ * de quoi afficher son etat.
+ */
+export function publicSettings(s = getSettings()) {
+  const { apiKey, ...rest } = s;
+  return {
+    ...rest,
+    hasStoredKey: !!apiKey,
+    hasEnvKey: !!process.env.ANTHROPIC_API_KEY,
+    keySource: apiKey ? 'stored' : (process.env.ANTHROPIC_API_KEY ? 'env' : 'none')
+  };
 }
 
 export function setSettings(patch) {
