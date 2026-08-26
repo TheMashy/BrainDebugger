@@ -64,31 +64,26 @@ export const PetTalk = {
   _abort: null,
 
   /** @returns {Promise<void>} résolue quand le sprite a fini de parler */
-  async say(artEl, bubbleEl, text, { speak = false, voice = null, charMs = 26 } = {}) {
+  async say(artEl, bubbleEl, text, { onChar = null, charMs = 26 } = {}) {
     this.stop();
     const token = this._abort = {};
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (reduced || !artEl) {
       bubbleEl.textContent = text;
-      if (speak && voice) voice.speak(text);
       return;
     }
 
     artEl.classList.add('talking');
-    let speaking = false;
-    if (speak && voice) speaking = voice.speak(text, () => { speaking = false; });
 
     for (let i = 1; i <= text.length; i++) {
       if (this._abort !== token) return;               // une nouvelle réplique a démarré
       bubbleEl.textContent = text.slice(0, i);
       const c = text[i - 1];
+      onChar?.(c);
       if (c === ' ') this.beat(artEl);
       await sleep(pauseFor(c, charMs));
     }
-
-    let guard = 0;
-    while (speaking && this._abort === token && guard++ < 400) await sleep(80);
 
     if (this._abort === token) {
       artEl.classList.remove('talking');
@@ -105,7 +100,7 @@ export const PetTalk = {
 
   _q: null,
 
-  startStream(artEl, bubbleEl, { charMs = 22 } = {}) {
+  startStream(artEl, bubbleEl, { charMs = 22, onChar = null } = {}) {
     this.stop();
     const token = this._abort = {};
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -114,7 +109,7 @@ export const PetTalk = {
 
     const q = this._q = {
       token, artEl, bubbleEl, chars: [], closed: false, reduced,
-      done: null, charMs
+      done: null, charMs, onChar
     };
     q.done = new Promise(resolve => { q.resolve = resolve; });
     this._drain(q);
@@ -141,6 +136,7 @@ export const PetTalk = {
       if (q.chars.length) {
         const c = q.chars.shift();
         q.bubbleEl.textContent += c;
+        q.onChar?.(c);
         if (c === ' ') this.beat(q.artEl);
         // file qui s'allonge : on accélère pour ne pas prendre du retard sur le modèle
         const rush = q.chars.length > 90 ? 0.35 : q.chars.length > 40 ? 0.6 : 1;

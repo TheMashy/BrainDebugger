@@ -1,5 +1,6 @@
 import { PETS, petMarkup } from './pets.js';
 import { toPNG, PetTalk } from './pet.js';
+import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
 
 /* ============================= socle ============================= */
@@ -22,6 +23,9 @@ async function api(path, body) {
   const res = await fetch(path, body
     ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     : undefined);
+  // session expirée ou déconnexion : on repasse par le verrou au lieu
+  // d'empiler des erreurs dans la console
+  if (res.status === 401) { location.href = '/login'; throw new Error('session expirée'); }
   const j = await res.json();
   if (j.error) throw new Error(j.error);
   return j;
@@ -59,32 +63,13 @@ document.addEventListener('mouseover', e => {
   }, { once: true });
 });
 
-/* --------- voix (Web Speech API, 100% navigateur) --------- */
-const Voice = {
-  list: [],
-  load() {
-    this.list = speechSynthesis.getVoices();
-    return this.list;
-  },
-  speak(text) {
-    if (!S?.settings.voiceEnabled || !window.speechSynthesis) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    const v = this.list.find(x => x.voiceURI === S.settings.voiceURI);
-    if (v) u.voice = v;
-    u.lang = v?.lang ?? 'fr-FR';
-    u.rate = S.settings.voiceRate ?? 1;
-    u.pitch = S.settings.voicePitch ?? 1;
-    speechSynthesis.speak(u);
-  }
-};
-if (window.speechSynthesis) {
-  Voice.load();
-  speechSynthesis.onvoiceschanged = () => Voice.load();
-}
+/** La voix du compagnon : un blip par syllabe (web/blips.js), pas de synthèse vocale. */
+const speakChar = c => Blip.tick(c, S.settings);
 
 function syncHeader() {
-  $('#dayline').textContent = `${S.stats.days} jours · ${S.stats.firstDate} → ${S.stats.lastDate}`;
+  $('#dayline').textContent = S.stats.days
+    ? `${S.stats.days} jours · ${S.stats.firstDate} → ${S.stats.lastDate}`
+    : 'aucune journée enregistrée';
 }
 
 async function saveSettings(patch) {
@@ -117,8 +102,8 @@ async function renderTonight() {
         <div class="name">${esc(s.petName)}</div>
         <div class="role">il écoute, il ne note pas</div>
         <div style="margin-top:13px;display:flex;flex-direction:column;gap:7px;align-items:center">
-          <button class="voicetoggle" id="voiceBtn" aria-pressed="${s.voiceEnabled}">
-            <span class="ico"></span>${s.voiceEnabled ? 'il parle' : 'muet'}
+          <button class="voicetoggle" id="voiceBtn" aria-pressed="${s.blipEnabled}">
+            <span class="ico"></span>${s.blipEnabled ? esc(VOICES.find(v => v.id === s.blipVoice)?.name ?? 'il parle') : 'muet'}
           </button>
           <span class="pill">${S.stats.streak} jour${S.stats.streak > 1 ? 's' : ''} d'affilée</span>
         </div>
@@ -143,7 +128,7 @@ async function renderTonight() {
             <span class="ritual">Note avant de te coucher.</span>
           </div>
           <p class="sub">C'est dans le lit qu'on voit le mieux la journée entière — et c'est toi qui notes,
-            jamais ${esc(s.petName)}.</p>
+            jamais ${esc(s.petName)}.${S.stats.reference !== null ? ` Ta référence glissante est à <b class="mono">${S.stats.reference}</b>.` : ''}</p>
 
           <div class="noteface">
             <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
@@ -191,12 +176,12 @@ async function renderTonight() {
     // capture AVANT le await : le DOM vide currentTarget des que le handler rend
     // la main, ce qui arrive au premier await d'une fonction async.
     const b = e.currentTarget;
-    const on = !S.settings.voiceEnabled;
-    await saveSettings({ voiceEnabled: on });
+    const on = !S.settings.blipEnabled;
+    await saveSettings({ blipEnabled: on });
     b.setAttribute('aria-pressed', String(on));
-    b.innerHTML = `<span class="ico"></span>${on ? 'il parle' : 'muet'}`;
-    if (on) Voice.speak(`Bonjour, moi c'est ${S.settings.petName}.`);
-    else if (window.speechSynthesis) speechSynthesis.cancel();
+    const v = VOICES.find(x => x.id === S.settings.blipVoice);
+    b.innerHTML = `<span class="ico"></span>${on ? esc(v?.name ?? 'il parle') : 'muet'}`;
+    if (on) Blip.preview(S.settings.blipVoice, S.settings);   // le clic autorise l'audio
   };
 
   // n'importe quelle image -> PNG carre normalise
@@ -306,15 +291,14 @@ async function send() {
         el.innerHTML = '<span class="tx"></span>';
         th.appendChild(el);
         th.scrollTop = th.scrollHeight;
-        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'));
+        Blip.reset();
+        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'), { onChar: speakChar });
         return;
       }
 
       if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
 
       if (ev === 'done') {
-        const last = data.messages[data.messages.length - 1];
-        if (S.settings.voiceEnabled && last?.role === 'pet') Voice.speak(last.text);
         PetTalk.endStream();
         S.messages = data.messages;
 
@@ -389,6 +373,31 @@ function drawEchoes() {
   </div>`;
 }
 
+/**
+ * Premier lancement : aucune donnée. On ne montre pas une page vide avec des
+ * tirets — on dit ce qui manque et par où commencer.
+ */
+function renderNoData(why) {
+  $('#view').innerHTML = `<div class="card" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+    <div style="width:84px;height:84px;flex:none">${petMarkup(S.settings)}</div>
+    <div style="flex:1;min-width:240px">
+      <h2 style="margin:0 0 5px">Rien à afficher</h2>
+      <p class="sub" style="margin:0 0 13px">${esc(why)}</p>
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn primary" data-goview="tonight">Noter aujourd'hui</button>
+      </div>
+      <p class="faint" style="font-size:12px;margin:13px 0 0">
+        Si tu as déjà un historique dans un tableur :
+        <span class="mono">node server/import-csv.js ton-export.csv</span>
+      </p>
+    </div>
+  </div>`;
+  $('#view').onclick = e => {
+    const v = e.target.closest('[data-goview]');
+    if (v) go(v.dataset.goview);
+  };
+}
+
 /* ============================= vue : année =============================
 
    Trois lectures des memes notes, chacune avec son metier :
@@ -403,6 +412,7 @@ let CUMMODE = 'etalon';
 let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
 async function renderYear(year) {
+  if (!S.stats.days) return renderNoData('Les courbes ont besoin de journées notées.');
   year = year ?? Number(S.stats.lastDate.slice(0, 4));
   SERIES ??= await api('/api/series');
   const grid = await api(`/api/year?year=${year}`);
@@ -570,6 +580,7 @@ function highlight(text, terms = []) {
 }
 
 async function renderMirror(date) {
+  if (!S.stats.days) return renderNoData('Le miroir a besoin de journées passées pour te montrer quoi que ce soit.');
   date = date ?? MIRROR_DATE ?? S.today;
   MIRROR_DATE = date;
   const m = await api(`/api/mirror?date=${date}`);
@@ -713,7 +724,6 @@ function wireMirror() {
 
 async function renderSettings() {
   const s = S.settings;
-  const voices = Voice.load();
 
   $('#view').innerHTML = `
     <div class="row">
@@ -734,22 +744,23 @@ async function renderSettings() {
 
       <div class="card">
         <h2>La voix</h2>
-        <p class="sub">Synthèse du navigateur. Rien n'est envoyé nulle part.</p>
+        <p class="sub">Un blip par syllabe, comme dans un RPG. Pas de synthèse vocale : une voix
+          qui lit « qu'est-ce qui s'est passé aujourd'hui ? » sonne comme un serveur vocal,
+          et on ne se confie pas à un serveur vocal.</p>
         <label class="field"><span>
-          <input type="checkbox" id="voiceEnabled" ${s.voiceEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
-          Lire les réponses à voix haute</span></label>
-        <label class="field"><span>Voix (${voices.length} disponibles)</span>
-          <select id="voiceURI">
-            <option value="">— par défaut —</option>
-            ${voices.map(v => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === s.voiceURI ? 'selected' : ''}>${esc(v.name)} (${esc(v.lang)})</option>`).join('')}
-          </select></label>
-        <div class="row" style="gap:11px">
-          <label class="field"><span>Débit <b class="mono" id="rv">${s.voiceRate}</b></span>
-            <input type="range" id="voiceRate" min=".6" max="1.6" step=".05" value="${s.voiceRate}"></label>
-          <label class="field"><span>Hauteur <b class="mono" id="pv">${s.voicePitch}</b></span>
-            <input type="range" id="voicePitch" min=".5" max="1.8" step=".05" value="${s.voicePitch}"></label>
+          <input type="checkbox" id="blipEnabled" ${s.blipEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
+          Le compagnon fait du bruit quand il parle</span></label>
+        <div class="voicepick" id="voicepick">
+          ${VOICES.map(v => `<button data-voice="${v.id}" aria-pressed="${s.blipVoice === v.id}">
+            <b>${esc(v.name)}</b><span>${esc(v.hint)}</span></button>`).join('')}
         </div>
-        <button class="btn" id="tryVoice">Essayer</button>
+        <div class="row" style="gap:11px;margin-top:14px">
+          <label class="field"><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
+            <input type="range" id="blipPitch" min=".6" max="1.6" step=".05" value="${s.blipPitch}"></label>
+          <label class="field"><span>Volume <b class="mono" id="bv">${Math.round(s.blipVolume * 100)}%</b></span>
+            <input type="range" id="blipVolume" min="0" max="1" step=".05" value="${s.blipVolume}"></label>
+        </div>
+        <p class="sub" style="margin:0;font-size:12px">Clique un timbre pour l'écouter.</p>
       </div>
     </div>
 
@@ -798,7 +809,10 @@ async function renderSettings() {
         <p class="sub" style="font-size:12.5px">
           Tout est dans un fichier SQLite sur ce disque. Aucun compte, aucun serveur, aucune synchro.
         </p>
-        <button class="btn" id="export">Exporter en JSON</button>
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn" id="export">Exporter en JSON</button>
+          <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">Se déconnecter</button></form>
+        </div>
       </div>
     </div>`;
 
@@ -808,14 +822,28 @@ async function renderSettings() {
     $('#' + id)?.addEventListener(ev, async e => { await saveSettings({ [key]: get(e.target) }); });
 
   bind('petName', 'petName', 'change');
-  bind('voiceURI', 'voiceURI');
   bind('floorMode', 'floorMode');
   bind('floor', 'floor', 'change', el => Number(el.value));
-  bind('voiceEnabled', 'voiceEnabled', 'change', el => el.checked);
+  bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
   $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
-  $('#voiceRate').addEventListener('input', async e => { $('#rv').textContent = e.target.value; await saveSettings({ voiceRate: Number(e.target.value) }); });
-  $('#voicePitch').addEventListener('input', async e => { $('#pv').textContent = e.target.value; await saveSettings({ voicePitch: Number(e.target.value) }); });
-  $('#tryVoice').addEventListener('click', () => Voice.speak(`Bonjour, moi c'est ${S.settings.petName}. Raconte-moi ta journée.`));
+
+  $('#voicepick')?.addEventListener('click', async e => {
+    const b = e.target.closest('[data-voice]');
+    if (!b) return;
+    await saveSettings({ blipVoice: b.dataset.voice });
+    for (const x of $('#voicepick').children) x.setAttribute('aria-pressed', String(x === b));
+    Blip.preview(b.dataset.voice, S.settings);      // le clic autorise l'audio
+  });
+  $('#blipPitch')?.addEventListener('input', async e => {
+    $('#bp').textContent = e.target.value;
+    await saveSettings({ blipPitch: Number(e.target.value) });
+  });
+  $('#blipPitch')?.addEventListener('change', () => Blip.preview(S.settings.blipVoice, S.settings));
+  $('#blipVolume')?.addEventListener('input', async e => {
+    $('#bv').textContent = Math.round(e.target.value * 100) + '%';
+    await saveSettings({ blipVolume: Number(e.target.value) });
+  });
+  $('#blipVolume')?.addEventListener('change', () => Blip.preview(S.settings.blipVoice, S.settings));
 
   $('#chatBackend').addEventListener('change', async e => {
     await saveSettings({ chatBackend: e.target.value });

@@ -61,10 +61,10 @@ export const DEFAULT_SETTINGS = {
   petName: 'Cerf',
   petSprite: 'deer',          // id integre, ou 'custom'
   petImage: null,             // data URL si petSprite === 'custom'
-  voiceURI: null,             // Web Speech API
-  voiceRate: 1,
-  voicePitch: 1,
-  voiceEnabled: false,
+  blipEnabled: true,          // la voix du compagnon : un blip par syllabe
+  blipVoice: 'aa',            // identifiant de timbre (voir web/blips.js)
+  blipPitch: 1,               // 0.6 .. 1.6
+  blipVolume: 0.7,            // 0 .. 1
   chatBackend: 'scripted',    // 'scripted' | 'anthropic' | 'ollama'
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'qwen2.5:7b',

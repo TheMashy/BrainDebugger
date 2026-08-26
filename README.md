@@ -40,6 +40,39 @@ L'importeur reconnaît les blocs par année, les lignes de mois (`Jan`…`Dec`),
 récupère au passage les **ancres d'étalonnage** (`8 Good` + description) si elles
 sont présentes dans la feuille.
 
+## Déployer (Railway, Fly, un VPS)
+
+Par défaut le serveur écoute sur `127.0.0.1` : rien ne sort de la machine. Pour l'héberger,
+il faut ouvrir cette écoute — et à partir de là, **c'est un mot de passe qui protège ton
+journal, plus l'isolement réseau**. Le serveur refuse de démarrer si `HOST` n'est pas une
+adresse locale et que `BD_PASSWORD` n'est pas défini. Échouer au lancement est le seul
+comportement acceptable : un avertissement dans un README ne protège personne.
+
+Variables :
+
+| Variable | Rôle |
+|---|---|
+| `HOST=0.0.0.0` | requis, sinon le conteneur n'est pas joignable |
+| `BD_PASSWORD` | **requis** dès que `HOST` n'est pas local |
+| `BD_DB=/data/braindebugger.db` | requis, dans un volume — sinon tout est perdu au redéploiement |
+| `PORT` | fourni par l'hébergeur, ne pas le définir |
+| `BD_SECRET` | facultatif ; sans lui la clé de session dérive du mot de passe |
+| `ANTHROPIC_API_KEY` | si le backend Claude est utilisé |
+
+Sur Railway : **monte un volume sur `/data` avant le premier déploiement**, sinon la base
+part à chaque build. `railway.toml` fixe le reste (Nixpacks, `npm start`, sonde `/healthz`).
+
+Le verrou est un mot de passe unique, cookie de session signé en HMAC, `HttpOnly`,
+`SameSite=Lax`, `Secure` derrière HTTPS, avec freinage progressif après cinq échecs.
+C'est du mono-utilisateur : il n'y a pas de comptes, pas d'inscription, pas de partage.
+
+**Ce que l'hébergement change vraiment.** En local, personne d'autre que toi ne peut lire
+la base. Hébergé, elle vit sur le disque de quelqu'un d'autre, et l'hébergeur y a un accès
+technique. Le mot de passe arrête les inconnus, pas l'infrastructure. Si tu héberges pour
+toi seul, c'est un compromis de confort raisonnable. Si un jour d'autres personnes y
+écrivent, ça devient de l'hébergement de données de santé pour autrui — et en France, la
+certification HDS entre dans le cadre (§9).
+
 ---
 
 ## Les deux couches
