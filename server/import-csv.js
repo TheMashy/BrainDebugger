@@ -11,7 +11,7 @@
  * Usage : node server/import-csv.js <fichier.csv> [--dry]
  */
 import { readFileSync } from 'node:fs';
-import { db, setAnchor } from './db.js';
+import { db, setAnchor, OWNER } from './db.js';
 
 /** Parseur CSV RFC4180 : gere les guillemets, virgules et retours ligne echappes. */
 export function parseCSV(text) {
@@ -123,15 +123,21 @@ export function inspectCSV(text, { existing = new Map() } = {}) {
   };
 }
 
-/** Ecriture en une transaction : soit tout passe, soit rien. */
-export function applyImport(entries, anchors) {
+/**
+ * Ecriture en une transaction : soit tout passe, soit rien. Importer quatre ans
+ * de journal a moitie serait pire que ne pas l'importer du tout.
+ *
+ * La cle est (user_id, date) : le ON CONFLICT doit nommer les deux colonnes,
+ * sinon SQLite ne reconnait pas la contrainte et rejette la requete entiere.
+ */
+export function applyImport(entries, anchors, userId = OWNER) {
   const stmt = db.prepare(`
-    INSERT INTO entries(date, note) VALUES(?, ?)
-    ON CONFLICT(date) DO UPDATE SET note = excluded.note
+    INSERT INTO entries(user_id, date, note) VALUES(?, ?, ?)
+    ON CONFLICT(user_id, date) DO UPDATE SET note = excluded.note
   `);
   db.exec('BEGIN');
   try {
-    for (const e of entries) stmt.run(e.date, e.note);
+    for (const e of entries) stmt.run(userId, e.date, e.note);
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
 
@@ -139,32 +145,19 @@ export function applyImport(entries, anchors) {
   for (const a of anchors ?? []) {
     if (seen.has(a.note)) continue;
     seen.add(a.note);
-    setAnchor(a.note, a.label, a.descr);
+    setAnchor(a.note, a.label, a.descr, userId);
   }
   return entries.length;
 }
 
-export function importFile(path, { dry = false } = {}) {
+/**
+ * Import en ligne de commande. Passe par applyImport : c'est la meme ecriture
+ * que depuis l'interface, et deux copies de cette requete, c'est la garantie
+ * qu'une seule des deux sera corrigee le jour ou le schema bouge.
+ */
+export function importFile(path, { dry = false, userId = OWNER } = {}) {
   const { entries, anchors } = extractFromRows(parseCSV(readFileSync(path, 'utf8')));
-
-  if (!dry) {
-    const stmt = db.prepare(`
-      INSERT INTO entries(date, note) VALUES(?, ?)
-      ON CONFLICT(date) DO UPDATE SET note = excluded.note
-    `);
-    db.exec('BEGIN');
-    try {
-      for (const e of entries) stmt.run(e.date, e.note);
-      db.exec('COMMIT');
-    } catch (err) { db.exec('ROLLBACK'); throw err; }
-
-    const seen = new Set();
-    for (const a of anchors) {
-      if (seen.has(a.note)) continue;
-      seen.add(a.note);
-      setAnchor(a.note, a.label, a.descr);
-    }
-  }
+  if (!dry) applyImport(entries, anchors, userId);
   return { entries, anchors };
 }
 

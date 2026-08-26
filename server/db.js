@@ -162,7 +162,9 @@ export function publicSettings(s = getSettings()) {
     ...rest,
     hasStoredKey: !!apiKey,
     hasEnvKey: !!process.env.ANTHROPIC_API_KEY,
-    keySource: apiKey ? 'stored' : (process.env.ANTHROPIC_API_KEY ? 'env' : 'none')
+    // Meme ordre que resolveKey() dans chat.js. Deux endroits qui repondent
+    // « quelle cle sert ? » differemment, c'est une interface qui ment.
+    keySource: process.env.ANTHROPIC_API_KEY ? 'env' : (apiKey ? 'stored' : 'none')
   };
 }
 

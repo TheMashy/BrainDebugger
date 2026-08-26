@@ -996,7 +996,9 @@ async function renderBackendCfg() {
       <span>Clé API</span>
       <div class="keystate ${s.keySource}">
         ${s.keySource === 'env'
-          ? `<b>Fournie par l'environnement</b> — variable <code>ANTHROPIC_API_KEY</code>. Rien à faire.`
+          ? `<b>Fournie par l'environnement</b> — variable <code>ANTHROPIC_API_KEY</code>. Rien à faire.
+             ${s.hasStoredKey ? `Une clé traîne aussi en base ; elle est ignorée.
+               <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">l'effacer</button>` : ''}`
           : s.keySource === 'stored'
             ? `<b>Enregistrée dans l'app</b> — elle n'est jamais renvoyée au navigateur.
                <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">effacer</button>`
@@ -1005,8 +1007,9 @@ async function renderBackendCfg() {
       <input type="password" id="apiKey" value="" autocomplete="off"
         placeholder="${s.keySource === 'none' ? 'sk-ant-… — colle ta clé ici' : 'sk-ant-… — pour la remplacer'}">
       <p class="faint" style="font-size:11.5px;margin:6px 0 0">
-        Sur un serveur, préfère la variable d'environnement : la clé ne passe alors jamais par la base.
-        Une clé collée ici l'emporte sur la variable.
+        Sur un serveur, préfère la variable d'environnement : la clé ne passe alors jamais par la base,
+        et elle l'emporte sur toute clé collée ici — sur une instance à plusieurs comptes, c'est celle
+        de l'hébergeur qui doit servir. Sans variable, la clé collée ici prend le relais.
       </p>
       <div style="display:flex;align-items:center;gap:10px;margin-top:11px;flex-wrap:wrap">
         <button class="btn" id="testKey">Tester la clé</button>
