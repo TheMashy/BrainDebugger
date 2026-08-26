@@ -6,7 +6,24 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const DB_PATH = process.env.BD_DB ?? join(ROOT, 'data', 'braindebugger.db');
 
-mkdirSync(dirname(DB_PATH), { recursive: true });
+try {
+  mkdirSync(dirname(DB_PATH), { recursive: true });
+} catch (err) {
+  // Cas classique sur un hébergeur : BD_DB pointe dans un volume qui n'a pas
+  // été monté. Le message par défaut (EACCES sur un chemin) n'aide personne.
+  console.error(`
+  ────────────────────────────────────────────────────────────
+  BASE DE DONNÉES INACCESSIBLE
+
+  Impossible de créer ${dirname(DB_PATH)} (${err.code ?? err.message}).
+
+  BD_DB=${DB_PATH} pointe dans un répertoire où le processus ne peut pas
+  écrire. Sur un hébergeur, monte un volume sur ce chemin avant de déployer,
+  ou laisse BD_DB vide pour utiliser ./data (perdu à chaque redéploiement).
+  ────────────────────────────────────────────────────────────
+`);
+  process.exit(1);
+}
 
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL');

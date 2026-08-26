@@ -1,13 +1,25 @@
 # Déploiement Railway.
 #
-# Variables à définir dans le projet :
-#   HOST=0.0.0.0            obligatoire — sinon le conteneur n'est pas joignable
-#   BD_PASSWORD=…           OBLIGATOIRE — sans lui le serveur refuse de démarrer
-#   BD_DB=/data/braindebugger.db   dans un volume, sinon tout est perdu au redéploiement
-#   ANTHROPIC_API_KEY=sk-ant-…     si le backend Claude est utilisé
+# À FAIRE DANS LE PROJET RAILWAY :
 #
-# PORT est fourni par Railway, ne pas le définir.
-# Monter un volume sur /data avant le premier déploiement.
+#   1. Variables :
+#        BD_PASSWORD=…                  OBLIGATOIRE. Sans elle le serveur refuse
+#                                       de démarrer : hébergé, c'est le seul
+#                                       verrou entre le journal et l'internet.
+#        BD_DB=/data/braindebugger.db   sinon la base est perdue à chaque déploiement
+#        ANTHROPIC_API_KEY=sk-ant-…     si le backend Claude est utilisé
+#
+#   2. Volume monté sur /data, AVANT le premier déploiement.
+#
+#   3. Settings › Networking › Generate Domain, sinon le service reste
+#      « Unexposed » et n'est joignable par personne.
+#
+# Ne PAS définir PORT ni HOST : Railway fournit PORT, et l'app détecte la
+# plateforme pour écouter sur 0.0.0.0 toute seule.
+#
+# Si le build choisit une version de Node antérieure à 22.5, `node:sqlite`
+# n'existe pas et le conteneur s'arrête au démarrage. .nvmrc fixe la version ;
+# au besoin, forcer avec NIXPACKS_NODE_VERSION=22.
 
 [build]
 builder = "NIXPACKS"
@@ -15,6 +27,6 @@ builder = "NIXPACKS"
 [deploy]
 startCommand = "npm start"
 healthcheckPath = "/healthz"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

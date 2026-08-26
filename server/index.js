@@ -1,3 +1,4 @@
+import { PLATFORM } from './preflight.js';     // en premier : contrôle de version de Node
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
@@ -10,20 +11,29 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = join(ROOT, 'web');
 
 const PORT = Number(process.env.PORT ?? 4173);
-// 127.0.0.1 par defaut : rien ne doit sortir de la machine. Un hebergeur
-// (Railway, Fly, un VPS) impose 0.0.0.0 -- c'est alors le mot de passe qui
-// protege, et le serveur refuse de demarrer sans lui.
-const HOST = process.env.HOST ?? '127.0.0.1';
+
+// Sur un poste de travail on écoute sur 127.0.0.1 : rien ne sort de la machine.
+// Dans un conteneur d'hébergeur, 127.0.0.1 est injoignable même par la sonde de
+// santé de la plateforme — le service échoue au déploiement sans rien dire
+// d'utile. On détecte donc la plateforme et on ouvre l'écoute par défaut ; c'est
+// alors le mot de passe qui protège, et il devient obligatoire.
+const HOST = process.env.HOST ?? (PLATFORM ? '0.0.0.0' : '127.0.0.1');
 
 if (!auth.isLoopback(HOST) && !auth.enabled()) {
   console.error(`
-  REFUS DE DÉMARRER
+  ────────────────────────────────────────────────────────────
+  REFUS DE DÉMARRER — IL MANQUE BD_PASSWORD
 
-  HOST=${HOST} rend ce serveur joignable depuis l'extérieur, et aucun mot de
-  passe n'est défini. Ce serveur expose un journal intime : sans verrou,
-  n'importe qui connaissant l'URL peut le lire.
+  ${PLATFORM ? `Détecté : ${PLATFORM}. L'écoute est ouverte sur 0.0.0.0` : `HOST=${HOST}`},
+  ce qui rend ce serveur joignable depuis l'extérieur. Aucun mot de passe
+  n'est défini.
 
-  Définis BD_PASSWORD, ou laisse HOST sur 127.0.0.1.
+  Ce serveur expose un journal intime. Sans verrou, n'importe qui connaissant
+  l'URL peut le lire — c'est pourquoi il refuse de démarrer plutôt que de
+  se lancer en clair.
+
+  Définis la variable BD_PASSWORD, puis redéploie.
+  ────────────────────────────────────────────────────────────
 `);
   process.exit(1);
 }
@@ -176,11 +186,22 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   const local = auth.isLoopback(HOST);
-  console.log(`\n  BrainDebugger — http://${HOST}:${PORT}`);
-  console.log(`  base : ${DB_PATH}`);
-  console.log(local
-    ? '  Local uniquement. Aucun appel sortant tant que le backend est "scripted".'
-    : `  Exposé sur ${HOST} — protégé par mot de passe.`);
-  if (local && auth.enabled()) console.log('  Verrou mot de passe actif.');
-  console.log('');
+  // Bannière volontairement bavarde : sur un hébergeur, c'est la seule fenêtre
+  // qu'on a sur la configuration réellement appliquée.
+  console.log(`
+  BrainDebugger
+  ─────────────────────────────────────────
+  écoute      ${HOST}:${PORT}${local ? '  (local uniquement)' : ''}
+  plateforme  ${PLATFORM ?? 'aucune détectée'}
+  node        ${process.versions.node}
+  base        ${DB_PATH}
+  verrou      ${auth.enabled() ? 'actif' : 'aucun'}
+  santé       /healthz
+  ─────────────────────────────────────────
+`);
+  if (!local && !process.env.BD_DB) {
+    console.warn('  ATTENTION : BD_DB non défini. La base vit dans le conteneur\n' +
+                 '  et sera PERDUE au prochain déploiement. Monte un volume et\n' +
+                 '  pointe BD_DB dessus (ex. /data/braindebugger.db).\n');
+  }
 });
