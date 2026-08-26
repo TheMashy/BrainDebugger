@@ -1,5 +1,6 @@
 import { PETS, petMarkup } from './pets.js';
-import { deltaColor, noteColor, lineChart, bandMarkup, SATURATION } from './charts.js';
+import { toPNG, PetTalk } from './pet.js';
+import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
 
 /* ============================= socle ============================= */
 
@@ -92,65 +93,90 @@ async function saveSettings(patch) {
   return settings;
 }
 
-/* ============================= vue : ce soir ============================= */
+/* ============================= vue : parler =============================
+
+   Une seule page pour le rituel du soir : tu parles, le compagnon relance,
+   tes propres mots d'avant remontent tout seuls, et tu notes.
+   La recherche n'est pas un onglet : chercher est une corvee, se voir rappeler
+   ses mots ne l'est pas. -- SPEC 2.2
+                                                                            */
+
+let ECHOES = { items: [], textCount: 0 };
 
 async function renderTonight() {
   const t = S.today;
   const note = S.entry?.note ?? null;
-  const ref = S.stats.reference;
-  const anchors = S.anchors;
+  const s = S.settings;
 
   $('#view').innerHTML = `
     <div class="tonight">
       <div class="card petcard">
-        <div class="art">${petMarkup(S.settings)}</div>
-        <div class="name">${esc(S.settings.petName)}</div>
+        <div class="art" id="art" tabindex="0" role="button"
+             aria-label="Changer l'image du compagnon">${petMarkup(s)}</div>
+        <input type="file" id="petPick" accept="image/*" hidden>
+        <div class="name">${esc(s.petName)}</div>
         <div class="role">il écoute, il ne note pas</div>
-        <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px;align-items:center">
+        <div style="margin-top:13px;display:flex;flex-direction:column;gap:7px;align-items:center">
+          <button class="voicetoggle" id="voiceBtn" aria-pressed="${s.voiceEnabled}">
+            <span class="ico"></span>${s.voiceEnabled ? 'il parle' : 'muet'}
+          </button>
           <span class="pill">${S.stats.streak} jour${S.stats.streak > 1 ? 's' : ''} d'affilée</span>
-          <span class="pill ${S.settings.chatBackend === 'scripted' ? '' : 'warn'}">
-            ${S.settings.chatBackend === 'scripted' ? 'hors-ligne · aucun modèle' : esc(S.settings.chatBackend)}
-          </span>
         </div>
       </div>
 
-      <div>
+      <div class="stack">
         <div class="card">
           <h2>${fmtDay(t)}</h2>
           <p class="sub">Raconte comme ça vient. Tes mots sont enregistrés tels quels.</p>
           <div class="thread" id="thread"></div>
           <div class="composer">
-            <textarea id="input" rows="1" placeholder="Écris ici…"></textarea>
+            <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
             <button class="btn primary" id="send">Envoyer</button>
           </div>
         </div>
 
-        <div class="card">
-          <h2>La note du jour</h2>
-          <p class="sub">C'est toi qui notes, jamais ${esc(S.settings.petName)}.
-            ${ref !== null ? `Ta référence glissante est à <b class="mono">${ref}</b>.` : ''}</p>
-          <div class="notestrip" id="notestrip">
-            ${Array.from({ length: 11 }, (_, n) => `
-              <button data-n="${n}" aria-pressed="${note === n}"
-                style="${note === n ? `background:${noteColor(n, ref ?? 6)}` : ''}"
-                data-tip="${anchors.find(a => a.note === n) ? esc(anchors.find(a => a.note === n).descr) : `${n}/10`}">${n}</button>`).join('')}
+        <div id="echoes"></div>
+
+        <div class="card notecard">
+          <div class="head">
+            <h2>La note d'aujourd'hui</h2>
+            <span class="ritual">Note avant de te coucher.</span>
           </div>
-          ${anchors.length ? `<div class="anchors">
-            ${anchors.map(a => `<div class="anchor">
-              <span class="n" style="background:${noteColor(a.note, ref ?? 6)}">${a.note}</span>
-              <span class="l"><b style="color:var(--ink)">${esc(a.label)}</b> — ${esc(a.descr)}</span>
-            </div>`).join('')}
+          <p class="sub">C'est dans le lit qu'on voit le mieux la journée entière — et c'est toi qui notes,
+            jamais ${esc(s.petName)}.</p>
+
+          <div class="noteface">
+            <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
+              ${note ?? '—'}<span class="sl">/10</span>
+            </div>
+            <div class="say" id="noteSay">${noteSay(note)}</div>
+          </div>
+
+          <div class="notestrip" id="notestrip">
+            ${Array.from({ length: 11 }, (_, n) => {
+              const c = noteScaleRGB(n);
+              const on = note === n;
+              return `<button data-n="${n}" aria-pressed="${on}" style="background:rgb(${c})"
+                data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
+            }).join('')}
+          </div>
+          <div class="scaleends"><span>0 · le pire</span><span>5 · moyen</span><span>10 · le meilleur</span></div>
+
+          ${S.anchors.length ? `<div class="anchors">
+            ${S.anchors.map(a => `<div class="anchor">
+              <span class="n" style="background:rgb(${noteScaleRGB(a.note)})">${a.note}</span>
+              <span class="l"><b>${esc(a.label)}</b> — ${esc(a.descr)}</span></div>`).join('')}
             <p class="faint" style="font-size:11.5px;margin:8px 0 0">
-              Tes propres repères, importés du tableur. Ils gardent l'échelle stable d'une année sur l'autre.
-            </p>
+              Tes propres repères. Ils gardent l'échelle stable d'une année sur l'autre.</p>
           </div>` : ''}
         </div>
       </div>
     </div>`;
 
   drawThread();
+  drawEchoes();
 
-  $('#notestrip').addEventListener('click', async e => {
+  $('#notestrip').onclick = async e => {
     const b = e.target.closest('button[data-n]');
     if (!b) return;
     const n = Number(b.dataset.n);
@@ -159,18 +185,56 @@ async function renderTonight() {
     syncHeader();
     renderTonight();
     toast(`Journée notée ${n}/10`);
-  });
+  };
+
+  $('#voiceBtn').onclick = async e => {
+    // capture AVANT le await : le DOM vide currentTarget des que le handler rend
+    // la main, ce qui arrive au premier await d'une fonction async.
+    const b = e.currentTarget;
+    const on = !S.settings.voiceEnabled;
+    await saveSettings({ voiceEnabled: on });
+    b.setAttribute('aria-pressed', String(on));
+    b.innerHTML = `<span class="ico"></span>${on ? 'il parle' : 'muet'}`;
+    if (on) Voice.speak(`Bonjour, moi c'est ${S.settings.petName}.`);
+    else if (window.speechSynthesis) speechSynthesis.cancel();
+  };
+
+  // n'importe quelle image -> PNG carre normalise
+  $('#art').onclick = () => $('#petPick').click();
+  $('#art').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#petPick').click(); } };
+  $('#petPick').onchange = async e => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 12 * 1024 * 1024) return toast('Fichier trop lourd (max 12 Mo)');
+    try {
+      const png = await toPNG(f, 256);
+      await saveSettings({ petImage: png, petSprite: 'custom' });
+      renderTonight();
+      toast('Nouveau compagnon');
+    } catch (err) { toast(err.message); }
+  };
 
   const input = $('#input');
-  input.addEventListener('input', () => {
+  input.oninput = () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
-  });
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-  });
-  $('#send').addEventListener('click', send);
+    scheduleEchoes(input.value);
+  };
+  input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  $('#send').onclick = send;
   input.focus();
+}
+
+const noteFaceStyle = n => n === null || n === undefined
+  ? 'background:var(--panel-3);color:var(--ink-faint)'
+  : `background:rgb(${noteScaleRGB(n)});color:#08110c`;
+
+function noteSay(n) {
+  if (n === null || n === undefined) return "Tu n'as pas encore noté cette journée.";
+  const a = S.anchors.find(x => x.note === n);
+  if (a) return `<b>${esc(a.label)}</b> — ${esc(a.descr)}`;
+  const near = S.anchors.filter(x => x.note < n).sort((x, y) => y.note - x.note)[0];
+  return near ? `Au-dessus de <b>${esc(near.label)}</b> (${near.note}).` : `Noté ${n} sur 10.`;
 }
 
 function drawThread() {
@@ -180,8 +244,9 @@ function drawThread() {
     th.innerHTML = `<div class="empty">Rien pour aujourd'hui.<br>Écris un mot, ${esc(S.settings.petName)} répondra.</div>`;
     return;
   }
-  th.innerHTML = S.messages.map(m => `
-    <div class="msg ${m.role}">${esc(m.text)}<span class="t">${fmtTime(m.ts)}</span></div>`).join('');
+  th.innerHTML = S.messages.map(m =>
+    `<div class="msg ${m.role}"><span class="tx">${esc(m.text)}</span><span class="t">${fmtTime(m.ts)}</span></div>`
+  ).join('');
   th.scrollTop = th.scrollHeight;
 }
 
@@ -192,121 +257,190 @@ async function send() {
   input.value = '';
   input.style.height = 'auto';
   $('#send').disabled = true;
+  PetTalk.stop();
 
-  // affichage optimiste : ce que tu écris apparait tout de suite
+  // affichage optimiste : ce que tu ecris apparait tout de suite
   S.messages.push({ ts: new Date().toISOString(), role: 'user', text });
   drawThread();
+  refreshEchoes(text);
 
   try {
     const r = await api('/api/message', { text, date: S.today });
     S.messages = r.messages;
     drawThread();
-    const last = r.messages[r.messages.length - 1];
-    if (last?.role === 'pet') Voice.speak(last.text);
     if (r.degraded) toast(`Modèle injoignable — repli hors-ligne (${r.degraded.slice(0, 60)})`);
+
+    const last = r.messages[r.messages.length - 1];
+    if (last?.role === 'pet') {
+      const bubble = $('#thread')?.lastElementChild?.querySelector('.tx');
+      const art = $('#art');
+      if (bubble) {
+        bubble.textContent = '';
+        await PetTalk.say(art, bubble, last.text, { speak: S.settings.voiceEnabled, voice: Voice });
+        $('#thread').scrollTop = $('#thread').scrollHeight;
+      }
+    }
   } catch (err) {
     toast(String(err.message));
   } finally {
-    $('#send').disabled = false;
-    input.focus();
+    const b = $('#send');
+    if (b) b.disabled = false;
+    $('#input')?.focus();
   }
 }
 
-/* ============================= vue : année ============================= */
+/* --------- echos : tes mots d'avant, sans avoir rien demande --------- */
 
-let CENTER = 'relative';
+let _echoTimer = null;
+function scheduleEchoes(text) {
+  clearTimeout(_echoTimer);
+  _echoTimer = setTimeout(() => refreshEchoes(text), 700);
+}
+
+async function refreshEchoes(text) {
+  const t = String(text ?? '').trim();
+  if (t.length < 12) { ECHOES = { ...ECHOES, items: [] }; return drawEchoes(); }
+  try {
+    ECHOES = await api('/api/echoes', { text: t, date: S.today, limit: 3 });
+    drawEchoes();
+  } catch { /* les echos ne doivent jamais casser la saisie */ }
+}
+
+function drawEchoes() {
+  const el = $('#echoes');
+  if (!el) return;
+  if (!ECHOES.items?.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="card echoes">
+    <h2>Tu as déjà écrit ça</h2>
+    <p class="sub">Remonté tout seul pendant que tu écris. La bande montre les 14 jours qui ont suivi,
+      tels qu'ils ont été. Le jour cerclé est le retour à la référence.</p>
+    ${ECHOES.items.map(it => `<div class="simitem">
+      <div class="hd">
+        <span class="d">${fmtDay(it.date)}</span>
+        <span class="pill" style="background:rgba(${noteScaleRGB(it.note ?? 5)},.2);color:rgb(${noteScaleRGB(it.note ?? 5)});border-color:transparent">${it.note ?? '—'}/10</span>
+        <span class="faint" style="font-size:11.5px">${it.terms.map(esc).join(' · ')}</span>
+      </div>
+      <p class="q">${highlight(it.text.slice(0, 240), it.terms)}${it.text.length > 240 ? '…' : ''}</p>
+      ${bandMarkup(it.band)}
+    </div>`).join('')}
+  </div>`;
+}
+
+/* ============================= vue : année =============================
+
+   Trois lectures des memes notes, chacune avec son metier :
+     - la grille  : ou etaient les journees
+     - l'ecart quotidien : signe(x)·x²/2,5, l'expansion qui fait ressortir les extremes
+     - le cumul   : somme des ecarts LINEAIRES a l'etalon, dont la pente est lisible
+   Le carre sert au quotidien, le lineaire au cumul. Cumuler le carre ecrase la forme.
+                                                                          */
+
 let SERIES = null;
-
-const CENTERS = {
-  fixed:    { key: 'cumFixed',    label: 'centre 5 (ta formule)' },
-  global:   { key: 'cumGlobal',   label: 'centre médiane globale' },
-  relative: { key: 'cumRelative', label: 'centre référence glissante' }
-};
+let CUMMODE = 'etalon';
+let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
 async function renderYear(year) {
   year = year ?? Number(S.stats.lastDate.slice(0, 4));
   SERIES ??= await api('/api/series');
   const grid = await api(`/api/year?year=${year}`);
   const years = S.stats.years;
+  const eta = SERIES.etalon;
 
-  const drift = k => SERIES[k][SERIES[k].length - 1] / SERIES[k].length;
-  const fmtDrift = k => (drift(k) > 0 ? '+' : '') + drift(k).toFixed(3);
+  const cumKey = CUMMODE === 'etalon' ? 'cumEtalon' : 'cumDeltaRef';
+  const drift = SERIES[cumKey][SERIES[cumKey].length - 1] / SERIES[cumKey].length;
 
   $('#view').innerHTML = `
-    <div class="card">
-      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:16px">
-        <h2 style="margin:0">Grille</h2>
-        <div class="centerpick" style="margin:0 0 0 auto">
-          ${years.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
+    <div class="stack">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:15px">
+          <h2 style="margin:0">Grille</h2>
+          <div class="centerpick" style="margin:0 0 0 auto">
+            ${years.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
+          </div>
+        </div>
+        <div class="gridwrap">${gridMarkup(grid)}</div>
+        <div class="legend">
+          <span>pire</span>
+          ${Array.from({ length: 17 }, (_, i) => `<i style="background:${deltaColor(-SATURATION + (i / 16) * 2 * SATURATION)}"></i>`).join('')}
+          <span>meilleur</span>
+          <span style="margin-left:12px">écart à la référence glissante, saturé à ±${SATURATION}</span>
+          <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
         </div>
       </div>
-      <div class="gridwrap">${gridMarkup(grid)}</div>
-      <div class="legend">
-        <span>pire</span>
-        ${Array.from({ length: 17 }, (_, i) => {
-          const d = -SATURATION + (i / 16) * 2 * SATURATION;
-          return `<i style="background:${deltaColor(d)}"></i>`;
-        }).join('')}
-        <span>meilleur</span>
-        <span style="margin-left:14px">écart à la référence glissante, saturé à ±${SATURATION}</span>
-        <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
-      </div>
-    </div>
 
-    <div class="card">
-      <h2>Cumul du contraste</h2>
-      <p class="sub">
-        Ta formule <span class="mono">signe(x)·x²/2,5</span> appliquée jour après jour, puis cumulée.
-        Ce qui change entre les trois, c'est uniquement <b>x</b> — l'écart à quoi.
-      </p>
-      <div class="centerpick">
-        ${Object.entries(CENTERS).map(([k, c]) => `
-          <button data-center="${k}" aria-pressed="${CENTER === k}">
-            ${c.label}<span class="drift">${fmtDrift(c.key)}/j</span>
-          </button>`).join('')}
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px">
+          <h2 style="margin:0">Écart quotidien</h2>
+          <div class="centerpick" style="margin:0 0 0 auto">
+            <button data-daily="year" aria-pressed="${!DAILYALL}">${year}</button>
+            <button data-daily="all" aria-pressed="${DAILYALL}">tout</button>
+          </div>
+        </div>
+        <p class="sub">Ta formule <span class="mono">signe(n−5)·(n−5)²/2,5</span>, jour par jour.
+          Une journée à 6 pèse <span class="mono">0,4</span>, une journée à 9 pèse <span class="mono">6,4</span> :
+          l'expansion quadratique écrase le milieu et fait sortir les extrêmes. Pas de cumul ici.</p>
+        ${(() => {
+          const idx = DAILYALL
+            ? SERIES.date.map((_, i) => i)
+            : SERIES.date.map((d, i) => d.startsWith(String(year)) ? i : -1).filter(i => i >= 0);
+          return dailyChart(idx.map(i => SERIES.date[i]), idx.map(i => SERIES.contrastFixed[i]),
+                            { height: 240, events: SERIES.events });
+        })()}
       </div>
-      ${lineChart(SERIES.date, SERIES[CENTERS[CENTER].key], { height: 230, events: SERIES.events })}
-      ${CENTER === 'fixed' ? `<p class="sub" style="margin:12px 0 0;color:var(--warn)">
-        Avec un centre figé à 5 et une moyenne réelle à ${(SERIES.note.reduce((a,b)=>a+b,0)/SERIES.note.length).toFixed(2)},
-        la courbe monte de <b class="mono">${drift('cumFixed').toFixed(3)}</b> point par jour sans que rien ne s'améliore.
-        La pente ne veut rien dire — c'est le biais décrit au §6 du spec.</p>` : ''}
-      ${CENTER === 'global' ? `<p class="sub" style="margin:12px 0 0">
-        Centre correct, dérive résiduelle de <b class="mono">${fmtDrift('cumGlobal')}</b>/j :
-        le carré signé amplifie ta queue basse plus que ta queue haute.</p>` : ''}
-      ${CENTER === 'relative' ? `<p class="sub" style="margin:12px 0 0">
-        La pente ne monte que si la période est meilleure que tes 365 derniers jours.
-        Dérive résiduelle <b class="mono">${fmtDrift('cumRelative')}</b>/j — c'est la seule des trois qui soit lisible.</p>` : ''}
-    </div>
 
-    <div class="card">
-      <h2>Repères</h2>
-      <p class="sub">Déménagement, rupture, nouveau boulot, arrêt d'un traitement. Ils apparaissent en pointillés
-        sur la courbe. Sans eux, une inflexion n'est qu'une inflexion.</p>
-      <form id="evform" style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
-        <label class="field" style="margin:0;flex:0 0 160px"><span>Date</span>
-          <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.stats.lastDate}" value="${S.today}"></label>
-        <label class="field" style="margin:0;flex:1 1 240px"><span>Quoi</span>
-          <input type="text" id="evlabel" required maxlength="120" placeholder="ex. changement de boulot"></label>
-        <button class="btn" type="submit">Ajouter</button>
-      </form>
-      ${SERIES.events.length
-        ? `<div style="display:flex;flex-direction:column;gap:1px">
-            ${SERIES.events.map(ev => `<div style="display:flex;align-items:baseline;gap:11px;padding:7px 0;border-top:1px solid var(--line-soft)">
-              <span class="mono faint" style="font-size:12px;flex:0 0 92px">${esc(ev.date)}</span>
-              <span style="flex:1">${esc(ev.label)}</span>
-              <button class="btn" data-delev="${ev.id}" style="padding:3px 9px;font-size:11.5px">retirer</button>
-            </div>`).join('')}
-          </div>`
-        : `<p class="sub" style="margin:0">Aucun repère pour l'instant.</p>`}
+      <div class="card">
+        <h2>Cumul</h2>
+        <p class="sub">Somme courante de <span class="mono">note − étalon</span> — l'écart <b>linéaire</b>, pas le carré.
+          La pente se lit directement : elle monte quand la période est au-dessus de l'étalon.</p>
+        <div class="centerpick">
+          <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}">étalon fixe<span class="drift mono">${eta}</span></button>
+          <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}">référence glissante<span class="drift">365 j</span></button>
+          <label class="field" style="margin:0 0 0 auto;display:flex;align-items:center;gap:8px">
+            <span style="margin:0;font-size:12px">étalon</span>
+            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}" style="width:76px">
+          </label>
+        </div>
+        ${lineChart(SERIES.date, SERIES[cumKey], { height: 250, events: SERIES.events })}
+        <p class="sub" style="margin:13px 0 0">
+          ${CUMMODE === 'etalon'
+            ? `Ta moyenne réelle est à <b class="mono">${SERIES.mean}</b>, ta médiane à <b class="mono">${SERIES.globalMedian}</b>.
+               Avec un étalon à <b class="mono">${eta}</b>, la courbe dérive de <b class="mono">${drift > 0 ? '+' : ''}${drift.toFixed(3)}</b>/jour.
+               Plus l'étalon colle à ta moyenne, plus la pente ne dit que ce qui a vraiment changé.`
+            : `Ici l'étalon n'est pas figé : c'est la médiane de tes 365 derniers jours, recalculée chaque jour.
+               Dérive résiduelle <b class="mono">${drift > 0 ? '+' : ''}${drift.toFixed(3)}</b>/jour, sans rien avoir à régler à la main.`}
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Repères</h2>
+        <p class="sub">Déménagement, rupture, nouveau boulot, arrêt d'un traitement. Ils apparaissent en pointillés
+          sur les deux courbes. Sans eux, une inflexion n'est qu'une inflexion.</p>
+        <form id="evform" style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+          <label class="field" style="margin:0;flex:0 0 160px"><span>Date</span>
+            <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.stats.lastDate}" value="${S.today}"></label>
+          <label class="field" style="margin:0;flex:1 1 240px"><span>Quoi</span>
+            <input type="text" id="evlabel" required maxlength="120" placeholder="ex. changement de boulot"></label>
+          <button class="btn" type="submit">Ajouter</button>
+        </form>
+        ${SERIES.events.length
+          ? `<div style="display:flex;flex-direction:column;gap:1px">
+              ${SERIES.events.map(ev => `<div style="display:flex;align-items:baseline;gap:11px;padding:7px 0;border-top:1px solid var(--line-soft)">
+                <span class="mono faint" style="font-size:12px;flex:0 0 92px">${esc(ev.date)}</span>
+                <span style="flex:1">${esc(ev.label)}</span>
+                <button class="btn" data-delev="${ev.id}" style="padding:3px 9px;font-size:11.5px">retirer</button>
+              </div>`).join('')}
+            </div>`
+          : `<p class="sub" style="margin:0">Aucun repère pour l'instant.</p>`}
+      </div>
     </div>`;
 
-  // onclick (et non addEventListener) : chaque rendu remplace l'ecouteur
-  // au lieu de l'empiler. #view survit aux rendus, contrairement a son contenu.
   $('#view').onclick = async e => {
     const y = e.target.closest('[data-year]');
     if (y) return renderYear(Number(y.dataset.year));
-    const c = e.target.closest('[data-center]');
-    if (c) { CENTER = c.dataset.center; return renderYear(year); }
+    const c = e.target.closest('[data-cum]');
+    if (c) { CUMMODE = c.dataset.cum; return renderYear(year); }
+    const dl = e.target.closest('[data-daily]');
+    if (dl) { DAILYALL = dl.dataset.daily === 'all'; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
     if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
     const del = e.target.closest('[data-delev]');
@@ -315,6 +449,15 @@ async function renderYear(year) {
       SERIES.events = events;
       return renderYear(year);
     }
+  };
+
+  $('#etalon').onchange = async e => {
+    const v = Number(e.target.value);
+    if (!Number.isFinite(v) || v < 0 || v > 10) return toast('Étalon hors 0..10');
+    await saveSettings({ etalon: v });
+    SERIES = await api('/api/series');
+    CUMMODE = 'etalon';
+    renderYear(year);
   };
 
   $('#evform').onsubmit = async e => {
@@ -340,10 +483,9 @@ function gridMarkup(grid) {
       ${mo.days.map(d => {
         if (!d) return '<td></td>';
         const has = d.note !== null && d.note !== undefined;
-        const col = has ? deltaColor(d.delta) : null;
         return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}"
-          ${col ? `style="background:${col}"` : ''}
-          ${has ? `data-date="${d.date}" data-tip="${fmtDay(d.date)}\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}"` : ''}></td>`;
+          ${has ? `style="background:${deltaColor(d.delta)}" data-date="${d.date}"
+          data-tip="${fmtDay(d.date)}\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}"` : ''}></td>`;
       }).join('')}
       <td class="avg">${mo.avg ?? ''}</td>
     </tr>`).join('')}
@@ -502,53 +644,6 @@ function wireMirror() {
     if (g) return renderMirror(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
   };
-}
-
-/* ============================= vue : recherche ============================= */
-
-let QUERY = '';
-
-async function renderSearch() {
-  const r = QUERY.trim() ? await api(`/api/search?q=${encodeURIComponent(QUERY)}`) : { items: [] };
-
-  $('#view').innerHTML = `
-    <div class="card">
-      <h2>Chercher dans ce que tu as écrit</h2>
-      <p class="sub">BM25 sur ton corpus personnel, ${S.stats.textDays} journée${S.stats.textDays > 1 ? 's' : ''} avec du texte.
-        Rien ne sort de cette machine.</p>
-      <input type="search" id="q" value="${esc(QUERY)}" placeholder="nuit, angoisse, boulot…" aria-label="Recherche">
-    </div>
-    ${QUERY.trim() ? `<div class="card">
-      <h2>${r.items.length} résultat${r.items.length > 1 ? 's' : ''}</h2>
-      ${r.items.length
-        ? `<p class="sub">Chaque bande montre les 14 jours qui ont suivi. Le jour cerclé est le retour à la référence.</p>
-           ${r.items.map(it => `<div class="simitem">
-             <div class="hd">
-               <span class="d">${fmtDay(it.date)}</span>
-               <span class="pill">${it.note ?? '—'}/10</span>
-               <span class="faint mono" style="font-size:11px">score ${it.score}</span>
-             </div>
-             <p class="q">${highlight(it.text, it.terms)}</p>
-             ${bandMarkup(it.band)}
-           </div>`).join('')}`
-        : `<p class="sub" style="margin:0">Rien trouvé. Les mots exacts comptent — l'outil ne reformule pas ta requête.</p>`}
-    </div>` : `<div class="card"><p class="sub" style="margin:0">
-        ${S.stats.textDays ? 'Tape un mot pour retrouver les soirs où tu as écrit quelque chose de proche.'
-                           : "Tu n'as pas encore écrit de texte. Cette recherche s'allumera toute seule dès que le corpus existera."}
-      </p></div>`}`;
-
-  const q = $('#q');
-  q.oninput = () => {
-    QUERY = q.value;
-    clearTimeout(q._t);
-    q._t = setTimeout(async () => {
-      const pos = q.selectionStart;
-      await renderSearch();
-      const n = $('#q');
-      if (n) { n.focus(); n.setSelectionRange(pos, pos); }
-    }, 180);
-  };
-  q.focus();
 }
 
 /* ============================= vue : réglages ============================= */
@@ -721,7 +816,6 @@ const VIEWS = {
   tonight: renderTonight,
   year: () => renderYear(),
   mirror: () => renderMirror(),
-  search: renderSearch,
   settings: renderSettings
 };
 
@@ -735,6 +829,7 @@ async function go(v) {
   view = v;
   syncNav();
   $('#view').onclick = null;
+  PetTalk.stop();
   $('#view').innerHTML = '<div class="empty">…</div>';
   try { await VIEWS[v](); }
   catch (err) { $('#view').innerHTML = `<div class="card"><h2>Erreur</h2><p class="sub">${esc(err.message)}</p></div>`; }

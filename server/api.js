@@ -3,7 +3,7 @@ import {
   addMessage, messagesForDate, allEvents, addEvent, deleteEvent,
   allAnchors, setAnchor
 } from './db.js';
-import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, CONTRAST_SATURATION } from './stats.js';
+import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { buildIndex, search } from './search.js';
 import { reply } from './chat.js';
 
@@ -13,7 +13,7 @@ export function invalidate() { _cache = null; }
 function series() {
   if (!_cache) {
     const rows = allEntries();
-    const s = buildSeries(rows);
+    const s = buildSeries(rows, { etalon: getSettings().etalon });
     const textDocs = rows.filter(r => r.text && r.text.trim()).map(r => ({ id: r.date, text: r.text }));
     _cache = { rows, series: s, byDate: indexByDate(s), index: buildIndex(textDocs), textCount: textDocs.length };
   }
@@ -111,9 +111,15 @@ export const routes = {
       contrastFixed: s.map(x => x.contrastFixed),
       contrastGlobal: s.map(x => x.contrastGlobal),
       contrastRelative: s.map(x => x.contrastRelative),
+      midValue: s.map(x => x.midValue),
+      cumEtalon: s.map(x => x.cumEtalon),
+      cumDeltaRef: s.map(x => x.cumDeltaRef),
       cumFixed: s.map(x => x.cumFixed),
       cumGlobal: s.map(x => x.cumGlobal),
       cumRelative: s.map(x => x.cumRelative),
+      etalon: getSettings().etalon ?? median(s.map(x => x.note).sort((a, b) => a - b)),
+      globalMedian: median(s.map(x => x.note).sort((a, b) => a - b)),
+      mean: s.length ? Math.round(s.reduce((a, b) => a + b.note, 0) / s.length * 1000) / 1000 : null,
       events: allEvents()
     };
   },
@@ -186,6 +192,28 @@ export const routes = {
     }
 
     return { date, note, reference, delta: cur?.delta ?? null, floored: false, floor, yesterday, episodes: ep, similar, textCount };
+  },
+
+  /**
+   * Echos : les entrees passees proches de ce qui est en train d'etre ecrit.
+   * Appele pendant la saisie, pas sur une action de recherche -- SPEC 2.2.
+   * Chercher est une corvee ; se voir rappeler ses propres mots ne l'est pas.
+   */
+  'POST /api/echoes': ({ body }) => {
+    const { index, rows, byDate, series: ser, textCount } = series();
+    const text = String(body.text ?? '').trim();
+    const exclude = new Set([body.date ?? today()]);
+    if (text.length < 12 || textCount < 2) return { items: [], textCount };
+    const hits = search(index, text, { limit: Number(body.limit ?? 3), exclude });
+    return {
+      textCount,
+      items: hits.filter(h => h.score > 0.6).map(h => ({
+        date: h.id, score: h.score, terms: h.terms,
+        note: byDate.get(h.id)?.note ?? null,
+        text: rows.find(r => r.date === h.id)?.text ?? '',
+        band: followUp(ser, h.id, 14)
+      }))
+    };
   },
 
   'GET /api/search': ({ query }) => {

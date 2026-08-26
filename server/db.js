@@ -74,6 +74,8 @@ export const DEFAULT_SETTINGS = {
   floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
   floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
   sustain: 2,                 // jours consecutifs >= reference pour valider un retour
+  etalon: 5.7,                // constante de calage du cumul (null = mediane globale)
+  cumMode: 'etalon',          // 'etalon' | 'reference'
   contrastCenter: 'reference' // 'fixed5' (formule tableur) | 'reference' (glissante)
 };
 

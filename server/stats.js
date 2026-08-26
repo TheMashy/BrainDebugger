@@ -41,6 +41,7 @@ export function contrast(x) {
 export const REFERENCE_WINDOW_DAYS = 365;
 export const MIN_REFERENCE_POINTS = 20;   // SPEC 6 - repli sous 20 points
 export const CONTRAST_SATURATION = 4;     // SPEC 6 - echelle de couleur saturee a +/-4
+export const DEFAULT_ETALON = 5.7;        // valeur calee a la main dans le tableur d'origine
 
 /**
  * Serie complete. rows doit etre trie par date croissante.
@@ -57,13 +58,17 @@ export const CONTRAST_SATURATION = 4;     // SPEC 6 - echelle de couleur saturee
  * avec une moyenne reelle a ~6.1 et un centre fige a 5, le cumul derive
  * mecaniquement vers le haut et ne veut plus rien dire.
  */
-export function buildSeries(rows) {
+export function buildSeries(rows, { etalon = null } = {}) {
   const withNote = rows.filter(r => r.note !== null && r.note !== undefined);
   const globalMedian = median(withNote.map(r => r.note).sort((a, b) => a - b)) ?? 5;
 
+  // Etalon : constante de calage du cumul. Repli sur la mediane globale si non
+  // fourni -- c'est ce qu'un utilisateur ferait a la main, en moins approximatif.
+  const eta = etalon === null || etalon === undefined ? globalMedian : Number(etalon);
+
   const out = [];
   let lo = 0;                 // borne basse de la fenetre glissante
-  let cumDelta = 0, cumFixed = 0, cumRelative = 0, cumGlobal = 0;
+  let cumDelta = 0, cumFixed = 0, cumRelative = 0, cumGlobal = 0, cumEtalon = 0;
 
   for (let i = 0; i < withNote.length; i++) {
     const row = withNote[i];
@@ -85,6 +90,7 @@ export function buildSeries(rows) {
     cumFixed += cFixed;
     cumRelative += cRelative;
     cumGlobal += cGlobal;
+    cumEtalon += row.note - eta;
 
     out.push({
       date: row.date,
@@ -93,13 +99,16 @@ export function buildSeries(rows) {
       referencePoints: window.length,
       referenceIsFallback: window.length < MIN_REFERENCE_POINTS,
       delta: Math.round(delta * 1000) / 1000,
+      midValue: Math.round((row.note - eta) * 1000) / 1000,   // "MID-VALUE" du tableur
       contrastFixed: cFixed,
       contrastRelative: cRelative,
       contrastGlobal: cGlobal,
       cumDelta: Math.round(cumDelta * 1000) / 1000,
       cumFixed: Math.round(cumFixed * 1000) / 1000,
       cumRelative: Math.round(cumRelative * 1000) / 1000,
-      cumGlobal: Math.round(cumGlobal * 1000) / 1000
+      cumGlobal: Math.round(cumGlobal * 1000) / 1000,
+      cumEtalon: Math.round(cumEtalon * 1000) / 1000,        // "CUM" du tableur
+      cumDeltaRef: Math.round(cumDelta * 1000) / 1000        // meme cumul, etalon glissant
     });
   }
   return out;
