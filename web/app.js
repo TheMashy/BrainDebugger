@@ -12,6 +12,10 @@ const fmtDay = d => {
   return `${Number(dd)} ${MONTHS_FR[Number(m) - 1].toLowerCase()} ${y}`;
 };
 const fmtTime = ts => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const dayShift = (d, n) => {
+  const [y, m, dd] = d.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, dd) + n * 86400000).toISOString().slice(0, 10);
+};
 
 async function api(path, body) {
   const res = await fetch(path, body
@@ -272,6 +276,28 @@ async function renderYear(year) {
       ${CENTER === 'relative' ? `<p class="sub" style="margin:12px 0 0">
         La pente ne monte que si la période est meilleure que tes 365 derniers jours.
         Dérive résiduelle <b class="mono">${fmtDrift('cumRelative')}</b>/j — c'est la seule des trois qui soit lisible.</p>` : ''}
+    </div>
+
+    <div class="card">
+      <h2>Repères</h2>
+      <p class="sub">Déménagement, rupture, nouveau boulot, arrêt d'un traitement. Ils apparaissent en pointillés
+        sur la courbe. Sans eux, une inflexion n'est qu'une inflexion.</p>
+      <form id="evform" style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+        <label class="field" style="margin:0;flex:0 0 160px"><span>Date</span>
+          <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.stats.lastDate}" value="${S.today}"></label>
+        <label class="field" style="margin:0;flex:1 1 240px"><span>Quoi</span>
+          <input type="text" id="evlabel" required maxlength="120" placeholder="ex. changement de boulot"></label>
+        <button class="btn" type="submit">Ajouter</button>
+      </form>
+      ${SERIES.events.length
+        ? `<div style="display:flex;flex-direction:column;gap:1px">
+            ${SERIES.events.map(ev => `<div style="display:flex;align-items:baseline;gap:11px;padding:7px 0;border-top:1px solid var(--line-soft)">
+              <span class="mono faint" style="font-size:12px;flex:0 0 92px">${esc(ev.date)}</span>
+              <span style="flex:1">${esc(ev.label)}</span>
+              <button class="btn" data-delev="${ev.id}" style="padding:3px 9px;font-size:11.5px">retirer</button>
+            </div>`).join('')}
+          </div>`
+        : `<p class="sub" style="margin:0">Aucun repère pour l'instant.</p>`}
     </div>`;
 
   // onclick (et non addEventListener) : chaque rendu remplace l'ecouteur
@@ -283,6 +309,25 @@ async function renderYear(year) {
     if (c) { CENTER = c.dataset.center; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
     if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
+    const del = e.target.closest('[data-delev]');
+    if (del) {
+      const { events } = await api('/api/events', { delete: Number(del.dataset.delev) });
+      SERIES.events = events;
+      return renderYear(year);
+    }
+  };
+
+  $('#evform').onsubmit = async e => {
+    e.preventDefault();
+    const date = $('#evdate').value, label = $('#evlabel').value.trim();
+    if (!date || !label) return;
+    try {
+      const { events } = await api('/api/events', { date, label });
+      SERIES.events = events;
+      $('#evlabel').value = '';
+      await renderYear(year);
+      toast('Repère ajouté');
+    } catch (err) { toast(err.message); }
   };
 }
 
@@ -307,15 +352,37 @@ function gridMarkup(grid) {
 
 /* ============================= vue : miroir ============================= */
 
+let MIRROR_DATE = null;
+
+/** Surligne les termes qui ont fait matcher. Montrer POURQUOI ca ressort. */
+function highlight(text, terms = []) {
+  let out = esc(text);
+  for (const t of terms) {
+    const re = new RegExp(`(^|[^a-zà-ÿ])(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[a-zà-ÿ]*)`, 'gi');
+    out = out.replace(re, '$1<mark>$2</mark>');
+  }
+  return out;
+}
+
 async function renderMirror(date) {
-  date = date ?? S.today;
+  date = date ?? MIRROR_DATE ?? S.today;
+  MIRROR_DATE = date;
   const m = await api(`/api/mirror?date=${date}`);
+  const prev = dayShift(date, -1), next = dayShift(date, 1);
+  const nav = `<div class="daynav">
+      <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
+      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      ${date !== S.today ? `<button class="wide" data-goto="${S.today}">aujourd'hui</button>` : ''}
+    </div>`;
 
   /* --- SPEC 4.1 : sous le plancher, aucune statistique. --- */
   if (m.floored) {
     $('#view').innerHTML = `
       <div class="card floorbox">
-        <h2>Aujourd'hui, pas de chiffres</h2>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:5px">
+          <h2 style="margin:0">Aujourd'hui, pas de chiffres</h2>
+          <div style="margin-left:auto">${nav}</div>
+        </div>
         <p class="sub" style="color:#c9a19b">
           Tu as noté ${m.note}/10. En dessous de ${m.floor.threshold}, cet outil ne sort aucune statistique.
           Un chiffre rassurant maintenant ne vaudrait rien.
@@ -344,7 +411,7 @@ async function renderMirror(date) {
           <button class="btn" id="backToChat">Parler à ${esc(S.settings.petName)}</button>
         </div>
       </div>` : ''}`;
-    $('#backToChat')?.addEventListener('click', () => go('tonight'));
+    wireMirror();
     return;
   }
 
@@ -358,14 +425,15 @@ async function renderMirror(date) {
       }</p></div>`;
   } else if (ep.insufficient) {
     epCard = `<div class="card"><h2>Preuve de résolution</h2>
-      <p class="sub">Seulement ${ep.count} journée${ep.count > 1 ? 's' : ''} comparable${ep.count > 1 ? 's' : ''} dans ton historique.
+      <p class="sub">Seulement ${ep.comparableCount} journée${ep.comparableCount > 1 ? 's' : ''} comparable${ep.comparableCount > 1 ? 's' : ''} dans ton historique.
       En dessous de ${ep.minComparable}, je n'ai rien à en tirer.</p></div>`;
   } else {
     epCard = `<div class="card">
       <h2>Preuve de résolution</h2>
       <p class="sub">
-        Les <b>${ep.count}</b> fois où tu es descendu à ${ep.note}/10 ou moins, voilà combien de temps
+        Les <b>${ep.comparableCount}</b> fois où tu es descendu à ${ep.note}/10 ou moins, voilà combien de temps
         il a fallu pour remonter au-dessus de ta référence — et pour y rester ${ep.sustain} jours.
+        ${ep.censoredCount ? `<br><span class="faint">L'épisode en cours n'est pas compté : il n'a pas encore assez de recul pour être jugé.</span>` : ''}
       </p>
       <div class="statgrid">
         <div class="s"><div class="k">Médiane</div><div class="v">${ep.medianDays}<span class="u"> jours</span></div></div>
@@ -376,6 +444,7 @@ async function renderMirror(date) {
       </div>
       <p class="sub" style="margin:16px 0 0;font-size:12px">
         La dernière colonne est la moitié honnête du chiffre. Sans elle, on ne montrerait que les fois où ça s'est arrangé.
+        ${ep.beyondHorizonDays?.length ? `Parmi elles, ${ep.beyondHorizonDays.length} sont finalement remontées, au bout de ${ep.beyondHorizonDays.join(', ')} jours.` : ''}
       </p>
     </div>`;
   }
@@ -386,15 +455,15 @@ async function renderMirror(date) {
     simCard = `<div class="card">
       <h2>${sim.mode === 'text' ? 'Tu as déjà écrit ça' : 'Les autres fois à ' + m.note + '/10'}</h2>
       <p class="sub">${sim.mode === 'text'
-        ? 'Recherche sur ton propre corpus. La bande montre les 14 jours qui ont suivi, tels qu\'ils ont été.'
-        : 'Pas encore assez de texte écrit pour comparer les mots — je compare les chiffres. La bande montre les 14 jours qui ont suivi.'}</p>
+        ? 'Recherche sur ton propre corpus. La bande montre les 14 jours qui ont suivi, tels qu\'ils ont été. Le jour cerclé est le retour à la référence.'
+        : 'Pas encore assez de texte écrit pour comparer les mots — je compare les chiffres. La bande montre les 14 jours qui ont suivi. Le jour cerclé est le retour à la référence.'}</p>
       ${sim.items.map(it => `<div class="simitem">
         <div class="hd">
           <span class="d">${fmtDay(it.date)}</span>
           <span class="pill">${it.note}/10</span>
           ${it.terms?.length ? `<span class="faint" style="font-size:11.5px">${it.terms.map(esc).join(' · ')}</span>` : ''}
         </div>
-        ${it.text ? `<p class="q">${esc(it.text.slice(0, 260))}${it.text.length > 260 ? '…' : ''}</p>` : ''}
+        ${it.text ? `<p class="q">${highlight(it.text.slice(0, 260), it.terms)}${it.text.length > 260 ? '…' : ''}</p>` : ''}
         ${bandMarkup(it.band)}
       </div>`).join('')}
     </div>`;
@@ -416,13 +485,70 @@ async function renderMirror(date) {
           ${m.note ?? '—'}<span style="font-size:16px;color:var(--ink-faint)">/10</span>
         </div>
       </div>
-      <div class="statgrid" style="flex:1">
+      <div class="statgrid" style="flex:1;min-width:220px">
         <div class="s"><div class="k">Référence glissante</div><div class="v">${m.reference ?? '—'}</div></div>
         <div class="s"><div class="k">Écart</div><div class="v">${m.delta > 0 ? '+' : ''}${m.delta ?? '—'}</div></div>
         <div class="s"><div class="k">Corpus texte</div><div class="v">${m.textCount ?? 0}<span class="u"> jours</span></div></div>
       </div>
+      ${nav}
     </div>
     ${epCard}${simCard}${yCard}`;
+  wireMirror();
+}
+
+function wireMirror() {
+  $('#view').onclick = e => {
+    const g = e.target.closest('[data-goto]');
+    if (g) return renderMirror(g.dataset.goto);
+    if (e.target.closest('#backToChat')) return go('tonight');
+  };
+}
+
+/* ============================= vue : recherche ============================= */
+
+let QUERY = '';
+
+async function renderSearch() {
+  const r = QUERY.trim() ? await api(`/api/search?q=${encodeURIComponent(QUERY)}`) : { items: [] };
+
+  $('#view').innerHTML = `
+    <div class="card">
+      <h2>Chercher dans ce que tu as écrit</h2>
+      <p class="sub">BM25 sur ton corpus personnel, ${S.stats.textDays} journée${S.stats.textDays > 1 ? 's' : ''} avec du texte.
+        Rien ne sort de cette machine.</p>
+      <input type="search" id="q" value="${esc(QUERY)}" placeholder="nuit, angoisse, boulot…" aria-label="Recherche">
+    </div>
+    ${QUERY.trim() ? `<div class="card">
+      <h2>${r.items.length} résultat${r.items.length > 1 ? 's' : ''}</h2>
+      ${r.items.length
+        ? `<p class="sub">Chaque bande montre les 14 jours qui ont suivi. Le jour cerclé est le retour à la référence.</p>
+           ${r.items.map(it => `<div class="simitem">
+             <div class="hd">
+               <span class="d">${fmtDay(it.date)}</span>
+               <span class="pill">${it.note ?? '—'}/10</span>
+               <span class="faint mono" style="font-size:11px">score ${it.score}</span>
+             </div>
+             <p class="q">${highlight(it.text, it.terms)}</p>
+             ${bandMarkup(it.band)}
+           </div>`).join('')}`
+        : `<p class="sub" style="margin:0">Rien trouvé. Les mots exacts comptent — l'outil ne reformule pas ta requête.</p>`}
+    </div>` : `<div class="card"><p class="sub" style="margin:0">
+        ${S.stats.textDays ? 'Tape un mot pour retrouver les soirs où tu as écrit quelque chose de proche.'
+                           : "Tu n'as pas encore écrit de texte. Cette recherche s'allumera toute seule dès que le corpus existera."}
+      </p></div>`}`;
+
+  const q = $('#q');
+  q.oninput = () => {
+    QUERY = q.value;
+    clearTimeout(q._t);
+    q._t = setTimeout(async () => {
+      const pos = q.selectionStart;
+      await renderSearch();
+      const n = $('#q');
+      if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+    }, 180);
+  };
+  q.focus();
 }
 
 /* ============================= vue : réglages ============================= */
@@ -498,6 +624,15 @@ async function renderSettings() {
       </div>
 
       <div class="card">
+        <h2>Le retour à la référence</h2>
+        <p class="sub">Combien de jours consécutifs au-dessus de la référence comptent comme une vraie remontée.
+          À 1 jour, un simple rebond suffit : avec la majorité de tes journées au-dessus de la référence,
+          le chiffre devient flatteur et ne dit plus rien.</p>
+        <label class="field"><span>Tenue exigée <b class="mono" id="sv">${s.sustain}</b> jour${s.sustain > 1 ? 's' : ''}</span>
+          <input type="range" id="sustain" min="1" max="5" step="1" value="${s.sustain}"></label>
+      </div>
+
+      <div class="card">
         <h2>Tes données</h2>
         <p class="sub">${S.stats.days} journées notées · ${S.stats.textDays} avec du texte · ${esc(S.stats.firstDate)} → ${esc(S.stats.lastDate)}</p>
         <p class="sub" style="font-size:12.5px">
@@ -517,6 +652,7 @@ async function renderSettings() {
   bind('floorMode', 'floorMode');
   bind('floor', 'floor', 'change', el => Number(el.value));
   bind('voiceEnabled', 'voiceEnabled', 'change', el => el.checked);
+  $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
   $('#voiceRate').addEventListener('input', async e => { $('#rv').textContent = e.target.value; await saveSettings({ voiceRate: Number(e.target.value) }); });
   $('#voicePitch').addEventListener('input', async e => { $('#pv').textContent = e.target.value; await saveSettings({ voicePitch: Number(e.target.value) }); });
   $('#tryVoice').addEventListener('click', () => Voice.speak(`Bonjour, moi c'est ${S.settings.petName}. Raconte-moi ta journée.`));
@@ -581,7 +717,13 @@ function renderBackendCfg() {
 
 /* ============================= routage ============================= */
 
-const VIEWS = { tonight: renderTonight, year: () => renderYear(), mirror: () => renderMirror(), settings: renderSettings };
+const VIEWS = {
+  tonight: renderTonight,
+  year: () => renderYear(),
+  mirror: () => renderMirror(),
+  search: renderSearch,
+  settings: renderSettings
+};
 
 function syncNav() {
   for (const b of document.querySelectorAll('nav button')) {

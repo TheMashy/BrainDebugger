@@ -92,11 +92,19 @@ export function lineChart(dates, values, { height = 210, events = [], color = '#
   </svg>`;
 }
 
-/** La bande des 14 jours suivants — SPEC 8, etape 4. */
+/**
+ * La bande des 14 jours suivants — SPEC 8, etape 4.
+ * Le premier jour repassant au-dessus de la reference est cercle : sans ce
+ * repere, l'oeil ne sait pas ou lire la remontee dans un dégradé de couleurs.
+ */
 export function bandMarkup(band) {
+  let returned = false;
   return `<div class="band">${band.map(d => {
-    const c = d.note === null || d.note === undefined ? null : deltaColor(d.delta ?? 0);
-    const t = d.note === null || d.note === undefined ? `${d.date} — rien` : `${d.date} — ${d.note}/10`;
-    return `<i style="${c ? `background:${c}` : ''}" data-tip="${esc(t)}"></i>`;
+    if (d.note === null || d.note === undefined) return `<i data-tip="${esc(d.date)} — rien"></i>`;
+    const back = d.reference !== null && d.reference !== undefined && d.note >= d.reference;
+    const mark = back && !returned;
+    if (back) returned = true;
+    return `<i class="${mark ? 'ret' : ''}" style="background:${deltaColor(d.delta ?? 0)}"
+      data-tip="${esc(`${d.date} — ${d.note}/10${mark ? '\nretour à la référence' : ''}`)}"></i>`;
   }).join('')}</div>`;
 }

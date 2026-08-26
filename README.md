@@ -12,8 +12,8 @@ Tout tourne sur ta machine. Aucun compte, aucun serveur, aucune synchro.
 ## Démarrer
 
 ```bash
-npm start
-# → http://127.0.0.1:4173
+npm start   # → http://127.0.0.1:4173
+npm test    # 25 tests sur le calcul, sans dépendance
 ```
 
 Aucune dépendance à installer. SQLite est intégré à Node 22 (`node:sqlite`), le
@@ -104,10 +104,19 @@ Et un centre fixe *correct* ne suffit pas non plus — le carré signé amplifie
 basse plus que la queue haute, il reste une dérive résiduelle. Seule la référence
 glissante donne une pente lisible.
 
-**Épisodes** — non chevauchants : un jour déjà compris dans un épisode en cours n'en
-ouvre pas un nouveau. Le retour à la référence doit **tenir `sustain` jours** (2 par
-défaut) : avec 62 % des journées au-dessus de la référence, un rebond d'un seul jour
-est quasi garanti par le taux de base et ne dit rien.
+**Épisodes** — trois règles, chacune corrigeant une manière de mentir avec le chiffre :
+
+1. **Non chevauchants.** Un jour déjà compris dans un épisode en cours n'en ouvre pas
+   un nouveau, sinon le nombre d'épisodes gonfle et la médiane s'effondre.
+2. **Le retour doit tenir `sustain` jours** (2 par défaut). Avec la majorité des
+   journées au-dessus de la référence, un rebond d'un seul jour est quasi garanti par
+   le taux de base et ne dit rien. Passer de 1 à 2 jours fait tomber la part « sous
+   4 jours » de 81 % à 58 % : moins flatteur, vrai.
+3. **L'horizon classe, il ne découpe pas.** Une période basse continue de 40 jours est
+   *un* épisode non résolu, pas deux. Et un épisode ouvert trop près de la fin des
+   données est **censuré**, pas « jamais remonté » : on n'a pas encore le recul pour
+   trancher. L'épisode en cours est toujours dans ce cas — c'est précisément celui
+   qu'on regarde un mauvais soir. Le compter comme non résolu serait faux et alarmiste.
 
 ---
 
@@ -146,12 +155,29 @@ signale**. Une panne silencieuse serait un mensonge sur l'endroit où partent le
 
 ---
 
+## Les vues
+
+- **Ce soir** — le compagnon, la conversation, la note du jour avec les ancres sous les yeux.
+- **Année** — la grille mois × jours, le cumul commutable entre les trois centres, et les
+  repères de vie (saisie et affichage en pointillés sur la courbe).
+- **Miroir** — les trois mécanismes, avec navigation jour par jour dans tout l'historique.
+- **Recherche** — BM25 sur le corpus, termes surlignés, bande des 14 jours suivants.
+- **Réglages** — compagnon, voix, backend, plancher, tenue du retour, export.
+
+## Tests
+
+`npm test` — 25 tests sur `server/stats.js`, sans dépendance (`node:test`). C'est la
+partie où la justesse compte : un bug dans les épisodes est un mensonge à quelqu'un
+qui va mal. Les tests couvrent la référence glissante et son repli, la reproduction
+exacte de la formule de contraste, la segmentation des épisodes, la tenue du retour,
+la censure à droite, les années bissextiles.
+
 ## Ce qui n'est pas fait
 
 - Embeddings locaux (`transformers.js`) — à faire quand le corpus texte dépassera
   quelques centaines d'entrées. `search.js` est isolé pour être remplacé sans toucher au reste.
 - Bot Discord (capture `#psy` + `/note`).
-- Table `events` remplie : le schéma et l'affichage sur la courbe existent, la saisie non.
+- Notification du soir : ouverte au §10 du spec, non tranchée.
 
 ## Ce que ce n'est pas
 

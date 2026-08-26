@@ -73,6 +73,7 @@ export const DEFAULT_SETTINGS = {
   apiModel: '',
   floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
   floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
+  sustain: 2,                 // jours consecutifs >= reference pour valider un retour
   contrastCenter: 'reference' // 'fixed5' (formule tableur) | 'reference' (glissante)
 };
 

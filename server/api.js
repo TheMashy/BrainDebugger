@@ -148,7 +148,7 @@ export const routes = {
     }
 
     // 1. PREUVE DE RESOLUTION
-    const sustain = Number(query.sustain ?? 2);
+    const sustain = Number(query.sustain ?? s.sustain ?? 2);
     const ep = note === null ? { applicable: false, reason: 'no_note' }
                              : episodes(ser, note, { horizon: 60, sustain });
     if (ep.applicable && ep.count < MIN_COMPARABLE) {

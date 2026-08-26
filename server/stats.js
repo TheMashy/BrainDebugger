@@ -135,43 +135,55 @@ export function episodes(series, N, { horizon = 60, sustain = 1 } = {}) {
     return { applicable: false, reason: 'at_or_above_reference', reference: ref, note: N };
   }
 
+  const lastDate = series[series.length - 1].date;
   const eps = [];
   let i = 0;
   while (i < series.length) {
-    const s = series[i];
-    if (s.note > N || s.reference === null || s.note >= s.reference) { i++; continue; }
+    const s0 = series[i];
+    if (s0.note > N || s0.reference === null || s0.note >= s0.reference) { i++; continue; }
 
-    // episode ouvert en i : on cherche le retour >= reference, tenu `sustain` jours.
-    // sustain > 1 evite de compter comme "resolu" un simple rebond d'un jour :
-    // avec 62% des journees au-dessus de la reference, un retour ponctuel est
-    // presque garanti par le taux de base et ne dit rien.
-    let j = i + 1;
-    let resolvedAt = null;
-    let run = 0;
+    // On cherche le retour reel, SANS borne : l'horizon sert a classer l'episode,
+    // jamais a le decouper. Le decouper ferait passer une seule periode basse de
+    // 40 jours pour deux episodes non resolus -- et ce compteur est le chiffre le
+    // plus lourd de l'outil, le gonfler serait alarmiste.
+    let j = i + 1, run = 0, resolvedAt = null, endIdx = series.length;
     while (j < series.length) {
       const t = series[j];
-      if (daysBetween(s.date, t.date) > horizon) break;
       if (t.reference !== null && t.note >= t.reference) {
         run++;
-        if (run >= sustain) { resolvedAt = series[j - sustain + 1]; break; }
+        if (run >= sustain) { resolvedAt = series[j - sustain + 1]; endIdx = j; break; }
       } else run = 0;
       j++;
     }
 
     if (resolvedAt) {
-      eps.push({ start: s.date, end: resolvedAt.date, days: daysBetween(s.date, resolvedAt.date), resolved: true });
-      // saute jusqu'a la resolution : pas de chevauchement
-      i = j + 1;
+      const days = daysBetween(s0.date, resolvedAt.date);
+      eps.push({ start: s0.date, end: resolvedAt.date, days, resolved: days <= horizon, censored: false });
     } else {
-      eps.push({ start: s.date, end: null, days: null, resolved: false });
-      // pas de resolution dans l'horizon : on reprend apres l'horizon
-      while (i < series.length && daysBetween(s.date, series[i].date) <= horizon) i++;
+      // Pas de retour observe. Deux situations tres differentes :
+      //  - l'episode a eu tout l'horizon pour remonter et ne l'a pas fait -> non resolu ;
+      //  - il a commence trop pres de la fin des donnees pour etre jugeable -> CENSURE.
+      // Confondre les deux est grave : l'episode en cours est toujours dans le
+      // second cas, et c'est precisement celui qu'on regarde un mauvais soir.
+      // L'afficher comme "jamais remonte" serait alarmiste et faux.
+      const observable = daysBetween(s0.date, lastDate);
+      eps.push({
+        start: s0.date, end: null, days: null,
+        resolved: false, censored: observable < horizon, observedDays: observable
+      });
     }
+    i = endIdx + 1;
   }
 
   const resolved = eps.filter(e => e.resolved);
+  const censored = eps.filter(e => e.censored);
   const durations = resolved.map(e => e.days).sort((a, b) => a - b);
-  const unresolved = eps.length - resolved.length;
+  // Les episodes censures ne comptent ni comme resolus ni comme non resolus :
+  // on n'a simplement pas encore assez de recul pour trancher.
+  const unresolved = eps.length - resolved.length - censored.length;
+  // Pour les episodes hors horizon on connait quand meme la duree reelle :
+  // "jamais remonte a 60 jours" se double alors d'un "remonte au bout de 87".
+  const beyond = eps.filter(e => !e.resolved && e.days !== null).map(e => e.days).sort((a, b) => a - b);
 
   return {
     applicable: true,
@@ -180,10 +192,14 @@ export function episodes(series, N, { horizon = 60, sustain = 1 } = {}) {
     horizon,
     sustain,
     count: eps.length,
+    comparableCount: eps.length - censored.length,   // ce sur quoi on peut se prononcer
     resolvedCount: resolved.length,
     unresolvedCount: unresolved,
+    censoredCount: censored.length,
     medianDays: median(durations),
     maxDays: durations.length ? durations[durations.length - 1] : null,
+    beyondHorizonDays: beyond,
+    neverReturnedCount: eps.filter(e => e.days === null && !e.censored).length,
     shareUnder4: durations.length ? durations.filter(d => d < 4).length / durations.length : null,
     episodes: eps
   };
