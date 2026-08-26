@@ -140,6 +140,17 @@ const LOGIN_DISCORD = `<!doctype html>
 </div>
 </body></html>`;
 
+// Une seule fois par URI : la boucle de connexion passe ici a chaque essai, et
+// une ligne par tentative noierait le reste des logs.
+const announced = new Set();
+function announceRedirect(uri) {
+  if (announced.has(uri)) return;
+  announced.add(uri);
+  console.log(`  redirection OAuth envoyée à Discord : ${uri}\n` +
+              '  Elle doit figurer AU CARACTÈRE PRÈS dans Developer Portal ›\n' +
+              '  ton application › OAuth2 › Redirects.');
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
   const key = `${req.method} ${url.pathname}`;
@@ -155,6 +166,11 @@ const server = createServer(async (req, res) => {
     if (key === 'GET /login' || key === 'GET /auth/discord') {
       if (auth.sessionUser(req)) { res.writeHead(302, { Location: '/' }); return res.end(); }
       const { state, cookie } = discord.makeState(isSecure(req));
+      // Discord refuse une redirection non déclarée par un mur muet
+      // (« redirect_uri non valide ») affiché sur SON domaine : le serveur
+      // n'apprend rien, et on cherche une différence entre deux chaînes dont
+      // une seule est visible. On journalise donc celle qu'on envoie.
+      announceRedirect(discord.redirectUri(req));
       res.writeHead(302, { Location: discord.authorizeUrl(req, state), 'Set-Cookie': cookie });
       return res.end();
     }
@@ -326,7 +342,10 @@ server.listen(PORT, HOST, () => {
   plateforme  ${PLATFORM ?? 'aucune détectée'}
   node        ${process.versions.node}
   base        ${DB_PATH}
-  verrou      ${discord.enabled() ? `Discord${discord.GUILD ? ` (serveur ${discord.GUILD})` : ''}` : auth.enabled() ? 'mot de passe' : 'aucun'}
+  verrou      ${discord.enabled() ? `Discord${discord.GUILD ? ` (serveur ${discord.GUILD})` : ''}` : auth.enabled() ? 'mot de passe' : 'aucun'}${discord.enabled() ? `
+  redirection ${process.env.BD_PUBLIC_URL
+      ? discord.redirectUri({ headers: {} })
+      : 'déduite de la requête — définis BD_PUBLIC_URL pour la figer'}` : ''}
   clé Claude  ${process.env.ANTHROPIC_API_KEY ? 'fournie par l\'environnement' : 'aucune (mode hors-ligne)'}
   santé       /healthz
   ─────────────────────────────────────────

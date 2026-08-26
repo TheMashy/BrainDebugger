@@ -26,13 +26,31 @@ const SECRET = process.env.BD_SECRET
 
 export const enabled = () => !!(CLIENT_ID && CLIENT_SECRET);
 
-/** L'URL publique : indispensable derriere un proxy, ou le Host seul ment. */
+/**
+ * L'URL publique : indispensable derriere un proxy, ou le Host seul ment.
+ *
+ * BD_PUBLIC_URL est nettoyee plutot que prise au mot. Elle est copiee a la main
+ * depuis un tableau de bord, et les trois erreurs de copie -- schema absent,
+ * barre finale, chemin colle par-dessus -- donnent toutes le meme mur cote
+ * Discord : « redirect_uri non valide », sans dire laquelle. Autant les
+ * absorber ici.
+ */
 export function publicUrl(req) {
-  if (process.env.BD_PUBLIC_URL) return process.env.BD_PUBLIC_URL.replace(/\/$/, '');
+  const raw = process.env.BD_PUBLIC_URL?.trim();
+  if (raw) {
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+      const u = new URL(withScheme);
+      return `${u.protocol}//${u.host}`;   // jette chemin, query, barre finale
+    } catch {
+      // URL illisible : on prefere le proxy a un plantage au demarrage.
+      console.warn(`  BD_PUBLIC_URL illisible (${raw}) — ignorée.`);
+    }
+  }
   const proto = (req.headers['x-forwarded-proto'] ?? '').split(',')[0] || 'http';
   return `${proto}://${req.headers.host}`;
 }
-const redirectUri = req => `${publicUrl(req)}/auth/discord/callback`;
+export const redirectUri = req => `${publicUrl(req)}/auth/discord/callback`;
 
 /* ---------- protection CSRF ---------- */
 
