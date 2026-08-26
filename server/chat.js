@@ -124,7 +124,21 @@ ${lines.join('\n\n')}`;
 /* ---------------- backend Anthropic ---------------- */
 
 let _sdk = null;
-async function anthropicClient(apiKey) {
+
+/**
+ * Resolution de la cle. Le `trim` n'est pas cosmetique : coller une cle dans
+ * l'interface d'un hebergeur y laisse tres souvent un saut de ligne ou une
+ * espace, et l'API repond alors 401 sans que rien ne le laisse deviner.
+ */
+export function resolveKey(settings) {
+  const stored = String(settings?.apiKey ?? '').trim();
+  const env = String(process.env.ANTHROPIC_API_KEY ?? '').trim();
+  if (stored) return { key: stored, source: 'stored' };
+  if (env) return { key: env, source: 'env' };
+  return { key: null, source: 'none' };
+}
+
+async function anthropicClient(settings) {
   if (!_sdk) {
     try {
       ({ default: _sdk } = await import('@anthropic-ai/sdk'));
@@ -132,9 +146,42 @@ async function anthropicClient(apiKey) {
       throw new Error("SDK absent — lance : npm install @anthropic-ai/sdk");
     }
   }
-  const key = apiKey || process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("Pas de clé API. Colle-la dans Réglages, ou exporte ANTHROPIC_API_KEY.");
-  return new _sdk({ apiKey: key });
+  const { key, source } = resolveKey(settings);
+  if (!key) throw new Error("Pas de clé API. Colle-la dans Réglages, ou définis ANTHROPIC_API_KEY.");
+  return { client: new _sdk({ apiKey: key }), source };
+}
+
+const SOURCE_LABEL = { stored: 'la clé enregistrée dans l\'app', env: 'la variable ANTHROPIC_API_KEY' };
+
+/**
+ * Un dump JSON brut dans une notification ne dit rien a personne. On traduit
+ * les erreurs qui ont une cause actionnable, et on nomme la cle utilisee --
+ * une cle collee dans l'interface l'emporte sur la variable d'environnement,
+ * ce qui est la source de confusion la plus frequente.
+ */
+export function explainApiError(err, source) {
+  const status = err?.status ?? err?.statusCode;
+  const which = SOURCE_LABEL[source] ?? 'la clé';
+  if (status === 401) return `Clé refusée (401). C'est ${which} qui a été utilisée — vérifie qu'elle est complète et sans espace en trop.`;
+  if (status === 403) return `Accès refusé (403). ${which} n'a pas accès à ce modèle.`;
+  if (status === 429) return 'Limite de débit atteinte (429). Réessaie dans un instant.';
+  if (status === 404) return "Modèle inconnu (404). Vérifie le modèle choisi dans Réglages.";
+  if (status >= 500) return `L'API est indisponible (${status}). Réessaie plus tard.`;
+  return String(err?.message ?? err).slice(0, 160);
+}
+
+/** Test de la clé sans consommer de jetons : on interroge l'API des modèles. */
+export async function testKey(settings) {
+  const { client, source } = await anthropicClient(settings);
+  const model = settings.anthropicModel || 'claude-opus-5';
+  try {
+    const m = await client.models.retrieve(model);
+    return { ok: true, source, model: m.id, displayName: m.display_name ?? m.id };
+  } catch (err) {
+    // `reason` et non `error` : un test qui rend un verdict negatif a reussi.
+    // Le routeur traduit `error` en HTTP 400, ce qui serait faux ici.
+    return { ok: false, source, reason: explainApiError(err, source) };
+  }
 }
 
 export const ANTHROPIC_MODELS = [
@@ -153,35 +200,44 @@ export const ANTHROPIC_MODELS = [
  * @returns {Promise<{text: string, backend: string, refused?: boolean, model?: string}>}
  */
 export async function anthropicReply(history, s, memory, onText) {
-  const client = await anthropicClient(s.apiKey);
+  const { client, source } = await anthropicClient(s);
 
   const system = [{ type: 'text', text: SYSTEM_PROMPT }];
   if (memory) system.push({ type: 'text', text: memory });
 
-  const stream = client.beta.messages.stream({
-    // Repli serveur : si un classificateur decline, la requete repart sur un
-    // autre modele dans le meme appel. Sur ce produit, un refus tombe pile au
-    // pire moment -- quelqu'un qui ecrit une soiree difficile. Le silence n'est
-    // pas une option acceptable.
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    model: s.anthropicModel || 'claude-opus-5',
-    max_tokens: 2048,
-    thinking: { type: 'adaptive' },
-    output_config: { effort: s.anthropicEffort || 'low' },
-    system,
-    messages: toChatMessages(history)
-  });
-
-  let text = '';
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-      text += event.delta.text;
-      onText?.(event.delta.text);
-    }
+  let stream;
+  try {
+    stream = client.beta.messages.stream({
+      // Repli serveur : si un classificateur decline, la requete repart sur un
+      // autre modele dans le meme appel. Sur ce produit, un refus tombe pile au
+      // pire moment -- quelqu'un qui ecrit une soiree difficile. Le silence n'est
+      // pas une option acceptable.
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      model: s.anthropicModel || 'claude-opus-5',
+      max_tokens: 2048,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: s.anthropicEffort || 'low' },
+      system,
+      messages: toChatMessages(history)
+    });
+  } catch (err) {
+    throw new Error(explainApiError(err, source));
   }
 
-  const final = await stream.finalMessage();
+  let text = '';
+  let final;
+  try {
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        text += event.delta.text;
+        onText?.(event.delta.text);
+      }
+    }
+    final = await stream.finalMessage();
+  } catch (err) {
+    throw new Error(explainApiError(err, source));
+  }
   if (final.stop_reason === 'refusal') {
     return { text: '', backend: 'anthropic', refused: true, model: final.model };
   }

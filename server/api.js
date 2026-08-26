@@ -6,7 +6,7 @@ import {
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { buildIndex, search } from './search.js';
-import { reply, memoryBlock, ANTHROPIC_MODELS } from './chat.js';
+import { reply, memoryBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ---------- */
 let _cache = null;
@@ -91,6 +91,12 @@ export const routes = {
 
   /** Les N dernieres journees ecrites, pour donner de la continuite au compagnon. */
   'GET /api/models': () => ({ models: ANTHROPIC_MODELS, hasEnvKey: !!process.env.ANTHROPIC_API_KEY }),
+
+  /** Vérifie la clé sans consommer de jetons (API des modèles, pas de génération). */
+  'POST /api/test-key': async () => {
+    try { return await testKey(getSettings()); }
+    catch (err) { return { ok: false, reason: String(err.message ?? err) }; }
+  },
 
   'POST /api/message': async ({ body }) => {
     const text = String(body.text ?? '').trim();
