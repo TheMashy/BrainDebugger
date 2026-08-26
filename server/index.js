@@ -1,5 +1,6 @@
 import { PLATFORM } from './preflight.js';     // en premier : contrôle de version de Node
 import { createServer } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,21 +21,33 @@ const PORT = Number(process.env.PORT ?? 4173);
 const HOST = process.env.HOST ?? (PLATFORM ? '0.0.0.0' : '127.0.0.1');
 
 if (!auth.isLoopback(HOST) && !auth.enabled()) {
-  console.error(`
-  ────────────────────────────────────────────────────────────
-  REFUS DE DÉMARRER — IL MANQUE BD_PASSWORD
-
-  ${PLATFORM ? `Détecté : ${PLATFORM}. L'écoute est ouverte sur 0.0.0.0` : `HOST=${HOST}`},
-  ce qui rend ce serveur joignable depuis l'extérieur. Aucun mot de passe
-  n'est défini.
-
-  Ce serveur expose un journal intime. Sans verrou, n'importe qui connaissant
-  l'URL peut le lire — c'est pourquoi il refuse de démarrer plutôt que de
-  se lancer en clair.
-
-  Définis la variable BD_PASSWORD, puis redéploie.
-  ────────────────────────────────────────────────────────────
-`);
+  // Mot de passe prêt à coller : sans ça, on renvoie quelqu'un vers un
+  // générateur, et il choisit « braindebugger » parce qu'il est pressé.
+  const suggestion = randomBytes(12).toString('base64url');
+  // Un seul write : l'hébergeur entrelace stdout et stderr, et un bloc écrit
+  // ligne par ligne ressort illisible dans les logs.
+  process.stderr.write([
+    '',
+    '  ════════════════════════════════════════════════════════════',
+    '  REFUS DE DÉMARRER — IL MANQUE BD_PASSWORD',
+    '',
+    PLATFORM
+      ? `  Détecté : ${PLATFORM}. L'écoute est ouverte sur ${HOST}, donc ce`
+      : `  HOST=${HOST}, donc ce`,
+    '  serveur est joignable depuis internet. Aucun mot de passe n\'est défini.',
+    '',
+    '  Ce serveur expose un journal intime. Sans verrou, n\'importe qui',
+    '  connaissant l\'URL peut le lire — il refuse donc de démarrer plutôt',
+    '  que de se lancer en clair. Ce n\'est pas une panne.',
+    '',
+    '  À FAIRE : ajoute une variable d\'environnement, puis redéploie.',
+    '',
+    '      BD_PASSWORD=' + suggestion,
+    '',
+    '  (mot de passe généré à l\'instant, à copier tel quel ou à remplacer)',
+    '  ════════════════════════════════════════════════════════════',
+    '', ''
+  ].join('\n'));
   process.exit(1);
 }
 
