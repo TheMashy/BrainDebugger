@@ -33,9 +33,11 @@ function safeEqual(a, b) {
   return timingSafeEqual(A, B);
 }
 
-export function issueCookie(secure) {
+/** La session porte desormais l'identifiant : c'est elle qui dit QUI ecrit. */
+export function issueCookie(secure, userId = 'local') {
   const issued = Date.now();
-  const value = `${issued}.${sign(issued)}`;
+  const payload = `${userId}:${issued}`;
+  const value = `${payload}.${sign(payload)}`;
   return [
     `${COOKIE}=${value}`,
     'HttpOnly',
@@ -50,15 +52,26 @@ export function clearCookie() {
   return `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
-export function isAuthed(req) {
-  if (!enabled()) return true;
+/** @returns {string|null} l'identifiant de session, ou null si absente/invalide */
+export function sessionUser(req) {
   const raw = req.headers.cookie ?? '';
   const hit = raw.split(';').map(c => c.trim()).find(c => c.startsWith(`${COOKIE}=`));
-  if (!hit) return false;
-  const [issued, sig] = hit.slice(COOKIE.length + 1).split('.');
-  if (!issued || !sig) return false;
-  if (Date.now() - Number(issued) > MAX_AGE * 1000) return false;
-  return safeEqual(sig, sign(issued));
+  if (!hit) return null;
+  const value = hit.slice(COOKIE.length + 1);
+  const dot = value.lastIndexOf('.');
+  if (dot < 0) return null;
+  const payload = value.slice(0, dot), sig = value.slice(dot + 1);
+  const sep = payload.lastIndexOf(':');
+  if (sep < 0) return null;
+  const userId = payload.slice(0, sep), issued = Number(payload.slice(sep + 1));
+  if (!userId || !Number.isFinite(issued)) return null;
+  if (Date.now() - issued > MAX_AGE * 1000) return null;
+  return safeEqual(sig, sign(payload)) ? userId : null;
+}
+
+export function isAuthed(req) {
+  if (!enabled()) return true;
+  return sessionUser(req) !== null;
 }
 
 /* Freinage des tentatives : rien de sophistique, juste de quoi rendre une

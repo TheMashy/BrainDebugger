@@ -2,6 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { migrate, ensureUserTables, OWNER } from './migrate.js';
+export { OWNER };
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const DB_PATH = process.env.BD_DB ?? join(ROOT, 'data', 'braindebugger.db');
@@ -29,48 +31,85 @@ export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
+// Schema cible : multi-comptes. Chaque table porte user_id, et les cles
+// naturelles (date, note, key) sont composites avec lui -- deux personnes ont
+// chacune leur 2026-08-26.
+//
+// Sur une base creee avant les comptes, ces CREATE ... IF NOT EXISTS ne font
+// rien : les tables existent deja, a l'ancienne forme. C'est migrate() juste
+// en dessous qui les reecrit. Une base neuve, elle, nait directement a la
+// bonne forme et n'a rien a migrer.
 db.exec(`
 CREATE TABLE IF NOT EXISTS entries (
-  date TEXT PRIMARY KEY,          -- 'YYYY-MM-DD'
-  note REAL,                      -- 0..10, nullable
-  text TEXT                       -- concatenation des messages utilisateur du jour
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  date    TEXT NOT NULL,          -- 'YYYY-MM-DD'
+  note    REAL,                   -- 0..10, nullable
+  text    TEXT,                   -- concatenation des messages utilisateur du jour
+  PRIMARY KEY (user_id, date)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
-  id     INTEGER PRIMARY KEY,
-  ts     TEXT NOT NULL,           -- ISO 8601
-  date   TEXT NOT NULL,           -- 'YYYY-MM-DD', jour de rattachement
-  source TEXT,                    -- 'web' | 'discord'
-  role   TEXT NOT NULL,           -- 'user' | 'pet'
-  text   TEXT NOT NULL
+  id      INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  ts      TEXT NOT NULL,          -- ISO 8601
+  date    TEXT NOT NULL,          -- 'YYYY-MM-DD', jour de rattachement
+  source  TEXT,                   -- 'web' | 'discord'
+  role    TEXT NOT NULL,          -- 'user' | 'pet'
+  text    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
 
 CREATE TABLE IF NOT EXISTS events (
-  id    INTEGER PRIMARY KEY,
-  date  TEXT NOT NULL,
-  label TEXT NOT NULL
+  id      INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  date    TEXT NOT NULL,
+  label   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
 
 -- Ancres d'etalonnage : la legende de l'echelle, dans les mots de l'utilisateur.
 -- Affichee au moment de noter pour limiter la derive pluriannuelle (SPEC 10.1).
 CREATE TABLE IF NOT EXISTS anchors (
-  note  INTEGER PRIMARY KEY,      -- 0..10
-  label TEXT NOT NULL,
-  descr TEXT
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  note    INTEGER NOT NULL,       -- 0..10
+  label   TEXT NOT NULL,
+  descr   TEXT,
+  PRIMARY KEY (user_id, note)
 );
 
 CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
-  date TEXT PRIMARY KEY,
-  vec  BLOB
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  date    TEXT NOT NULL,
+  vec     BLOB,
+  PRIMARY KEY (user_id, date)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL             -- JSON
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  key     TEXT NOT NULL,
+  value   TEXT NOT NULL,          -- JSON
+  PRIMARY KEY (user_id, key)
 );
 `);
+
+const _m = migrate(db);
+if (_m.migrated) console.log('  base migrée vers le mode multi-utilisateurs');
+ensureUserTables(db);
+
+/* ---------- utilisateurs ---------- */
+
+export function upsertUser({ id, username, avatar }) {
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO users(id, username, avatar, created_at, seen_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET username = excluded.username,
+                                  avatar   = excluded.avatar,
+                                  seen_at  = excluded.seen_at
+  `).run(id, username ?? null, avatar ?? null, now, now);
+  return getUser(id);
+}
+export const getUser = id => db.prepare('SELECT * FROM users WHERE id = ?').get(id) ?? null;
+export const countUsers = () => db.prepare('SELECT COUNT(*) c FROM users').get().c;
 
 /* ---------- settings ---------- */
 
@@ -97,8 +136,8 @@ export const DEFAULT_SETTINGS = {
   contrastCenter: 'reference' // 'fixed5' (formule tableur) | 'reference' (glissante)
 };
 
-export function getSettings() {
-  const rows = db.prepare('SELECT key, value FROM settings').all();
+export function getSettings(userId = OWNER) {
+  const rows = db.prepare('SELECT key, value FROM settings WHERE user_id = ?').all(userId);
   const stored = new Set(rows.map(r => r.key));
   const out = { ...DEFAULT_SETTINGS };
   for (const r of rows) {
@@ -127,33 +166,33 @@ export function publicSettings(s = getSettings()) {
   };
 }
 
-export function setSettings(patch) {
+export function setSettings(patch, userId = OWNER) {
   const stmt = db.prepare(
-    'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    'INSERT INTO settings(user_id, key, value) VALUES(?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value'
   );
   for (const [k, v] of Object.entries(patch)) {
     if (!(k in DEFAULT_SETTINGS)) continue;
-    stmt.run(k, JSON.stringify(v));
+    stmt.run(userId, k, JSON.stringify(v));
   }
-  return getSettings();
+  return getSettings(userId);
 }
 
 /* ---------- entries ---------- */
 
-export function allEntries() {
-  return db.prepare('SELECT date, note, text FROM entries ORDER BY date ASC').all();
+export function allEntries(userId = OWNER) {
+  return db.prepare('SELECT date, note, text FROM entries WHERE user_id = ? ORDER BY date ASC').all(userId);
 }
 
-export function getEntry(date) {
-  return db.prepare('SELECT date, note, text FROM entries WHERE date = ?').get(date) ?? null;
+export function getEntry(date, userId = OWNER) {
+  return db.prepare('SELECT date, note, text FROM entries WHERE user_id = ? AND date = ?').get(userId, date) ?? null;
 }
 
-export function setNote(date, note) {
+export function setNote(date, note, userId = OWNER) {
   db.prepare(`
-    INSERT INTO entries(date, note) VALUES(?, ?)
-    ON CONFLICT(date) DO UPDATE SET note = excluded.note
-  `).run(date, note);
-  return getEntry(date);
+    INSERT INTO entries(user_id, date, note) VALUES(?, ?, ?)
+    ON CONFLICT(user_id, date) DO UPDATE SET note = excluded.note
+  `).run(userId, date, note);
+  return getEntry(date, userId);
 }
 
 /**
@@ -161,25 +200,25 @@ export function setNote(date, note) {
  * SPEC 4.3 : les mots exacts. On ne stocke jamais les phrases du pet
  * dans le corpus qui sera rendu a l'utilisateur.
  */
-export function rebuildEntryText(date) {
+export function rebuildEntryText(date, userId = OWNER) {
   const rows = db.prepare(
-    "SELECT text FROM messages WHERE date = ? AND role = 'user' ORDER BY ts ASC"
-  ).all(date);
+    "SELECT text FROM messages WHERE user_id = ? AND date = ? AND role = 'user' ORDER BY ts ASC"
+  ).all(userId, date);
   const text = rows.map(r => r.text).join('\n');
   db.prepare(`
-    INSERT INTO entries(date, text) VALUES(?, ?)
-    ON CONFLICT(date) DO UPDATE SET text = excluded.text
-  `).run(date, text);
+    INSERT INTO entries(user_id, date, text) VALUES(?, ?, ?)
+    ON CONFLICT(user_id, date) DO UPDATE SET text = excluded.text
+  `).run(userId, date, text);
   return text;
 }
 
 /* ---------- messages ---------- */
 
-export function addMessage({ ts, date, source = 'web', role, text }) {
+export function addMessage({ ts, date, source = 'web', role, text, userId = OWNER }) {
   const info = db.prepare(
-    'INSERT INTO messages(ts, date, source, role, text) VALUES(?,?,?,?,?)'
-  ).run(ts, date, source, role, text);
-  if (role === 'user') rebuildEntryText(date);
+    'INSERT INTO messages(user_id, ts, date, source, role, text) VALUES(?,?,?,?,?,?)'
+  ).run(userId, ts, date, source, role, text);
+  if (role === 'user') rebuildEntryText(date, userId);
   return Number(info.lastInsertRowid);
 }
 
@@ -189,45 +228,46 @@ export function addMessage({ ts, date, source = 'web', role, text }) {
  * formulaire quotidien. Le changement de jour devient un simple repere dans le
  * fil, pas une coupure.
  */
-export function recentMessages(limit = 80) {
+export function recentMessages(limit = 80, userId = OWNER) {
   return db.prepare(
-    'SELECT id, ts, date, source, role, text FROM messages ORDER BY ts DESC, id DESC LIMIT ?'
-  ).all(limit).reverse();
+    'SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?'
+  ).all(userId, limit).reverse();
 }
 
-export function messagesForDate(date) {
+export function messagesForDate(date, userId = OWNER) {
   return db.prepare(
-    'SELECT id, ts, source, role, text FROM messages WHERE date = ? ORDER BY ts ASC'
-  ).all(date);
+    'SELECT id, ts, source, role, text FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
+  ).all(userId, date);
 }
 
-export function recentUserMessages(limit = 40) {
+export function recentUserMessages(limit = 40, userId = OWNER) {
   return db.prepare(
-    "SELECT id, ts, date, role, text FROM messages WHERE role = 'user' ORDER BY ts DESC LIMIT ?"
-  ).all(limit).reverse();
+    "SELECT id, ts, date, role, text FROM messages WHERE user_id = ? AND role = 'user' ORDER BY ts DESC LIMIT ?"
+  ).all(userId, limit).reverse();
 }
 
 /* ---------- events ---------- */
 
-export function allEvents() {
-  return db.prepare('SELECT id, date, label FROM events ORDER BY date ASC').all();
+export function allEvents(userId = OWNER) {
+  return db.prepare('SELECT id, date, label FROM events WHERE user_id = ? ORDER BY date ASC').all(userId);
 }
-export function addEvent(date, label) {
-  const info = db.prepare('INSERT INTO events(date, label) VALUES(?,?)').run(date, label);
+export function addEvent(date, label, userId = OWNER) {
+  const info = db.prepare('INSERT INTO events(user_id, date, label) VALUES(?,?,?)').run(userId, date, label);
   return { id: Number(info.lastInsertRowid), date, label };
 }
-export function deleteEvent(id) {
-  db.prepare('DELETE FROM events WHERE id = ?').run(id);
+export function deleteEvent(id, userId = OWNER) {
+  // filtre sur l'utilisateur : un identifiant devine ne doit pas suffire
+  db.prepare('DELETE FROM events WHERE id = ? AND user_id = ?').run(id, userId);
 }
 
 /* ---------- anchors ---------- */
 
-export function allAnchors() {
-  return db.prepare('SELECT note, label, descr FROM anchors ORDER BY note DESC').all();
+export function allAnchors(userId = OWNER) {
+  return db.prepare('SELECT note, label, descr FROM anchors WHERE user_id = ? ORDER BY note DESC').all(userId);
 }
-export function setAnchor(note, label, descr) {
+export function setAnchor(note, label, descr, userId = OWNER) {
   db.prepare(`
-    INSERT INTO anchors(note, label, descr) VALUES(?,?,?)
-    ON CONFLICT(note) DO UPDATE SET label = excluded.label, descr = excluded.descr
-  `).run(note, label, descr);
+    INSERT INTO anchors(user_id, note, label, descr) VALUES(?,?,?,?)
+    ON CONFLICT(user_id, note) DO UPDATE SET label = excluded.label, descr = excluded.descr
+  `).run(userId, note, label, descr);
 }

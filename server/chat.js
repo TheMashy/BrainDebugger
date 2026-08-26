@@ -151,6 +151,15 @@ async function anthropicClient(settings) {
   return { client: new _sdk({ apiKey: key }), source };
 }
 
+/** Jetons reellement factures, y compris ceux du repli serveur le cas echeant. */
+function readUsage(final) {
+  const u = final?.usage ?? {};
+  return {
+    input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+    output: u.output_tokens ?? 0
+  };
+}
+
 const SOURCE_LABEL = { stored: 'la clé enregistrée dans l\'app', env: 'la variable ANTHROPIC_API_KEY' };
 
 /**
@@ -288,8 +297,18 @@ export async function ollamaReply(history, s, memory, onText) {
  * Tout echec d'un backend distant retombe sur `scripted` ET LE DIT. Une panne
  * silencieuse serait un mensonge sur l'endroit ou partent les donnees.
  */
-export async function reply(history, settings, { memory = null, onText = null } = {}) {
+export async function reply(history, settings, { memory = null, onText = null, exhausted = false } = {}) {
   const backend = settings.chatBackend ?? 'scripted';
+
+  // Enveloppe epuisee : on ne coupe pas la parole a quelqu'un. Le compagnon
+  // hors-ligne prend la main et l'interface l'explique -- couper net un mauvais
+  // soir serait exactement ce que ce produit passe son temps a eviter.
+  if (exhausted && backend !== 'scripted') {
+    const text = scriptedReply(history);
+    onText?.(text);
+    return { text, backend: 'scripted', exhausted: true };
+  }
+
   if (backend === 'scripted') {
     const text = scriptedReply(history);
     onText?.(text);

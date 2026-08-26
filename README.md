@@ -5,7 +5,8 @@ Un journal quotidien qui te rend tes propres mots au moment où tu en as besoin.
 Tu parles le soir. L'outil retrouve les fois où tu as écrit quelque chose de proche,
 et te montre ce qui s'est réellement passé les jours suivants.
 
-Tout tourne sur ta machine. Aucun compte, aucun serveur, aucune synchro.
+En local : tout tourne sur ta machine, aucun compte, aucun serveur, aucune synchro.
+Hébergé : un login Discord, et un journal isolé par compte.
 
 ---
 
@@ -43,21 +44,32 @@ sont présentes dans la feuille.
 ## Déployer (Railway, Fly, un VPS)
 
 Par défaut le serveur écoute sur `127.0.0.1` : rien ne sort de la machine. Pour l'héberger,
-il faut ouvrir cette écoute — et à partir de là, **c'est un mot de passe qui protège ton
-journal, plus l'isolement réseau**. Le serveur refuse de démarrer si `HOST` n'est pas une
-adresse locale et que `BD_PASSWORD` n'est pas défini. Échouer au lancement est le seul
-comportement acceptable : un avertissement dans un README ne protège personne.
+il faut ouvrir cette écoute — et à partir de là, **c'est un verrou qui protège ton journal,
+plus l'isolement réseau**. Le serveur refuse de démarrer si `HOST` n'est pas une adresse
+locale et qu'aucun verrou n'est configuré. Échouer au lancement est le seul comportement
+acceptable : un avertissement dans un README ne protège personne.
+
+Deux verrous possibles, exclusifs dans les faits :
+
+| | **Mot de passe** | **Discord** |
+|---|---|---|
+| Pour | toi seul | plusieurs personnes |
+| Variables | `BD_PASSWORD` | `BD_DISCORD_CLIENT_ID` + `BD_DISCORD_CLIENT_SECRET` |
+| Journaux | un | un par compte, isolés |
 
 Variables :
 
 | Variable | Rôle |
 |---|---|
-| `HOST=0.0.0.0` | requis, sinon le conteneur n'est pas joignable |
-| `BD_PASSWORD` | **requis** dès que `HOST` n'est pas local |
+| `BD_PASSWORD` | verrou mono-utilisateur |
+| `BD_DISCORD_CLIENT_ID` / `BD_DISCORD_CLIENT_SECRET` | verrou multi-comptes (voir plus bas) |
+| `BD_DISCORD_GUILD` | facultatif : n'accepte que les membres de ce serveur Discord |
+| `BD_PUBLIC_URL` | facultatif : force l'URL publique si le proxy ment sur l'hôte |
 | `BD_DB=/data/braindebugger.db` | requis, dans un volume — sinon tout est perdu au redéploiement |
-| `PORT` | fourni par l'hébergeur, ne pas le définir |
-| `BD_SECRET` | facultatif ; sans lui la clé de session dérive du mot de passe |
 | `ANTHROPIC_API_KEY` | si le backend Claude est utilisé |
+| `BD_TOKEN_ALLOWANCE` | facultatif : jetons/mois affichés dans la jauge (défaut 500 000) |
+| `BD_SECRET` | facultatif ; sans lui la clé de session dérive du mot de passe ou du secret Discord |
+| `HOST` / `PORT` | fournis par l'hébergeur, ne pas les définir |
 
 `HOST` et `PORT` n'ont normalement pas à être définis : l'app détecte Railway, Fly, Render,
 Heroku et Cloud Run, et ouvre l'écoute sur `0.0.0.0` d'elle-même. Sur un poste de travail
@@ -67,8 +79,8 @@ Sur Railway, trois choses à faire :
 
 1. **Monter un volume sur `/data` avant le premier déploiement**, et pointer `BD_DB` dessus —
    sinon la base repart à zéro à chaque build.
-2. Définir `BD_PASSWORD`. Sans elle le conteneur s'arrête au démarrage et le déploiement
-   échoue sur le *healthcheck*.
+2. Définir un verrou. Sans lui le conteneur s'arrête au démarrage, et les logs disent
+   lequel manque (avec un mot de passe généré, prêt à coller).
 3. **Settings › Networking › Generate Domain**, sinon le service reste « Unexposed ».
 
 `railway.toml` fixe le reste. Si le build choisit une version de Node antérieure à 22.5,
@@ -76,18 +88,46 @@ Sur Railway, trois choses à faire :
 `NIXPACKS_NODE_VERSION=22` la force au besoin.
 
 La bannière de démarrage affiche la configuration réellement appliquée — écoute,
-plateforme détectée, version de Node, chemin de la base, état du verrou. Sur un hébergeur
+plateforme détectée, version de Node, chemin de la base, verrou en place. Sur un hébergeur
 c'est la seule fenêtre qu'on ait dessus ; c'est le premier endroit à regarder quand un
 déploiement échoue.
 
-Le verrou est un mot de passe unique, cookie de session signé en HMAC, `HttpOnly`,
-`SameSite=Lax`, `Secure` derrière HTTPS, avec freinage progressif après cinq échecs.
-C'est du mono-utilisateur : il n'y a pas de comptes, pas d'inscription, pas de partage.
+### Le login Discord
+
+Tout le monde a déjà un compte Discord. C'est la raison entière du choix : pas
+d'inscription, pas de mot de passe à retenir, pas de mail à vérifier, pas de « mot de
+passe oublié » à écrire.
+
+Dans le [Discord Developer Portal](https://discord.com/developers/applications) : une
+application, onglet **OAuth2**, puis
+`Redirects` → `https://TON-DOMAINE/auth/discord/callback` — exactement, à la barre finale
+près. Reporte `Client ID` et `Client Secret` dans les variables.
+
+Le scope demandé est `identify` seul : l'identifiant, le pseudo, l'avatar. Pas les mails,
+pas les messages, pas les serveurs — sauf si `BD_DISCORD_GUILD` est défini, auquel cas
+`guilds` s'ajoute pour vérifier l'appartenance, et rien de plus.
+
+Ce que ça change dans la base : chaque table est indexée par `(user_id, …)`, chaque requête
+est filtrée sur le compte de la session. Une base existante en mono-utilisateur est migrée
+au démarrage, et le premier compte Discord qui se connecte **récupère** ce journal — c'est
+le tien, tu es la seule personne à avoir pu l'écrire. Les suivants repartent d'une base vide.
+
+### La jauge de jetons
+
+L'API Claude est payée par BrainDebugger. Personne ne branche de clé, personne ne paie.
+
+La pastille en haut de l'écran passe du vert au rouge selon ce qui reste dans l'enveloppe
+du mois ; en cliquant dessus on voit les jetons consommés, l'estimation en dollars et la
+date de remise à zéro. C'est une jauge, pas une facture.
+
+**Elle ne coupe pas.** Enveloppe épuisée, le compagnon retombe sur les relances scriptées
+et le dit — mais la conversation continue et la journée s'enregistre. Interrompre
+quelqu'un en pleine phrase un mauvais soir serait exactement le contraire de ce produit.
 
 **Ce que l'hébergement change vraiment.** En local, personne d'autre que toi ne peut lire
 la base. Hébergé, elle vit sur le disque de quelqu'un d'autre, et l'hébergeur y a un accès
-technique. Le mot de passe arrête les inconnus, pas l'infrastructure. Si tu héberges pour
-toi seul, c'est un compromis de confort raisonnable. Si un jour d'autres personnes y
+technique. Le verrou arrête les inconnus, pas l'infrastructure. Si tu héberges pour
+toi seul, c'est un compromis de confort raisonnable. Dès que d'autres personnes y
 écrivent, ça devient de l'hébergement de données de santé pour autrui — et en France, la
 certification HDS entre dans le cadre (§9).
 
@@ -182,23 +222,31 @@ glissante donne une pente lisible.
 
 ```
 server/
-  index.js       serveur http, 127.0.0.1 uniquement
-  api.js         routes + application du plancher
-  db.js          schéma SQLite, réglages, ancres
+  preflight.js   garde Node ≥ 22.5, détection de plateforme
+  index.js       serveur http, 127.0.0.1 en local, verrou obligatoire hébergé
+  api.js         routes + application du plancher, tout filtré par compte
+  db.js          schéma SQLite, réglages, ancres — clés (user_id, …)
+  migrate.js     mono-utilisateur → multi-comptes, et reprise du journal d'origine
+  auth.js        session signée HMAC, mot de passe
+  discord.js     OAuth2 Discord (scope identify), état CSRF signé
+  usage.js       comptage des jetons, enveloppe mensuelle, niveau de la jauge
   stats.js       référence, delta, contraste, cumul, épisodes
   search.js      BM25 (k1=1.5, b=0.75), stopwords FR/EN, NFD
-  chat.js        3 backends : scripted (hors-ligne) | ollama | API compatible OpenAI
+  chat.js        3 backends : scripted (hors-ligne) | anthropic | ollama
   import-csv.js  import de la grille annuelle
 web/
-  app.js         4 vues : Ce soir, Année, Miroir, Réglages
+  app.js         4 vues : Parler, Année, Miroir, Réglages
   charts.js      échelle de couleur divergente, courbes SVG
   pets.js        compagnons intégrés (+ PNG personnalisé)
+  pet.js         conversion en PNG, animation du sprite pendant la frappe
+  blips.js       6 timbres synthétisés en Web Audio
 data/
   braindebugger.db
 ```
 
-Le serveur écoute sur `127.0.0.1` et pas `0.0.0.0` : un journal intime ne doit pas
-être joignable depuis le réseau local.
+En local le serveur écoute sur `127.0.0.1` et pas `0.0.0.0` : un journal intime ne doit
+pas être joignable depuis le réseau local. Hébergé, il ouvre l'écoute lui-même — et exige
+alors un verrou pour démarrer.
 
 ### Le modèle
 
@@ -236,12 +284,19 @@ refus serait pire.
 
 ## Les vues
 
-- **Ce soir** — le compagnon, la conversation, la note du jour avec les ancres sous les yeux.
+- **Parler** — le fil continu, le compagnon, la note du jour avec les ancres sous les yeux.
 - **Année** — la grille mois × jours, le cumul commutable entre les trois centres, et les
   repères de vie (saisie et affichage en pointillés sur la courbe).
 - **Miroir** — les trois mécanismes, avec navigation jour par jour dans tout l'historique.
-- **Recherche** — BM25 sur le corpus, termes surlignés, bande des 14 jours suivants.
-- **Réglages** — compagnon, voix, backend, plancher, tenue du retour, export.
+- **Réglages** — compagnon, timbre des bips, backend, plancher, tenue du retour, import/export.
+
+Il n'y a pas de vue « Recherche ». Ouvrir un champ de recherche demande de savoir quoi
+chercher ; le passé remonte tout seul pendant qu'on écrit, en marge de la conversation.
+
+La conversation est **continue** : on rouvre le fil là où on l'a laissé, avec les jours
+précédents visibles au-dessus, séparés par leur date. C'est un confident qu'on va voir
+quand on en a besoin, pas un questionnaire du soir — le compagnon ne relance pas, ne
+reproche pas une absence, et n'ouvre pas la conversation à ta place.
 
 ## Tests
 
