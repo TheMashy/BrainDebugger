@@ -944,7 +944,12 @@ async function renderBackendCfg() {
         placeholder="${s.keySource === 'none' ? 'sk-ant-… — colle ta clé ici' : 'sk-ant-… — pour la remplacer'}">
       <p class="faint" style="font-size:11.5px;margin:6px 0 0">
         Sur un serveur, préfère la variable d'environnement : la clé ne passe alors jamais par la base.
+        Une clé collée ici l'emporte sur la variable.
       </p>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:11px;flex-wrap:wrap">
+        <button class="btn" id="testKey">Tester la clé</button>
+        <span id="keyResult" class="sub" style="margin:0"></span>
+      </div>
     </div>
     <label class="field"><span>Mémoire — <b class="mono">${s.memoryDays}</b> journée${s.memoryDays > 1 ? 's' : ''} passée${s.memoryDays > 1 ? 's' : ''} transmise${s.memoryDays > 1 ? 's' : ''}</span>
       <input type="range" id="memoryDays" min="0" max="30" step="1" value="${s.memoryDays}"></label>
@@ -979,6 +984,21 @@ async function renderBackendCfg() {
     renderSettings();
     toast('Clé enregistrée');
   });
+  $('#testKey')?.addEventListener('click', async e => {
+    const b = e.currentTarget, out = $('#keyResult');
+    b.disabled = true; b.textContent = 'Test…'; out.textContent = '';
+    try {
+      const r = await api('/api/test-key', {});
+      out.innerHTML = r.ok
+        ? `<span style="color:var(--accent)">✓ ${esc(r.displayName ?? r.model)} accessible</span>`
+        : `<span style="color:var(--danger)">${esc(r.error)}</span>`;
+    } catch (err) {
+      out.innerHTML = `<span style="color:var(--danger)">${esc(err.message)}</span>`;
+    } finally {
+      b.disabled = false; b.textContent = 'Tester la clé';
+    }
+  });
+
   $('#clearKey')?.addEventListener('click', async () => {
     await saveSettings({ apiKey: '', clearKey: true });
     renderSettings();
