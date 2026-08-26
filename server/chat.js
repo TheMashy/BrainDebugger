@@ -126,15 +126,28 @@ ${lines.join('\n\n')}`;
 let _sdk = null;
 
 /**
- * Resolution de la cle. Le `trim` n'est pas cosmetique : coller une cle dans
- * l'interface d'un hebergeur y laisse tres souvent un saut de ligne ou une
- * espace, et l'API repond alors 401 sans que rien ne le laisse deviner.
+ * Resolution de la cle.
+ *
+ * L'environnement l'emporte sur la cle collee dans l'interface. C'est
+ * l'inverse de l'ordre naturel, et c'est voulu : des lors que l'instance est
+ * ouverte a plusieurs comptes, ANTHROPIC_API_KEY est la cle de celui qui
+ * heberge -- il paie, et personne ne doit pouvoir la court-circuiter, ni par
+ * malveillance ni par accident. Une cle perimee restee en base a l'epoque du
+ * mono-utilisateur suffisait sinon a casser le chat de tout le monde, avec un
+ * 401 qui accuse le mauvais coupable.
+ *
+ * Sans variable d'environnement -- le cas d'une installation locale -- la cle
+ * de l'interface reprend la main.
+ *
+ * Le `trim` n'est pas cosmetique : coller une cle dans l'interface d'un
+ * hebergeur y laisse tres souvent un saut de ligne ou une espace, et l'API
+ * repond alors 401 sans que rien ne le laisse deviner.
  */
 export function resolveKey(settings) {
   const stored = String(settings?.apiKey ?? '').trim();
   const env = String(process.env.ANTHROPIC_API_KEY ?? '').trim();
-  if (stored) return { key: stored, source: 'stored' };
   if (env) return { key: env, source: 'env' };
+  if (stored) return { key: stored, source: 'stored' };
   return { key: null, source: 'none' };
 }
 
