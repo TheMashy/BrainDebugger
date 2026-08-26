@@ -65,12 +65,13 @@ export const DEFAULT_SETTINGS = {
   voiceRate: 1,
   voicePitch: 1,
   voiceEnabled: false,
-  chatBackend: 'scripted',    // 'scripted' | 'ollama' | 'openai'
+  chatBackend: 'scripted',    // 'scripted' | 'anthropic' | 'ollama'
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'qwen2.5:7b',
-  apiUrl: '',
-  apiKey: '',
-  apiModel: '',
+  apiKey: '',                 // cle Anthropic ; repli sur ANTHROPIC_API_KEY
+  anthropicModel: 'claude-opus-5',
+  anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
+  memoryDays: 14,             // journees passees transmises au compagnon (0 = aucune)
   floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
   floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
   sustain: 2,                 // jours consecutifs >= reference pour valider un retour

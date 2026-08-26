@@ -5,7 +5,7 @@ import {
 } from './db.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { buildIndex, search } from './search.js';
-import { reply } from './chat.js';
+import { reply, memoryBlock, ANTHROPIC_MODELS } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ---------- */
 let _cache = null;
@@ -18,6 +18,23 @@ function series() {
     _cache = { rows, series: s, byDate: indexByDate(s), index: buildIndex(textDocs), textCount: textDocs.length };
   }
   return _cache;
+}
+
+/**
+ * Les journees ecrites les plus recentes, dans les mots exacts de l'utilisateur.
+ * Uniquement du TEXTE : jamais les statistiques, jamais les episodes. Le
+ * compagnon n'a pas a connaitre les chiffres -- c'est le Miroir qui les montre.
+ */
+export function recentMemory(date) {
+  const s = getSettings();
+  const days = Number(s.memoryDays ?? 0);
+  if (!days) return null;
+  const rows = db.prepare(`
+    SELECT date, note, text FROM entries
+    WHERE date < ? AND text IS NOT NULL AND TRIM(text) <> ''
+    ORDER BY date DESC LIMIT ?
+  `).all(date, days).reverse();
+  return memoryBlock(rows);
 }
 
 export function today() {
@@ -71,6 +88,9 @@ export const routes = {
     };
   },
 
+  /** Les N dernieres journees ecrites, pour donner de la continuite au compagnon. */
+  'GET /api/models': () => ({ models: ANTHROPIC_MODELS, hasEnvKey: !!process.env.ANTHROPIC_API_KEY }),
+
   'POST /api/message': async ({ body }) => {
     const text = String(body.text ?? '').trim();
     if (!text) return { error: 'texte vide' };
@@ -81,10 +101,13 @@ export const routes = {
     invalidate();
 
     const history = messagesForDate(date).map(m => ({ role: m.role, text: m.text }));
-    const r = await reply(history, getSettings());
+    const r = await reply(history, getSettings(), { memory: recentMemory(date) });
 
     addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
-    return { messages: messagesForDate(date), backend: r.backend, degraded: r.degraded ?? null };
+    return {
+      messages: messagesForDate(date), backend: r.backend,
+      degraded: r.degraded ?? null, refused: r.refused ?? false
+    };
   },
 
   'GET /api/messages': ({ query }) => ({ messages: messagesForDate(query.date ?? today()) }),
@@ -257,3 +280,39 @@ export const routes = {
     messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages ORDER BY ts').all()
   })
 };
+
+
+/**
+ * Envoi d'un message avec reponse streamee.
+ *
+ * `send(event, data)` ecrit un evenement SSE. Sequence :
+ *   user  -> le message de l'utilisateur est enregistre
+ *   delta -> fragments de texte, au fil de la generation
+ *   done  -> message complet enregistre, etat du backend
+ */
+export async function streamMessage(body, send) {
+  const text = String(body.text ?? '').trim();
+  if (!text) { send('error', { error: 'texte vide' }); return; }
+
+  const date = body.date ?? today();
+  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text });
+  invalidate();
+  send('user', { messages: messagesForDate(date) });
+
+  const history = messagesForDate(date).map(m => ({ role: m.role, text: m.text }));
+  const settings = getSettings();
+
+  const r = await reply(history, settings, {
+    memory: recentMemory(date),
+    onText: chunk => send('delta', { text: chunk })
+  });
+
+  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
+  send('done', {
+    messages: messagesForDate(date),
+    backend: r.backend,
+    model: r.model ?? null,
+    degraded: r.degraded ?? null,
+    refused: r.refused ?? false
+  });
+}

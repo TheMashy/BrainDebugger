@@ -16,8 +16,15 @@ npm start   # → http://127.0.0.1:4173
 npm test    # 25 tests sur le calcul, sans dépendance
 ```
 
-Aucune dépendance à installer. SQLite est intégré à Node 22 (`node:sqlite`), le
-serveur est en `node:http`, le front est du JS natif. `npm install` ne télécharge rien.
+SQLite est intégré à Node 22 (`node:sqlite`), le serveur est en `node:http`, le front est
+du JS natif. Les modes `scripted` et `ollama` n'ont **aucune dépendance**.
+
+Le mode Claude a besoin d'un paquet :
+
+```bash
+npm install @anthropic-ai/sdk
+export ANTHROPIC_API_KEY=sk-ant-...   # ou colle la clé dans Réglages
+```
 
 Prérequis : **Node ≥ 22.5**.
 
@@ -146,12 +153,33 @@ Le serveur écoute sur `127.0.0.1` et pas `0.0.0.0` : un journal intime ne doit 
 
 Par défaut : **aucun**. Les relances sont scriptées, rien ne quitte la machine.
 
-- **Ollama local** — conversation réelle, tout reste sur le disque. Demande une installation.
-- **API distante** — le texte des journées part chez un tiers. C'est le seul mode où
-  les données sortent. L'interface le dit explicitement.
+| Backend | Sort de la machine | Installation |
+|---|---|---|
+| `scripted` *(défaut)* | rien | aucune |
+| `anthropic` | le texte du chat | `npm install @anthropic-ai/sdk` + une clé |
+| `ollama` | rien | Ollama + un modèle |
 
-Si un backend distant tombe, le serveur retombe sur les relances scriptées **et le
-signale**. Une panne silencieuse serait un mensonge sur l'endroit où partent les données.
+**Ce que le mode Claude envoie, exactement :** la conversation du jour, plus le *texte*
+des N dernières journées écrites (réglable, 14 par défaut, 0 pour rien). Jamais les notes,
+jamais les statistiques, jamais les épisodes. Le Miroir n'est que du calcul et de la
+recherche locale — il ne fait aucun appel réseau, quel que soit le backend. C'est la
+frontière qui rend le compromis acceptable : ce qui sort, c'est ce qu'on vient d'écrire,
+pas quatre ans d'historique chiffré.
+
+Requête : `claude-opus-5`, réflexion adaptative, effort réglable (bas par défaut — la
+latence compte plus que la profondeur quand quelqu'un attend une réponse le soir), et le
+repli serveur `fallbacks: "default"` armé. Ce dernier point n'est pas cosmétique : sur ce
+produit, un refus de modèle tomberait exactement au pire moment.
+
+**La réponse est streamée.** Sans streaming, il y a plusieurs secondes de silence avant
+que le compagnon écrive quoi que ce soit, et l'illusion de quelqu'un en face tombe. Les
+fragments sont mis en file et drainés à cadence constante côté navigateur, pour que la
+frappe reste régulière quelle que soit la vitesse du modèle.
+
+Si un backend distant tombe — ou si le modèle décline — le serveur retombe sur les
+relances scriptées **et le signale**, et l'interface remonte le numéro d'aide. Une panne
+silencieuse serait un mensonge sur l'endroit où partent les données ; un silence après un
+refus serait pire.
 
 ---
 

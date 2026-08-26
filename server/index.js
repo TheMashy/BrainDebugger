@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { routes } from './api.js';
+import { routes, streamMessage } from './api.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = join(ROOT, 'web');
@@ -49,6 +49,28 @@ async function readBody(req) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
   const key = `${req.method} ${url.pathname}`;
+
+  // Flux SSE : le compagnon ecrit au fur et a mesure. Traite avant `routes`
+  // parce qu'il ecrit lui-meme dans la reponse au lieu de rendre du JSON.
+  if (key === 'POST /api/message/stream') {
+    try {
+      const body = await readBody(req);
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      });
+      const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      await streamMessage(body, send);
+      res.end();
+    } catch (err) {
+      console.error('[stream]', err);
+      if (!res.headersSent) json(res, 500, { error: String(err.message ?? err) });
+      else { res.write(`event: error\ndata: ${JSON.stringify({ error: String(err.message ?? err) })}\n\n`); res.end(); }
+    }
+    return;
+  }
 
   if (routes[key]) {
     try {

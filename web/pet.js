@@ -45,6 +45,12 @@ export async function toPNG(file, size = 256) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/** Ponctuation : on souffle, comme à l'oral. */
+const pauseFor = (c, charMs) =>
+  '.!?'.includes(c) ? charMs * 9 :
+  ',;:'.includes(c) ? charMs * 4 :
+  c === ' '         ? charMs * 2 : charMs;
+
 /**
  * Dialogue façon RPG : le texte se dévoile lettre à lettre pendant que le sprite
  * s'agite. C'est ce décalage qui donne l'impression que quelqu'un parle — un
@@ -78,11 +84,9 @@ export const PetTalk = {
       bubbleEl.textContent = text.slice(0, i);
       const c = text[i - 1];
       if (c === ' ') this.beat(artEl);
-      // ponctuation : on souffle, comme à l'oral
-      await sleep('.!?'.includes(c) ? charMs * 9 : ',;:'.includes(c) ? charMs * 4 : c === ' ' ? charMs * 2 : charMs);
+      await sleep(pauseFor(c, charMs));
     }
 
-    // la voix dépasse souvent le texte : on laisse le sprite bouger jusqu'au bout
     let guard = 0;
     while (speaking && this._abort === token && guard++ < 400) await sleep(80);
 
@@ -92,14 +96,84 @@ export const PetTalk = {
     }
   },
 
+  /* ---------- mode flux ----------
+     Un modèle distant livre par à-coups : parfois quarante caractères d'un coup,
+     parfois rien pendant une seconde. Recopier les fragments tels quels donne
+     une saccade. On met donc les caractères en file et on les draine à cadence
+     constante — la frappe reste régulière quelle que soit la vitesse du modèle.
+  */
+
+  _q: null,
+
+  startStream(artEl, bubbleEl, { charMs = 22 } = {}) {
+    this.stop();
+    const token = this._abort = {};
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    bubbleEl.textContent = '';
+    if (!reduced && artEl) artEl.classList.add('talking');
+
+    const q = this._q = {
+      token, artEl, bubbleEl, chars: [], closed: false, reduced,
+      done: null, charMs
+    };
+    q.done = new Promise(resolve => { q.resolve = resolve; });
+    this._drain(q);
+    return q.done;
+  },
+
+  feed(chunk) {
+    const q = this._q;
+    if (!q || this._abort !== q.token || !chunk) return;
+    if (q.reduced) { q.bubbleEl.textContent += chunk; return; }
+    q.chars.push(...chunk);
+  },
+
+  endStream() {
+    const q = this._q;
+    if (!q) return Promise.resolve();
+    q.closed = true;
+    if (q.reduced) this._finish(q);
+    return q.done;
+  },
+
+  async _drain(q) {
+    while (this._abort === q.token) {
+      if (q.chars.length) {
+        const c = q.chars.shift();
+        q.bubbleEl.textContent += c;
+        if (c === ' ') this.beat(q.artEl);
+        // file qui s'allonge : on accélère pour ne pas prendre du retard sur le modèle
+        const rush = q.chars.length > 90 ? 0.35 : q.chars.length > 40 ? 0.6 : 1;
+        await sleep(pauseFor(c, q.charMs) * rush);
+      } else if (q.closed) {
+        break;
+      } else {
+        await sleep(28);           // en attente du prochain fragment
+      }
+    }
+    this._finish(q);
+  },
+
+  _finish(q) {
+    if (this._abort !== q.token) return;
+    q.artEl?.classList.remove('talking');
+    this._abort = null;
+    this._q = null;
+    q.resolve?.();
+  },
+
   beat(artEl) {
+    if (!artEl) return;
     artEl.classList.remove('beat');
     void artEl.offsetWidth;            // force le redémarrage de l'animation
     artEl.classList.add('beat');
   },
 
   stop() {
+    const q = this._q;
     this._abort = null;
+    this._q = null;
+    q?.resolve?.();
     for (const el of document.querySelectorAll('.art.talking, .art.beat')) {
       el.classList.remove('talking', 'beat');
     }

@@ -250,6 +250,25 @@ function drawThread() {
   th.scrollTop = th.scrollHeight;
 }
 
+/** Lit un flux SSE renvoyé par fetch et appelle `on(event, data)` par trame. */
+async function readSSE(res, on) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const frames = buf.split('\n\n');
+    buf = frames.pop() ?? '';
+    for (const f of frames) {
+      const ev = f.match(/^event: (.+)$/m)?.[1];
+      const raw = f.match(/^data: (.+)$/m)?.[1];
+      if (ev && raw) { try { on(ev, JSON.parse(raw)); } catch { /* trame partielle */ } }
+    }
+  }
+}
+
 async function send() {
   const input = $('#input');
   const text = input.value.trim();
@@ -259,34 +278,78 @@ async function send() {
   $('#send').disabled = true;
   PetTalk.stop();
 
-  // affichage optimiste : ce que tu ecris apparait tout de suite
+  // affichage optimiste : ce que tu écris apparaît tout de suite
   S.messages.push({ ts: new Date().toISOString(), role: 'user', text });
   drawThread();
   refreshEchoes(text);
 
-  try {
-    const r = await api('/api/message', { text, date: S.today });
-    S.messages = r.messages;
-    drawThread();
-    if (r.degraded) toast(`Modèle injoignable — repli hors-ligne (${r.degraded.slice(0, 60)})`);
+  let typing = null;
 
-    const last = r.messages[r.messages.length - 1];
-    if (last?.role === 'pet') {
-      const bubble = $('#thread')?.lastElementChild?.querySelector('.tx');
-      const art = $('#art');
-      if (bubble) {
-        bubble.textContent = '';
-        await PetTalk.say(art, bubble, last.text, { speak: S.settings.voiceEnabled, voice: Voice });
-        $('#thread').scrollTop = $('#thread').scrollHeight;
+  try {
+    const res = await fetch('/api/message/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, date: S.today })
+    });
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+    await readSSE(res, (ev, data) => {
+      if (ev === 'error') { toast(data.error); return; }
+
+      if (ev === 'user') {
+        S.messages = data.messages;
+        drawThread();
+        // bulle vide dans laquelle le compagnon va écrire
+        const th = $('#thread');
+        const el = document.createElement('div');
+        el.className = 'msg pet';
+        el.innerHTML = '<span class="tx"></span>';
+        th.appendChild(el);
+        th.scrollTop = th.scrollHeight;
+        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'));
+        return;
       }
-    }
+
+      if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
+
+      if (ev === 'done') {
+        const last = data.messages[data.messages.length - 1];
+        if (S.settings.voiceEnabled && last?.role === 'pet') Voice.speak(last.text);
+        PetTalk.endStream();
+        S.messages = data.messages;
+
+        if (data.refused) {
+          toast('Le modèle a décliné — le compagnon hors-ligne a pris la main.');
+          showHelpline();
+        } else if (data.degraded) {
+          toast(`Modèle injoignable — repli hors-ligne (${String(data.degraded).slice(0, 60)})`);
+        }
+      }
+    });
+
+    await typing;
+    drawThread();                       // repose les horodatages définitifs
   } catch (err) {
+    PetTalk.stop();
     toast(String(err.message));
   } finally {
     const b = $('#send');
     if (b) b.disabled = false;
     $('#input')?.focus();
   }
+}
+
+/**
+ * Si le modèle décline, on ne laisse pas un blanc. Le numéro d'aide devient
+ * visible sur la page où la personne est déjà en train d'écrire.
+ */
+function showHelpline() {
+  if ($('#helpline')) return;
+  const el = document.createElement('div');
+  el.className = 'helpline';
+  el.id = 'helpline';
+  el.innerHTML = "Si tu as besoin de parler à quelqu'un maintenant : <b>3114</b>, gratuit, 24h/24, partout en France.";
+  $('#thread')?.after(el);
 }
 
 /* --------- echos : tes mots d'avant, sans avoir rien demande --------- */
@@ -696,13 +759,15 @@ async function renderSettings() {
       <label class="field"><span>Backend</span>
         <select id="chatBackend">
           <option value="scripted" ${s.chatBackend === 'scripted' ? 'selected' : ''}>Aucun modèle — relances scriptées (hors-ligne)</option>
+          <option value="anthropic" ${s.chatBackend === 'anthropic' ? 'selected' : ''}>Claude (API Anthropic)</option>
           <option value="ollama" ${s.chatBackend === 'ollama' ? 'selected' : ''}>Ollama local</option>
-          <option value="openai" ${s.chatBackend === 'openai' ? 'selected' : ''}>API distante (compatible OpenAI)</option>
         </select></label>
       <div id="backendCfg"></div>
-      <p class="sub" style="margin:4px 0 0;font-size:12px">
-        En « API distante », le texte de tes journées est envoyé à un serveur tiers. C'est le seul mode où tes données sortent d'ici.
-      </p>
+      ${s.chatBackend === 'anthropic' ? `<p class="sub" style="margin:10px 0 0;font-size:12.5px;color:var(--warn)">
+        Dans ce mode, <b>le texte de tes conversations part chez Anthropic</b>. Tes notes, tes
+        statistiques et tes 1698 journées chiffrées ne bougent pas : le Miroir est du calcul et
+        de la recherche, il ne fait aucun appel réseau. Seul ce que tu écris dans le chat sort d'ici.
+      </p>` : ''}
     </div>
 
     <div class="row">
@@ -754,7 +819,7 @@ async function renderSettings() {
 
   $('#chatBackend').addEventListener('change', async e => {
     await saveSettings({ chatBackend: e.target.value });
-    renderBackendCfg();
+    renderSettings();
   });
 
   $('#spritepick').addEventListener('click', async e => {
@@ -788,11 +853,36 @@ async function renderSettings() {
   });
 }
 
-function renderBackendCfg() {
+async function renderBackendCfg() {
   const s = S.settings;
   const el = $('#backendCfg');
   if (!el) return;
-  if (s.chatBackend === 'ollama') {
+
+  if (s.chatBackend === 'anthropic') {
+    let info = { models: [], hasEnvKey: false };
+    try { info = await api('/api/models'); } catch { /* ignoré */ }
+    el.innerHTML = `<div class="row">
+      <label class="field"><span>Modèle</span>
+        <select id="anthropicModel">
+          ${info.models.map(m => `<option value="${esc(m.id)}" ${m.id === s.anthropicModel ? 'selected' : ''}>${esc(m.label)} — ${esc(m.note)}</option>`).join('')}
+        </select></label>
+      <label class="field"><span>Effort</span>
+        <select id="anthropicEffort">
+          <option value="low" ${s.anthropicEffort === 'low' ? 'selected' : ''}>bas — répond vite</option>
+          <option value="medium" ${s.anthropicEffort === 'medium' ? 'selected' : ''}>moyen</option>
+          <option value="high" ${s.anthropicEffort === 'high' ? 'selected' : ''}>élevé — réfléchit plus, répond moins vite</option>
+        </select></label>
+    </div>
+    <label class="field"><span>Clé API${info.hasEnvKey ? ' — <code>ANTHROPIC_API_KEY</code> détectée, laisse vide pour l\'utiliser' : ''}</span>
+      <input type="password" id="apiKey" value="${esc(s.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
+    <label class="field"><span>Mémoire — <b class="mono">${s.memoryDays}</b> journée${s.memoryDays > 1 ? 's' : ''} passée${s.memoryDays > 1 ? 's' : ''} transmise${s.memoryDays > 1 ? 's' : ''}</span>
+      <input type="range" id="memoryDays" min="0" max="30" step="1" value="${s.memoryDays}"></label>
+    <p class="sub" style="margin:0;font-size:12px">
+      Ce qui donne la continuité : sans mémoire, il repart de zéro chaque soir. Seul le
+      <b>texte</b> de ces journées est transmis — jamais tes notes, jamais tes statistiques.
+      À 0, il ne connaît que la conversation du jour.
+    </p>`;
+  } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
       <label class="field"><span>URL Ollama</span><input type="text" id="ollamaUrl" value="${esc(s.ollamaUrl)}"></label>
       <label class="field"><span>Modèle</span><input type="text" id="ollamaModel" value="${esc(s.ollamaModel)}"></label>
@@ -805,9 +895,13 @@ function renderBackendCfg() {
     <label class="field"><span>Clé API</span><input type="password" id="apiKey" value="${esc(s.apiKey)}"></label>`;
   } else { el.innerHTML = ''; return; }
 
-  for (const id of ['ollamaUrl', 'ollamaModel', 'apiUrl', 'apiModel', 'apiKey']) {
+  for (const id of ['ollamaUrl', 'ollamaModel', 'apiKey', 'anthropicModel', 'anthropicEffort']) {
     $('#' + id)?.addEventListener('change', async e => { await saveSettings({ [id]: e.target.value }); });
   }
+  $('#memoryDays')?.addEventListener('change', async e => {
+    await saveSettings({ memoryDays: Number(e.target.value) });
+    renderSettings();
+  });
 }
 
 /* ============================= routage ============================= */

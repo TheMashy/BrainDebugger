@@ -11,5 +11,8 @@
     "start": "node server/index.js",
     "import": "node server/import-csv.js",
     "test": "node --test test/*.test.js"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.120.0"
   }
 }
