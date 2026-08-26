@@ -95,18 +95,10 @@ async function renderTonight() {
 
   $('#view').innerHTML = `
     <div class="tonight">
-      <div class="card petcard">
+      <div class="petcard">
         <div class="art" id="art" tabindex="0" role="button"
              aria-label="Changer l'image du compagnon">${petMarkup(s)}</div>
         <input type="file" id="petPick" accept="image/*" hidden>
-        <div class="name">${esc(s.petName)}</div>
-        <div class="role">il écoute, il ne note pas</div>
-        <div style="margin-top:13px;display:flex;flex-direction:column;gap:7px;align-items:center">
-          <button class="voicetoggle" id="voiceBtn" aria-pressed="${s.blipEnabled}">
-            <span class="ico"></span>${s.blipEnabled ? esc(VOICES.find(v => v.id === s.blipVoice)?.name ?? 'il parle') : 'muet'}
-          </button>
-          <span class="pill">${S.stats.streak} jour${S.stats.streak > 1 ? 's' : ''} d'affilée</span>
-        </div>
       </div>
 
       <div class="stack">
@@ -128,7 +120,7 @@ async function renderTonight() {
             <span class="ritual">Note avant de te coucher.</span>
           </div>
           <p class="sub">C'est dans le lit qu'on voit le mieux la journée entière — et c'est toi qui notes,
-            jamais ${esc(s.petName)}.${S.stats.reference !== null ? ` Ta référence glissante est à <b class="mono">${S.stats.reference}</b>.` : ''}</p>
+            jamais l'application.${S.stats.reference !== null ? ` Ta référence glissante est à <b class="mono">${S.stats.reference}</b>.` : ''}</p>
 
           <div class="noteface">
             <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
@@ -172,7 +164,7 @@ async function renderTonight() {
     toast(`Journée notée ${n}/10`);
   };
 
-  $('#voiceBtn').onclick = async e => {
+  $('#voiceBtn')?.addEventListener('click', async e => {
     // capture AVANT le await : le DOM vide currentTarget des que le handler rend
     // la main, ce qui arrive au premier await d'une fonction async.
     const b = e.currentTarget;
@@ -182,7 +174,7 @@ async function renderTonight() {
     const v = VOICES.find(x => x.id === S.settings.blipVoice);
     b.innerHTML = `<span class="ico"></span>${on ? esc(v?.name ?? 'il parle') : 'muet'}`;
     if (on) Blip.preview(S.settings.blipVoice, S.settings);   // le clic autorise l'audio
-  };
+  });
 
   // n'importe quelle image -> PNG carre normalise
   $('#art').onclick = () => $('#petPick').click();
@@ -226,7 +218,7 @@ function drawThread() {
   const th = $('#thread');
   if (!th) return;
   if (!S.messages.length) {
-    th.innerHTML = `<div class="empty">Rien pour aujourd'hui.<br>Écris un mot, ${esc(S.settings.petName)} répondra.</div>`;
+    th.innerHTML = `<div class="empty">Rien pour aujourd'hui.<br>Écris un mot, on te répondra.</div>`;
     return;
   }
   th.innerHTML = S.messages.map(m =>
@@ -624,7 +616,7 @@ async function renderMirror(date) {
         <div>
           <p style="margin:0 0 4px">Il n'y a rien d'écrit à te remontrer pour l'instant.</p>
           <p class="sub" style="margin:0 0 12px">Le miroir a besoin de tes mots pour servir à quelque chose. Il n'en a pas encore.</p>
-          <button class="btn" id="backToChat">Parler à ${esc(S.settings.petName)}</button>
+          <button class="btn" id="backToChat">Écrire</button>
         </div>
       </div>` : ''}`;
     wireMirror();
