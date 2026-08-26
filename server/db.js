@@ -1,0 +1,179 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+export const DB_PATH = process.env.BD_DB ?? join(ROOT, 'data', 'braindebugger.db');
+
+mkdirSync(dirname(DB_PATH), { recursive: true });
+
+export const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA foreign_keys = ON');
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS entries (
+  date TEXT PRIMARY KEY,          -- 'YYYY-MM-DD'
+  note REAL,                      -- 0..10, nullable
+  text TEXT                       -- concatenation des messages utilisateur du jour
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id     INTEGER PRIMARY KEY,
+  ts     TEXT NOT NULL,           -- ISO 8601
+  date   TEXT NOT NULL,           -- 'YYYY-MM-DD', jour de rattachement
+  source TEXT,                    -- 'web' | 'discord'
+  role   TEXT NOT NULL,           -- 'user' | 'pet'
+  text   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
+
+CREATE TABLE IF NOT EXISTS events (
+  id    INTEGER PRIMARY KEY,
+  date  TEXT NOT NULL,
+  label TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
+
+-- Ancres d'etalonnage : la legende de l'echelle, dans les mots de l'utilisateur.
+-- Affichee au moment de noter pour limiter la derive pluriannuelle (SPEC 10.1).
+CREATE TABLE IF NOT EXISTS anchors (
+  note  INTEGER PRIMARY KEY,      -- 0..10
+  label TEXT NOT NULL,
+  descr TEXT
+);
+
+CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
+  date TEXT PRIMARY KEY,
+  vec  BLOB
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL             -- JSON
+);
+`);
+
+/* ---------- settings ---------- */
+
+export const DEFAULT_SETTINGS = {
+  petName: 'Cerf',
+  petSprite: 'deer',          // id integre, ou 'custom'
+  petImage: null,             // data URL si petSprite === 'custom'
+  voiceURI: null,             // Web Speech API
+  voiceRate: 1,
+  voicePitch: 1,
+  voiceEnabled: false,
+  chatBackend: 'scripted',    // 'scripted' | 'ollama' | 'openai'
+  ollamaUrl: 'http://127.0.0.1:11434',
+  ollamaModel: 'qwen2.5:7b',
+  apiUrl: '',
+  apiKey: '',
+  apiModel: '',
+  floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
+  floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
+  contrastCenter: 'reference' // 'fixed5' (formule tableur) | 'reference' (glissante)
+};
+
+export function getSettings() {
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const out = { ...DEFAULT_SETTINGS };
+  for (const r of rows) {
+    try { out[r.key] = JSON.parse(r.value); } catch { /* ignore */ }
+  }
+  return out;
+}
+
+export function setSettings(patch) {
+  const stmt = db.prepare(
+    'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  );
+  for (const [k, v] of Object.entries(patch)) {
+    if (!(k in DEFAULT_SETTINGS)) continue;
+    stmt.run(k, JSON.stringify(v));
+  }
+  return getSettings();
+}
+
+/* ---------- entries ---------- */
+
+export function allEntries() {
+  return db.prepare('SELECT date, note, text FROM entries ORDER BY date ASC').all();
+}
+
+export function getEntry(date) {
+  return db.prepare('SELECT date, note, text FROM entries WHERE date = ?').get(date) ?? null;
+}
+
+export function setNote(date, note) {
+  db.prepare(`
+    INSERT INTO entries(date, note) VALUES(?, ?)
+    ON CONFLICT(date) DO UPDATE SET note = excluded.note
+  `).run(date, note);
+  return getEntry(date);
+}
+
+/**
+ * entries.text est la concatenation des messages *utilisateur* du jour.
+ * SPEC 4.3 : les mots exacts. On ne stocke jamais les phrases du pet
+ * dans le corpus qui sera rendu a l'utilisateur.
+ */
+export function rebuildEntryText(date) {
+  const rows = db.prepare(
+    "SELECT text FROM messages WHERE date = ? AND role = 'user' ORDER BY ts ASC"
+  ).all(date);
+  const text = rows.map(r => r.text).join('\n');
+  db.prepare(`
+    INSERT INTO entries(date, text) VALUES(?, ?)
+    ON CONFLICT(date) DO UPDATE SET text = excluded.text
+  `).run(date, text);
+  return text;
+}
+
+/* ---------- messages ---------- */
+
+export function addMessage({ ts, date, source = 'web', role, text }) {
+  const info = db.prepare(
+    'INSERT INTO messages(ts, date, source, role, text) VALUES(?,?,?,?,?)'
+  ).run(ts, date, source, role, text);
+  if (role === 'user') rebuildEntryText(date);
+  return Number(info.lastInsertRowid);
+}
+
+export function messagesForDate(date) {
+  return db.prepare(
+    'SELECT id, ts, source, role, text FROM messages WHERE date = ? ORDER BY ts ASC'
+  ).all(date);
+}
+
+export function recentUserMessages(limit = 40) {
+  return db.prepare(
+    "SELECT id, ts, date, role, text FROM messages WHERE role = 'user' ORDER BY ts DESC LIMIT ?"
+  ).all(limit).reverse();
+}
+
+/* ---------- events ---------- */
+
+export function allEvents() {
+  return db.prepare('SELECT id, date, label FROM events ORDER BY date ASC').all();
+}
+export function addEvent(date, label) {
+  const info = db.prepare('INSERT INTO events(date, label) VALUES(?,?)').run(date, label);
+  return { id: Number(info.lastInsertRowid), date, label };
+}
+export function deleteEvent(id) {
+  db.prepare('DELETE FROM events WHERE id = ?').run(id);
+}
+
+/* ---------- anchors ---------- */
+
+export function allAnchors() {
+  return db.prepare('SELECT note, label, descr FROM anchors ORDER BY note DESC').all();
+}
+export function setAnchor(note, label, descr) {
+  db.prepare(`
+    INSERT INTO anchors(note, label, descr) VALUES(?,?,?)
+    ON CONFLICT(note) DO UPDATE SET label = excluded.label, descr = excluded.descr
+  `).run(note, label, descr);
+}

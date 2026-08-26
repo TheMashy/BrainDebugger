@@ -1,0 +1,13 @@
+{
+  "name": "braindebugger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Un journal quotidien qui te rend tes propres mots au moment ou tu en as besoin.",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node server/index.js",
+    "seed": "node server/seed.js",
+    "import": "node server/import-csv.js"
+  }
+}

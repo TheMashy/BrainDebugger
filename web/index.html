@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>BrainDebugger</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦌</text></svg>">
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div class="brand">
+      <b>BrainDebugger</b>
+      <span id="dayline"></span>
+    </div>
+    <nav>
+      <button data-view="tonight">Ce soir</button>
+      <button data-view="year">Année</button>
+      <button data-view="mirror">Miroir</button>
+      <button data-view="settings">Réglages</button>
+    </nav>
+  </header>
+  <main id="view"></main>
+</div>
+<div class="tip" id="tip"></div>
+<div class="toast" id="toast"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
