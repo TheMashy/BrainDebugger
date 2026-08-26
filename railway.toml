@@ -26,7 +26,10 @@ builder = "NIXPACKS"
 
 [deploy]
 startCommand = "npm start"
-healthcheckPath = "/healthz"
-healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
+restartPolicyMaxRetries = 2
+
+# Pas de healthcheckPath volontairement. Sur un service à un seul conteneur il
+# n'apporte rien — si le process tourne, le domaine répond — et il masque la
+# vraie erreur derrière un « Deployment failed » opaque. L'endpoint /healthz
+# reste servi par l'app si on veut le brancher plus tard.
