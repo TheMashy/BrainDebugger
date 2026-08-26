@@ -59,8 +59,26 @@ Variables :
 | `BD_SECRET` | facultatif ; sans lui la clé de session dérive du mot de passe |
 | `ANTHROPIC_API_KEY` | si le backend Claude est utilisé |
 
-Sur Railway : **monte un volume sur `/data` avant le premier déploiement**, sinon la base
-part à chaque build. `railway.toml` fixe le reste (Nixpacks, `npm start`, sonde `/healthz`).
+`HOST` et `PORT` n'ont normalement pas à être définis : l'app détecte Railway, Fly, Render,
+Heroku et Cloud Run, et ouvre l'écoute sur `0.0.0.0` d'elle-même. Sur un poste de travail
+elle reste sur `127.0.0.1`.
+
+Sur Railway, trois choses à faire :
+
+1. **Monter un volume sur `/data` avant le premier déploiement**, et pointer `BD_DB` dessus —
+   sinon la base repart à zéro à chaque build.
+2. Définir `BD_PASSWORD`. Sans elle le conteneur s'arrête au démarrage et le déploiement
+   échoue sur le *healthcheck*.
+3. **Settings › Networking › Generate Domain**, sinon le service reste « Unexposed ».
+
+`railway.toml` fixe le reste. Si le build choisit une version de Node antérieure à 22.5,
+`node:sqlite` n'existe pas et le conteneur s'arrête : `.nvmrc` fixe la version, et
+`NIXPACKS_NODE_VERSION=22` la force au besoin.
+
+La bannière de démarrage affiche la configuration réellement appliquée — écoute,
+plateforme détectée, version de Node, chemin de la base, état du verrou. Sur un hébergeur
+c'est la seule fenêtre qu'on ait dessus ; c'est le premier endroit à regarder quand un
+déploiement échoue.
 
 Le verrou est un mot de passe unique, cookie de session signé en HMAC, `HttpOnly`,
 `SameSite=Lax`, `Secure` derrière HTTPS, avec freinage progressif après cinq échecs.
