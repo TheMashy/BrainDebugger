@@ -991,7 +991,7 @@ async function renderBackendCfg() {
       const r = await api('/api/test-key', {});
       out.innerHTML = r.ok
         ? `<span style="color:var(--accent)">✓ ${esc(r.displayName ?? r.model)} accessible</span>`
-        : `<span style="color:var(--danger)">${esc(r.error)}</span>`;
+        : `<span style="color:var(--danger)">${esc(r.reason)}</span>`;
     } catch (err) {
       out.innerHTML = `<span style="color:var(--danger)">${esc(err.message)}</span>`;
     } finally {

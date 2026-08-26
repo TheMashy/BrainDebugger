@@ -178,7 +178,9 @@ export async function testKey(settings) {
     const m = await client.models.retrieve(model);
     return { ok: true, source, model: m.id, displayName: m.display_name ?? m.id };
   } catch (err) {
-    return { ok: false, source, error: explainApiError(err, source) };
+    // `reason` et non `error` : un test qui rend un verdict negatif a reussi.
+    // Le routeur traduit `error` en HTTP 400, ce qui serait faux ici.
+    return { ok: false, source, reason: explainApiError(err, source) };
   }
 }
 

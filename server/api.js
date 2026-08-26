@@ -95,7 +95,7 @@ export const routes = {
   /** Vérifie la clé sans consommer de jetons (API des modèles, pas de génération). */
   'POST /api/test-key': async () => {
     try { return await testKey(getSettings()); }
-    catch (err) { return { ok: false, error: String(err.message ?? err) }; }
+    catch (err) { return { ok: false, reason: String(err.message ?? err) }; }
   },
 
   'POST /api/message': async ({ body }) => {
