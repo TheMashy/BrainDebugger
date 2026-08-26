@@ -425,3 +425,50 @@ input[type=date] { color-scheme: dark; }
 /* Le fil est devenu la surface principale de la page : il mérite la place. */
 .thread { min-height: 240px; max-height: 62vh; }
 @media (max-width: 560px) { .thread { max-height: 56vh; } }
+
+/* ---------- jauge de jetons ---------- */
+
+.gauge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px 4px 8px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--ink-dim);
+  font-size: 12px; transition: border-color .12s, background .12s;
+}
+.gauge:hover { background: var(--panel-3); color: var(--ink); }
+.gauge img { width: 20px; height: 20px; border-radius: 50%; display: block; }
+.gauge .who { font-family: var(--mono); font-size: 11.5px; }
+.gauge .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.gauge[data-level="green"]  .dot { background: #4ade80; box-shadow: 0 0 7px #4ade8099; }
+.gauge[data-level="yellow"] .dot { background: #e8d13d; box-shadow: 0 0 7px #e8d13d99; }
+.gauge[data-level="orange"] .dot { background: #e8933d; box-shadow: 0 0 7px #e8933d99; }
+.gauge[data-level="red"]    .dot { background: #e0564a; box-shadow: 0 0 7px #e0564a99; }
+
+.gaugepanel {
+  position: fixed; top: 62px; right: 20px; z-index: 70;
+  width: min(340px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+  padding: 16px; box-shadow: 0 16px 44px rgba(0,0,0,.6);
+}
+.gaugepanel .head { display: flex; align-items: center; gap: 11px; margin-bottom: 15px; }
+.gaugepanel .head img { width: 34px; height: 34px; border-radius: 50%; }
+.gaugepanel .head b { display: block; font-size: 14px; }
+.gaugepanel .head span { font-size: 11.5px; color: var(--ink-faint); }
+.gaugepanel .head .btn { padding: 4px 10px; font-size: 11.5px; }
+
+.gaugepanel .bar { height: 7px; border-radius: 999px; background: var(--panel-3); overflow: hidden; margin-bottom: 10px; }
+.gaugepanel .bar i { display: block; height: 100%; border-radius: 999px; transition: width .3s; }
+.gaugepanel .bar[data-level="green"]  i { background: #4ade80; }
+.gaugepanel .bar[data-level="yellow"] i { background: #e8d13d; }
+.gaugepanel .bar[data-level="orange"] i { background: #e8933d; }
+.gaugepanel .bar[data-level="red"]    i { background: #e0564a; }
+
+.gaugepanel .nums { margin: 0 0 3px; font-size: 13.5px; color: var(--ink-dim); }
+.gaugepanel .nums b { color: var(--ink); font-family: var(--mono); font-size: 15px; }
+.gaugepanel .paid {
+  margin: 0; padding: 9px 11px; border-radius: 8px; font-size: 12.5px;
+  background: #0e2018; border: 1px solid var(--accent-dk); color: var(--accent);
+}
+@media (max-width: 560px) { .gaugepanel { right: 12px; left: 12px; width: auto; } }
+
+/* .sub n'est stylé que dans .card : le panneau de jauge a besoin du même rendu */
+.gaugepanel .sub { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-dim); line-height: 1.5; }

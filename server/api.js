@@ -1,24 +1,29 @@
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, messagesForDate, recentMessages, allEvents, addEvent, deleteEvent,
-  allAnchors, setAnchor
+  allAnchors, setAnchor, getUser, OWNER
 } from './db.js';
+import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { buildIndex, search } from './search.js';
 import { reply, memoryBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
 
-/* ---------- cache : la serie complete coute ~10ms sur 1700 jours ---------- */
-let _cache = null;
-export function invalidate() { _cache = null; }
-function series() {
-  if (!_cache) {
-    const rows = allEntries();
-    const s = buildSeries(rows, { etalon: getSettings().etalon });
+/* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
+   Indexe par utilisateur : un cache global rendrait le journal de l'un a
+   l'autre, ce qui serait la pire fuite possible sur ce produit. */
+const _cache = new Map();
+export function invalidate(userId) {
+  if (userId === undefined) _cache.clear(); else _cache.delete(userId);
+}
+function series(userId = OWNER) {
+  if (!_cache.has(userId)) {
+    const rows = allEntries(userId);
+    const s = buildSeries(rows, { etalon: getSettings(userId).etalon });
     const textDocs = rows.filter(r => r.text && r.text.trim()).map(r => ({ id: r.date, text: r.text }));
-    _cache = { rows, series: s, byDate: indexByDate(s), index: buildIndex(textDocs), textCount: textDocs.length };
+    _cache.set(userId, { rows, series: s, byDate: indexByDate(s), index: buildIndex(textDocs), textCount: textDocs.length });
   }
-  return _cache;
+  return _cache.get(userId);
 }
 
 /**
@@ -26,16 +31,22 @@ function series() {
  * Uniquement du TEXTE : jamais les statistiques, jamais les episodes. Le
  * compagnon n'a pas a connaitre les chiffres -- c'est le Miroir qui les montre.
  */
-export function recentMemory(date) {
-  const s = getSettings();
+export function recentMemory(date, userId = OWNER) {
+  const s = getSettings(userId);
   const days = Number(s.memoryDays ?? 0);
   if (!days) return null;
   const rows = db.prepare(`
     SELECT date, note, text FROM entries
-    WHERE date < ? AND text IS NOT NULL AND TRIM(text) <> ''
+    WHERE user_id = ? AND date < ? AND text IS NOT NULL AND TRIM(text) <> ''
     ORDER BY date DESC LIMIT ?
-  `).all(date, days).reverse();
+  `).all(userId, date, days).reverse();
   return memoryBlock(rows);
+}
+
+/** Ce que le navigateur a le droit de savoir de la personne connectée. */
+export function publicUser(userId) {
+  const u = getUser(userId);
+  return u ? { id: u.id, username: u.username, avatar: u.avatar } : { id: userId, username: null, avatar: null };
 }
 
 export function today() {
@@ -64,18 +75,20 @@ const MIN_COMPARABLE = 5;   // SPEC 4.4 - aveu d'ignorance
 
 export const routes = {
 
-  'GET /api/state': () => {
-    const s = getSettings();
-    const { series: ser, byDate, textCount } = series();
+  'GET /api/state': ({ userId }) => {
+    const s = getSettings(userId);
+    const { series: ser, byDate, textCount } = series(userId);
     const t = today();
-    const entry = getEntry(t);
+    const entry = getEntry(t, userId);
     const last = ser.length ? ser[ser.length - 1] : null;
     return {
       today: t,
       settings: publicSettings(s),
       entry,
-      anchors: allAnchors(),
-      messages: recentMessages(80),
+      anchors: allAnchors(userId),
+      messages: recentMessages(80, userId),
+      user: publicUser(userId),
+      usage: usageFor(userId),
       stats: {
         days: ser.length,
         textDays: textCount,
@@ -93,47 +106,48 @@ export const routes = {
   'GET /api/models': () => ({ models: ANTHROPIC_MODELS, hasEnvKey: !!process.env.ANTHROPIC_API_KEY }),
 
   /** Vérifie la clé sans consommer de jetons (API des modèles, pas de génération). */
-  'POST /api/test-key': async () => {
-    try { return await testKey(getSettings()); }
+  'POST /api/test-key': async ({ userId }) => {
+    try { return await testKey(getSettings(userId)); }
     catch (err) { return { ok: false, reason: String(err.message ?? err) }; }
   },
 
-  'POST /api/message': async ({ body }) => {
+  'POST /api/message': async ({ body, userId }) => {
     const text = String(body.text ?? '').trim();
     if (!text) return { error: 'texte vide' };
     const date = body.date ?? today();
     const now = new Date().toISOString();
 
-    addMessage({ ts: now, date, source: 'web', role: 'user', text });
-    invalidate();
+    addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
+    invalidate(userId);
 
-    const history = recentMessages(60).map(m => ({ role: m.role, text: m.text }));
-    const r = await reply(history, getSettings(), { memory: recentMemory(date) });
+    const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text }));
+    const r = await reply(history, getSettings(userId), { memory: recentMemory(date, userId) });
+    if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
 
-    addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
+    addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
     return {
-      messages: recentMessages(80), backend: r.backend,
+      messages: recentMessages(80, userId), backend: r.backend,
       degraded: r.degraded ?? null, refused: r.refused ?? false
     };
   },
 
-  'GET /api/messages': ({ query }) =>
-    query.date ? { messages: messagesForDate(query.date) } : { messages: recentMessages(80) },
+  'GET /api/messages': ({ query, userId }) =>
+    query.date ? { messages: messagesForDate(query.date, userId) } : { messages: recentMessages(80, userId) },
 
-  'POST /api/note': ({ body }) => {
+  'POST /api/note': ({ body, userId }) => {
     const date = body.date ?? today();
     const note = body.note === null ? null : Number(body.note);
     if (note !== null && (!Number.isFinite(note) || note < 0 || note > 10)) return { error: 'note hors 0..10' };
-    setNote(date, note);
-    invalidate();
-    return { entry: getEntry(date) };
+    setNote(date, note, userId);
+    invalidate(userId);
+    return { entry: getEntry(date, userId) };
   },
 
-  'GET /api/year': ({ query }) => yearGrid(series().series, Number(query.year ?? today().slice(0, 4))),
+  'GET /api/year': ({ query, userId }) => yearGrid(series(userId).series, Number(query.year ?? today().slice(0, 4))),
 
   /** Serie compacte pour les courbes : tableaux paralleles, ~5x plus leger que des objets. */
-  'GET /api/series': () => {
-    const s = series().series;
+  'GET /api/series': ({ userId }) => {
+    const s = series(userId).series;
     return {
       date: s.map(x => x.date),
       note: s.map(x => x.note),
@@ -148,10 +162,10 @@ export const routes = {
       cumFixed: s.map(x => x.cumFixed),
       cumGlobal: s.map(x => x.cumGlobal),
       cumRelative: s.map(x => x.cumRelative),
-      etalon: getSettings().etalon ?? median(s.map(x => x.note).sort((a, b) => a - b)),
+      etalon: getSettings(userId).etalon ?? median(s.map(x => x.note).sort((a, b) => a - b)),
       globalMedian: median(s.map(x => x.note).sort((a, b) => a - b)),
       mean: s.length ? Math.round(s.reduce((a, b) => a + b.note, 0) / s.length * 1000) / 1000 : null,
-      events: allEvents()
+      events: allEvents(userId)
     };
   },
 
@@ -160,12 +174,12 @@ export const routes = {
    * preuve de resolution, similitude, contradiction.
    * Ne genere aucun texte. Rend des dates, des chiffres et des mots deja ecrits.
    */
-  'GET /api/mirror': ({ query }) => {
-    const s = getSettings();
-    const { series: ser, byDate, index, rows, textCount } = series();
+  'GET /api/mirror': ({ query, userId }) => {
+    const s = getSettings(userId);
+    const { series: ser, byDate, index, rows, textCount } = series(userId);
     const date = query.date ?? today();
     const cur = byDate.get(date) ?? null;
-    const entry = getEntry(date);
+    const entry = getEntry(date, userId);
     const note = entry?.note ?? null;
     const reference = cur?.reference ?? (ser.length ? ser[ser.length - 1].reference : null);
 
@@ -173,7 +187,7 @@ export const routes = {
 
     // 3. CONTRADICTION : l'entree d'hier, brute, sans commentaire.
     const y = addDays(date, -1);
-    const yEntry = getEntry(y);
+    const yEntry = getEntry(y, userId);
     const yesterday = yEntry ? { date: y, note: yEntry.note ?? null, text: yEntry.text ?? '' } : { date: y, note: null, text: '' };
 
     // Sous le plancher : rien d'autre que du brut. SPEC 4.1.
@@ -230,8 +244,8 @@ export const routes = {
    * Appele pendant la saisie, pas sur une action de recherche -- SPEC 2.2.
    * Chercher est une corvee ; se voir rappeler ses propres mots ne l'est pas.
    */
-  'POST /api/echoes': ({ body }) => {
-    const { index, rows, byDate, series: ser, textCount } = series();
+  'POST /api/echoes': ({ body, userId }) => {
+    const { index, rows, byDate, series: ser, textCount } = series(userId);
     const text = String(body.text ?? '').trim();
     const exclude = new Set([body.date ?? today()]);
     if (text.length < 12 || textCount < 2) return { items: [], textCount };
@@ -247,8 +261,8 @@ export const routes = {
     };
   },
 
-  'GET /api/search': ({ query }) => {
-    const { index, rows, byDate, series: ser } = series();
+  'GET /api/search': ({ query, userId }) => {
+    const { index, rows, byDate, series: ser } = series(userId);
     const q = String(query.q ?? '').trim();
     if (!q) return { items: [], query: q };
     const hits = search(index, q, { limit: 20 });
@@ -268,11 +282,11 @@ export const routes = {
    * En deux temps : un apercu qui ne touche a rien, puis l'ecriture. Ecraser
    * des annees de notes sur un simple choix de fichier serait indefendable.
    */
-  'POST /api/import': ({ body }) => {
+  'POST /api/import': ({ body, userId }) => {
     const csv = String(body.csv ?? '');
     if (!csv.trim()) return { error: 'fichier vide' };
 
-    const existing = new Map(allEntries().filter(r => r.note !== null).map(r => [r.date, r.note]));
+    const existing = new Map(allEntries(userId).filter(r => r.note !== null).map(r => [r.date, r.note]));
     let report;
     try { report = inspectCSV(csv, { existing }); }
     catch (err) { return { error: `CSV illisible : ${err.message}` }; }
@@ -284,21 +298,21 @@ export const routes = {
       const { entries, ...preview } = report;
       return { preview };
     }
-    const written = applyImport(report.entries, report.anchors);
-    invalidate();
+    const written = applyImport(report.entries, report.anchors, userId);
+    invalidate(userId);
     const { entries, ...preview } = report;
     return { imported: written, preview };
   },
 
-  'GET /api/events': () => ({ events: allEvents() }),
-  'POST /api/events': ({ body }) => {
-    if (body.delete) { deleteEvent(Number(body.delete)); return { events: allEvents() }; }
+  'GET /api/events': ({ userId }) => ({ events: allEvents(userId) }),
+  'POST /api/events': ({ body, userId }) => {
+    if (body.delete) { deleteEvent(Number(body.delete), userId); return { events: allEvents(userId) }; }
     if (!body.date || !body.label) return { error: 'date et label requis' };
-    addEvent(body.date, String(body.label).slice(0, 120));
-    return { events: allEvents() };
+    addEvent(body.date, String(body.label).slice(0, 120), userId);
+    return { events: allEvents(userId) };
   },
 
-  'POST /api/settings': ({ body }) => {
+  'POST /api/settings': ({ body, userId }) => {
     // Une chaine vide ne doit pas effacer la cle par accident : le champ est
     // vide dans l'interface puisqu'on ne la renvoie jamais. L'effacement est
     // une action explicite.
@@ -306,23 +320,26 @@ export const routes = {
     if (patch.apiKey === '' && !body.clearKey) delete patch.apiKey;
     if (body.clearKey) patch.apiKey = '';
     delete patch.clearKey;
-    return { settings: publicSettings(setSettings(patch)) };
+    return { settings: publicSettings(setSettings(patch, userId)) };
   },
 
-  'POST /api/anchors': ({ body }) => {
+  'POST /api/anchors': ({ body, userId }) => {
     if (body.note === undefined) return { error: 'note requise' };
-    setAnchor(Number(body.note), String(body.label ?? ''), String(body.descr ?? ''));
-    return { anchors: allAnchors() };
+    setAnchor(Number(body.note), String(body.label ?? ''), String(body.descr ?? ''), userId);
+    return { anchors: allAnchors(userId) };
   },
 
   /** Les donnees appartiennent a l'utilisateur, et il doit pouvoir partir avec. */
-  'GET /api/export': () => ({
+  'GET /api/export': ({ userId }) => ({
     exportedAt: new Date().toISOString(),
-    entries: allEntries(),
-    events: allEvents(),
-    anchors: allAnchors(),
-    messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages ORDER BY ts').all()
-  })
+    entries: allEntries(userId),
+    events: allEvents(userId),
+    anchors: allAnchors(userId),
+    messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts').all(userId)
+  }),
+
+  /** La jauge de jetons : ce qu'il reste ce mois-ci, et ce que ça a coûté. */
+  'GET /api/usage': ({ userId }) => usageFor(userId),
 };
 
 
@@ -334,29 +351,34 @@ export const routes = {
  *   delta -> fragments de texte, au fil de la generation
  *   done  -> message complet enregistre, etat du backend
  */
-export async function streamMessage(body, send) {
+export async function streamMessage(body, send, userId = OWNER) {
   const text = String(body.text ?? '').trim();
   if (!text) { send('error', { error: 'texte vide' }); return; }
 
   const date = body.date ?? today();
-  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text });
-  invalidate();
-  send('user', { messages: recentMessages(80) });
+  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
+  invalidate(userId);
+  send('user', { messages: recentMessages(80, userId) });
 
-  const history = recentMessages(60).map(m => ({ role: m.role, text: m.text }));
-  const settings = getSettings();
+  const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text }));
+  const settings = getSettings(userId);
 
+  const before = usageFor(userId);
   const r = await reply(history, settings, {
-    memory: recentMemory(date),
-    onText: chunk => send('delta', { text: chunk })
+    memory: recentMemory(date, userId),
+    onText: chunk => send('delta', { text: chunk }),
+    exhausted: before.exhausted
   });
+  if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
 
-  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
+  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
   send('done', {
-    messages: recentMessages(80),
+    messages: recentMessages(80, userId),
+    usage: usageFor(userId),
     backend: r.backend,
     model: r.model ?? null,
     degraded: r.degraded ?? null,
-    refused: r.refused ?? false
+    refused: r.refused ?? false,
+    exhausted: r.exhausted ?? false
   });
 }

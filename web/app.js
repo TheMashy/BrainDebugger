@@ -66,6 +66,66 @@ document.addEventListener('mouseover', e => {
 /** La voix du compagnon : un blip par syllabe (web/blips.js), pas de synthèse vocale. */
 const speakChar = c => Blip.tick(c, S.settings);
 
+/**
+ * La jauge de jetons. Un point coloré, rien de plus tant qu'on ne clique pas :
+ * un compteur permanent transformerait chaque phrase en dépense, ce qui est la
+ * dernière chose à avoir en tête quand on vient écrire un mauvais soir.
+ */
+function syncGauge() {
+  const btn = $('#gauge');
+  if (!btn) return;
+  const u = S.usage;
+  if (!u) { btn.hidden = true; return; }
+  btn.hidden = false;
+  btn.dataset.level = u.level;
+  btn.innerHTML = `<span class="dot"></span>${
+    S.user?.avatar ? `<img src="${esc(S.user.avatar)}" alt="">`
+                   : `<span class="who">${esc(S.user?.username ?? 'toi')}</span>`}`;
+  btn.setAttribute('aria-label', `Jetons : ${u.level}`);
+}
+
+/** Sous 10 000 on garde une décimale : « 5 k » pour 4 800 fait perdre 200 jetons à l'œil. */
+const fmtTok = n =>
+  n >= 1e6  ? (n / 1e6).toFixed(1).replace('.0', '') + ' M' :
+  n >= 1e4  ? Math.round(n / 1000) + ' k' :
+  n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + ' k' : String(n);
+
+function drawGaugePanel() {
+  const el = $('#gaugePanel'), u = S.usage;
+  if (!el || !u) return;
+  const pct = u.allowance > 0 ? Math.min(100, Math.round(u.used / u.allowance * 100)) : 0;
+  el.innerHTML = `
+    <div class="head">
+      ${S.user?.avatar ? `<img src="${esc(S.user.avatar)}" alt="">` : ''}
+      <div>
+        <b>${esc(S.user?.username ?? 'Toi')}</b>
+        <span>connecté${S.user?.id && S.user.id !== 'local' ? ' avec Discord' : ''}</span>
+      </div>
+      <form method="post" action="/logout" style="margin-left:auto"><button class="btn" type="submit">Déconnexion</button></form>
+    </div>
+
+    <div class="bar" data-level="${u.level}"><i style="width:${pct}%"></i></div>
+    <p class="nums">
+      <b>${fmtTok(u.remaining)}</b> jetons restants sur ${fmtTok(u.allowance)} ce mois-ci
+    </p>
+    <p class="sub" style="margin:0 0 12px">
+      Remise à zéro le ${fmtDay(u.resetsOn)}. ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois.
+    </p>
+    <p class="paid">Tu n'as rien à payer. C'est BrainDebugger qui règle.</p>
+    ${u.exhausted ? `<p class="sub" style="color:var(--warn);margin:12px 0 0">
+      Enveloppe épuisée pour ce mois. Le compagnon continue de répondre, mais hors-ligne —
+      il ne se souvient plus de la conversation.</p>` : ''}`;
+  el.querySelector('form')?.addEventListener('submit', () => { /* laisse le POST partir */ });
+}
+
+function toggleGauge(force) {
+  const el = $('#gaugePanel'), btn = $('#gauge');
+  const open = force ?? el.hidden;
+  if (open) drawGaugePanel();
+  el.hidden = !open;
+  btn?.setAttribute('aria-expanded', String(open));
+}
+
 function syncHeader() {
   $('#dayline').textContent = S.stats.days
     ? `${S.stats.days} jours · ${S.stats.firstDate} → ${S.stats.lastDate}`
@@ -302,6 +362,8 @@ async function send() {
 
       if (ev === 'done') {
         PetTalk.endStream();
+        if (data.usage) { S.usage = data.usage; syncGauge(); }
+        if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
 
         if (data.refused) {
@@ -1103,6 +1165,14 @@ async function boot() {
     if (b) go(b.dataset.view);
   });
   syncHeader();
+  syncGauge();
+
+  $('#gauge')?.addEventListener('click', e => { e.stopPropagation(); toggleGauge(); });
+  document.addEventListener('click', e => {
+    if (!$('#gaugePanel').hidden && !e.target.closest('#gaugePanel') && !e.target.closest('#gauge')) toggleGauge(false);
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleGauge(false); });
+
   go('tonight');
 }
 

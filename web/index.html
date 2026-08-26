@@ -15,6 +15,7 @@
       <b>BrainDebugger</b>
       <span id="dayline"></span>
     </div>
+    <button class="gauge" id="gauge" aria-haspopup="dialog" aria-expanded="false" hidden></button>
     <nav>
       <button data-view="tonight">Parler</button>
       <button data-view="year">Année</button>
@@ -24,6 +25,7 @@
   </header>
   <main id="view"></main>
 </div>
+<div class="gaugepanel" id="gaugePanel" role="dialog" aria-label="Jetons restants" hidden></div>
 <div class="tip" id="tip"></div>
 <div class="toast" id="toast"></div>
 <script type="module" src="/app.js"></script>

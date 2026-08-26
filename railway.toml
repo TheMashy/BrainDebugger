@@ -2,16 +2,36 @@
 #
 # À FAIRE DANS LE PROJET RAILWAY :
 #
-#   1. Variables :
-#        BD_PASSWORD=…                  OBLIGATOIRE. Sans elle le serveur refuse
-#                                       de démarrer : hébergé, c'est le seul
-#                                       verrou entre le journal et l'internet.
-#        BD_DB=/data/braindebugger.db   sinon la base est perdue à chaque déploiement
-#        ANTHROPIC_API_KEY=sk-ant-…     si le backend Claude est utilisé
+#   1. Un verrou — OBLIGATOIRE. Sans lui le serveur refuse de démarrer :
+#      hébergé, c'est la seule chose entre le journal et l'internet.
+#      Au choix :
 #
-#   2. Volume monté sur /data, AVANT le premier déploiement.
+#        BD_PASSWORD=…                    un seul journal, une personne
 #
-#   3. Settings › Networking › Generate Domain, sinon le service reste
+#      ou, pour que plusieurs personnes aient chacune le leur :
+#
+#        BD_DISCORD_CLIENT_ID=…           Discord Developer Portal › ton app
+#        BD_DISCORD_CLIENT_SECRET=…       › OAuth2
+#        BD_DISCORD_GUILD=…               facultatif : réserve l'accès aux
+#                                         membres d'un serveur Discord donné
+#        BD_PUBLIC_URL=https://…          facultatif : force l'URL de retour
+#                                         OAuth si le proxy ment sur l'hôte
+#
+#      L'URL de redirection à déclarer côté Discord est exactement :
+#        https://TON-DOMAINE/auth/discord/callback
+#
+#   2. Autres variables :
+#        BD_DB=/data/braindebugger.db     sinon la base est perdue à chaque
+#                                         déploiement
+#        ANTHROPIC_API_KEY=sk-ant-…       si le backend Claude est utilisé.
+#                                         C'est BrainDebugger qui paie : les
+#                                         comptes ne branchent aucune clé.
+#        BD_TOKEN_ALLOWANCE=500000        facultatif : jetons/mois affichés
+#                                         dans la jauge (défaut 500 000)
+#
+#   3. Volume monté sur /data, AVANT le premier déploiement.
+#
+#   4. Settings › Networking › Generate Domain, sinon le service reste
 #      « Unexposed » et n'est joignable par personne.
 #
 # Ne PAS définir PORT ni HOST : Railway fournit PORT, et l'app détecte la

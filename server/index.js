@@ -5,8 +5,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage } from './api.js';
-import { DB_PATH } from './db.js';
+import { DB_PATH, db, upsertUser, countUsers, OWNER } from './db.js';
+import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
+import * as discord from './discord.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = join(ROOT, 'web');
@@ -20,7 +22,8 @@ const PORT = Number(process.env.PORT ?? 4173);
 // alors le mot de passe qui protège, et il devient obligatoire.
 const HOST = process.env.HOST ?? (PLATFORM ? '0.0.0.0' : '127.0.0.1');
 
-if (!auth.isLoopback(HOST) && !auth.enabled()) {
+const LOCKED = auth.enabled() || discord.enabled();
+if (!auth.isLoopback(HOST) && !LOCKED) {
   // Mot de passe prêt à coller : sans ça, on renvoie quelqu'un vers un
   // générateur, et il choisit « braindebugger » parce qu'il est pressé.
   const suggestion = randomBytes(12).toString('base64url');
@@ -29,7 +32,7 @@ if (!auth.isLoopback(HOST) && !auth.enabled()) {
   process.stderr.write([
     '',
     '  ════════════════════════════════════════════════════════════',
-    '  REFUS DE DÉMARRER — IL MANQUE BD_PASSWORD',
+    '  REFUS DE DÉMARRER — AUCUN VERROU',
     '',
     PLATFORM
       ? `  Détecté : ${PLATFORM}. L'écoute est ouverte sur ${HOST}, donc ce`
@@ -40,9 +43,14 @@ if (!auth.isLoopback(HOST) && !auth.enabled()) {
     '  connaissant l\'URL peut le lire — il refuse donc de démarrer plutôt',
     '  que de se lancer en clair. Ce n\'est pas une panne.',
     '',
-    '  À FAIRE : ajoute une variable d\'environnement, puis redéploie.',
+    '  À FAIRE : au choix, puis redéploie.',
     '',
-    '      BD_PASSWORD=' + suggestion,
+    '      BD_PASSWORD=' + suggestion + '        (un seul journal, une personne)',
+    '',
+    '    ou, pour plusieurs personnes :',
+    '',
+    '      BD_DISCORD_CLIENT_ID=…',
+    '      BD_DISCORD_CLIENT_SECRET=…',
     '',
     '  (mot de passe généré à l\'instant, à copier tel quel ou à remplacer)',
     '  ════════════════════════════════════════════════════════════',
@@ -94,9 +102,43 @@ async function readBody(req) {
   catch { throw new Error('JSON invalide'); }
 }
 
+/** Qui écrit. Sans verrou, tout appartient au propriétaire de la machine. */
+const currentUser = req => auth.sessionUser(req) ?? OWNER;
+
 const clientIp = req =>
   (req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
 const isSecure = req => (req.headers['x-forwarded-proto'] ?? '').split(',')[0] === 'https';
+
+const LOGIN_DISCORD = `<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BrainDebugger</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:#0a0c0b; color:#e9efeb;
+         font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+  .box { width:min(360px,88vw); background:#121614; border:1px solid #19211c; border-radius:11px; padding:28px 26px; text-align:center; }
+  h1 { margin:0 0 6px; font-size:16px; letter-spacing:-.01em; }
+  p { margin:0 0 20px; font-size:13px; color:#93a099; }
+  a.btn { display:flex; align-items:center; justify-content:center; gap:9px; text-decoration:none;
+          padding:11px; border-radius:9px; background:#5865F2; color:#fff; font-weight:600; font-size:14px; }
+  a.btn:hover { background:#4752c4; }
+  svg { width:20px; height:20px; fill:currentColor; }
+  .err { margin:14px 0 0; font-size:13px; color:#e0564a; min-height:1.2em; }
+  .fine { margin:18px 0 0; font-size:11.5px; color:#5d6a63; line-height:1.5; }
+</style></head><body>
+<div class="box">
+  <h1>BrainDebugger</h1>
+  <p>Ton journal, derrière ton compte.</p>
+  <a class="btn" href="/auth/discord">
+    <svg viewBox="0 0 127 96"><path d="M107 8A105 105 0 0 0 81 0a73 73 0 0 0-3 7 97 97 0 0 0-29 0 72 72 0 0 0-4-7 105 105 0 0 0-26 8C2 34-1 58 1 82a106 106 0 0 0 32 16l7-11a69 69 0 0 1-11-5l3-2a75 75 0 0 0 64 0l3 2a68 68 0 0 1-11 5l7 11a106 106 0 0 0 32-16c3-28-2-52-20-74ZM42 67c-6 0-12-6-12-13s5-13 12-13 12 6 12 13-5 13-12 13Zm43 0c-6 0-12-6-12-13s5-13 12-13 12 6 12 13-5 13-12 13Z"/></svg>
+    Se connecter avec Discord
+  </a>
+  <p class="err">__ERROR__</p>
+  <p class="fine">On récupère ton identifiant, ton pseudo et ton avatar. Rien d'autre —
+    ni ton adresse mail, ni tes serveurs. Ce que tu écris n'est visible que par toi.</p>
+</div>
+</body></html>`;
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
@@ -107,7 +149,59 @@ const server = createServer(async (req, res) => {
 
   /* ---------- verrou ---------- */
 
-  if (auth.enabled()) {
+  /* ---------- connexion Discord ---------- */
+
+  if (discord.enabled()) {
+    if (key === 'GET /login' || key === 'GET /auth/discord') {
+      if (auth.sessionUser(req)) { res.writeHead(302, { Location: '/' }); return res.end(); }
+      const { state, cookie } = discord.makeState(isSecure(req));
+      res.writeHead(302, { Location: discord.authorizeUrl(req, state), 'Set-Cookie': cookie });
+      return res.end();
+    }
+
+    if (key === 'GET /auth/discord/callback') {
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const fail = msg => html(res, 400,
+        discord.enabled()
+          ? LOGIN_DISCORD.replace('__ERROR__', msg)
+          : auth.LOGIN_PAGE.replace('__ERROR__', msg),
+        { 'Set-Cookie': discord.clearState() });
+
+      if (url.searchParams.get('error')) return fail('Connexion annulée.');
+      if (!code || !discord.checkState(req, state)) return fail('Lien de connexion expiré. Réessaie.');
+
+      try {
+        const profile = await discord.completeLogin(code, req);
+        const isFirst = countUsers() === 0;
+        upsertUser(profile);
+        // Premiere connexion sur une instance qui contenait deja un journal :
+        // ce journal est celui de la personne qui deploie.
+        if (isFirst) {
+          const n = claimOwnerData(db, profile.id);
+          if (n) console.log(`  journal existant rattaché à ${profile.username} (${n} lignes)`);
+        }
+        res.writeHead(302, {
+          Location: '/',
+          'Set-Cookie': [auth.issueCookie(isSecure(req), profile.id), discord.clearState()]
+        });
+        return res.end();
+      } catch (err) {
+        console.error('[discord]', err);
+        return fail(String(err.message ?? err).slice(0, 140));
+      }
+    }
+
+    if (key === 'POST /logout' || key === 'GET /logout') {
+      res.writeHead(302, { Location: '/login', 'Set-Cookie': auth.clearCookie() });
+      return res.end();
+    }
+
+    if (!auth.sessionUser(req)) {
+      if (url.pathname.startsWith('/api/')) return json(res, 401, { error: 'non authentifié' });
+      return html(res, 200, LOGIN_DISCORD.replace('__ERROR__', ''));
+    }
+  } else if (auth.enabled()) {
     if (key === 'GET /login') {
       if (auth.isAuthed(req)) { res.writeHead(302, { Location: '/' }); return res.end(); }
       return html(res, 200, auth.LOGIN_PAGE.replace('__ERROR__', ''));
@@ -117,7 +211,7 @@ const server = createServer(async (req, res) => {
       const password = new URLSearchParams(raw).get('password') ?? '';
       const r = auth.checkPassword(password, clientIp(req));
       if (r.ok) {
-        res.writeHead(302, { Location: '/', 'Set-Cookie': auth.issueCookie(isSecure(req)) });
+        res.writeHead(302, { Location: '/', 'Set-Cookie': auth.issueCookie(isSecure(req), OWNER) });
         return res.end();
       }
       const msg = r.waitMs
@@ -148,7 +242,7 @@ const server = createServer(async (req, res) => {
         'X-Accel-Buffering': 'no'
       });
       const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-      await streamMessage(body, send);
+      await streamMessage(body, send, currentUser(req));
       res.end();
     } catch (err) {
       console.error('[stream]', err);
@@ -164,7 +258,7 @@ const server = createServer(async (req, res) => {
     try {
       const query = Object.fromEntries(url.searchParams);
       const body = req.method === 'POST' ? await readBody(req) : {};
-      const out = await routes[key]({ query, body, req });
+      const out = await routes[key]({ query, body, req, userId: currentUser(req) });
       return json(res, out && out.error ? 400 : 200, out);
     } catch (err) {
       console.error(`[${key}]`, err);
@@ -232,7 +326,7 @@ server.listen(PORT, HOST, () => {
   plateforme  ${PLATFORM ?? 'aucune détectée'}
   node        ${process.versions.node}
   base        ${DB_PATH}
-  verrou      ${auth.enabled() ? 'actif' : 'aucun'}
+  verrou      ${discord.enabled() ? `Discord${discord.GUILD ? ` (serveur ${discord.GUILD})` : ''}` : auth.enabled() ? 'mot de passe' : 'aucun'}
   clé Claude  ${process.env.ANTHROPIC_API_KEY ? 'fournie par l\'environnement' : 'aucune (mode hors-ligne)'}
   santé       /healthz
   ─────────────────────────────────────────
