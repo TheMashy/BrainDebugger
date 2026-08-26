@@ -103,8 +103,7 @@ async function renderTonight() {
 
       <div class="stack">
         <div class="card">
-          <h2>${fmtDay(t)}</h2>
-          <p class="sub">Raconte comme ça vient. Tes mots sont enregistrés tels quels.</p>
+          <h2>La conversation</h2>
           <div class="thread" id="thread"></div>
           <div class="composer">
             <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
@@ -214,16 +213,27 @@ function noteSay(n) {
   return near ? `Au-dessus de <b>${esc(near.label)}</b> (${near.note}).` : `Noté ${n} sur 10.`;
 }
 
+/**
+ * Le fil est continu : le changement de jour n'est qu'un repère, pas une
+ * coupure. On revient vers quelqu'un qu'on connaît, on ne remplit pas un
+ * formulaire quotidien.
+ */
 function drawThread() {
   const th = $('#thread');
   if (!th) return;
   if (!S.messages.length) {
-    th.innerHTML = `<div class="empty">Rien pour aujourd'hui.<br>Écris un mot, on te répondra.</div>`;
+    th.innerHTML = `<div class="empty">Écris quand tu veux.<br>Ce que tu dis reste, et la conversation reprend là où elle s'est arrêtée.</div>`;
     return;
   }
-  th.innerHTML = S.messages.map(m =>
-    `<div class="msg ${m.role}"><span class="tx">${esc(m.text)}</span><span class="t">${fmtTime(m.ts)}</span></div>`
-  ).join('');
+  let last = null;
+  th.innerHTML = S.messages.map(m => {
+    const day = m.date ?? m.ts.slice(0, 10);
+    const sep = day !== last
+      ? `<div class="daysep"><span>${day === S.today ? "aujourd'hui" : fmtDay(day)}</span></div>`
+      : '';
+    last = day;
+    return sep + `<div class="msg ${m.role}"><span class="tx">${esc(m.text)}</span><span class="t">${fmtTime(m.ts)}</span></div>`;
+  }).join('');
   th.scrollTop = th.scrollHeight;
 }
 
@@ -256,7 +266,7 @@ async function send() {
   PetTalk.stop();
 
   // affichage optimiste : ce que tu écris apparaît tout de suite
-  S.messages.push({ ts: new Date().toISOString(), role: 'user', text });
+  S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user', text });
   drawThread();
   refreshEchoes(text);
 
