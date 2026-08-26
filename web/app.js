@@ -804,6 +804,16 @@ async function renderSettings() {
       </div>
 
       <div class="card">
+        <h2>Importer un historique</h2>
+        <p class="sub">L'export d'une grille annuelle depuis un tableur : une ligne par mois,
+          les notes en colonnes 1 à 31. Les repères d'étalonnage présents dans la feuille sont
+          récupérés au passage.</p>
+        <label class="field"><span>Fichier CSV</span>
+          <input type="file" id="csvFile" accept=".csv,text/csv,text/plain"></label>
+        <div id="importReport"></div>
+      </div>
+
+      <div class="card">
         <h2>Tes données</h2>
         <p class="sub">${S.stats.days} journées notées · ${S.stats.textDays} avec du texte · ${esc(S.stats.firstDate)} → ${esc(S.stats.lastDate)}</p>
         <p class="sub" style="font-size:12.5px">
@@ -870,6 +880,23 @@ async function renderSettings() {
     r.readAsDataURL(f);
   });
 
+  $('#csvFile')?.addEventListener('change', async e => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 8 * 1024 * 1024) return toast('Fichier trop lourd (max 8 Mo)');
+    let csv;
+    try { csv = await f.text(); } catch (err) { return toast('Lecture impossible'); }
+    IMPORT_CSV = csv;
+    const box = $('#importReport');
+    box.innerHTML = '<p class="sub" style="margin:12px 0 0">Analyse…</p>';
+    try {
+      const { preview } = await api('/api/import', { csv });
+      drawImportPreview(preview);
+    } catch (err) {
+      box.innerHTML = `<p class="sub" style="margin:12px 0 0;color:var(--danger)">${esc(err.message)}</p>`;
+    }
+  });
+
   $('#export').addEventListener('click', async () => {
     const data = await api('/api/export');
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -901,8 +928,22 @@ async function renderBackendCfg() {
           <option value="high" ${s.anthropicEffort === 'high' ? 'selected' : ''}>élevé — réfléchit plus, répond moins vite</option>
         </select></label>
     </div>
-    <label class="field"><span>Clé API${info.hasEnvKey ? ' — <code>ANTHROPIC_API_KEY</code> détectée, laisse vide pour l\'utiliser' : ''}</span>
-      <input type="password" id="apiKey" value="${esc(s.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
+    <div class="field">
+      <span>Clé API</span>
+      <div class="keystate ${s.keySource}">
+        ${s.keySource === 'env'
+          ? `<b>Fournie par l'environnement</b> — variable <code>ANTHROPIC_API_KEY</code>. Rien à faire.`
+          : s.keySource === 'stored'
+            ? `<b>Enregistrée dans l'app</b> — elle n'est jamais renvoyée au navigateur.
+               <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">effacer</button>`
+            : `<b>Aucune clé</b> — le compagnon reste en mode hors-ligne.`}
+      </div>
+      <input type="password" id="apiKey" value="" autocomplete="off"
+        placeholder="${s.keySource === 'none' ? 'sk-ant-… — colle ta clé ici' : 'sk-ant-… — pour la remplacer'}">
+      <p class="faint" style="font-size:11.5px;margin:6px 0 0">
+        Sur un serveur, préfère la variable d'environnement : la clé ne passe alors jamais par la base.
+      </p>
+    </div>
     <label class="field"><span>Mémoire — <b class="mono">${s.memoryDays}</b> journée${s.memoryDays > 1 ? 's' : ''} passée${s.memoryDays > 1 ? 's' : ''} transmise${s.memoryDays > 1 ? 's' : ''}</span>
       <input type="range" id="memoryDays" min="0" max="30" step="1" value="${s.memoryDays}"></label>
     <p class="sub" style="margin:0;font-size:12px">
@@ -923,13 +964,89 @@ async function renderBackendCfg() {
     <label class="field"><span>Clé API</span><input type="password" id="apiKey" value="${esc(s.apiKey)}"></label>`;
   } else { el.innerHTML = ''; return; }
 
-  for (const id of ['ollamaUrl', 'ollamaModel', 'apiKey', 'anthropicModel', 'anthropicEffort']) {
+  for (const id of ['ollamaUrl', 'ollamaModel', 'anthropicModel', 'anthropicEffort']) {
     $('#' + id)?.addEventListener('change', async e => { await saveSettings({ [id]: e.target.value }); });
   }
+  // Le champ est vide en permanence : une chaine vide ne doit pas effacer la
+  // cle enregistree. L'effacement passe par le bouton.
+  $('#apiKey')?.addEventListener('change', async e => {
+    const v = e.target.value.trim();
+    if (!v) return;
+    await saveSettings({ apiKey: v });
+    e.target.value = '';
+    renderSettings();
+    toast('Clé enregistrée');
+  });
+  $('#clearKey')?.addEventListener('click', async () => {
+    await saveSettings({ apiKey: '', clearKey: true });
+    renderSettings();
+    toast('Clé effacée');
+  });
   $('#memoryDays')?.addEventListener('change', async e => {
     await saveSettings({ memoryDays: Number(e.target.value) });
     renderSettings();
   });
+}
+
+/* --------- import d'un historique tableur --------- */
+
+let IMPORT_CSV = null;
+
+/**
+ * Aperçu avant écriture. On montre ce qui va se passer — et surtout combien de
+ * journées existantes seraient écrasées — plutôt que de demander de faire
+ * confiance à un choix de fichier.
+ */
+function drawImportPreview(p) {
+  const box = $('#importReport');
+  if (!box) return;
+  box.innerHTML = `
+    <div style="border-top:1px solid var(--line-soft);margin-top:14px;padding-top:14px">
+      <div class="statgrid" style="margin-bottom:14px">
+        <div><div class="k">Journées lues</div><div class="v">${p.total}</div></div>
+        <div><div class="k">Nouvelles</div><div class="v" style="color:var(--accent)">${p.added}</div></div>
+        <div><div class="k">Écrasées</div><div class="v" style="color:${p.overwrite ? 'var(--warn)' : 'var(--ink)'}">${p.overwrite}</div></div>
+        <div><div class="k">Identiques</div><div class="v">${p.unchanged}</div></div>
+      </div>
+      <p class="sub" style="margin:0 0 10px">
+        <span class="mono">${esc(p.first)}</span> → <span class="mono">${esc(p.last)}</span>
+      </p>
+      <div style="display:flex;flex-direction:column;gap:1px;margin-bottom:12px">
+        ${p.years.map(y => `<div style="display:flex;gap:12px;padding:5px 0;border-top:1px solid var(--line-soft);font-size:13px">
+          <span class="mono" style="flex:0 0 46px">${esc(y.year)}</span>
+          <span class="muted" style="flex:0 0 84px">${y.count} jours</span>
+          <span class="mono muted">moyenne ${y.avg}</span>
+        </div>`).join('')}
+      </div>
+      ${p.anchors.length ? `<p class="sub" style="margin:0 0 8px">Repères d'étalonnage trouvés :</p>
+        <div class="anchors" style="margin:0 0 14px">
+          ${p.anchors.map(a => `<div class="anchor">
+            <span class="n" style="background:rgb(${noteScaleRGB(a.note)})">${a.note}</span>
+            <span class="l"><b>${esc(a.label)}</b> — ${esc(a.descr)}</span></div>`).join('')}
+        </div>` : ''}
+      ${p.overwrite ? `<p class="sub" style="color:var(--warn);margin:0 0 12px">
+        ${p.overwrite} journée${p.overwrite > 1 ? 's' : ''} déjà notée${p.overwrite > 1 ? 's' : ''} ${p.overwrite > 1 ? 'seront remplacées' : 'sera remplacée'} par la valeur du fichier.</p>` : ''}
+      <button class="btn primary" id="doImport">Importer ${p.total} journées</button>
+    </div>`;
+
+  $('#doImport').onclick = async e => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    b.textContent = 'Import…';
+    try {
+      const r = await api('/api/import', { csv: IMPORT_CSV, apply: true });
+      S = await api('/api/state');
+      syncHeader();
+      SERIES = null;                 // la série complète doit être rechargée
+      IMPORT_CSV = null;
+      renderSettings();
+      toast(`${r.imported} journées importées`);
+    } catch (err) {
+      b.disabled = false;
+      b.textContent = 'Réessayer';
+      toast(err.message);
+    }
+  };
 }
 
 /* ============================= routage ============================= */

@@ -93,6 +93,57 @@ export function extractFromRows(rows) {
   };
 }
 
+/**
+ * Analyse un CSV sans rien ecrire. Sert a l'apercu avant import : on montre
+ * ce qui va se passer plutot que de demander de faire confiance.
+ */
+export function inspectCSV(text, { existing = new Map() } = {}) {
+  const { entries, anchors } = extractFromRows(parseCSV(text));
+  const byYear = {};
+  let overwrite = 0, unchanged = 0, added = 0;
+  for (const e of entries) {
+    const y = e.date.slice(0, 4);
+    (byYear[y] ??= { count: 0, sum: 0 });
+    byYear[y].count++;
+    byYear[y].sum += e.note;
+    if (existing.has(e.date)) {
+      if (existing.get(e.date) === e.note) unchanged++; else overwrite++;
+    } else added++;
+  }
+  return {
+    total: entries.length,
+    added, overwrite, unchanged,
+    first: entries.length ? entries[0].date : null,
+    last: entries.length ? entries[entries.length - 1].date : null,
+    years: Object.entries(byYear).map(([year, v]) => ({
+      year, count: v.count, avg: Math.round(v.sum / v.count * 1000) / 1000
+    })),
+    anchors: [...new Map(anchors.map(a => [a.note, a])).values()].sort((a, b) => b.note - a.note),
+    entries
+  };
+}
+
+/** Ecriture en une transaction : soit tout passe, soit rien. */
+export function applyImport(entries, anchors) {
+  const stmt = db.prepare(`
+    INSERT INTO entries(date, note) VALUES(?, ?)
+    ON CONFLICT(date) DO UPDATE SET note = excluded.note
+  `);
+  db.exec('BEGIN');
+  try {
+    for (const e of entries) stmt.run(e.date, e.note);
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+
+  const seen = new Set();
+  for (const a of anchors ?? []) {
+    if (seen.has(a.note)) continue;
+    seen.add(a.note);
+    setAnchor(a.note, a.label, a.descr);
+  }
+  return entries.length;
+}
+
 export function importFile(path, { dry = false } = {}) {
   const { entries, anchors } = extractFromRows(parseCSV(readFileSync(path, 'utf8')));
 
