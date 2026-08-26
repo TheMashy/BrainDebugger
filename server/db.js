@@ -183,6 +183,18 @@ export function addMessage({ ts, date, source = 'web', role, text }) {
   return Number(info.lastInsertRowid);
 }
 
+/**
+ * Le fil, en continu. Une conversation qui repart de zero chaque matin n'est
+ * pas une conversation : on revient vers quelqu'un qu'on connait, pas vers un
+ * formulaire quotidien. Le changement de jour devient un simple repere dans le
+ * fil, pas une coupure.
+ */
+export function recentMessages(limit = 80) {
+  return db.prepare(
+    'SELECT id, ts, date, source, role, text FROM messages ORDER BY ts DESC, id DESC LIMIT ?'
+  ).all(limit).reverse();
+}
+
 export function messagesForDate(date) {
   return db.prepare(
     'SELECT id, ts, source, role, text FROM messages WHERE date = ? ORDER BY ts ASC'

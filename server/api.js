@@ -1,6 +1,6 @@
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
-  addMessage, messagesForDate, allEvents, addEvent, deleteEvent,
+  addMessage, messagesForDate, recentMessages, allEvents, addEvent, deleteEvent,
   allAnchors, setAnchor
 } from './db.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -75,7 +75,7 @@ export const routes = {
       settings: publicSettings(s),
       entry,
       anchors: allAnchors(),
-      messages: messagesForDate(t),
+      messages: recentMessages(80),
       stats: {
         days: ser.length,
         textDays: textCount,
@@ -101,17 +101,18 @@ export const routes = {
     addMessage({ ts: now, date, source: 'web', role: 'user', text });
     invalidate();
 
-    const history = messagesForDate(date).map(m => ({ role: m.role, text: m.text }));
+    const history = recentMessages(60).map(m => ({ role: m.role, text: m.text }));
     const r = await reply(history, getSettings(), { memory: recentMemory(date) });
 
     addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
     return {
-      messages: messagesForDate(date), backend: r.backend,
+      messages: recentMessages(80), backend: r.backend,
       degraded: r.degraded ?? null, refused: r.refused ?? false
     };
   },
 
-  'GET /api/messages': ({ query }) => ({ messages: messagesForDate(query.date ?? today()) }),
+  'GET /api/messages': ({ query }) =>
+    query.date ? { messages: messagesForDate(query.date) } : { messages: recentMessages(80) },
 
   'POST /api/note': ({ body }) => {
     const date = body.date ?? today();
@@ -334,9 +335,9 @@ export async function streamMessage(body, send) {
   const date = body.date ?? today();
   addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text });
   invalidate();
-  send('user', { messages: messagesForDate(date) });
+  send('user', { messages: recentMessages(80) });
 
-  const history = messagesForDate(date).map(m => ({ role: m.role, text: m.text }));
+  const history = recentMessages(60).map(m => ({ role: m.role, text: m.text }));
   const settings = getSettings();
 
   const r = await reply(history, settings, {
@@ -346,7 +347,7 @@ export async function streamMessage(body, send) {
 
   addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text });
   send('done', {
-    messages: messagesForDate(date),
+    messages: recentMessages(80),
     backend: r.backend,
     model: r.model ?? null,
     degraded: r.degraded ?? null,
