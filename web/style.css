@@ -691,8 +691,6 @@ input[type=date] { color-scheme: dark; }
 }
 .voicetoggle[aria-pressed="true"] .ico { background: var(--accent); box-shadow: 0 0 7px var(--accent); }
 
-.echoes { border-color: var(--accent-dk); }
-.echoes h2 { color: var(--accent); }
 
 /* ---------- choix du timbre ---------- */
 .voicepick { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 8px; }
@@ -833,7 +831,10 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ---------- la lecture ---------- */
 
-.lecture { max-width: 720px; }
+/* La carte a besoin de largeur ; le texte n'en veut pas. Le conteneur suit donc
+   la carte, et ce qui se lit en lignes garde sa colonne. */
+.lecture { max-width: 980px; }
+.lechead, .synthese, .themes, .lectvide { max-width: 720px; }
 .lechead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 26px; }
 .lecmeta { font-size: 11.5px; }
 .lecmeta b { color: var(--warn); font-weight: 500; }
@@ -850,7 +851,7 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 .synthese {
   font: 300 19px/1.6 var(--serif); color: var(--ink);
-  margin: 0 0 34px; max-width: 34em;
+  margin: 0 0 30px;
 }
 
 .lectvide { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 40px 0; }
@@ -909,26 +910,25 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   text-underline-offset: 3px; font-size: 12px; }
 .tliens button:hover { color: var(--accent); }
 
-/* --- la carte des thèmes --- */
+/* --- la carte organique --- */
 
-.cartethemes { max-width: 330px; margin: 6px auto 0; }
-.cartethemes svg { width: 100%; height: auto; overflow: visible; }
-.ct-liens line { stroke: var(--line); stroke-width: .45; }
-.ct-noeud circle { fill: var(--ink-faint); transition: fill .15s; }
-.ct-noeud text { fill: var(--ink-faint); font-size: 3.6px; font-family: var(--sans); transition: fill .15s; }
-.ct-capte { fill: transparent; cursor: pointer; }
-.ct-noeud:hover circle, .ct-noeud.on circle { fill: var(--accent); }
-.ct-noeud:hover text, .ct-noeud.on text { fill: var(--ink); }
-
-.retourlect { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; }
-.retourlect button {
-  background: none; border: 0; color: var(--ink-faint); border-radius: 7px;
-  padding: 5px 9px; font-size: 12.5px; transition: color .13s, background .13s;
+/* Elle prend la largeur : c'est la forme qu'on vient reconnaitre, et une carte
+   de trois cents pixels dans une colonne de texte n'est plus une carte. */
+.cartewrap { margin: 0 0 30px; }
+.cartewrap canvas {
+  display: block; width: 100%; height: clamp(340px, 52vh, 560px);
+  border-radius: 3px;
 }
-.retourlect button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
-.retourlect button:disabled { opacity: .3; }
-.retourlect button:first-child { color: var(--ink-dim); margin-right: 6px; }
-.retourlect .faint { flex: 1; font-size: 12.5px; }
+.cartelegende {
+  display: flex; flex-wrap: wrap; gap: 6px 18px;
+  margin-top: 4px; font-size: 11.5px; color: var(--ink-faint);
+}
+.cartelegende span { display: flex; align-items: center; gap: 6px; }
+/* Contouré, comme les nœuds : cette carte est entièrement déclarée. */
+.cartelegende i {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid hsl(var(--g) 58% 62%);
+}
 
 .mirror { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px 34px; }
 .mcol { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
@@ -1001,9 +1001,6 @@ body:has(#ambiance) { background: transparent; }
 .carte { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 30px; }
 @media (max-width: 1000px) { .carte { grid-template-columns: 1fr; } }
 
-.cartewrap { position: relative; width: 100%; height: min(62vh, 620px); min-height: 340px; }
-.cartewrap canvas { display: block; width: 100%; height: 100%; }
-.cartelegende { margin: 12px 0 0 !important; font-size: 12px; max-width: 68ch; }
 
 .cartetip {
   position: absolute; pointer-events: none;

@@ -1,6 +1,7 @@
 import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
-import { disposer, dessiner, auPoint } from './carte.js';
+import { disposer } from './carte.js';
+import { versGraphe, dessinerRelations, noeudAu, cadrer, NOM_GENRE, TEINTE_GENRE } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -155,7 +156,6 @@ async function saveSettings(patch) {
    ses mots ne l'est pas. -- SPEC 2.2
                                                                             */
 
-let ECHOES = { items: [], textCount: 0 };
 
 async function renderTonight() {
   const t = S.today;
@@ -190,8 +190,6 @@ async function renderTonight() {
         </button>
       </div>
 
-      <div id="echoes"></div>
-
       <div class="notecard">
         <div class="noteline">
           <span class="k">Note avant de te coucher</span>
@@ -219,7 +217,6 @@ async function renderTonight() {
     </div>`;
 
   drawThread();
-  drawEchoes();
 
   $('#newChat')?.addEventListener('click', async e => {
     const b = e.currentTarget;
@@ -235,7 +232,6 @@ async function renderTonight() {
       S.messages = r.messages;
       S.settings.chatSince = r.chatSince;
       drawThread();
-      $('#echoes').innerHTML = '';
       toast('Nouveau fil. Tes journées sont intactes.');
     } catch (err) {
       toast(err.message);
@@ -272,7 +268,6 @@ async function renderTonight() {
   input.oninput = () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
-    scheduleEchoes(input.value);
   };
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
@@ -624,7 +619,6 @@ async function send() {
   // affichage optimiste : ce que tu écris apparaît tout de suite
   S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user', text });
   drawThread();
-  refreshEchoes(text);
 
   let typing = null;
 
@@ -715,41 +709,24 @@ function showHelpline() {
   $('#thread')?.after(el);
 }
 
-/* --------- echos : tes mots d'avant, sans avoir rien demande --------- */
-
-let _echoTimer = null;
-function scheduleEchoes(text) {
-  clearTimeout(_echoTimer);
-  _echoTimer = setTimeout(() => refreshEchoes(text), 700);
-}
-
-async function refreshEchoes(text) {
-  const t = String(text ?? '').trim();
-  if (t.length < 12) { ECHOES = { ...ECHOES, items: [] }; return drawEchoes(); }
-  try {
-    ECHOES = await api('/api/echoes', { text: t, date: S.today, limit: 3 });
-    drawEchoes();
-  } catch { /* les echos ne doivent jamais casser la saisie */ }
-}
-
-function drawEchoes() {
-  const el = $('#echoes');
-  if (!el) return;
-  if (!ECHOES.items?.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="card echoes">
-    <h2>Tu as déjà écrit ça</h2>
-
-    ${ECHOES.items.map(it => `<div class="simitem">
-      <div class="hd">
-        <span class="d">${fmtDay(it.date)}</span>
-        <span class="pill" style="background:rgba(${noteScaleRGB(it.note ?? 5)},.2);color:rgb(${noteScaleRGB(it.note ?? 5)});border-color:transparent">${it.note ?? '—'}/10</span>
-        <span class="faint" style="font-size:11.5px">${termesMarkup(it)}</span>
-      </div>
-      <p class="q">${highlight(it.text.slice(0, 240), it.terms, it.forts)}${it.text.length > 240 ? '…' : ''}</p>
-      ${bandMarkup(it.band)}
-    </div>`).join('')}
-  </div>`;
-}
+/* ---------------------------------------------------------------------
+ * IL N'Y A PLUS DE PANNEAU « TU AS DEJA ECRIT CA » DANS « PARLER ».
+ *
+ * Il cherchait dans le corpus pendant la frappe et posait sous le composeur les
+ * journees qui ressemblaient a ce qu'on etait en train d'ecrire. C'etait juste,
+ * et c'etait au mauvais endroit : on raconte sa soiree a quelqu'un, et
+ * l'application affiche par-dessous « tu as deja ecrit ca » avec les dates. La
+ * remarque est vraie et personne ne l'a demandee — c'est le ton d'une machine
+ * qui coche, pas de quelqu'un en face.
+ *
+ * La recherche existe toujours, a l'identique. Elle part maintenant vers le
+ * COMPAGNON, dans son contexte, et c'est lui qui decide s'il la rend — quand
+ * quelqu'un dit que ca n'arrive jamais, quand il croit que c'est la premiere
+ * fois, quand il cherche ce qui avait marche. Voir echoBlock() dans chat.js.
+ *
+ * Le Miroir garde son « tu as deja ecrit ca » : c'est une surface de
+ * restitution, on y va pour ca.
+ * ------------------------------------------------------------------- */
 
 /**
  * Premier lancement : aucune donnée. On ne montre pas une page vide avec des
@@ -1533,47 +1510,69 @@ function themeMarkup(t) {
 }
 
 /**
- * La carte des thèmes.
+ * La carte organique.
  *
- * Des nœuds sur un cercle, reliés par ce que le compagnon a lié. Un cercle et
- * pas un placement calculé : sur trois à six nœuds, une simulation de forces
- * donne un résultat différent à chaque rendu, et une carte qui bouge quand on
- * ne l'a pas touchée n'est pas lisible. Le rayon du nœud dit l'intensité.
+ * Elle est DESSINEE, pas disposee a la main : seize choses reliees dans tous les
+ * sens n'ont pas de bonne place fixe, et le placement en cercle qui suffisait a
+ * quatre themes donne ici une roue ou tous les traits passent par le centre.
+ * On reprend donc le moteur de la carte des mots -- repulsion, ressorts,
+ * regroupement par amas -- avec les GENRES comme amas.
+ *
+ * Le placement est reproductible (graine fixe, depart en spirale) : une carte
+ * qui se redispose differemment a chaque ouverture ne se memorise pas, et on
+ * perd le seul benefice d'une carte, qui est de reconnaitre sa forme.
  */
-function carteThemesMarkup(themes) {
-  if (themes.length < 2) return '';
-  // Le viewBox fait 100 d'unites pour ~340 px : un rayon de 7 devient une bille
-  // de trente pixels, et trois billes de trente pixels ne sont plus une carte.
-  const R = 33, W = 100, H = 100;
-  const pos = new Map(themes.map((t, i) => {
-    const a = (i / themes.length) * Math.PI * 2 - Math.PI / 2;
-    return [t.nom, { x: 50 + R * Math.cos(a), y: 50 + R * Math.sin(a) }];
-  }));
-  const traits = [];
-  const vus = new Set();
-  for (const t of themes) for (const l of t.liens ?? []) {
-    const cle = [t.nom, l].sort().join('|');
-    if (vus.has(cle)) continue;
-    vus.add(cle);
-    const a = pos.get(t.nom), b = pos.get(l);
-    if (a && b) traits.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}"
-      x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`);
-  }
-  return `<div class="cartethemes">
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Les thèmes et ce qui les relie">
-      <g class="ct-liens">${traits.join('')}</g>
-      ${themes.map(t => {
-        const p = pos.get(t.nom);
-        const r = 1.7 + t.intensite * 0.7;
-        return `<g class="ct-noeud${MIR_THEME === t.nom ? ' on' : ''}" data-theme-aller="${esc(t.nom)}">
-          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}"/>
-          <text x="${p.x.toFixed(1)}" y="${(p.y + (p.y < 50 ? -r - 3 : r + 6.2)).toFixed(1)}"
-                text-anchor="middle">${esc(t.nom)}</text>
-          <circle class="ct-capte" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="8"/>
-        </g>`;
-      }).join('')}
-    </svg>
+let RELA = null, RELA_DISPO = null, RELA_SURVOL = -1;
+
+function carteMarkup(carte) {
+  if (!carte?.noeuds?.length) return '';
+  return `<div class="cartewrap">
+    <canvas id="cartec" aria-label="La carte de ce qui revient et de ce qui le relie"></canvas>
+    <div class="cartelegende">${
+      [...new Set(carte.noeuds.map(n => n.genre))].map(g =>
+        `<span><i style="--g:${TEINTE_GENRE[g]}"></i>${esc(NOM_GENRE[g] ?? g)}</span>`).join('')}
+    </div>
   </div>`;
+}
+
+function monterCarte(carte) {
+  const cv = $('#cartec');
+  if (!cv || !carte?.noeuds?.length) return;
+  RELA = versGraphe(carte);
+  RELA_SURVOL = -1;
+
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  let L = 0, H = 0;
+
+  const poser = () => {
+    L = cv.clientWidth; H = cv.clientHeight;
+    if (!L || !H) return;
+    cv.width = L * dpr; cv.height = H * dpr;
+    RELA_DISPO = disposer(RELA, L, H);
+    cadrer(RELA_DISPO.pts, L, H);
+    peindre();
+  };
+  const peindre = () => {
+    if (!RELA_DISPO) return;
+    dessinerRelations(cv.getContext('2d'), RELA, RELA_DISPO,
+      { largeur: L, hauteur: H, survol: RELA_SURVOL, dpr });
+  };
+
+  cv.addEventListener('mousemove', e => {
+    const r = cv.getBoundingClientRect();
+    const i = noeudAu(RELA_DISPO?.pts ?? [], RELA, e.clientX - r.left, e.clientY - r.top);
+    if (i === RELA_SURVOL) return;
+    RELA_SURVOL = i;
+    cv.style.cursor = i >= 0 ? 'pointer' : 'default';
+    peindre();
+  }, { passive: true });
+  cv.addEventListener('mouseleave', () => { RELA_SURVOL = -1; peindre(); }, { passive: true });
+
+  // Un seul observateur, retire avec le canvas : sans ca, changer d'horizon
+  // trois fois laisse trois observateurs qui repeignent un canvas detache.
+  const ro = new ResizeObserver(() => poser());
+  ro.observe(cv);
+  poser();
 }
 
 async function renderLecture() {
@@ -1599,10 +1598,13 @@ async function renderLecture() {
    */
   let corps;
   if (L.lecture) {
+    // La carte d'abord : c'est la forme qu'on vient reconnaitre. La synthese la
+    // dit en mots, les themes la detaillent -- l'ordre va du coup d'oeil au
+    // detail, et pas l'inverse.
     corps = `
+      ${carteMarkup(L.lecture.carte)}
       <p class="synthese">${esc(L.lecture.synthese)}</p>
-      <div class="themes">${themes.map(themeMarkup).join('')}</div>
-      ${carteThemesMarkup(themes)}`;
+      <div class="themes">${themes.map(themeMarkup).join('')}</div>`;
   } else if (LECTURE_EN_COURS) {
     corps = `<div class="lectvide"><span class="spin"></span>
       <p>Il relit ton journal.</p>
@@ -1636,6 +1638,7 @@ async function renderLecture() {
   </div>`;
 
   wireLecture();
+  monterCarte(L.lecture?.carte);
 
   // « elle doit toujours faire de l'analyse de fond » : si elle manque, on la
   // lance en arrivant, sans rien demander. Si elle existe mais a pris du
@@ -1703,7 +1706,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
   MIRROR_CARNET = m.carnet ?? [];
   const prev = dayShift(date, -1), next = dayShift(date, 1);
   const nav = `<div class="daynav">
-      <button class="wide" data-lecture title="Revenir à la vue d'ensemble">‹ la lecture</button>
+      <button class="wide" data-lecture title="Revenir à la vue d'ensemble">‹ ma carte</button>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
       <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button class="wide" data-goto="${S.today}">aujourd'hui</button>` : ''}
@@ -1820,7 +1823,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
     ${/* Le retour vers la lecture. Sans lui, ouvrir une journée depuis une
           preuve est un aller simple : la vue d'ensemble n'a plus de porte. */''}
     <div class="retourlect">
-      <button data-lecture>‹ la lecture</button>
+      <button data-lecture>‹ ma carte</button>
       <span class="faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</span>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
       <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
@@ -1993,374 +1996,23 @@ function wireMirror() {
    dont on parle, et ce qui revient avec quoi. Rien n'est généré — on compte des
    mots déjà écrits, on les colore par les notes déjà posées.            */
 
-let CARTE_FENETRE = 'tout';
-let REMQ_MODE = 'global';        // 'global' | 'theme'
-let REMQ_THEME = null;           // { id, nom }
-let CARTE = null, CARTE_DISPO = null, CARTE_SURVOL = -1;
-
-async function renderCarte() {
-  if (REMQ_MODE === 'theme' && REMQ_THEME) return renderTheme();
-  const G = await api(`/api/remarque?fenetre=${CARTE_FENETRE}`);
-
-  if (G.floored) {
-    $('#view').innerHTML = `
-      <div class="card floorbox">
-        <h2>Pas de carte aujourd'hui</h2>
-        <p class="sub" style="color:#c9a19b">
-          Tu as noté ${G.floor.note ?? ''}/10. En dessous de ${G.floor.threshold}, cet outil ne sort
-          aucune statistique — et une carte en est une. Une très jolie, ce qui la rend plus
-          dangereuse qu'un chiffre, pas moins.
-        </p>
-        <div class="helpline">
-          Si tu as besoin de parler à quelqu'un maintenant : <b>3114</b>, gratuit, 24h/24, partout en France.
-        </div>
-      </div>`;
-    return;
-  }
-
-  const choix = [['30', '30 j'], ['90', '90 j'], ['365', '1 an'], ['tout', 'tout']]
-    .map(([v, l]) => `<button data-fen="${v}" aria-pressed="${CARTE_FENETRE === v}">${l}</button>`).join('');
-
-  if (!G.assez) {
-    $('#view').innerHTML = `
-      <div class="card">
-        <div class="cardhead"><h2>Carte de tes mots</h2>
-          <div class="centerpick" style="margin-left:auto">${choix}</div></div>
-        <p class="sub">
-          ${G.jours} journée${G.jours > 1 ? 's' : ''} écrite${G.jours > 1 ? 's' : ''} sur cette période.
-          Il en faut au moins ${G.minimum} pour qu'un mot qui revient veuille dire quelque chose —
-          en dessous, ce ne sont que des mots isolés.
-        </p>
-      </div>`;
-    $('#view').onclick = e => {
-      const b = e.target.closest('[data-fen]');
-      if (b) { CARTE_FENETRE = b.dataset.fen; renderCarte(); }
-    };
-    return;
-  }
-
-  CARTE = G;
-  $('#view').innerHTML = `
-    ${bandeauRemarque(G)}
-
-    <div class="carte">
-      <div class="card cartebox">
-        <div class="cardhead">
-          <h2 title="La taille dit combien de journées portent ce mot — jamais les notes apportées. La couleur est celle de leur note. Un anneau marque tes repères d'étalonnage.">Carte de tes mots</h2>
-          <span class="sub" style="margin:0">${G.noeuds.length} mots qui reviennent</span>
-        </div>
-        <div class="cartewrap"><canvas id="carteCv"></canvas>
-          <div class="cartetip" id="carteTip" hidden></div>
-        </div>
-
-      </div>
-
-      <div class="mcol">
-        <div class="card">
-          <h2>Les groupes</h2>
-          <div class="amaslist">
-            ${G.amas.filter(a => a.taille >= 2).map(a => `
-              <button class="amasrow" data-theme="${a.id}" data-nom="${esc(a.nom)}">
-                <span class="pastille" style="background:${a.note !== null ? deltaColor(a.note - G.moyenneGlobale) : 'var(--line)'}"></span>
-                <b>${esc(a.nom)}</b>
-                <span class="muted">${a.taille} mots · ${a.jours} j</span>
-                <span class="mono muted" style="margin-left:auto">${a.note !== null ? a.note : '—'}</span>
-              </button>`).join('')}
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Ce qui revient</h2>
-          ${G.faits.length
-            ? G.faits.map(f => `<p class="fait">${esc(f.texte)}</p>`).join('')
-            : `<p class="sub" style="margin:0">Rien qui ressorte assez nettement pour être compté.
-               Il faut au moins ${G.minNotees} journées notées portant le même mot pour qu'une
-               moyenne en dise autant.</p>`}
-        </div>
-      </div>
-    </div>
-
-    ${tableauMots(G)}
-    ${tableauEcarts(G)}
-    ${tableauPaires(G)}
-    ${tableauBouge(G)}
-
-`;
-
-  monterCarte();
-}
-
-/*
- * LA DECISION DE FORME QUI TIENT TOUT ICI : des tableaux a en-tetes, pas des
- * phrases.
+/* ---------------------------------------------------------------------
+ * « JE REMARQUE » N'EST PLUS UN ONGLET.
  *
- * Une colonne nomme son denominateur une seule fois, en haut. Une phrase doit
- * le redire a chaque ligne, et c'est la qu'elle triche : « insomnie revient 31
- * jours · moyenne 4,8 contre 6,1 » aligne trois denominateurs differents dans
- * une syntaxe qui les presente comme un seul constat -- 31 journees ecrites,
- * une moyenne sur les seules journees NOTEES parmi elles, et une moyenne
- * generale sur un troisieme ensemble encore.
- */
-
-function bandeauRemarque(G) {
-  const choix = [['30', '30 j'], ['90', '90 j'], ['365', '1 an'], ['tout', 'tout']]
-    .map(([v, l]) => `<button data-fen="${v}" aria-pressed="${CARTE_FENETRE === v}">${l}</button>`).join('');
-  const c = G.carnet ?? { notes: 0, datees: 0, libres: 0 };
-  return `<div class="card bandeau">
-    <div class="cardhead">
-      <h2 title="Des comptes sur tes propres journées, rien de plus. L'application ne dit pas ce qu'ils veulent dire — le lien, c'est toi qui le fais.">Ce que je remarque</h2>
-      <div class="centerpick" style="margin-left:auto">
-        <button data-mode="global" aria-pressed="${REMQ_MODE === 'global'}">état global</button>
-        <button data-mode="theme" aria-pressed="${REMQ_MODE === 'theme'}">explorer un thème</button>
-      </div>
-    </div>
-    <p class="mono comptes" title="${c.libres ? `Les ${c.libres} notes sans date sont comptées dans les quatre fenêtres.` : ''}">${G.jours} journées écrites${G.notees !== undefined ? ` · dont ${G.notees} notées` : ''}
-      · ${c.notes} note${c.notes > 1 ? 's' : ''} apportée${c.notes > 1 ? 's' : ''} (${c.datees} datée${c.datees > 1 ? 's' : ''}, ${c.libres} sans date)${G.depuis ? ` · depuis le ${fmtDay(G.depuis)}` : ''}</p>
-    <div class="centerpick">${choix}</div>
-
-  </div>`;
-}
-
-function tableauMots(G) {
-  const lignes = G.noeuds.slice().sort((a, b) => b.jours - a.jours).slice(0, 20);
-  if (!lignes.length) return '';
-  return `<div class="card">
-    <h2>Ce qui revient le plus</h2>
-    <div class="tblwrap"><table class="tbl">
-      <thead><tr>
-        <th>mot</th><th class="n">journées</th><th class="n" title="Le dénominateur réel de la moyenne. En dessous de ${G.minNotees}, un tiret plutôt qu'un chiffre prudent.">dont notées</th>
-        <th class="n">moyenne</th><th class="n">écart</th><th class="n" title="Une colonne à part, jamais additionnée aux journées.">notes apportées</th>
-      </tr></thead>
-      <tbody>${lignes.map(n => `<tr data-theme="${n.amas}" data-nom="${esc(G.amas.find(a => a.id === n.amas)?.nom ?? '')}">
-        <td>${esc(n.mot)}</td>
-        <td class="n">${n.jours}</td>
-        <td class="n">${n.joursNotees ?? '—'}</td>
-        <td class="n">${(n.joursNotees ?? 0) >= G.minNotees ? n.note : '—'}</td>
-        <td class="n" style="color:${(n.joursNotees ?? 0) >= G.minNotees && n.ecart !== null ? deltaColor(n.ecart) : 'var(--ink-faint)'}">
-          ${(n.joursNotees ?? 0) >= G.minNotees && n.ecart !== null ? (n.ecart > 0 ? '+' : '') + n.ecart : '—'}</td>
-        <td class="n">${n.carnet || '—'}</td>
-      </tr>`).join('')}</tbody>
-    </table></div>
-  </div>`;
-}
-
-function tableauEcarts(G) {
-  const eligibles = G.noeuds.filter(n => (n.joursNotees ?? 0) >= G.minNotees && n.ecart !== null);
-  if (eligibles.length < 2) return '';
-  const bas = eligibles.slice().sort((a, b) => a.ecart - b.ecart).slice(0, 6);
-  const haut = eligibles.slice().sort((a, b) => b.ecart - a.ecart).slice(0, 6);
-  const col = (titre, liste) => `<div>
-    <div class="k faint">${titre}</div>
-    ${liste.map(n => `<div class="ecartrow">
-      <span style="color:${deltaColor(n.ecart)}">${n.ecart > 0 ? '+' : ''}${n.ecart}</span>
-      <b>${esc(n.mot)}</b>
-      <span class="muted">sur ${n.joursNotees} journées notées</span>
-    </div>`).join('')}
-  </div>`;
-  return `<div class="card">
-    <h2>Ce qui s'écarte le plus</h2>
-    <div class="deuxcol">
-      ${col(`plus bas que l'ensemble (${G.moyenneGlobale})`, bas)}
-      ${col(`plus haut que l'ensemble (${G.moyenneGlobale})`, haut)}
-    </div>
-  </div>`;
-}
-
-function tableauPaires(G) {
-  if (!G.liens?.length) return '';
-  const top = G.liens.slice().sort((a, b) => b.force - a.force).slice(0, 8);
-  return `<div class="card">
-    <h2>Ce qui va avec quoi</h2>
-    ${top.map(l => {
-      const a = G.noeuds[l.s], b = G.noeuds[l.t];
-      if (!a || !b) return '';
-      // Les deux dénominateurs sont là pour que le compte se lise. Sans eux,
-      // « 14 » se lit comme fort ou faible selon l'humeur du lecteur.
-      return `<p class="fait"><b>${esc(a.mot)}</b> · <b>${esc(b.mot)}</b> —
-        ${l.jours ?? '?'} journées ensemble <span class="muted">(sur ${a.jours} et ${b.jours})</span></p>`;
-    }).join('')}
-  </div>`;
-}
-
-function tableauBouge(G) {
-  if (!G.bouge?.length || CARTE_FENETRE === '90') return '';
-  return `<div class="card">
-    <h2>Ce qui a changé de place</h2>
-    <div class="tblwrap"><table class="tbl">
-      <thead><tr><th>mot</th><th class="n">90 derniers jours</th><th class="n">sur l'ensemble</th></tr></thead>
-      <tbody>${G.bouge.map(b => `<tr>
-        <td>${esc(b.mot)}</td>
-        <td class="n mono">${b.recentJours} j / ${b.recentSur} écrites</td>
-        <td class="n mono">${b.toutJours} j / ${b.toutSur} écrites</td>
-      </tr>`).join('')}</tbody>
-    </table></div>
-  </div>`;
-}
-
-/**
- * Le dossier d'un theme.
+ * Il portait la carte des MOTS : des co-occurrences, un trait quand deux mots
+ * tombent la meme journee. Elle savait dire que « fatigue » et « boulot » vont
+ * ensemble, et rien de plus -- un trait sans verbe ne dit pas ce qui se passe
+ * entre deux choses. Elle vivait a cote d'une autre vue qui, elle, comprenait
+ * quelque chose, et il fallait choisir un onglet sans savoir lequel repondait.
  *
- * Deux colonnes, et la separation entre elles EST la regle du produit : a
- * gauche ce qui est COMPTE sur des journees vecues, a droite ce qui est
- * APPORTE. Aucune moyenne, aucun ecart et aucun emploi du mot « jours » ne
- * traverse vers la droite -- une note n'a pas ete vecue le jour dont elle
- * parle, et la melanger aux comptes fabriquerait un denominateur invisible.
- */
-async function renderTheme() {
-  const T = await api(`/api/theme?amas=${REMQ_THEME.id}&nom=${encodeURIComponent(REMQ_THEME.nom)}&fenetre=${CARTE_FENETRE}`);
+ * Un seul onglet maintenant : « Ma carte ». La synthese, la carte organique, et
+ * les themes -- une seule lecture, un seul endroit. Le jour reste dessous.
+ *
+ * Le calcul des mots n'est PAS supprime : server/graph.js et ses routes vivent
+ * toujours, testes, avec l'invariant du carnet qu'ils portent. Ce qui a disparu
+ * est l'onglet qui les affichait.
+ * ------------------------------------------------------------------- */
 
-  // Les amas sont renumerotes a chaque construction du graphe : un identifiant
-  // seul designerait un jour un autre theme sans que rien ne le signale. D'ou
-  // le nom, verifie cote serveur.
-  if (T.perime) {
-    REMQ_THEME = null; REMQ_MODE = 'global';
-    toast('Ce thème a changé de forme — retour à l\'état global.');
-    return renderCarte();
-  }
-  if (T.floored || T.assez === false) { REMQ_MODE = 'global'; return renderCarte(); }
-
-  const a = T.amas;
-  $('#view').innerHTML = `
-    <div class="card bandeau">
-      <div class="cardhead">
-        <h2>${esc(a.nom)}</h2>
-        <div class="centerpick" style="margin-left:auto">
-          <button data-retour="1">← état global</button>
-        </div>
-      </div>
-      <p class="mono comptes">${a.taille} mots · ${a.jours} journées écrites où ils apparaissent
-        · moyenne ${a.note ?? '—'} contre ${T.moyenneGlobale} sur l'ensemble</p>
-      <div class="motschips">${T.membres.map(m => `<span class="motchip">${esc(m.mot)}
-        <b class="mono">${m.jours} j</b></span>`).join('')}</div>
-    </div>
-
-    <div class="carte">
-      <div class="mcol">
-        <div class="card">
-          <h2>Les journées</h2>
-          <p class="sub">${T.jours.length} journées</p>
-          <div class="cnliste">
-            ${T.jours.slice(0, 40).map(j => `<div class="cnitem">
-              <div class="cnmeta">
-                <button class="cndate" data-goto="${j.date}">${fmtDay(j.date)}</button>
-                ${j.note !== null
-                  ? `<span class="mono" style="color:${deltaColor(j.delta ?? 0)}">${j.note}/10</span>`
-                  : '<span class="faint">non notée</span>'}
-                <span class="faint">${j.mots.map(esc).join(' · ')}</span>
-              </div>
-              <p class="cntexte">${highlight(j.extrait, j.mots)}…</p>
-            </div>`).join('')}
-          </div>
-          ${T.jours.length > 40 ? `<p class="sub" style="margin:12px 0 0">40 des ${T.jours.length} affichées.</p>` : ''}
-        </div>
-      </div>
-
-      <div class="mcol">
-        <div class="card">
-          <h2>Dans ton carnet</h2>
-          ${T.notes.length
-            ? `<p class="sub" title="Elles n'entrent dans aucun chiffre de cette page : elles sont là parce qu'elles contiennent un de ces mots.">${T.notes.length} sur ${T.carnetTotal}</p>
-               <div class="cnliste">${T.notes.map(n => carnetItemMarkup(n)).join('')}</div>`
-            : `<p class="sub" style="margin:0">Aucune note de ton carnet ne contient un de ces mots.</p>`}
-        </div>
-
-        ${T.liens.length ? `<div class="card">
-          <h2>Ce qui revient avec</h2>
-          ${T.liens.map(l => `<p class="fait"><b>${esc(l.a)}</b> · <b>${esc(l.b)}</b> —
-            ${l.n ?? '?'} journées ensemble <span class="muted">(sur ${l.ja} et ${l.jb})</span></p>`).join('')}
-        </div>` : ''}
-      </div>
-    </div>`;
-
-  $('#view').onclick = async e => {
-    if (e.target.closest('[data-retour]')) { REMQ_MODE = 'global'; REMQ_THEME = null; return renderCarte(); }
-    const dcn = e.target.closest('[data-delcn]');
-    if (dcn) {
-      await api('/api/carnet', { delete: Number(dcn.dataset.delcn) });
-      toast('Note retirée');
-      return renderTheme();
-    }
-    const g = e.target.closest('[data-goto]');
-    if (g) { view = 'mirror'; syncNav(); return renderMirror(g.dataset.goto); }
-  };
-}
-
-function monterCarte() {
-  const cv = $('#carteCv');
-  const tip = $('#carteTip');
-  if (!cv || !CARTE) return;
-  const ctx = cv.getContext('2d');
-
-  const redimensionner = () => {
-    const r = cv.parentElement.getBoundingClientRect();
-    const dpr = Math.min(devicePixelRatio || 1, 2);
-    cv.width = Math.round(r.width * dpr);
-    cv.height = Math.round(r.height * dpr);
-    cv.style.width = r.width + 'px';
-    cv.style.height = r.height + 'px';
-    // La disposition est recalculée à chaque taille : les forces dépendent du
-    // cadre, et une carte simplement étirée se lit mal.
-    CARTE_DISPO = disposer(CARTE, r.width, r.height);
-    dessiner(ctx, CARTE, CARTE_DISPO, { largeur: r.width, hauteur: r.height, survol: CARTE_SURVOL, dpr });
-  };
-  redimensionner();
-
-  cv.onmousemove = e => {
-    const r = cv.getBoundingClientRect();
-    const i = auPoint(CARTE_DISPO.pts, CARTE, e.clientX - r.left, e.clientY - r.top);
-    if (i !== CARTE_SURVOL) {
-      CARTE_SURVOL = i;
-      const dpr = Math.min(devicePixelRatio || 1, 2);
-      dessiner(ctx, CARTE, CARTE_DISPO, { largeur: r.width, hauteur: r.height, survol: i, dpr });
-    }
-    if (i >= 0) {
-      const nd = CARTE.noeuds[i];
-      tip.innerHTML = `<b>${esc(nd.mot)}</b><br>${nd.jours} journées`
-        + (nd.note !== null ? ` · moyenne <b class="mono">${nd.note}</b>` : '')
-        + (nd.ecart !== null && Math.abs(nd.ecart) >= 0.3
-            ? `<br><span class="faint">${nd.ecart > 0 ? '+' : ''}${nd.ecart} par rapport à ta moyenne</span>` : '')
-        + `<br><span class="faint">clique pour ouvrir le Miroir</span>`;
-      tip.hidden = false;
-      tip.style.left = Math.min(r.width - 190, CARTE_DISPO.pts[i].x + 14) + 'px';
-      tip.style.top = (CARTE_DISPO.pts[i].y + 14) + 'px';
-      cv.style.cursor = 'pointer';
-    } else { tip.hidden = true; cv.style.cursor = 'default'; }
-  };
-  cv.onmouseleave = () => { tip.hidden = true; };
-
-  cv.onclick = () => {
-    if (CARTE_SURVOL < 0) return;
-    const d = CARTE.noeuds[CARTE_SURVOL].dates?.slice(-1)[0];
-    if (d) { MIRROR_DATE = d; go('mirror'); }
-  };
-
-  addEventListener('resize', redimensionner, { passive: true });
-
-  $('#view').onclick = async e => {
-    const b = e.target.closest('[data-fen]');
-    if (b) { CARTE_FENETRE = b.dataset.fen; CARTE_SURVOL = -1; return renderCarte(); }
-    const md = e.target.closest('[data-mode]');
-    if (md) {
-      REMQ_MODE = md.dataset.mode;
-      CARTE_SURVOL = -1;
-      // « explorer un theme » sans theme choisi : on ouvre le plus dense.
-      if (REMQ_MODE === 'theme' && !REMQ_THEME && CARTE?.amas?.length) {
-        REMQ_THEME = { id: CARTE.amas[0].id, nom: CARTE.amas[0].nom };
-      }
-      return renderCarte();
-    }
-    const th = e.target.closest('[data-theme]');
-    if (th) {
-      REMQ_MODE = 'theme';
-      REMQ_THEME = { id: Number(th.dataset.theme), nom: th.dataset.nom ?? '' };
-      return renderCarte();
-    }
-    const dcn = e.target.closest('[data-delcn]');
-    if (dcn) { await api('/api/carnet', { delete: Number(dcn.dataset.delcn) }); toast('Note retirée'); return renderCarte(); }
-    const gto = e.target.closest('.cndate[data-goto]');
-    if (gto) { view = 'mirror'; syncNav(); return renderMirror(gto.dataset.goto); }
-  };
-}
 
 /* ============================= vue : réglages ============================= */
 
@@ -2643,7 +2295,7 @@ async function renderSettings() {
       try {
         const r = await api('/api/wipe', { portee, confirm: mot.value.trim() });
         S = await api('/api/state');
-        SERIES = null; ECHOES = { items: [], textCount: 0 };
+        SERIES = null;
         syncHeader();
         renderSettings();
         const n = Object.values(r.compte).reduce((a, b) => a + b, 0);
@@ -2983,13 +2635,12 @@ function drawNotesPreview(p) {
 
 const VIEWS = {
   tonight: renderTonight,
-  carte: renderCarte,
   year: () => renderYear(),
   mirror: () => renderMirror(),
   settings: renderSettings
 };
 
-const NOM_VUE = { tonight: 'Parler', year: 'Année', mirror: 'Miroir', carte: 'Ce que je remarque', settings: 'Réglages' };
+const NOM_VUE = { tonight: 'Parler', year: 'Année', mirror: 'Ma carte', settings: 'Réglages' };
 
 function syncNav() {
   for (const b of document.querySelectorAll('nav button')) {

@@ -219,7 +219,24 @@ est une information.
 
 LES LIENS
 Quand deux thèmes vont ensemble chez lui — l'un précède l'autre, l'un nourrit l'autre — tu
-le dis dans « liens ». C'est ce qui fait la carte.
+le dis dans « liens ».
+
+SA CARTE
+En plus des thèmes, tu rends une carte : les CHOSES de sa vie qui reviennent, et ce qui les
+relie. Des personnes, des lieux, un travail, une activité, une période, une sensation du
+corps, un mécanisme. Pas des mots — des choses. « Léa », « les nuits courtes », « le
+dimanche soir », « l'appartement de Lyon ».
+
+Ce qui fait la carte n'est pas la liste des nœuds, c'est ce qui les relie. Un lien dit
+COMMENT, en deux ou trois mots, dans un sens : « précède », « fait retomber », « le seul
+moment où ça tient », « revient dès qu'il est seul ». Un lien qui dirait seulement « lié à »
+n'apprend rien et ne vaut pas la peine d'être tracé.
+
+Tu ne relies que ce que tu as vu se produire ensemble chez LUI. Deux choses qui vont
+souvent ensemble en général ne sont pas un lien : c'est une généralité, et il en a déjà
+entendu assez.
+
+Huit à seize nœuds. En dessous ce n'est pas une carte ; au-dessus on n'y lit plus rien.
 
 COMBIEN
 Trois à six thèmes. Deux, c'est que tu n'as pas cherché ; huit, c'est que tu as découpé le
@@ -279,11 +296,46 @@ const OUTIL = {
           },
           required: ['nom', 'quoi', 'intensite', 'serie', 'preuves']
         }
+      },
+      carte: {
+        type: 'object',
+        description: 'Les choses de sa vie qui reviennent, et ce qui les relie.',
+        properties: {
+          noeuds: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                nom:   { type: 'string', description: 'Un à trois mots. Une chose, pas un mot : « Léa », « les nuits courtes », « le dimanche soir ».' },
+                genre: { type: 'string', description: 'personne | lieu | travail | corps | mecanisme | periode | activite.' },
+                poids: { type: 'integer', description: '0 à 3 : à quel point cette chose occupe de la place chez lui.' }
+              },
+              required: ['nom', 'genre', 'poids']
+            }
+          },
+          liens: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                de:    { type: 'string', description: 'Le nom d\'un nœud de la carte.' },
+                vers:  { type: 'string', description: 'Le nom d\'un autre nœud.' },
+                quoi:  { type: 'string', description: 'COMMENT, en deux ou trois mots, dans ce sens-là : « précède », « fait retomber », « le seul moment où ça tient ».' },
+                force: { type: 'integer', description: '1 discret, 2 net, 3 constant.' }
+              },
+              required: ['de', 'vers', 'quoi', 'force']
+            }
+          }
+        },
+        required: ['noeuds', 'liens']
       }
     },
-    required: ['synthese', 'themes']
+    required: ['synthese', 'themes', 'carte']
   }
 };
+
+/** Les genres reconnus. Un genre inconnu retombe sur « activite ». */
+export const GENRES = ['personne', 'lieu', 'travail', 'corps', 'mecanisme', 'periode', 'activite'];
 
 /* ------------------------------ la validation ------------------------------ */
 
@@ -328,7 +380,52 @@ export function valider(brut, dates) {
     t.liens = [...new Set((src?.liens ?? []).map(l => texte(l, 40).toLowerCase()))]
       .filter(l => l !== t.nom && noms.has(l)).slice(0, 4);
   }
-  return { synthese: texte(brut?.synthese, 700), themes };
+  return { synthese: texte(brut?.synthese, 700), themes, carte: validerCarte(brut?.carte) };
+}
+
+/**
+ * La carte : des choses, et ce qui les relie.
+ *
+ * Un lien vers un noeud qui n'existe pas dessine un trait qui part dans le vide
+ * -- le meme defaut que les liens entre themes, et il se produit exactement de
+ * la meme facon : le modele nomme un noeud dans un lien puis l'oublie dans la
+ * liste. Les aretes sont donc resolues APRES les noeuds, et jetees sinon.
+ *
+ * Un lien sans « quoi » est jete aussi : ce qui fait une carte n'est pas la
+ * liste des noeuds, c'est ce qui les relie. « lie a » n'apprend rien.
+ */
+export function validerCarte(brut) {
+  const vus = new Map();
+  for (const n of (brut?.noeuds ?? []).slice(0, 20)) {
+    const nom = texte(n?.nom, 40);
+    if (!nom || vus.has(nom.toLowerCase())) continue;
+    vus.set(nom.toLowerCase(), {
+      nom,
+      genre: GENRES.includes(String(n?.genre)) ? String(n.genre) : 'activite',
+      poids: borne(Math.round(n?.poids), 0, 3)
+    });
+  }
+  const noeuds = [...vus.values()];
+
+  const arretes = new Map();
+  for (const l of (brut?.liens ?? []).slice(0, 40)) {
+    const de = texte(l?.de, 40).toLowerCase();
+    const vers = texte(l?.vers, 40).toLowerCase();
+    const quoi = texte(l?.quoi, 60);
+    if (!quoi || de === vers || !vus.has(de) || !vus.has(vers)) continue;
+    // Un seul lien par paire : deux traits entre les memes deux choses se
+    // superposent et le second est invisible, avec son libelle.
+    const cle = [de, vers].sort().join('|');
+    if (arretes.has(cle)) continue;
+    arretes.set(cle, {
+      de: vus.get(de).nom, vers: vus.get(vers).nom,
+      quoi, force: borne(Math.round(l?.force), 1, 3)
+    });
+  }
+  // Un noeud sans aucun lien n'est pas sur la carte : il flotte, et la carte
+  // n'est faite que de ce qui se relie.
+  const relies = new Set([...arretes.values()].flatMap(l => [l.de, l.vers]));
+  return { noeuds: noeuds.filter(n => relies.has(n.nom)), liens: [...arretes.values()] };
 }
 
 /* ------------------------------ l'appel ------------------------------ */

@@ -25,7 +25,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, resolveKey, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
+import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -61,7 +61,12 @@ function series(userId = OWNER) {
  * Uniquement du TEXTE : jamais les statistiques, jamais les episodes. Le
  * compagnon n'a pas a connaitre les chiffres -- c'est le Miroir qui les montre.
  */
-export function recentMemory(date, userId = OWNER) {
+/**
+ * @param {string} date
+ * @param {string} userId
+ * @param {string|null} texte  ce qu'il vient d'ecrire, pour y chercher des echos
+ */
+export function recentMemory(date, userId = OWNER, texte = null) {
   const s = getSettings(userId);
   const days = Number(s.memoryDays ?? 0);
 
@@ -109,6 +114,33 @@ export function recentMemory(date, userId = OWNER) {
   if (days && s.carnetMemoire !== false) {
     const c = carnetBlock(series(userId).carnet);
     if (c) morceaux.push(c);
+  }
+
+  /*
+   * Les echos : ce qu'il a deja ecrit de tres proche de ce qu'il vient de dire.
+   *
+   * Sous le MEME `if (days)` que les journees, et pour la meme raison : a
+   * memoire zero, l'interface promet qu'il ne connait que la conversation du
+   * jour, et lui passer trois journees de 2023 par une autre porte ferait de
+   * cette promesse un mensonge.
+   *
+   * Le seuil est celui de l'ancien panneau, a l'identique -- score > 0.6 ET au
+   * moins un mot saillant. C'est ce qui fait que le bloc est absent la plupart
+   * du temps : present a chaque tour, il deviendrait du bruit, et le compagnon
+   * finirait par le citer pour meubler.
+   */
+  if (days && texte && String(texte).trim().length >= 12) {
+    const { index, rows, byDate, textCount } = series(userId);
+    if (textCount >= 2) {
+      const hits = search(index, String(texte), { limit: 3, exclude: new Set([date]) })
+        .filter(h => h.score > 0.6 && h.forts.length);
+      const bloc = echoBlock(hits.map(h => ({
+        date: h.id,
+        note: byDate.get(h.id)?.note ?? null,
+        text: rows.find(r => r.date === h.id)?.text ?? ''
+      })).filter(h => h.text.trim()));
+      if (bloc) morceaux.push(bloc);
+    }
   }
 
   const note = presenceNote(presence(userId));
@@ -216,7 +248,7 @@ export const routes = {
     invalidate(userId);
 
     const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text }));
-    const r = await reply(history, getSettings(userId), { memory: recentMemory(date, userId) });
+    const r = await reply(history, getSettings(userId), { memory: recentMemory(date, userId, text) });
     if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
 
     addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
@@ -382,29 +414,7 @@ export const routes = {
              carnet: carnetDuJour(date, userId) };
   },
 
-  /**
-   * Echos : les entrees passees proches de ce qui est en train d'etre ecrit.
-   * Appele pendant la saisie, pas sur une action de recherche -- SPEC 2.2.
-   * Chercher est une corvee ; se voir rappeler ses propres mots ne l'est pas.
-   */
-  'POST /api/echoes': ({ body, userId }) => {
-    const { index, rows, byDate, series: ser, textCount } = series(userId);
-    const text = String(body.text ?? '').trim();
-    const exclude = new Set([body.date ?? today()]);
-    if (text.length < 12 || textCount < 2) return { items: [], textCount };
-    const hits = search(index, text, { limit: Number(body.limit ?? 3), exclude });
-    return {
-      textCount,
-      items: hits.filter(h => h.score > 0.6 && h.forts.length).map(h => ({
-        date: h.id, score: h.score, terms: h.terms, forts: h.forts,
-        note: byDate.get(h.id)?.note ?? null,
-        text: rows.find(r => r.date === h.id)?.text ?? '',
-        band: followUp(ser, h.id, 14)
-      }))
-    };
-  },
-
-  'GET /api/search': ({ query, userId }) => {
+    'GET /api/search': ({ query, userId }) => {
     const { index, rows, byDate, series: ser } = series(userId);
     const q = String(query.q ?? '').trim();
     if (!q) return { items: [], query: q };
@@ -851,9 +861,21 @@ export const routes = {
      * Le seuil suit la fenetre : sur trente jours, une semaine de plus est un
      * quart du corpus ; sur quatre ans, elle ne change rien.
      */
-    const retard = l?.jusqu_au
+    /*
+     * Le retard compte les journees ecrites ET les notes apportees depuis.
+     *
+     * Coller trois ans de carnet est l'evenement qui change le plus une carte,
+     * et c'est exactement celui qui ne comptait pas : une note rangee n'est pas
+     * une journee (c'est tout l'invariant du carnet), donc elle ne bougeait pas
+     * le retard, donc la carte restait celle d'avant.
+     *
+     * Elles se comptent par leur date d'APPORT, pas par le jour dont elles
+     * parlent : un souvenir de 1998 apporte ce soir est nouveau ce soir.
+     */
+    const notes = carnetRecent(l?.fait_le, userId);
+    const retard = (l?.jusqu_au
       ? ecrites.filter(r => r.date > l.jusqu_au).length
-      : ecrites.length;
+      : ecrites.length) + notes;
     const SEUIL = { court: 3, moyen: 14, long: 30 }[horizon] ?? 14;
     return {
       horizon,
@@ -866,6 +888,7 @@ export const routes = {
       minimum: LECTURE_MIN,
       ecrites: ecrites.length,
       retard,
+      notes,
       perime: !!l && retard > 0,
       // Ce qui declenche une relecture sans qu'on la demande.
       arelire: !l || retard >= SEUIL,
@@ -1058,6 +1081,10 @@ function deplacements(rows, anchors, carnet, t) {
  */
 const ISO_JOUR = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Les notes apportees depuis un instant donne, par leur date d'apport. */
+const carnetRecent = (depuis, userId) =>
+  depuis ? allCarnet(userId).filter(c => c.cree_le > depuis).length : allCarnet(userId).length;
+
 /**
  * Les reperes, decores de leur theme.
  *
@@ -1098,7 +1125,8 @@ export async function streamMessage(body, send, userId = OWNER) {
 
   const before = usageFor(userId);
   const r = await reply(history, settings, {
-    memory: recentMemory(date, userId),
+    // le texte du message en cours : c'est lui qui declenche les echos
+    memory: recentMemory(date, userId, text),
     onText: chunk => send('delta', { text: chunk }),
     exhausted: before.exhausted,
     outils: outilsPour(userId, messageId, send)
@@ -1226,6 +1254,28 @@ export function outilsPour(userId, messageId, send = () => {}) {
       const fait = { type: 'objectif', nouveau: false, ...o };
       send('geste', fait);
       return { message: tenu ? `« ${o.quoi} » repart du ${d}.` : `« ${o.quoi} » marqué rompu.`, fait };
+    },
+
+    /*
+     * Chercher dans ses journees. C'est la meme recherche que les echos, mais
+     * declenchee par le compagnon plutot que par le message en cours : elle sert
+     * quand la conversation touche a quelque chose d'ancien que le message seul
+     * ne peut pas retrouver.
+     */
+    chercher_journees: ({ mot }) => {
+      const m = String(mot ?? '').trim();
+      if (m.length < 2 || m.length > 40) return { erreur: 'Donne un ou deux mots, entre 2 et 40 caractères.' };
+      const { index, rows, byDate } = series(userId);
+      const hits = search(index, m, { limit: 5 });
+      const lignes = hits.map(h => {
+        const r = rows.find(x => x.date === h.id);
+        if (!r?.text?.trim()) return null;
+        const t = r.text.length > ECHO_CAR ? r.text.slice(0, ECHO_CAR) + '… (coupée)' : r.text;
+        const n = byDate.get(h.id)?.note;
+        return `[le ${h.id}${n !== null && n !== undefined ? ` · ${n}/10` : ''}] ${t}`;
+      }).filter(Boolean);
+      if (!lignes.length) return { message: `Rien dans ses journées sur « ${m} ».` };
+      return { message: `${lignes.length} journée(s) sur « ${m} » :\n${lignes.join('\n')}` };
     },
 
     /*

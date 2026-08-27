@@ -283,6 +283,50 @@ ${derniers.join('\n')}`;
 }
 
 /**
+ * Ce qu'il a deja ecrit de tres proche de ce qu'il vient de dire.
+ *
+ * C'EST L'ANCIEN PANNEAU DE « PARLER », DEPLACE.
+ *
+ * Il cherchait pendant la frappe et posait les journees ressemblantes sous le
+ * composeur. C'etait juste, et c'etait au mauvais endroit : on raconte sa
+ * soiree, et l'application repond « tu as deja ecrit ca » avec les dates. La
+ * remarque est vraie et personne ne l'a demandee.
+ *
+ * La meme recherche, au meme seuil, arrive maintenant ici. Le compagnon
+ * l'a en tete ; c'est lui qui decide s'il la rend, et quand.
+ *
+ * Le SEUIL compte plus que le contenu : on ne passe que des journees ou c'est
+ * la MEME chose, pas des journees qui se ressemblent vaguement. Un bloc present
+ * a chaque tour deviendrait du bruit, et le compagnon finirait par le citer
+ * pour meubler.
+ */
+export const ECHO_CAR = 400;
+
+export function echoBlock(hits) {
+  if (!hits?.length) return null;
+  const lignes = hits.map(h => {
+    const t = neutraliser(h.text ?? '').trim();
+    return `[le ${h.date}${h.note !== null && h.note !== undefined ? ` · ${h.note}/10` : ''}] ${
+      t.length > ECHO_CAR ? t.slice(0, ECHO_CAR) + '… (coupée)' : t}`;
+  });
+  return `Il a déjà écrit ceci, et c'est très proche de ce qu'il vient de dire. Ce ne sont
+pas des journées qui se ressemblent vaguement : c'est la même chose.
+
+Tu ne les récites pas. La plupart du temps tu ne les mentionnes même pas — les avoir en
+tête suffit à ne pas lui faire raconter deux fois la même chose comme si tu la découvrais.
+
+Tu les lui rends quand ça LUI sert : quand il dit que ça n'arrive jamais, quand il croit
+que c'est la première fois, quand il cherche ce qui avait marché la dernière fois. Alors tu
+donnes la date et ses mots à lui, jamais ton résumé.
+
+Ce que tu ne fais jamais : t'en servir pour prouver quelque chose, ou pour lui montrer
+qu'il se répète. « Tu m'as déjà dit ça » sans autre raison que de le signaler est un
+reproche, et l'application ne lui en fait aucun.
+
+${lignes.join('\n\n')}`;
+}
+
+/**
  * Les objectifs, avec leur identifiant et l'etat de la serie.
  *
  * On donne le nombre de jours calcule, pas seulement la date : « tenu depuis
@@ -780,6 +824,25 @@ lire combien de temps ca avait tenu.`,
         date: { type: 'string', description: 'AAAA-MM-JJ du jour ou ca s\'est passe. Omets si c\'est aujourd\'hui.' }
       },
       required: ['id', 'tenu']
+    }
+  },
+
+  chercher_journees: {
+    description: `Cherche dans ses journees ecrites. Un ou deux mots. Rend au plus cinq journees,
+avec leur date, leur note et ce qu'il a ecrit ce jour-la.
+
+Tu t'en sers quand la conversation en cours y touche : il te demande quand c'etait la
+derniere fois, il dit que ca n'arrive jamais, il cherche ce qui avait marche. Tu ne t'en sers
+pas pour lancer un sujet, ni pour verifier ce qu'il raconte -- fouiller le passe de quelqu'un
+pendant qu'il parle pour voir s'il dit vrai n'est pas une conversation.
+
+Ce que tu trouves, tu le lui rends dans SES mots, avec la date. Jamais un resume.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        mot: { type: 'string', description: 'Un ou deux mots, entre 2 et 40 caracteres.' }
+      },
+      required: ['mot']
     }
   },
 
