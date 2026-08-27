@@ -1,5 +1,6 @@
 import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
+import { disposer, dessiner, auPoint } from './carte.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -467,9 +468,9 @@ function drawEchoes() {
       <div class="hd">
         <span class="d">${fmtDay(it.date)}</span>
         <span class="pill" style="background:rgba(${noteScaleRGB(it.note ?? 5)},.2);color:rgb(${noteScaleRGB(it.note ?? 5)});border-color:transparent">${it.note ?? '—'}/10</span>
-        <span class="faint" style="font-size:11.5px">${it.terms.map(esc).join(' · ')}</span>
+        <span class="faint" style="font-size:11.5px">${termesMarkup(it)}</span>
       </div>
-      <p class="q">${highlight(it.text.slice(0, 240), it.terms)}${it.text.length > 240 ? '…' : ''}</p>
+      <p class="q">${highlight(it.text.slice(0, 240), it.terms, it.forts)}${it.text.length > 240 ? '…' : ''}</p>
       ${bandMarkup(it.band)}
     </div>`).join('')}
   </div>`;
@@ -667,14 +668,75 @@ function gridMarkup(grid) {
 
 let MIRROR_DATE = null;
 
-/** Surligne les termes qui ont fait matcher. Montrer POURQUOI ca ressort. */
-function highlight(text, terms = []) {
-  let out = esc(text);
-  for (const t of terms) {
-    const re = new RegExp(`(^|[^a-zà-ÿ])(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[a-zà-ÿ]*)`, 'gi');
-    out = out.replace(re, '$1<mark>$2</mark>');
+/**
+ * Surligne les termes qui ont fait matcher. Montrer POURQUOI ca ressort.
+ *
+ * Deux pieges, tous deux visibles a l'oeil sur un journal francais :
+ *
+ *  - Les termes arrivent normalises (sans accent) et le texte, lui, en a. Une
+ *    recherche litterale de « fatigue » ne trouve jamais « fatigué » -- et
+ *    « fatigué » est precisement le genre de mot qu'on veut voir surligne. On
+ *    cherche donc sur une copie aplatie de meme longueur, et on decoupe le
+ *    texte d'origine aux positions trouvees.
+ *  - Certains termes sont des expressions (« me_faire_du_mal »). On les
+ *    surligne entieres : dans « envie de me faire du mal », designer « envie »
+ *    designe la mauvaise moitie de la phrase.
+ *
+ * `forts` sont les termes qui nomment un etat ou un mecanisme plutot qu'une
+ * circonstance ; ils recoivent un surlignage plus appuye.
+ */
+function aplat(s) {
+  // Longueur preservee : une unite entre, une unite sort. Les index restent
+  // valides sur le texte d'origine.
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const d = s[i].normalize('NFD').replace(/[̀-ͯ]/g, '');
+    out += d.length === 1 ? d : s[i];
   }
   return out;
+}
+
+const echapRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function highlight(text, terms = [], forts = []) {
+  if (!terms.length) return esc(text);
+  const fort = new Set(forts);
+  const plat = aplat(text);
+  const spans = [];
+
+  // Les plus longs d'abord : une expression doit gagner contre ses morceaux.
+  const ordre = [...new Set(terms)].sort((a, b) => b.length - a.length);
+  for (const t of ordre) {
+    const parts = t.split('_').map(w => echapRe(w) + '[a-z0-9]*');
+    const re = new RegExp(`(?<![a-z0-9])(${parts.join('[^a-z0-9]+')})`, 'gi');
+    let m;
+    while ((m = re.exec(plat)) !== null) {
+      const a = m.index, b = a + m[1].length;
+      if (spans.some(s => a < s.b && b > s.a)) continue;   // pas de chevauchement
+      spans.push({ a, b, fort: fort.has(t) });
+    }
+  }
+  if (!spans.length) return esc(text);
+
+  spans.sort((x, y) => x.a - y.a);
+  let out = '', cur = 0;
+  for (const s of spans) {
+    out += esc(text.slice(cur, s.a));
+    out += `<mark${s.fort ? ' class="fort"' : ''}>${esc(text.slice(s.a, s.b))}</mark>`;
+    cur = s.b;
+  }
+  return out + esc(text.slice(cur));
+}
+
+/** « me_faire_du_mal » se lit « me faire du mal ». */
+const motLisible = t => String(t).replace(/_/g, ' ');
+
+/** L'etiquette « voici pourquoi ca ressort », les mots qui pesent en tete. */
+function termesMarkup(it) {
+  const fort = new Set(it.forts ?? []);
+  return (it.terms ?? [])
+    .map(t => `<span class="${fort.has(t) ? 'tfort' : ''}">${esc(motLisible(t))}</span>`)
+    .join(' · ');
 }
 
 async function renderMirror(date) {
@@ -765,14 +827,16 @@ async function renderMirror(date) {
   if (sim?.items?.length) {
     simCard = `<div class="card">
       <h2>${sim.mode === 'text' ? 'Tu as déjà écrit ça' : 'Les autres fois à ' + m.note + '/10'}</h2>
-      ${sim.mode === 'text' ? '' : `<p class="sub">Comparaison sur les notes, pas sur les mots.</p>`}
+      ${sim.mode === 'text' ? '' : `<p class="sub">${sim.reason === 'no_theme'
+        ? "Rien de commun dans les mots aujourd'hui. Comparaison sur les notes."
+        : 'Comparaison sur les notes, pas sur les mots.'}</p>`}
       ${sim.items.map(it => `<div class="simitem">
         <div class="hd">
           <span class="d">${fmtDay(it.date)}</span>
           <span class="pill">${it.note}/10</span>
-          ${it.terms?.length ? `<span class="faint" style="font-size:11.5px">${it.terms.map(esc).join(' · ')}</span>` : ''}
+          ${it.terms?.length ? `<span class="faint" style="font-size:11.5px">${termesMarkup(it)}</span>` : ''}
         </div>
-        ${it.text ? `<p class="q">${highlight(it.text.slice(0, 260), it.terms)}${it.text.length > 260 ? '…' : ''}</p>` : ''}
+        ${it.text ? `<p class="q">${highlight(it.text.slice(0, 260), it.terms, it.forts)}${it.text.length > 260 ? '…' : ''}</p>` : ''}
         ${bandMarkup(it.band)}
       </div>`).join('')}
     </div>`;
@@ -794,8 +858,9 @@ async function renderMirror(date) {
         <div class="card dayread">
           <div class="dayhead">
             <div>
-              <div class="k faint">${fmtDay(date)}</div>
-              <div class="bignum" style="color:${m.note !== null ? deltaColor(m.delta) : 'var(--ink-faint)'}">
+              <div class="k faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</div>
+              <div class="bignum${m.note !== null ? ' noted' : ''}"
+                   style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
                 ${m.note ?? '—'}<span class="sl">/10</span>
               </div>
             </div>
@@ -854,18 +919,23 @@ function calendarMarkup(m, date) {
       <button data-goto="${moisPrec}" aria-label="Mois précédent">‹</button>
       <span class="calmois">${esc(nom)}</span>
       <button data-goto="${moisSuiv}" ${suivDispo ? '' : 'disabled'} aria-label="Mois suivant">›</button>
-      ${date !== S.today ? `<button class="calnow" data-goto="${S.today}">aujourd'hui</button>` : ''}
+      <button class="calnow" data-goto="${S.today}" ${date === S.today ? 'disabled' : ''}>aujourd'hui</button>
     </div>
     <div class="calgrid">
       ${JOURS_COURT.map(j => `<span class="cald">${j}</span>`).join('')}
       ${'<span></span>'.repeat(premier)}
       ${cases.map(c => {
         const sel = c.date === date;
+        // Deux reperes distincts, et c'est volontaire : « on » dit ou on
+        // regarde, « auj » dit ou on est. Les confondre fait perdre le nord des
+        // qu'on s'eloigne de quelques jours -- on ne sait plus si le cadre
+        // blanc est la date du jour ou celle qu'on a ouverte.
+        const auj = c.date === S.today;
         const futur = c.date > S.today;
         const fond = c.note !== null ? `background:${deltaColor(c.delta ?? 0)}` : '';
-        return `<button class="calcase${sel ? ' on' : ''}${c.note === null ? ' vide' : ''}${c.texte ? ' texte' : ''}"
+        return `<button class="calcase${sel ? ' on' : ''}${auj ? ' auj' : ''}${c.note === null ? ' vide' : ''}${c.texte ? ' texte' : ''}"
           data-goto="${c.date}" ${futur ? 'disabled' : ''} style="${fond}"
-          data-tip="${esc(fmtDay(c.date))}${c.note !== null ? ` · ${c.note}/10` : ' · non notée'}"
+          data-tip="${esc(fmtDay(c.date))}${auj ? " · aujourd'hui" : ''}${c.note !== null ? ` · ${c.note}/10` : ' · non notée'}"
           >${Number(c.date.slice(-2))}</button>`;
       }).join('')}
     </div>
@@ -893,6 +963,160 @@ function wireMirror() {
         toast('Journée effacée');
       } catch (err) { toast(err.message); }
     }
+  };
+}
+
+/* ============================= vue : carte =============================
+
+   Ce que quatre ans de journal contiennent et qu'aucune courbe ne montre : ce
+   dont on parle, et ce qui revient avec quoi. Rien n'est généré — on compte des
+   mots déjà écrits, on les colore par les notes déjà posées.            */
+
+let CARTE_FENETRE = 'tout';
+let CARTE = null, CARTE_DISPO = null, CARTE_SURVOL = -1;
+
+async function renderCarte() {
+  const G = await api(`/api/graph?fenetre=${CARTE_FENETRE}`);
+
+  if (G.floored) {
+    $('#view').innerHTML = `
+      <div class="card floorbox">
+        <h2>Pas de carte aujourd'hui</h2>
+        <p class="sub" style="color:#c9a19b">
+          Tu as noté ${G.floor.note ?? ''}/10. En dessous de ${G.floor.threshold}, cet outil ne sort
+          aucune statistique — et une carte en est une. Une très jolie, ce qui la rend plus
+          dangereuse qu'un chiffre, pas moins.
+        </p>
+        <div class="helpline">
+          Si tu as besoin de parler à quelqu'un maintenant : <b>3114</b>, gratuit, 24h/24, partout en France.
+        </div>
+      </div>`;
+    return;
+  }
+
+  const choix = [['30', '30 j'], ['90', '90 j'], ['365', '1 an'], ['tout', 'tout']]
+    .map(([v, l]) => `<button data-fen="${v}" aria-pressed="${CARTE_FENETRE === v}">${l}</button>`).join('');
+
+  if (!G.assez) {
+    $('#view').innerHTML = `
+      <div class="card">
+        <div class="cardhead"><h2>Carte de tes mots</h2>
+          <div class="centerpick" style="margin-left:auto">${choix}</div></div>
+        <p class="sub">
+          ${G.jours} journée${G.jours > 1 ? 's' : ''} écrite${G.jours > 1 ? 's' : ''} sur cette période.
+          Il en faut au moins ${G.minimum} pour qu'un mot qui revient veuille dire quelque chose —
+          en dessous, ce ne sont que des mots isolés.
+        </p>
+      </div>`;
+    $('#view').onclick = e => {
+      const b = e.target.closest('[data-fen]');
+      if (b) { CARTE_FENETRE = b.dataset.fen; renderCarte(); }
+    };
+    return;
+  }
+
+  CARTE = G;
+  $('#view').innerHTML = `
+    <div class="carte">
+      <div class="card cartebox">
+        <div class="cardhead">
+          <h2>Carte de tes mots</h2>
+          <span class="sub" style="margin:0">${G.jours} journées écrites · ${G.noeuds.length} mots qui reviennent</span>
+          <div class="centerpick" style="margin-left:auto">${choix}</div>
+        </div>
+        <div class="cartewrap"><canvas id="carteCv"></canvas>
+          <div class="cartetip" id="carteTip" hidden></div>
+        </div>
+        <p class="sub cartelegende">
+          La taille dit combien de journées portent ce mot. La couleur est celle de leur note,
+          sur la même échelle que la grille. Un anneau marque tes repères d'étalonnage.
+        </p>
+      </div>
+
+      <div class="mcol">
+        <div class="card">
+          <h2>Ce qui revient</h2>
+          ${G.faits.length
+            ? G.faits.map(f => `<p class="fait">${esc(f.texte)}</p>`).join('')
+            : `<p class="sub" style="margin:0">Rien qui ressorte assez nettement pour être compté.</p>`}
+          <p class="sub" style="margin:14px 0 0;font-size:11.5px">
+            Des comptes sur tes propres journées, rien de plus. L'application ne dit pas ce
+            qu'ils veulent dire — le lien, c'est toi qui le fais.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>Les groupes</h2>
+          <div class="amaslist">
+            ${G.amas.filter(a => a.taille >= 2).map(a => `
+              <div class="amasrow">
+                <span class="pastille" style="background:${a.note !== null ? deltaColor(a.note - G.moyenneGlobale) : 'var(--line)'}"></span>
+                <b>${esc(a.nom)}</b>
+                <span class="muted">${a.taille} mots</span>
+                <span class="mono muted" style="margin-left:auto">${a.note !== null ? a.note : '—'}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  monterCarte();
+}
+
+function monterCarte() {
+  const cv = $('#carteCv');
+  const tip = $('#carteTip');
+  if (!cv || !CARTE) return;
+  const ctx = cv.getContext('2d');
+
+  const redimensionner = () => {
+    const r = cv.parentElement.getBoundingClientRect();
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    cv.width = Math.round(r.width * dpr);
+    cv.height = Math.round(r.height * dpr);
+    cv.style.width = r.width + 'px';
+    cv.style.height = r.height + 'px';
+    // La disposition est recalculée à chaque taille : les forces dépendent du
+    // cadre, et une carte simplement étirée se lit mal.
+    CARTE_DISPO = disposer(CARTE, r.width, r.height);
+    dessiner(ctx, CARTE, CARTE_DISPO, { largeur: r.width, hauteur: r.height, survol: CARTE_SURVOL, dpr });
+  };
+  redimensionner();
+
+  cv.onmousemove = e => {
+    const r = cv.getBoundingClientRect();
+    const i = auPoint(CARTE_DISPO.pts, CARTE, e.clientX - r.left, e.clientY - r.top);
+    if (i !== CARTE_SURVOL) {
+      CARTE_SURVOL = i;
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      dessiner(ctx, CARTE, CARTE_DISPO, { largeur: r.width, hauteur: r.height, survol: i, dpr });
+    }
+    if (i >= 0) {
+      const nd = CARTE.noeuds[i];
+      tip.innerHTML = `<b>${esc(nd.mot)}</b><br>${nd.jours} journées`
+        + (nd.note !== null ? ` · moyenne <b class="mono">${nd.note}</b>` : '')
+        + (nd.ecart !== null && Math.abs(nd.ecart) >= 0.3
+            ? `<br><span class="faint">${nd.ecart > 0 ? '+' : ''}${nd.ecart} par rapport à ta moyenne</span>` : '')
+        + `<br><span class="faint">clique pour ouvrir le Miroir</span>`;
+      tip.hidden = false;
+      tip.style.left = Math.min(r.width - 190, CARTE_DISPO.pts[i].x + 14) + 'px';
+      tip.style.top = (CARTE_DISPO.pts[i].y + 14) + 'px';
+      cv.style.cursor = 'pointer';
+    } else { tip.hidden = true; cv.style.cursor = 'default'; }
+  };
+  cv.onmouseleave = () => { tip.hidden = true; };
+
+  cv.onclick = () => {
+    if (CARTE_SURVOL < 0) return;
+    const d = CARTE.noeuds[CARTE_SURVOL].dates?.slice(-1)[0];
+    if (d) { MIRROR_DATE = d; go('mirror'); }
+  };
+
+  addEventListener('resize', redimensionner, { passive: true });
+
+  $('#view').onclick = e => {
+    const b = e.target.closest('[data-fen]');
+    if (b) { CARTE_FENETRE = b.dataset.fen; CARTE_SURVOL = -1; renderCarte(); }
   };
 }
 
@@ -1409,6 +1633,7 @@ function drawNotesPreview(p) {
 
 const VIEWS = {
   tonight: renderTonight,
+  carte: renderCarte,
   year: () => renderYear(),
   mirror: () => renderMirror(),
   settings: renderSettings

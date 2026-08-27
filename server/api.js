@@ -9,6 +9,7 @@ import { inspectCSV, applyImport } from './import-csv.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMood, readEnergy } from './mood.js';
+import { buildGraph, MIN_JOURS } from './graph.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search } from './search.js';
 import { reply, memoryBlock, anchorBlock, gridBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
@@ -282,12 +283,19 @@ export const routes = {
     // chiffres : sans ce repli, le Miroir serait vide le premier jour.
     let similar = null;
     const curText = entry?.text ?? '';
-    if (curText.trim() && textCount >= 2) {
-      const hits = search(index, curText, { limit: 5, exclude: new Set([date]) });
+    // Un rapprochement doit tenir sur un mot qui NOMME quelque chose. Deux
+    // journees qui n'ont en commun que « juste », « encore » ou « c'est » ne se
+    // ressemblent pas : elles sont ecrites dans la meme langue. Les afficher
+    // quand meme donne une fausse impression de theme, ce qui est pire que ne
+    // rien montrer -- on retombe alors sur la comparaison par note, honnete.
+    const hits = curText.trim() && textCount >= 2
+      ? search(index, curText, { limit: 8, exclude: new Set([date]) }).filter(h => h.forts.length)
+      : [];
+    if (hits.length) {
       similar = {
         mode: 'text',
-        items: hits.map(h => ({
-          date: h.id, score: h.score, terms: h.terms,
+        items: hits.slice(0, 5).map(h => ({
+          date: h.id, score: h.score, terms: h.terms, forts: h.forts,
           note: byDate.get(h.id)?.note ?? null,
           text: rows.find(r => r.date === h.id)?.text ?? '',
           band: followUp(ser, h.id, 14)
@@ -297,7 +305,7 @@ export const routes = {
       const same = ser.filter(x => x.date < date && x.note === note).slice(-5).reverse();
       similar = {
         mode: 'note',
-        reason: textCount < 2 ? 'no_text_corpus' : 'no_text_today',
+        reason: textCount < 2 ? 'no_text_corpus' : (curText.trim() ? 'no_theme' : 'no_text_today'),
         items: same.map(x => ({
           date: x.date, note: x.note, delta: x.delta, text: '',
           band: followUp(ser, x.date, 14)
@@ -328,8 +336,8 @@ export const routes = {
     const hits = search(index, text, { limit: Number(body.limit ?? 3), exclude });
     return {
       textCount,
-      items: hits.filter(h => h.score > 0.6).map(h => ({
-        date: h.id, score: h.score, terms: h.terms,
+      items: hits.filter(h => h.score > 0.6 && h.forts.length).map(h => ({
+        date: h.id, score: h.score, terms: h.terms, forts: h.forts,
         note: byDate.get(h.id)?.note ?? null,
         text: rows.find(r => r.date === h.id)?.text ?? '',
         band: followUp(ser, h.id, 14)
@@ -345,7 +353,7 @@ export const routes = {
     return {
       query: q,
       items: hits.map(h => ({
-        date: h.id, score: h.score, terms: h.terms,
+        date: h.id, score: h.score, terms: h.terms, forts: h.forts,
         note: byDate.get(h.id)?.note ?? null,
         text: rows.find(r => r.date === h.id)?.text ?? '',
         band: followUp(ser, h.id, 14)
@@ -468,6 +476,33 @@ export const routes = {
     invalidate(userId);
     const { series: ser, textCount } = series(userId);
     return { portee, compte, restant: { days: ser.length, textDays: textCount } };
+  },
+
+  /**
+   * La carte des mots.
+   *
+   * Elle ne sort QUE du texte deja ecrit et des notes deja posees. Rien n'est
+   * genere, rien n'est qualifie : on compte ce qui revient, et avec quoi.
+   *
+   * Le plancher s'applique ici comme partout ailleurs (SPEC 4.1) : sous le
+   * seuil, aucune statistique. Une carte est une statistique -- une tres jolie,
+   * ce qui la rend plus dangereuse qu'un chiffre, pas moins.
+   */
+  'GET /api/graph': ({ query, userId }) => {
+    const s = getSettings(userId);
+    const { rows, series: ser } = series(userId);
+    const t = today();
+    const note = getEntry(t, userId)?.note ?? null;
+    const reference = ser.length ? ser[ser.length - 1].reference : null;
+    const floor = floorState(note, reference, s);
+    if (floor.floored) return { floored: true, floor };
+
+    const f = String(query.fenetre ?? 'tout');
+    const jours = f === '30' ? 30 : f === '90' ? 90 : f === '365' ? 365 : null;
+    const since = jours ? addDays(t, -jours) : null;
+
+    return { floored: false, fenetre: f, minimum: MIN_JOURS,
+             ...buildGraph(rows, allAnchors(userId), { since }) };
   },
 
   'GET /api/events': ({ userId }) => ({ events: allEvents(userId) }),
