@@ -7,8 +7,10 @@ import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
+import * as sessions from './sessions.js';
+const { presence, presenceNote } = sessions;
 import { buildIndex, search } from './search.js';
-import { reply, memoryBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
+import { reply, memoryBlock, anchorBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -35,13 +37,28 @@ function series(userId = OWNER) {
 export function recentMemory(date, userId = OWNER) {
   const s = getSettings(userId);
   const days = Number(s.memoryDays ?? 0);
-  if (!days) return null;
-  const rows = db.prepare(`
-    SELECT date, note, text FROM entries
-    WHERE user_id = ? AND date < ? AND text IS NOT NULL AND TRIM(text) <> ''
-    ORDER BY date DESC LIMIT ?
-  `).all(userId, date, days).reverse();
-  return memoryBlock(rows);
+
+  const morceaux = [];
+
+  if (days) {
+    const rows = db.prepare(`
+      SELECT date, note, text FROM entries
+      WHERE user_id = ? AND date < ? AND text IS NOT NULL AND TRIM(text) <> ''
+      ORDER BY date DESC LIMIT ?
+    `).all(userId, date, days).reverse();
+    const bloc = memoryBlock(rows);
+    if (bloc) morceaux.push(bloc);
+  }
+
+  // Les reperes survivent a « Nouveau chat » : c'est ce qui fait qu'un fil
+  // repartant de zero connait quand meme la personne en face.
+  const ancres = anchorBlock(allAnchors(userId));
+  if (ancres) morceaux.push(ancres);
+
+  const note = presenceNote(presence(userId));
+  if (note) morceaux.push(note);
+
+  return morceaux.length ? morceaux.join('\n\n---\n\n') : null;
 }
 
 /** Ce que le navigateur a le droit de savoir de la personne connectée. */
@@ -328,6 +345,35 @@ export const routes = {
     const written = applyNotes(entries, userId);
     invalidate(userId);
     return { imported: written, preview };
+  },
+
+  /**
+   * Ouverture et fermeture de la fenetre.
+   *
+   * La fermeture arrive par sendBeacon et peut se perdre : un navigateur tue ne
+   * l'envoie jamais. On ne s'en sert donc que comme indice -- c'est l'ouverture
+   * qui fait foi, et une session restee ouverte est refermee a la suivante.
+   */
+  'POST /api/session': ({ body, userId }) => {
+    if (body.close) return { closed: sessions.close(userId) };
+    const info = sessions.open(userId);
+    return { session: info, presence: sessions.presence(userId) };
+  },
+
+  /**
+   * Nouveau fil.
+   *
+   * Le curseur avance : les messages anterieurs quittent la conversation. RIEN
+   * n'est efface -- le texte des journees reste dans le journal, le miroir le
+   * fouille toujours, et le compagnon garde ses reperes et sa memoire des jours
+   * ecrits. C'est un changement de sujet, pas une suppression : effacer des
+   * annees d'ecriture sur un clic serait irreparable, et personne ne clique un
+   * bouton « nouveau chat » en pensant perdre son journal.
+   */
+  'POST /api/chat/new': ({ userId }) => {
+    const since = new Date().toISOString();
+    setSettings({ chatSince: since }, userId);
+    return { chatSince: since, messages: recentMessages(80, userId) };
   },
 
   'GET /api/events': ({ userId }) => ({ events: allEvents(userId) }),

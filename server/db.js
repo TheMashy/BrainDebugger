@@ -133,7 +133,14 @@ export const DEFAULT_SETTINGS = {
   sustain: 2,                 // jours consecutifs >= reference pour valider un retour
   etalon: 5.7,                // constante de calage du cumul (null = mediane globale)
   cumMode: 'etalon',          // 'etalon' | 'reference'
-  contrastCenter: 'reference' // 'fixed5' (formule tableur) | 'reference' (glissante)
+  contrastCenter: 'reference', // 'fixed5' (formule tableur) | 'reference' (glissante)
+  // Debut du fil courant. « Nouveau chat » avance ce curseur : les messages
+  // anterieurs quittent la conversation, mais RIEN n'est efface -- le texte des
+  // journees reste dans le journal, et c'est lui que le miroir fouille et que
+  // le compagnon garde en memoire. Effacer pour de bon des annees d'ecriture
+  // sur un clic serait irreparable, et ce n'est pas ce qu'on demande a un
+  // bouton qui sert a changer de sujet.
+  chatSince: null             // ISO 8601, ou null = tout le fil
 };
 
 export function getSettings(userId = OWNER) {
@@ -230,10 +237,19 @@ export function addMessage({ ts, date, source = 'web', role, text, userId = OWNE
  * formulaire quotidien. Le changement de jour devient un simple repere dans le
  * fil, pas une coupure.
  */
+/**
+ * Le fil courant. `since` borne le debut : c'est « Nouveau chat ».
+ *
+ * Les messages plus anciens ne sont pas supprimes, seulement hors du fil. Le
+ * journal, lui, les garde -- c'est la difference entre changer de sujet et
+ * effacer ce qu'on a ecrit.
+ */
 export function recentMessages(limit = 80, userId = OWNER) {
-  return db.prepare(
-    'SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?'
-  ).all(userId, limit).reverse();
+  const since = getSettings(userId).chatSince;
+  const rows = since
+    ? db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
+    : db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
+  return rows.reverse();
 }
 
 export function messagesForDate(date, userId = OWNER) {

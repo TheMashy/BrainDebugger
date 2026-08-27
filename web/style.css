@@ -172,6 +172,38 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
 .petcard .name { font-weight: 620; font-size: 15px; }
 .petcard .role { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
 
+/* ---------- le fil ---------- */
+
+.threadhead { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.newchat {
+  background: none; border: 0; padding: 4px 9px; border-radius: 6px;
+  font-size: 11.5px; color: var(--ink-faint);
+  transition: color .14s, background .14s;
+}
+.newchat:hover:not(:disabled) { color: var(--ink-dim); background: var(--surface); }
+.newchat:disabled { opacity: .4; }
+
+/* Le passé est là, on le voit, il n'appelle pas. En arrivant, l'œil regarde le
+   bas du fil — garder le mois dernier à pleine intensité met la journée en
+   concurrence avec elle-même. Dès qu'on remonte, tout redevient net : le geste
+   de scroller EST l'intention de lire. */
+.msg.past { opacity: .42; transition: opacity .32s ease; }
+.thread.reading .msg.past { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .msg.past { transition: none; }
+}
+
+/* « Nouveau fil » : le fil s'efface avant la réponse du serveur. C'est le geste
+   qu'on veut sentir, pas l'aller-retour réseau. */
+.thread.wiping {
+  opacity: 0; transform: translateY(-6px) scale(.995);
+  transition: opacity .34s ease, transform .34s ease;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread.wiping { transition: opacity .12s linear; transform: none; }
+}
+
 .thread {
   min-height: 120px; max-height: 52vh; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: 11px; padding-right: 5px;

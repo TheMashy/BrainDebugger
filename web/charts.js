@@ -153,25 +153,24 @@ export function dailyChart(dates, values, { height = 240, events = [] } = {}) {
   const n = values.length;
   if (!n) return '<div class="empty">Pas encore de données.</div>';
 
-  const W = 1000, H = height, PL = 34, PR = 10, PT = 10, PB = 24;
+  const W = 1000, H = height, PL = 34, PR = 10, PT = 14, PB = 24;
   const iw = W - PL - PR, ih = H - PT - PB;
   const lim = Math.max(10, Math.ceil(Math.max(...values.map(Math.abs))));
 
   const X = i => PL + (i / n) * iw;
   const Y = v => PT + ih / 2 - (v / lim) * (ih / 2);
   const step = iw / n;
+  const y0 = Y(0);
 
-  // escalier : palier horizontal par jour, saut vertical entre deux jours
-  let d = `M${X(0).toFixed(2)} ${Y(0).toFixed(2)}`;
-  for (let i = 0; i < n; i++) {
-    const y = Y(values[i]).toFixed(2);
-    d += `L${X(i).toFixed(2)} ${y}L${(X(i) + step).toFixed(2)} ${y}`;
-  }
-  d += `L${X(n).toFixed(2)} ${Y(0).toFixed(2)}Z`;
+  // Une barre fine avec un filet de fond entre deux jours tant qu'il y a la
+  // place ; collees des qu'on affiche plusieurs annees, sinon le graphe devient
+  // un peigne et la forme disparait derriere les interstices.
+  const gap = step > 2.6 ? Math.min(1, step * 0.22) : 0;
+  const bw = Math.max(0.6, step - gap);
+  const rx = bw >= 3 ? 1.2 : 0;
 
   const ticks = [-lim, -lim / 2, 0, lim / 2, lim];
-  // une seule annee affichee -> reperes mensuels ; plusieurs -> reperes annuels
-  const singleYear = n > 0 && dates[0].slice(0, 4) === dates[n - 1].slice(0, 4);
+  const singleYear = dates[0].slice(0, 4) === dates[n - 1].slice(0, 4);
   const MO = ['jan', 'fév', 'mar', 'avr', 'mai', 'juin', 'juil', 'août', 'sep', 'oct', 'nov', 'déc'];
   const xl = [];
   let last = null;
@@ -179,19 +178,43 @@ export function dailyChart(dates, values, { height = 240, events = [] } = {}) {
     const key = singleYear ? dates[i].slice(5, 7) : dates[i].slice(0, 4);
     if (key !== last) { xl.push({ i, label: singleYear ? MO[Number(key) - 1] : key }); last = key; }
   }
+
   const evMarks = events
     .map(e => ({ ...e, i: dates.indexOf(e.date) }))
     .filter(e => e.i >= 0)
     .map(e => `<line x1="${X(e.i).toFixed(1)}" y1="${PT}" x2="${X(e.i).toFixed(1)}" y2="${PT + ih}"
-                 stroke="#ffffff" stroke-opacity=".2" stroke-dasharray="2 3"><title>${esc(e.date)} — ${esc(e.label)}</title></line>`).join('');
+                 stroke="#ffffff" stroke-opacity=".18" stroke-dasharray="2 3"><title>${esc(e.date)} — ${esc(e.label)}</title></line>`).join('');
+
+  const bars = values.map((v, i) => {
+    if (v === null || v === undefined || Number.isNaN(v)) return '';
+    const y = Y(v);
+    const h = Math.max(0.9, Math.abs(y - y0));            // un jour a zero reste visible
+    const top = v >= 0 ? y : y0;
+    const c = deltaColor(deltaDuContraste(v)) ?? 'var(--line)';
+    return `<rect x="${(X(i) + gap / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${bw.toFixed(2)}"`
+         + ` height="${h.toFixed(2)}"${rx ? ` rx="${rx}"` : ''} fill="${c}">`
+         + `<title>${esc(dates[i])} · ${v > 0 ? '+' : ''}${v.toFixed(1)}</title></rect>`;
+  }).join('');
 
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px"
-      role="img" aria-label="Écart quotidien, échelle expansée">
+      role="img" aria-label="Écart d'humeur jour par jour">
     ${ticks.map(v => `<line class="grid-l" x1="${PL}" y1="${Y(v).toFixed(1)}" x2="${W - PR}" y2="${Y(v).toFixed(1)}"/>
        <text x="${PL - 6}" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end">${v > 0 ? '+' : ''}${Math.round(v)}</text>`).join('')}
     ${evMarks}
-    <path d="${d}" fill="#4ade80" fill-opacity=".22" stroke="#4ade80" stroke-width="1" stroke-linejoin="miter"/>
-    <line class="axis" x1="${PL}" y1="${Y(0).toFixed(1)}" x2="${W - PR}" y2="${Y(0).toFixed(1)}"/>
+    ${bars}
+    <line class="axis" x1="${PL}" y1="${y0.toFixed(1)}" x2="${W - PR}" y2="${y0.toFixed(1)}"/>
     ${xl.map(t => `<text x="${X(t.i).toFixed(1)}" y="${H - 7}" text-anchor="middle">${t.label}</text>`).join('')}
   </svg>`;
 }
+
+/**
+ * Ecart brut d'ou vient un contraste. `c = signe(x)*x^2/2,5` s'inverse en
+ * `x = signe(c)*racine(2,5*|c|)`.
+ *
+ * Sans cette inversion, colorer les barres avec l'echelle de la grille les
+ * peindrait toutes trop fort : un contraste de 6,4 n'est pas un ecart de 6,4,
+ * c'est un ecart de 4. Le meme jour doit porter exactement la meme couleur dans
+ * la grille juste au-dessus et dans ce graphe -- deux teintes pour une seule
+ * journee sur un meme ecran, et l'echelle ne veut plus rien dire.
+ */
+const deltaDuContraste = c => Math.sign(c) * Math.sqrt(2.5 * Math.abs(c));
