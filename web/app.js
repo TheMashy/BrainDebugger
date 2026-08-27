@@ -878,6 +878,27 @@ async function renderSettings() {
       </div>
 
       <div class="card">
+        <h2>Coller des notes déjà écrites</h2>
+        <p class="sub">Le miroir ne peut rendre que ce qu'il a. Les notes du tableur lui donnent
+          des chiffres ; celles-ci lui donnent tes mots — et sans mots, la recherche par
+          similitude reste muette sur des années de journal.</p>
+        <p class="sub" style="font-size:12.5px">
+          Chaque journée commence par une date sur sa propre ligne, puis le texte en dessous.
+          <span class="mono">2024-03-12</span>, <span class="mono">12/03/2024</span> ou
+          <span class="mono">12 mars 2024</span> — le jour avant le mois. Ce qui précède la
+          première date est ignoré.
+        </p>
+        <textarea id="notesPaste" rows="8" placeholder="12 mars 2024&#10;Nuit blanche, je tourne en rond…&#10;&#10;13 mars 2024&#10;Un peu mieux."
+          style="width:100%;resize:vertical;background:var(--panel-2);border:1px solid var(--line);
+                 border-radius:var(--r);padding:10px 12px;font:13.5px/1.6 var(--sans)"></textarea>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn" id="scanNotes">Analyser</button>
+          <span class="sub" style="margin:0">Rien n'est écrit avant que tu aies vu le résultat.</span>
+        </div>
+        <div id="notesReport"></div>
+      </div>
+
+      <div class="card">
         <h2>Tes données</h2>
         <p class="sub">${S.stats.days} journées notées · ${S.stats.textDays} avec du texte · ${esc(S.stats.firstDate)} → ${esc(S.stats.lastDate)}</p>
         <p class="sub" style="font-size:12.5px">
@@ -942,6 +963,24 @@ async function renderSettings() {
       toast('Compagnon mis à jour');
     };
     r.readAsDataURL(f);
+  });
+
+  $('#scanNotes')?.addEventListener('click', async e => {
+    // capture AVANT le await : le DOM vide currentTarget des que le handler rend
+    // la main, ce qui arrive au premier await d'une fonction async.
+    const b = e.currentTarget;
+    const texte = $('#notesPaste')?.value ?? '';
+    if (!texte.trim()) { toast('Colle d\'abord tes notes.'); return; }
+    b.disabled = true; b.textContent = 'Analyse…';
+    try {
+      const r = await api('/api/import-notes', { text: texte });
+      NOTES_PASTE = texte;
+      drawNotesPreview(r.preview);
+    } catch (err) {
+      $('#notesReport').innerHTML = `<p class="sub" style="color:var(--warn);margin:12px 0 0">${esc(err.message)}</p>`;
+    } finally {
+      b.disabled = false; b.textContent = 'Analyser';
+    }
   });
 
   $('#csvFile')?.addEventListener('change', async e => {
@@ -1134,6 +1173,66 @@ function drawImportPreview(p) {
       toast(err.message);
     }
   };
+}
+
+let NOTES_PASTE = null;
+
+/**
+ * Aperçu des notes collées. Même règle que pour le CSV : on montre ce qui va
+ * être écrit avant de l'écrire. Ici l'enjeu n'est pas l'écrasement — rien n'est
+ * remplacé — mais la date : un bloc rangé sous le mauvais jour ferait rendre au
+ * miroir des mots qui n'ont pas été écrits ce jour-là. C'est pour ça que chaque
+ * date interprétée est affichée en clair.
+ */
+function drawNotesPreview(p) {
+  const box = $('#notesReport');
+  if (!box) return;
+
+  const teinte = { nouvelle: 'var(--accent)', ajout: 'var(--warn)', identique: 'var(--ink-faint)' };
+  const mot = { nouvelle: 'nouvelle', ajout: 'ajout', identique: 'déjà là' };
+
+  box.innerHTML = `
+    <div style="border-top:1px solid var(--line-soft);margin-top:14px;padding-top:14px">
+      <div class="statgrid" style="margin-bottom:14px">
+        <div><div class="k">Journées</div><div class="v">${p.total}</div></div>
+        <div><div class="k">Nouvelles</div><div class="v" style="color:var(--accent)">${p.nouvelles}</div></div>
+        <div><div class="k">Ajouts</div><div class="v" style="color:${p.ajouts ? 'var(--warn)' : 'var(--ink)'}">${p.ajouts}</div></div>
+        <div><div class="k">Déjà là</div><div class="v">${p.identiques}</div></div>
+      </div>
+      <p class="sub" style="margin:0 0 10px">
+        <span class="mono">${esc(p.first)}</span> → <span class="mono">${esc(p.last)}</span>
+        · ${p.mots} mots
+      </p>
+      ${p.ignore ? `<p class="sub" style="margin:0 0 10px;color:var(--ink-faint)">
+        Ignoré, avant la première date : <i>${esc(p.ignore)}</i></p>` : ''}
+      <div style="display:flex;flex-direction:column;gap:1px;margin-bottom:12px;max-height:260px;overflow-y:auto">
+        ${p.apercu.map(a => `<div style="display:flex;gap:12px;padding:6px 0;border-top:1px solid var(--line-soft);font-size:13px;align-items:baseline">
+          <span class="mono" style="flex:0 0 88px">${esc(a.date)}</span>
+          <span style="flex:0 0 60px;font-size:11.5px;color:${teinte[a.etat]}">${mot[a.etat]}</span>
+          <span class="muted" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.extrait)}</span>
+        </div>`).join('')}
+      </div>
+      ${p.nouvelles + p.ajouts
+        ? `<button class="btn primary" id="doNotes">Ajouter ${p.nouvelles + p.ajouts} journée${p.nouvelles + p.ajouts > 1 ? 's' : ''} au miroir</button>`
+        : `<p class="sub" style="margin:0">Tout est déjà dans le miroir. Rien à ajouter.</p>`}
+    </div>`;
+
+  $('#doNotes')?.addEventListener('click', async e => {
+    const b = e.currentTarget;
+    b.disabled = true; b.textContent = 'Ajout…';
+    try {
+      const r = await api('/api/import-notes', { text: NOTES_PASTE, apply: true });
+      S = await api('/api/state');
+      syncHeader();
+      SERIES = null;
+      NOTES_PASTE = null;
+      renderSettings();
+      toast(`${r.imported.journees} journées ajoutées au miroir`);
+    } catch (err) {
+      b.disabled = false; b.textContent = 'Réessayer';
+      toast(err.message);
+    }
+  });
 }
 
 /* ============================= routage ============================= */
