@@ -3,7 +3,8 @@ import {
   addMessage, messagesForDate, recentMessages, allEvents, deleteEvent,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
-  addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet
+  addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
+  updateEvent, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -21,7 +22,7 @@ import { themeDe } from '../web/reperes.js';
 // Meme raison : la geometrie de la frise doit etre calculee une seule fois, au
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
-import { voies, etendue } from '../web/frise.js';
+import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
 import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 
@@ -574,60 +575,61 @@ export const routes = {
 
     const et = etendue({
       naissance: s.naissance,
-      events,
+      events: events.map(e => ({ date: e.date, fin: finEffective(e, t) })),
       premierJour: ser.length ? ser[0].date : null,
       dernierJour: ser.length ? ser[ser.length - 1].date : null,
       aujourdhui: t
     });
 
     /*
-     * La couleur d'un repere, c'est la couleur des jours qu'il couvre.
+     * LA REGLE DE COULEUR : ce qui est REMPLI est MESURE, ce qui est CONTOURE
+     * est DECLARE.
      *
-     * Elle resout la tension entre « je veux colorer mes reperes » et « la
-     * couleur vient des notes ». Un repere n'a pas de couleur a lui : il prend
-     * celle de la periode qu'il marque, sur la meme echelle que la grille et
-     * que la carte. Une addiction traversee a 3/10 est rouge, un contrat vecu a
-     * 8/10 est vert, et personne n'a decide de rien -- c'est deja dans les
-     * notes.
+     * Le serveur ne rend donc jamais une couleur : il rend les ECARTS des
+     * journees couvertes, et le dessin en fait un degrade. Une periode prend
+     * ainsi le degrade des jours qu'elle recouvre, jamais leur moyenne -- sur un
+     * corpus reel, la moyenne des ecarts sur trois ans tient entre −0,08 et
+     * +0,12, soit deux jaunes indiscernables : six barres de la meme couleur.
      *
-     * Et surtout : la ou il n'y a pas de journees -- l'enfance, tout ce qui
-     * precede le journal -- il n'y a PAS de couleur. On ne colorie pas ce qu'on
-     * ne sait pas, et un gris au milieu de couleurs se lit tout de suite comme
-     * « ici, aucune donnee ».
+     * Et la ou il n'y a pas de journees -- l'enfance, tout ce qui precede le
+     * journal -- il n'y a pas d'ecart, donc pas de couleur. On ne colorie pas ce
+     * qu'on ne sait pas.
      */
-    const ecartMoyen = (debut, fin) => {
-      const dans = ser.filter(x => x.date >= debut && x.date <= (fin ?? debut));
-      if (!dans.length) return null;
-      const m = dans.reduce((a, x) => a + (x.delta ?? 0), 0) / dans.length;
-      return Math.round(m * 100) / 100;
-    };
+    const couverture = (debut, fin) => ser
+      .filter(x => x.date >= debut && x.date <= fin)
+      .map(x => ({ date: x.date, delta: x.delta ?? null }));
 
-    // Bornes INCLUSES : une periode du 1er au 3 dure trois jours, pas deux. La
-    // difference brute donnait 570 jours pour une periode dont on a 571 ecrits,
-    // ce qui se lit comme un bug de comptage -- et qui en etait un.
     const jours = (a, b) => Math.round(
       (Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000) + 1;
 
-    const periodes = events.filter(e => e.fin);
-    const lanes = voies(periodes, 14);
+    const periodes = events.filter(estPeriode);
+    const lanes = voies(periodes.map(e => ({ date: e.date, fin: finEffective(e, t) })), 14);
 
     return {
       etendue: et,
       naissance: s.naissance,
-      points: events.filter(e => !e.fin).map(e => ({
-        id: e.id, date: e.date, label: e.label, theme: themeDe(e.label),
+      teintes: TEINTES,
+      points: events.filter(e => !estPeriode(e)).map(e => ({
+        id: e.id, date: e.date, label: e.label,
+        theme: e.theme ?? themeDe(e.label),
+        teinte: e.teinte ?? null, fort: e.fort ? 1 : 0,
         ecart: byDate.get(e.date)?.delta ?? null,
         note: byDate.get(e.date)?.note ?? null
       })),
-      periodes: periodes.map((e, i) => ({
-        id: e.id, date: e.date, fin: e.fin, label: e.label, theme: themeDe(e.label),
-        voie: lanes[i].voie,
-        jours: jours(e.date, e.fin),
-        ecart: ecartMoyen(e.date, e.fin),
-        // Combien de ces journees sont ecrites : la barre peut ainsi montrer
-        // qu'elle ne repose que sur trois mois sur quatre ans.
-        couvert: ser.filter(x => x.date >= e.date && x.date <= e.fin).length
-      }))
+      periodes: periodes.map((e, i) => {
+        const fin = finEffective(e, t);
+        return {
+          id: e.id, date: e.date, fin, ouvert: e.ouvert ? 1 : 0, label: e.label,
+          theme: e.theme ?? themeDe(e.label),
+          teinte: e.teinte ?? null, fort: e.fort ? 1 : 0,
+          voie: lanes[i].voie,
+          duree: jours(e.date, fin),
+          // Les journees ecrites sous la barre. Leur nombre dit aussi sur quoi
+          // la couleur repose : une barre de quatre ans posee sur trois mois de
+          // journal ne doit pas se lire comme quatre ans de mesure.
+          jours: couverture(e.date, fin)
+        };
+      })
     };
   },
 
@@ -807,7 +809,15 @@ export const routes = {
     const fin = body.fin ? String(body.fin) : null;
     if (fin && !/^\d{4}-\d{2}-\d{2}$/.test(fin)) return { error: 'Fin invalide : il faut AAAA-MM-JJ.' };
     if (fin && fin < body.date) return { error: 'La fin est avant le début.' };
-    addEvent({ date: body.date, fin, label: String(body.label).slice(0, 120), userId });
+    // Validation en code, jamais dans une consigne : la teinte doit venir de la
+    // table declaree, sinon la separation avec la rampe des notes ne tient plus.
+    const teinte = body.teinte == null ? null : Number(body.teinte);
+    if (teinte !== null && !TEINTES.includes(teinte)) return { error: 'Teinte inconnue.' };
+    addEvent({
+      date: body.date, fin, label: String(body.label).slice(0, 120),
+      theme: body.theme ?? null, teinte, fort: body.fort ? 1 : 0,
+      ouvert: body.ouvert ? 1 : 0, userId
+    });
     return rendre();
   },
 

@@ -143,108 +143,199 @@ export function situer(date, { debut, fin }) {
 
 /* ======================= le dessin ======================= */
 
-const NEUTRE = 'rgba(147,160,153,.55)';
+import { deltaColor } from './charts.js';
 
-/** Les annees a graduer : toutes si la frise est courte, sinon une sur cinq. */
+/* Ce qui n'a pas de journees derriere lui n'a pas de couleur, et c'est une
+   information : on ne colorie pas ce qu'on ne sait pas. */
+const SANS_DONNEES = 'rgba(147,160,153,.42)';
+
+/** Les annees a graduer : toutes si la frise est courte, sinon espacees. */
 function graduations(et) {
   const a0 = Number(et.debut.slice(0, 4)), a1 = Number(et.fin.slice(0, 4));
   const span = a1 - a0;
-  const pas = span <= 8 ? 1 : span <= 20 ? 2 : span <= 40 ? 5 : 10;
+  const pas = span <= 8 ? 1 : span <= 20 ? 2 : span <= 45 ? 5 : 10;
   const out = [];
   for (let a = Math.ceil(a0 / pas) * pas; a <= a1; a += pas) out.push(a);
   return out;
 }
 
 /**
- * @param {object} F  { etendue, points, periodes } -- deja situes et voies par le serveur
- * @param {object} opts
+ * Le degrade des jours couverts par une periode.
+ *
+ * Une periode prend le DEGRADE des journees qu'elle recouvre, jamais leur
+ * moyenne. Mesure sur mille sept cents journees reelles : la moyenne des ecarts
+ * sur trois ans tient entre −0,08 et +0,12, soit deux jaunes indiscernables --
+ * six barres de la meme couleur, et aucune information. Le degrade, lui, montre
+ * une relation verte puis rouge, ce qu'aucune autre vue de l'application ne
+ * sait dire.
+ */
+function degradeDeriode(id, jours, x1, x2) {
+  if (!jours?.length) return { def: '', ref: SANS_DONNEES };
+
+  /*
+   * On regroupe avant de peindre.
+   *
+   * Un arret par jour sur une barre de quatre ans large de trois cents pixels
+   * fait un code-barre : mille cinq cents raies verticales de deux dixiemes de
+   * pixel, ou l'oeil ne lit plus qu'un gris sale. La couleur cesse d'etre une
+   * lecture et devient du bruit -- exactement le defaut qu'on venait de
+   * corriger sur l'aire du cumul.
+   *
+   * Quarante paquets, et la MEDIANE de chacun. La mediane et non la moyenne :
+   * sur une periode, deux journees a 1 et 10 ne font pas une periode moyenne,
+   * elles font une periode instable, et c'est la valeur centrale qui dit ce que
+   * ces semaines-la ont ete la plupart du temps.
+   */
+  const PAQUETS = 40;
+  const n = Math.min(PAQUETS, jours.length);
+  const arrets = [];
+  let derniere = null;
+  for (let k = 0; k < n; k++) {
+    const a = Math.floor(k * jours.length / n);
+    const b = Math.max(a + 1, Math.floor((k + 1) * jours.length / n));
+    const ds = jours.slice(a, b).map(x => x.delta).filter(d => d !== null).sort((p, q) => p - q);
+    const c = ds.length ? deltaColor(ds[Math.floor(ds.length / 2)]) : SANS_DONNEES;
+    if (c === derniere) continue;
+    arrets.push({ o: n === 1 ? 0 : k / (n - 1), c });
+    derniere = c;
+  }
+  if (arrets.length < 2) return { def: '', ref: arrets[0]?.c ?? SANS_DONNEES };
+  if (arrets[0].o > 0) arrets.unshift({ o: 0, c: arrets[0].c });
+  if (arrets.at(-1).o < 1) arrets.push({ o: 1, c: arrets.at(-1).c });
+
+  return {
+    def: `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${x1.toFixed(1)}" y1="0" x2="${x2.toFixed(1)}" y2="0">
+      ${arrets.map(a => `<stop offset="${(a.o * 100).toFixed(2)}%" stop-color="${a.c}"/>`).join('')}
+    </linearGradient>`,
+    ref: `url(#${id})`
+  };
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/**
+ * @param {object} F  { etendue, points, periodes } — deja situes et voies par le serveur
+ * @param {(theme:string, taille:number) => string} icone
  * @returns {string} le SVG complet
  */
-export function friseMarkup(F, { hauteurVoie = 26, survol = null } = {}) {
-  const et = F.etendue;
+export function friseMarkup(F, icone, { hauteurVoie = 30, survol = null, cadre = 'vie' } = {}) {
+  /*
+   * LE ZOOM, ET PAS UNE DEFORMATION DE L'AXE.
+   *
+   * Trente ans de vie dont quatre de journal sur une seule bande : tout se
+   * tasse a droite. La tentation est de comprimer l'avant-journal pour donner
+   * de la place au reste -- et une frise dont l'axe ment n'est plus une frise.
+   * Deux reperes distants de dix ans se retrouveraient a la meme distance que
+   * deux reperes distants d'un an, et toute la lecture des durees, qui est
+   * exactement ce qu'on demande a une frise, deviendrait fausse.
+   *
+   * On change donc de CADRE, pas d'echelle. Chaque cadre reste lineaire ; ce
+   * qui deborde est ramene au bord et son infobulle garde les vraies dates.
+   */
+  const et = cadre === 'journal' && F?.etendue?.journal
+    ? { ...F.etendue.journal, journal: F.etendue.journal }
+    : F?.etendue;
   if (!et) return '';
 
-  const W = 1000;
-  const MG = 10, MD = 10;
+  const W = 1000, MG = 12, MD = 12;
   const iw = W - MG - MD;
   const X = d => MG + situer(d, et) * iw;
 
   const nbVoies = F.periodes.length ? Math.max(...F.periodes.map(p => p.voie)) + 1 : 0;
-  const HAUT = 22;                                   // les graduations d'annees
+  const HAUT = 20;                                   // la rangee des annees
   const VOIES = nbVoies * hauteurVoie;
-  const POINTS = 46;                                 // la rangee des instants
-  const H = HAUT + VOIES + (VOIES ? 10 : 0) + POINTS;
+  const POINTS = 52;                                 // la rangee des instants
+  const H = HAUT + VOIES + (VOIES ? 12 : 0) + POINTS;
   const yVoie = v => HAUT + v * hauteurVoie;
-  const yAxe = H - 18;
+  const yAxe = H - 16;
 
-  /* --- le fond : ou le journal existe reellement --- */
+  const defs = [];
+
+  /* --- le fond : ou le journal existe reellement ---
+     Une vie est plus longue que ce qu'on en a ecrit. La bande le montre sans
+     le dire, et sans jamais colorier ce qui la precede. */
   const j = et.journal;
-  const fondJournal = j
-    ? `<rect x="${X(j.debut).toFixed(1)}" y="${HAUT - 6}"
-             width="${(X(j.fin) - X(j.debut)).toFixed(1)}" height="${(yAxe - HAUT + 6).toFixed(1)}"
-             fill="var(--accent)" fill-opacity=".035"/>
-       <line x1="${X(j.debut).toFixed(1)}" y1="${HAUT - 6}" x2="${X(j.debut).toFixed(1)}" y2="${yAxe}"
-             stroke="var(--accent)" stroke-opacity=".3" stroke-dasharray="2 4"/>`
-    : '';
+  const fond = j ? `
+    <rect x="${X(j.debut).toFixed(1)}" y="${HAUT - 5}"
+          width="${Math.max(1, X(j.fin) - X(j.debut)).toFixed(1)}" height="${(yAxe - HAUT + 5).toFixed(1)}"
+          fill="var(--accent)" fill-opacity=".04"/>
+    <line x1="${X(j.debut).toFixed(1)}" y1="${HAUT - 5}" x2="${X(j.debut).toFixed(1)}" y2="${yAxe}"
+          stroke="var(--accent)" stroke-opacity=".28" stroke-dasharray="2 4"/>
+    ${cadre === 'vie' ? `<text x="${(X(j.debut) + 5).toFixed(1)}" y="${HAUT - 9}" class="frisejournal">ton journal</text>` : ''}` : '';
 
   const ans = graduations(et).map(a => {
     const x = X(`${a}-01-01`);
     if (x < MG - 1 || x > W - MD + 1) return '';
-    return `<line x1="${x.toFixed(1)}" y1="${HAUT - 8}" x2="${x.toFixed(1)}" y2="${yAxe}"
-                  stroke="var(--line-soft)"/>
-            <text x="${x.toFixed(1)}" y="12" text-anchor="middle" class="frisean">${a}</text>`;
+    return `<line x1="${x.toFixed(1)}" y1="${HAUT - 5}" x2="${x.toFixed(1)}" y2="${yAxe}" stroke="var(--line-soft)"/>
+            <text x="${x.toFixed(1)}" y="11" text-anchor="middle" class="frisean">${a}</text>`;
   }).join('');
 
   /* --- les periodes : une barre par voie --- */
+  /*
+   * L'etiquette d'une periode courte deborde a droite, et tombe sur la barre
+   * suivante de la MEME voie. On calcule donc, par voie, ou commence la
+   * suivante : au-dela, on n'ecrit pas.
+   */
+  const suivanteSurLaVoie = new Map();
+  for (const v of new Set(F.periodes.map(p => p.voie))) {
+    const surV = F.periodes.filter(p => p.voie === v).sort((a, b) => a.date.localeCompare(b.date));
+    surV.forEach((p, i) => suivanteSurLaVoie.set(p.id, surV[i + 1] ? X(surV[i + 1].date) : W - MD));
+  }
+
   const barres = F.periodes.map(p => {
-    const x1 = X(p.date), x2 = Math.max(X(p.fin), x1 + 3);
+    const x1 = X(p.date), x2 = Math.max(X(p.fin), x1 + 4);
     const y = yVoie(p.voie);
-    const c = p.couleur ?? NEUTRE;
+    const g = degradeDeriode(`fp${p.id}`, p.jours, x1, x2);
+    if (g.def) defs.push(g.def);
     const actif = survol === p.id;
-    const th = p.theme ?? themeDe(p.label);
-    // Le libelle se pose DANS la barre si elle est assez large, sinon apres.
-    const large = x2 - x1 > 92;
-    return `<g class="fperiode${actif ? ' on' : ''}" data-ev="${p.id}" style="--c:${c}">
-      <rect x="${x1.toFixed(1)}" y="${y}" width="${(x2 - x1).toFixed(1)}" height="16" rx="3"
-            fill="${c}" fill-opacity="${actif ? .34 : .18}"
-            stroke="${c}" stroke-opacity="${actif ? .9 : .5}"/>
-      <g transform="translate(${(x1 + 4).toFixed(1)} ${y + 2}) scale(.5)" color="${c}">${icone(th, 24)}</g>
-      <text x="${(large ? x1 + 19 : x2 + 6).toFixed(1)}" y="${y + 11.5}"
-            class="fetiq${large ? ' dedans' : ''}">${esc(p.label)}</text>
-      <title>${esc(p.label)} — ${esc(p.date)} → ${esc(p.fin)}${p.jours ? ` (${p.jours} jours)` : ''}</title>
+    const h = p.fort ? 20 : 15;
+    // CONTOURE = DECLARE : la teinte choisie ne touche jamais le remplissage.
+    const contour = p.teinte != null ? `hsl(${p.teinte} 62% 62%)` : 'var(--line)';
+    const large = x2 - x1 > 96;
+    // Combien de place a droite avant la barre suivante de cette voie.
+    const place = (suivanteSurLaVoie.get(p.id) ?? W - MD) - x2 - 8;
+    const etiquette = large || place > 60;
+    return `<g class="fperiode${actif ? ' on' : ''}${p.fort ? ' fort' : ''}" data-ev="${p.id}">
+      <rect x="${x1.toFixed(1)}" y="${y}" width="${(x2 - x1).toFixed(1)}" height="${h}" rx="3"
+            fill="${g.ref}" fill-opacity="${actif ? .85 : .62}"
+            stroke="${contour}" stroke-opacity="${actif ? 1 : p.teinte != null ? .85 : .5}"
+            stroke-width="${p.fort ? 1.5 : 1}"/>
+      <g transform="translate(${(x1 + 3).toFixed(1)} ${y + (h - 12) / 2}) scale(.5)"
+         color="${p.teinte != null ? contour : 'var(--ink-dim)'}">${icone(p.theme, 24)}</g>
+      ${etiquette ? `<text x="${(large ? x1 + 18 : x2 + 6).toFixed(1)}" y="${(y + h / 2 + 3.5).toFixed(1)}"
+            class="fetiq${large ? ' dedans' : ''}">${esc(p.label)}</text>` : ''}
+      <title>${esc(p.label)} — ${esc(p.date)} → ${esc(p.ouvert ? "aujourd'hui" : p.fin)} (${p.jours?.length ?? 0} journées écrites dessous)</title>
     </g>`;
   }).join('');
 
   /* --- les instants : une icone sur l'axe --- */
   const marques = F.points.map(p => {
     const x = X(p.date);
-    const c = p.couleur ?? NEUTRE;
+    // REMPLI = MESURE : la couleur de sa case dans la grille, exactement.
+    const remplissage = p.ecart === null ? SANS_DONNEES : deltaColor(p.ecart);
+    const contour = p.teinte != null ? `hsl(${p.teinte} 62% 62%)` : 'transparent';
     const actif = survol === p.id;
-    const th = p.theme ?? themeDe(p.label);
-    return `<g class="fpoint${actif ? ' on' : ''}" data-ev="${p.id}" style="--c:${c}">
-      <line x1="${x.toFixed(1)}" y1="${(yAxe - 20).toFixed(1)}" x2="${x.toFixed(1)}" y2="${yAxe}"
-            stroke="${c}" stroke-opacity=".5"/>
-      <circle cx="${x.toFixed(1)}" cy="${yAxe}" r="${actif ? 3.4 : 2.4}" fill="${c}"/>
-      <g transform="translate(${(x - 7).toFixed(1)} ${(yAxe - 34).toFixed(1)}) scale(.58)" color="${c}">${icone(th, 24)}</g>
-      <title>${esc(p.label)} — ${esc(p.date)}</title>
+    const r = p.fort ? 3.6 : 2.6;
+    const t = p.fort ? 26 : 22;
+    return `<g class="fpoint${actif ? ' on' : ''}${p.fort ? ' fort' : ''}" data-ev="${p.id}">
+      <line x1="${x.toFixed(1)}" y1="${(yAxe - 18).toFixed(1)}" x2="${x.toFixed(1)}" y2="${yAxe}"
+            stroke="${remplissage}" stroke-opacity=".55"/>
+      <circle cx="${x.toFixed(1)}" cy="${yAxe}" r="${actif ? r + 1 : r}"
+              fill="${remplissage}" stroke="${contour}" stroke-width="1.4"/>
+      <g transform="translate(${(x - t / 2).toFixed(1)} ${(yAxe - 18 - t).toFixed(1)}) scale(${(t / 24).toFixed(3)})"
+         color="${remplissage}">${icone(p.theme, 24)}</g>
+      <title>${esc(p.label)} — ${esc(p.date)}${p.note !== null && p.note !== undefined ? ` · ${p.note}/10` : ' · pas de journée écrite'}</title>
     </g>`;
   }).join('');
 
-  return `<svg class="frisesvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
-               style="height:${H}px" role="img" aria-label="Frise de tes repères">
-    ${fondJournal}
+  return `<svg class="frisesvg" viewBox="0 0 ${W} ${H}" style="height:${H}px"
+               role="img" aria-label="Frise de tes repères">
+    ${defs.length ? `<defs>${defs.join('')}</defs>` : ''}
+    ${fond}
     ${ans}
     <line x1="${MG}" y1="${yAxe}" x2="${W - MD}" y2="${yAxe}" stroke="var(--line)"/>
     ${barres}
     ${marques}
   </svg>`;
-}
-
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-/** Le repère sous le curseur, ou null. Le SVG est en unites viewBox, pas en pixels. */
-export function auPointFrise(svg, clientX, clientY) {
-  const el = document.elementFromPoint(clientX, clientY);
-  const g = el?.closest?.('[data-ev]');
-  return g ? Number(g.dataset.ev) : null;
 }

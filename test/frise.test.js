@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { voies, etendue, situer, JOUR_MS } from '../web/frise.js';
+import { voies, etendue, situer, estPeriode, finEffective, JOUR_MS } from '../web/frise.js';
 
 /* ------------------------------ les voies ------------------------------ */
 
@@ -119,4 +119,40 @@ test('une date hors bornes est ramenée sur la frise, pas au-delà', () => {
 
 test('JOUR_MS vaut bien une journée', () => {
   assert.equal(JOUR_MS, 24 * 60 * 60 * 1000);
+});
+
+/* -------------------- points, périodes, rétro-compat -------------------- */
+
+test('un repère sans fin est un instant, avec fin une période', () => {
+  assert.equal(estPeriode({ date: '2020-01-01', fin: null }), false);
+  assert.equal(estPeriode({ date: '2020-01-01', fin: '2020-06-01' }), true);
+});
+
+test('une période « en cours » n’a pas de fin en base mais en a une à l’écran', () => {
+  // Une sentinelle dans la colonne date serait pire que la colonne séparée :
+  // en ASCII '*' vaut 0x2A et '0' vaut 0x30, l'étoile passerait donc devant
+  // toutes les dates dans un tri, et l'étendue partirait de « * ».
+  const e = { date: '2024-01-01', fin: null, ouvert: 1 };
+  assert.equal(estPeriode(e), true);
+  assert.equal(finEffective(e, '2026-08-27'), '2026-08-27');
+  assert.equal(finEffective({ date: '2020-01-01', fin: '2021-01-01' }, '2026-08-27'), '2021-01-01');
+});
+
+test('une borne malformée ne peut pas produire NaN', () => {
+  // Un champ date accepte une année à quatre chiffres : « 0202-04-12 » donnait
+  // un domaine de six cent mille jours où le journal faisait deux pixels, et
+  // « lol » une frise entièrement blanche, sans erreur nulle part.
+  for (const mauvaise of ['0202-04-12', 'lol', '', '12/04/1996', '1899-12-31']) {
+    const e = etendue({ naissance: mauvaise, events: [], premierJour: '2022-01-01',
+                        dernierJour: '2026-08-27', aujourdhui: '2026-08-27' });
+    assert.ok(!Number.isNaN(e.jours), `« ${mauvaise} » produit NaN`);
+    assert.equal(e.debut, '2022-01-01', `« ${mauvaise} » ne doit pas devenir une borne`);
+  }
+});
+
+test('une date de repère malformée est ignorée comme borne', () => {
+  const e = etendue({ naissance: '1996-04-12', events: [{ date: 'oups', fin: null }],
+                      premierJour: '2022-01-01', dernierJour: '2026-08-27', aujourdhui: '2026-08-27' });
+  assert.equal(e.debut, '1996-04-12');
+  assert.ok(!Number.isNaN(e.jours));
 });
