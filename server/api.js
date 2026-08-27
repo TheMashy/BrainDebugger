@@ -254,7 +254,7 @@ export const routes = {
       etalon: getSettings(userId).etalon ?? median(s.map(x => x.note).sort((a, b) => a - b)),
       globalMedian: median(s.map(x => x.note).sort((a, b) => a - b)),
       mean: s.length ? Math.round(s.reduce((a, b) => a + b.note, 0) / s.length * 1000) / 1000 : null,
-      events: allEvents(userId).map(e => ({ ...e, theme: themeDe(e.label) })),
+      events: reperes(userId).events,
       motifs: motifsDuFil(userId)
     };
   },
@@ -800,25 +800,39 @@ export const routes = {
     return motifsDuFil(userId);
   },
   'POST /api/events': ({ body, userId }) => {
-    const rendre = () => ({ events: allEvents(userId).map(e => ({ ...e, theme: themeDe(e.label) })) });
-    if (body.delete) { deleteEvent(Number(body.delete), userId); return rendre(); }
+    if (body.delete) { deleteEvent(Number(body.delete), userId); return reperes(userId); }
     if (!body.date || !body.label) return { error: 'date et label requis' };
+    if (!ISO_JOUR.test(String(body.date))) return { error: 'Date invalide : il faut AAAA-MM-JJ.' };
     // `fin` accepte ici, et c'est ce qui rend une periode possible : la colonne
     // existait, l'affectation en voies etait ecrite et testee, et aucun chemin
     // ne pouvait en creer une.
     const fin = body.fin ? String(body.fin) : null;
-    if (fin && !/^\d{4}-\d{2}-\d{2}$/.test(fin)) return { error: 'Fin invalide : il faut AAAA-MM-JJ.' };
+    if (fin && !ISO_JOUR.test(fin)) return { error: 'Fin invalide : il faut AAAA-MM-JJ.' };
     if (fin && fin < body.date) return { error: 'La fin est avant le début.' };
     // Validation en code, jamais dans une consigne : la teinte doit venir de la
     // table declaree, sinon la separation avec la rampe des notes ne tient plus.
     const teinte = body.teinte == null ? null : Number(body.teinte);
     if (teinte !== null && !TEINTES.includes(teinte)) return { error: 'Teinte inconnue.' };
-    addEvent({
-      date: body.date, fin, label: String(body.label).slice(0, 120),
+
+    const champs = {
+      date: String(body.date), fin, label: String(body.label).slice(0, 120),
       theme: body.theme ?? null, teinte, fort: body.fort ? 1 : 0,
-      ouvert: body.ouvert ? 1 : 0, userId
-    });
-    return rendre();
+      ouvert: body.ouvert ? 1 : 0
+    };
+    /*
+     * MODIFIER, ET PAS SEULEMENT POSER.
+     *
+     * Sans ce chemin, corriger une date se faisait en supprimant le repere et
+     * en le reposant -- sur le fait le plus lourd d'une frise, avec un bouton
+     * « × » comme premiere etape. updateEvent filtre deja sur user_id : un
+     * identifiant devine ne suffit pas.
+     */
+    if (body.id) {
+      if (!updateEvent(Number(body.id), champs, userId)) return { error: 'Repère introuvable.' };
+    } else {
+      addEvent({ ...champs, userId });
+    }
+    return reperes(userId);
   },
 
   'POST /api/settings': ({ body, userId }) => {
@@ -917,9 +931,24 @@ function deplacements(rows, anchors, carnet, t) {
  * c'est lui qui repond a la question qu'on se pose vraiment en rouvrant une
  * vieille journee : « j'en etais ou, a ce moment-la ? »
  */
+const ISO_JOUR = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Les reperes, decores de leur theme.
+ *
+ * `e.theme ?? themeDe(e.label)`, et jamais `themeDe(e.label)` seul : la colonne
+ * dit « NULL = deduit du libelle », donc une valeur presente est un CHOIX. La
+ * liste ecrasait ce choix a chaque lecture -- on pouvait changer l'icone d'un
+ * repere, le serveur l'enregistrait, et il revenait a l'icone du libelle au
+ * rechargement suivant, sans que rien ne le signale.
+ */
+export const reperes = userId => ({
+  events: allEvents(userId).map(e => ({ ...e, theme: e.theme ?? themeDe(e.label) }))
+});
+
 function reperesDuJour(date, userId) {
   const tous = allEvents(userId);
-  const decore = e => ({ ...e, theme: themeDe(e.label) });
+  const decore = e => ({ ...e, theme: e.theme ?? themeDe(e.label) });
   const avant = tous.filter(e => e.date < date).slice(-1)[0] ?? null;
   return {
     jour: tous.filter(e => e.date === date).map(decore),

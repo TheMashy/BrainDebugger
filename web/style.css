@@ -1072,7 +1072,12 @@ body:has(#ambiance) { background: transparent; }
 
 /* --- la frise, dans l'Année --- */
 
+/* Le composeur tenait sur sept elements en ligne : icone, libelle, date, une
+   case a cocher, une seconde date, six pastilles de teinte, un bouton. Il en
+   reste quatre. Ce qui a disparu n'est pas parti : l'apparence est passee sous
+   l'icone, la duree sous la date -- la ou on la cherche. */
 .repform { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.repform .anc { position: relative; flex: none; }
 .repapercu {
   display: grid; place-items: center; flex: none;
   width: 40px; height: 40px; border-radius: 10px;
@@ -1084,8 +1089,10 @@ body:has(#ambiance) { background: transparent; }
 .repapercu:not([data-theme="jalon"]):not([data-theme=""]) {
   color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, transparent);
 }
+/* CONTOURE = DECLARE : une teinte choisie ne touche que le contour, jamais le
+   remplissage. La règle vaut jusque dans l'aperçu du composeur. */
+.repapercu[data-teinte] { color: hsl(var(--t) 62% 62%); border-color: hsl(var(--t) 50% 44%); }
 .repform input[type="text"] { flex: 1 1 220px; min-width: 0; }
-.repform input[type="date"] { flex: 0 0 auto; width: auto; }
 .repform input {
   background: var(--surface); border: 1px solid var(--line); color: var(--ink);
   border-radius: 9px; padding: 10px 12px; font-size: 14px; font-family: inherit;
@@ -1093,10 +1100,106 @@ body:has(#ambiance) { background: transparent; }
 .repform input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .repform .btn { flex: none; height: 40px; }
 
+/* Le bouton de date : il DIT la date, en français, au lieu de la faire
+   deviner dans « 08/27/2026 ». Une période s'y lit d'un coup. */
+.repdatebtn {
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+  border-radius: 9px; padding: 10px 13px; font-size: 13.5px; white-space: nowrap;
+  display: flex; align-items: center; gap: 7px;
+}
+.repdatebtn:hover { border-color: var(--line); background: var(--surface-h); }
+.repdatebtn[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.repdatebtn .fl { color: var(--ink-faint); }
+
+/* --- les panneaux flottants (dates, apparence) --- */
+
+.pop {
+  position: absolute; z-index: 40; top: calc(100% + 7px); left: 0;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 13px; padding: 11px; box-shadow: 0 14px 38px rgb(0 0 0 / .55);
+}
+.pop.droite { left: auto; right: 0; }
+@media (max-width: 700px) { .pop { left: 0; right: auto; } }
+
+.cal { width: 246px; user-select: none; }
+.calhead { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.calhead button { background: none; border: 0; border-radius: 7px; padding: 4px 7px; }
+.calnav { color: var(--ink-dim); font-size: 17px; line-height: 1; }
+.calnav:hover { background: var(--surface); color: var(--ink); }
+.calmois { flex: 1; text-align: left; font-size: 13.5px; color: var(--ink); }
+.calan { font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim); }
+.calmois:hover, .calan:hover { background: var(--surface); color: var(--ink); }
+.calmois[aria-expanded="true"], .calan[aria-expanded="true"] { background: var(--surface); color: var(--accent); }
+
+.caldows { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 3px; }
+.caldows span { text-align: center; font-size: 10px; color: var(--ink-faint); letter-spacing: .06em; }
+
+.calgrid { display: grid; gap: 2px; }
+.calgrid.jours { grid-template-columns: repeat(7, 1fr); }
+.calgrid.mois  { grid-template-columns: repeat(3, 1fr); }
+.calgrid.ans   { grid-template-columns: repeat(3, 1fr); }
+.calgrid button {
+  background: none; border: 0; border-radius: 7px; color: var(--ink);
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+  padding: 0; height: 30px; transition: background .1s, color .1s;
+}
+.calgrid.mois button, .calgrid.ans button { height: 34px; font-size: 12.5px; }
+.calgrid button:hover:not(:disabled) { background: var(--surface); }
+.calgrid button:disabled { color: var(--ink-faint); opacity: .35; cursor: default; }
+.calgrid button[aria-pressed="true"] { background: var(--surface); color: var(--accent); }
+
+.calj.hors { color: var(--ink-faint); }
+/* Aujourd'hui se voit toujours, même non sélectionné : c'est le point de repère
+   depuis lequel on lit toutes les autres dates. */
+.calj.hui { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+/* La journée écrite porte un point : dans le Miroir, un trou est une information. */
+.calj.ecrit::after {
+  content: ''; position: absolute; translate: 0 11px;
+  width: 3px; height: 3px; border-radius: 50%; background: var(--jc, var(--ink-faint));
+}
+.calj { position: relative; }
+.calj.entre { background: color-mix(in srgb, var(--accent) 13%, transparent); border-radius: 0; }
+.calj.borne { background: var(--accent); color: #06120b; font-weight: 600; }
+.calj.borne.lo { border-radius: 7px 0 0 7px; }
+.calj.borne.hi { border-radius: 0 7px 7px 0; }
+.calj.borne.lo.hi, .calj.borne:not(.hi):not(.lo) { border-radius: 7px; }
+
+.calpied {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line-soft);
+  font-size: 12px; color: var(--ink-dim);
+}
+.calpied .caltog { margin-left: auto; }
+.caltog {
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink-dim);
+  border-radius: 7px; padding: 4px 9px; font-size: 11.5px;
+}
+.caltog[aria-pressed="true"] { background: var(--surface-h); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* --- l'apparence : l'icône et la couleur, ensemble --- */
+
+.apparence { width: 226px; }
+.appgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.appgrid button {
+  display: grid; place-items: center; height: 36px;
+  background: none; border: 1px solid transparent; border-radius: 8px; color: var(--ink-dim);
+}
+.appgrid button:hover { background: var(--surface); color: var(--ink); }
+.appgrid button[aria-pressed="true"] {
+  background: var(--surface); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.appauto {
+  width: 100%; margin-top: 7px; padding: 5px; border-radius: 7px;
+  background: none; border: 1px solid var(--line); color: var(--ink-dim); font-size: 11.5px;
+}
+.appauto:hover { color: var(--ink); background: var(--surface); }
+
 /* Bornée : une liste de neuf lignes étalée sur mille pixels n'est plus une
    liste, c'est un tableau vide avec du texte dans la marge gauche. */
 .frise { display: flex; flex-direction: column; gap: 18px; max-width: 560px; }
-.repform { max-width: 560px; }
+.repform { max-width: 760px; }
 .frisean { display: flex; flex-direction: column; gap: 2px; }
 .frisetitre { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .frisetitre .mono { font-size: 12px; color: var(--ink-dim); letter-spacing: .06em; }
@@ -1110,7 +1213,7 @@ body:has(#ambiance) { background: transparent; }
 }
 .repligne:hover { background: var(--surface); }
 .repligne .ricone-box { width: 30px; height: 30px; border-radius: 8px; }
-.repdate { font-size: 11.5px; flex: 0 0 62px; }
+.repdate { font-size: 11.5px; flex: 0 0 auto; min-width: 62px; }
 .replabel { flex: 1; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repdel {
   flex: none; background: none; border: 0; color: var(--ink-faint);
@@ -1289,15 +1392,12 @@ button.amasrow:hover { background: var(--panel); }
 .frisesvg .fpoint:hover circle { r: 4; }
 .frisenote { max-width: 68ch; margin: 0 0 16px; font-size: 11.5px; }
 
-.friseliste { margin-top: 6px; }
-.friseliste summary {
-  cursor: pointer; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-faint); padding: 6px 0; list-style: none;
-}
-.friseliste summary::-webkit-details-marker { display: none; }
-.friseliste summary::before { content: '▸ '; }
-.friseliste[open] summary::before { content: '▾ '; }
-.friseliste summary:hover { color: var(--ink-dim); }
+/* La liste des repères ne se replie plus derrière « la liste » : c'est là
+   qu'on va pour en corriger un, et un accordéon de plus est un clic de plus
+   sur le seul geste que cette carte serve à faire. */
+.repligne[data-edev] { cursor: pointer; }
+.repligne.ouvert { background: var(--surface-h); box-shadow: inset 2px 0 0 var(--accent); }
+.repdate { font-variant-numeric: tabular-nums; }
 
 /* Le choix de couleur. Cinq pastilles, et rien d'autre : un sélecteur libre
    rendrait la règle inapplicable — les teintes déclarées doivent rester hors

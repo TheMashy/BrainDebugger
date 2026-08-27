@@ -4,8 +4,9 @@ import { disposer, dessiner, auPoint } from './carte.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
-import { icone, iconeDe, themeDe, NOMS, TEINTES_DECLAREES } from './reperes.js';
+import { icone, iconeDe, themeDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { friseMarkup as friseSVG } from './frise.js';
+import { calMarkup, calClic, moisDe } from './calendrier.js';
 
 /* ============================= socle ============================= */
 
@@ -18,6 +19,8 @@ const fmtDay = d => {
   return `${Number(dd)} ${MONTHS_FR[Number(m) - 1].toLowerCase()} ${y}`;
 };
 const fmtTime = ts => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const joursEntre = (a, b) => Math.round(
+  (Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000) + 1;
 const dayShift = (d, n) => {
   const [y, m, dd] = d.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, dd) + n * 86400000).toISOString().slice(0, 10);
@@ -820,32 +823,15 @@ async function renderYear(year) {
       <div class="card">
         <div class="cardhead">
           <h2>Repères</h2>
-          <label class="naissance" title="Donne une origine à la frise. Aucun âge n'est calculé.">
-            <span>naissance</span>
-            <input type="date" id="naissance" min="1900-01-01" max="${S.today}"
-                   value="${S.settings.naissance ?? ''}">
-          </label>
+          <button class="repdatebtn" id="naissbtn" aria-expanded="false"
+                  title="Donne une origine à la frise. Aucun âge n'est calculé."
+                  style="margin-left:auto;font-size:12.5px;padding:7px 11px">
+            <span class="fl">naissance</span>${S.settings.naissance ? fmtDay(S.settings.naissance) : '—'}
+          </button>
         </div>
-        <form id="evform" class="repform">
-          <span class="repapercu" id="evicone">${icone('jalon', 22)}</span>
-          <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
-                 placeholder="changement de boulot, déménagement…">
-          <input type="date" id="evdate" required min="1900-01-01" max="${S.today}" value="${S.today}">
-          <label class="evduree" title="Deux dates : une période — une addiction, un contrat, une relation.">
-            <input type="checkbox" id="evPeriode"> ça a duré</label>
-          <input type="date" id="evfin" min="1900-01-01" max="${S.today}" hidden>
-          <span class="evteintes" id="evteintes" role="group"
-                title="La teinte ne touche que le contour : le remplissage vient de tes journées.">
-            <button type="button" class="evt" data-teinte="" aria-pressed="true" title="sans couleur"></button>
-            ${TEINTES_DECLAREES.map(t => `<button type="button" class="evt" data-teinte="${t}"
-              aria-pressed="false" style="--t:${t}" title="teinte ${t}°"></button>`).join('')}
-          </span>
-          <button class="btn primary" type="submit">Poser</button>
-        </form>
+        ${composeurMarkup()}
         ${SERIES.events.length
-          ? `<details class="friseliste"><summary>la liste</summary>
-               <div class="frise">${friseMarkup(SERIES.events)}</div>
-             </details>`
+          ? `<div class="frise">${friseMarkup(SERIES.events)}</div>`
           : `<p class="sub" style="margin:0">Aucun repère. Le compagnon en pose aussi de lui-même.</p>`}
       </div>
     </div>`;
@@ -861,12 +847,6 @@ async function renderYear(year) {
     if (dl) { DAILYALL = dl.dataset.daily === 'all'; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
     if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
-    const del = e.target.closest('[data-delev]');
-    if (del) {
-      const { events } = await api('/api/events', { delete: Number(del.dataset.delev) });
-      SERIES.events = events;
-      return renderYear(year);
-    }
     const cad = e.target.closest('[data-cadre]');
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
     const dcn = e.target.closest('[data-delcn]');
@@ -882,14 +862,7 @@ async function renderYear(year) {
 
   wireCarnet(async () => { CARNET = await api('/api/carnet'); renderYear(year); });
   wireFrise();
-
-  $('#naissance')?.addEventListener('change', async e => {
-    try {
-      await saveSettings({ naissance: e.target.value || null });
-      FRISE = null;
-      toast(e.target.value ? 'Naissance enregistrée' : 'Naissance retirée');
-    } catch (err) { toast(err.message); e.target.value = S.settings.naissance ?? ''; }
-  });
+  wireReperes(year);
 
   $('#etalon').onchange = async e => {
     const v = Number(e.target.value);
@@ -900,48 +873,251 @@ async function renderYear(year) {
     renderYear(year);
   };
 
-  // L'icône se décide pendant la frappe. C'est la raison d'être du module
-  // partagé : le classement tourne dans le navigateur, sans aller-retour, et
-  // c'est exactement celui que le serveur appliquera.
+}
+
+/**
+ * Le composeur, câblé.
+ *
+ * Il se redessine à chaque changement d'état plutôt que de muter le DOM :
+ * l'icône, la couleur, les dates et le libellé des boutons dépendent tous du
+ * même objet, et six mutations coordonnées finissent toujours par se
+ * désynchroniser sur un chemin qu'on n'a pas prévu.
+ *
+ * Le libellé, lui, est préservé à la main avant chaque redessin : il vit dans
+ * un champ non contrôlé, et le perdre en ouvrant le calendrier serait la pire
+ * des surprises.
+ */
+function wireReperes(year) {
+  const carte = $('#evform')?.closest('.card');
+  if (!carte) return;
+
+  const saisi = () => { const c = $('#evlabel'); if (c && EV) EV.label = c.value; };
+  /*
+   * `lire` = faut-il reprendre le libelle du champ avant de redessiner ?
+   *
+   * Presque toujours oui : le champ n'est pas controle, et le perdre en
+   * ouvrant le calendrier serait la pire des surprises. Mais quand on vient de
+   * remplacer EV en entier -- ouvrir un repere existant -- le champ contient
+   * encore l'ancien etat, et le relire ecrasait le libelle qu'on venait de
+   * charger. Le champ s'ouvrait vide sur le repere qu'on voulait corriger.
+   */
+  const redessiner = (lire = true) => {
+    if (lire) saisi();
+    $('#evform').outerHTML = composeurMarkup();
+    wireReperes(year);
+    const c = $('#evlabel');
+    if (c && !POP) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); }
+  };
+
+  EV ??= evVide();
+
+  // L'icône se décide pendant la frappe, tant qu'on ne l'a pas choisie à la
+  // main. C'est la raison d'être du module partagé : le classement tourne dans
+  // le navigateur, et c'est exactement celui que le serveur appliquera.
   const champ = $('#evlabel');
   champ.oninput = () => {
+    EV.label = champ.value;
+    if (EV.theme != null) return;                 // choisi à la main : on n'y touche plus
     const t = themeDe(champ.value);
-    $('#evicone').innerHTML = icone(t, 22);
-    $('#evicone').dataset.theme = t;
-    $('#evicone').title = NOMS[t] ?? 'jalon';
+    const ic = $('#evicone');
+    ic.innerHTML = icone(t, 22);
+    ic.dataset.theme = t;
   };
 
-  // « ça a duré » revele la seconde date : un repere ponctuel et une periode ne
-  // sont pas deux objets differents, seulement une borne de plus.
-  $('#evPeriode').onchange = e => {
-    const f = $('#evfin');
-    f.hidden = !e.target.checked;
-    if (e.target.checked && !f.value) f.value = S.today;
+  $('#evicone').onclick = () => { POP = POP === 'app' ? null : 'app'; redessiner(); };
+
+  $('#evdate').onclick = () => {
+    if (POP === 'date') { POP = null; return redessiner(); }
+    ouvrirCal('date', { debut: EV.debut, fin: EV.fin, plage: !!EV.fin,
+                        min: '1900-01-01', max: S.today });
+    redessiner();
   };
 
-  let TEINTE = null;
-  $('#evteintes').onclick = e => {
-    const b = e.target.closest('[data-teinte]');
-    if (!b) return;
-    TEINTE = b.dataset.teinte ? Number(b.dataset.teinte) : null;
-    $('#evteintes').querySelectorAll('.evt').forEach(x =>
-      x.setAttribute('aria-pressed', String(x === b)));
+  $('#naissbtn').onclick = () => {
+    if (POP === 'naiss') { POP = null; return redessiner(); }
+    ouvrirCal('naiss', { debut: S.settings.naissance ?? '1990-01-01', fin: null,
+                         plage: false, min: '1900-01-01', max: S.today });
+    redessiner();
   };
+  // Le panneau de naissance vit hors du formulaire : on le pose à côté du bouton.
+  if (POP === 'naiss') {
+    const anc = $('#naissbtn');
+    anc.parentElement.style.position ||= 'relative';
+    anc.insertAdjacentHTML('afterend', calPopMarkup(false).replace('class="pop"', 'class="pop droite"'));
+  }
+
+  carte.onclick = async e => {
+    const t = e.target;
+
+    // --- le calendrier ---
+    const c = t.closest('[data-cal]');
+    if (c) {
+      CAL = calClic(CAL, c.dataset);
+      if (POP === 'naiss') {
+        if (c.dataset.cal === 'jour') {
+          POP = null;
+          try {
+            await saveSettings({ naissance: CAL.debut });
+            FRISE = null;
+            toast('Naissance enregistrée');
+            return renderYear(year);
+          } catch (err) { toast(err.message); }
+        }
+      } else if (POP === 'date') {
+        EV.debut = CAL.debut; EV.fin = CAL.plage ? CAL.fin : null;
+        // Une plage se ferme quand elle est complète ; un jour, tout de suite.
+        if (c.dataset.cal === 'jour' && (!CAL.plage || CAL.fin)) POP = null;
+      }
+      return redessiner();
+    }
+    const dur = t.closest('[data-plage]');
+    if (dur) {
+      CAL.plage = !CAL.plage;
+      if (!CAL.plage) { CAL.fin = null; EV.fin = null; }
+      return redessiner();
+    }
+
+    // --- l'apparence ---
+    const ic = t.closest('[data-ico]');
+    if (ic) { EV.theme = ic.dataset.ico || null; return redessiner(); }
+    const te = t.closest('.evt[data-teinte]');
+    if (te) { EV.teinte = te.dataset.teinte ? Number(te.dataset.teinte) : null; return redessiner(); }
+
+    // --- la liste ---
+    const del = t.closest('[data-delev]');
+    if (del) {
+      const id = Number(del.dataset.delev);
+      const { events } = await api('/api/events', { delete: id });
+      SERIES.events = events;
+      if (EV?.id === id) EV = null;
+      FRISE = null;
+      return renderYear(year);
+    }
+    const ed = t.closest('[data-edev]');
+    if (ed) {
+      const ev = SERIES.events.find(x => x.id === Number(ed.dataset.edev));
+      if (!ev) return;
+      // Une période ouverte n'a pas de fin en base : on ne s'en invente pas une.
+      EV = { id: ev.id, label: ev.label, theme: ev.theme ?? null, teinte: ev.teinte ?? null,
+             debut: ev.date, fin: ev.fin ?? null };
+      POP = null;
+      return redessiner(false);
+    }
+  };
+
+  $('#evannul')?.addEventListener('click', () => { EV = null; POP = null; redessiner(false); });
 
   $('#evform').onsubmit = async e => {
     e.preventDefault();
-    const date = $('#evdate').value, label = champ.value.trim();
-    if (!date || !label) return;
-    const fin = $('#evPeriode').checked ? $('#evfin').value : null;
+    saisi();
+    const label = (EV.label ?? '').trim();
+    if (!label || !EV.debut) return;
     try {
-      const { events } = await api('/api/events', { date, fin, label, theme: themeDe(label), teinte: TEINTE });
+      const { events } = await api('/api/events', {
+        id: EV.id ?? undefined, date: EV.debut, fin: EV.fin ?? null, label,
+        // `theme` reste NULL tant qu'on ne l'a pas choisi : la colonne dit
+        // « NULL = deduit du libelle ». Y ecrire le theme deduit fige l'icone,
+        // et renommer le repere ne la ferait plus suivre.
+        theme: EV.theme, teinte: EV.teinte
+      });
       SERIES.events = events;
-      champ.value = '';
-      $('#evPeriode').checked = false; $('#evfin').hidden = true;
+      const quoi = EV.id ? 'Repère modifié' : EV.fin ? 'Période posée' : 'Repère posé';
+      EV = null; POP = null; FRISE = null;
       await renderYear(year);
-      toast(fin ? 'Période posée' : 'Repère posé');
+      toast(quoi);
     } catch (err) { toast(err.message); }
   };
+}
+
+/* ===================== le composeur de repères =====================
+ *
+ * UN SEUL COMPOSEUR, QUI POSE ET QUI MODIFIE.
+ *
+ * Il y en avait un pour poser, et rien pour modifier : une date fausse se
+ * corrigeait en supprimant le repère et en le reposant. Un repère mal daté
+ * déplace toute une lecture, et c'est précisément celui qu'on veut corriger.
+ *
+ * Le formulaire tenait sur sept éléments en ligne — icône, libellé, date, case
+ * « ça a duré », seconde date, six pastilles, bouton. Il en reste quatre :
+ * l'apparence est passée sous l'icône, la durée sous la date, là où on les
+ * cherche. Ce n'est pas du rangement : une commande visible en permanence dit
+ * qu'on aura à s'en servir à chaque fois, et neuf fois sur dix on n'a rien à
+ * changer ni à l'icône ni à la couleur.
+ */
+
+/** null = on pose ; un objet = on modifie ce repère-là. */
+let EV = null;
+/** 'date' | 'app' | 'naiss' | null — un seul panneau ouvert à la fois. */
+let POP = null;
+let CAL = null;
+
+const evVide = () => ({ id: null, label: '', theme: null, teinte: null,
+                        debut: S.today, fin: null, plage: false });
+
+/** Le thème effectif : celui qu'on a choisi, sinon celui que le libellé dicte. */
+const evTheme = e => e.theme ?? themeDe(e.label);
+
+function ouvrirCal(cle, { debut, fin, plage, min, max }) {
+  POP = cle;
+  CAL = { vue: 'jour', curseur: moisDe(debut, S.today.slice(0, 7)),
+          debut, fin, plage, min, max };
+}
+
+/** « 10 mai 2020 → 20 nov 2022 », ou « 27 août 2026 ». */
+const quandLisible = e => e.fin ? `${fmtDay(e.debut)} <span class="fl">→</span> ${fmtDay(e.fin)}`
+                                : fmtDay(e.debut);
+
+function calPopMarkup(avecDuree) {
+  return `<div class="pop" id="calpop">
+    ${calMarkup({ ...CAL, aujourdhui: S.today })}
+    ${avecDuree ? `<div class="calpied">
+      ${/* Le pied dit l'etat, pas la fonction : « du debut a la fin » ne
+            distingue pas une plage commencee d'une plage finie, et c'est
+            exactement ce qu'on a besoin de savoir a ce moment-la. */''}
+      <span>${!CAL.plage ? 'un jour'
+              : !CAL.fin ? "clique l'autre borne"
+              : `${joursEntre(CAL.debut, CAL.fin)} jours`}</span>
+      <button type="button" class="caltog" data-plage aria-pressed="${CAL.plage}"
+              title="Une addiction, un contrat, une relation : deux bornes au lieu d'une.">ça a duré</button>
+    </div>` : ''}
+  </div>`;
+}
+
+function composeurMarkup() {
+  const e = EV ?? evVide();
+  const th = evTheme(e);
+  return `<form id="evform" class="repform">
+    <span class="anc">
+      <button type="button" class="repapercu" id="evicone" data-theme="${th}"
+              ${e.teinte != null ? `data-teinte style="--t:${e.teinte}"` : ''}
+              aria-expanded="${POP === 'app'}" title="Icône et couleur">${icone(th, 22)}</button>
+      ${POP === 'app' ? `<div class="pop apparence" id="apppop">
+        <div class="appgrid">
+          ${Object.keys(ICONES).map(t => `<button type="button" data-ico="${t}"
+            aria-pressed="${t === th}" title="${NOMS[t] ?? t}">${icone(t, 18)}</button>`).join('')}
+        </div>
+        <div class="evteintes" style="margin-top:9px;justify-content:center"
+             title="La teinte ne touche que le contour : le remplissage vient de tes journées.">
+          <button type="button" class="evt" data-teinte="" aria-pressed="${e.teinte == null}" title="sans couleur"></button>
+          ${TEINTES_DECLAREES.map(t => `<button type="button" class="evt" data-teinte="${t}"
+            aria-pressed="${e.teinte === t}" style="--t:${t}" title="teinte ${t}°"></button>`).join('')}
+        </div>
+        <button type="button" class="appauto" data-ico="">choisir d'après le libellé</button>
+      </div>` : ''}
+    </span>
+
+    <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
+           value="${esc(e.label)}" placeholder="changement de boulot, déménagement…">
+
+    <span class="anc">
+      <button type="button" class="repdatebtn" id="evdate" aria-expanded="${POP === 'date'}"
+        >${quandLisible(e)}</button>
+      ${POP === 'date' ? calPopMarkup(true) : ''}
+    </span>
+
+    <button class="btn primary" type="submit">${e.id ? 'Enregistrer' : 'Poser'}</button>
+    ${e.id ? `<button type="button" class="btn" id="evannul">Annuler</button>` : ''}
+  </form>`;
 }
 
 /**
@@ -964,9 +1140,15 @@ function friseMarkup(events) {
       <div class="frisetitre"><span class="mono">${an}</span><i></i><span class="faint">${liste.length}</span></div>
       ${liste.map(ev => {
         const t = ev.theme ?? themeDe(ev.label);
-        return `<div class="repligne" data-theme="${t}">
-          <span class="ricone-box">${icone(t, 18)}</span>
-          <span class="repdate mono faint">${Number(ev.date.slice(8))} ${MONTHS_FR[Number(ev.date.slice(5, 7)) - 1].toLowerCase()}</span>
+        const jm = d => `${Number(d.slice(8))} ${MONTHS_FR[Number(d.slice(5, 7)) - 1].toLowerCase()}`;
+        // Une période affiche ses DEUX bornes : la liste en montrait une seule,
+        // et rien ne distinguait un instant d'une addiction de trois ans.
+        const quand = ev.fin ? `${jm(ev.date)} → ${jm(ev.fin)}` : jm(ev.date);
+        return `<div class="repligne${EV?.id === ev.id ? ' ouvert' : ''}" data-theme="${t}"
+                     data-edev="${ev.id}" role="button" tabindex="0"
+                     title="Modifier ce repère">
+          <span class="ricone-box"${ev.teinte != null ? ` style="color:hsl(${ev.teinte} 62% 62%)"` : ''}>${icone(t, 18)}</span>
+          <span class="repdate mono faint">${quand}</span>
           <span class="replabel">${esc(ev.label)}</span>
           <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">×</button>
         </div>`;

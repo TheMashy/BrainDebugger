@@ -95,6 +95,7 @@ export function themeDe(label) {
  * la meme echelle qu'ailleurs.
  */
 export const ICONES = {
+  jalon:    '<path d="M12 3.5 20.5 12 12 20.5 3.5 12z"/>',
   crise:    '<path d="M13.6 2.8 5.9 13.6h4.8L9.9 21.2l7.7-10.8h-4.9z"/>',
   conso:    '<path d="M20.4 12a8.4 8.4 0 1 1-3.2-6.6"/><path d="M20.4 4.2v4.6h-4.6"/><circle cx="12" cy="12" r="2.1"/>',
   manger:   '<path d="M3.4 11.2h17.2a8.6 8.6 0 0 1-17.2 0z"/><path d="M2.2 20.4h19.6"/><path d="M8.6 7.6c0-1.4 1.2-1.9 1.2-3.2M12 7.6c0-1.4 1.2-1.9 1.2-3.2M15.4 7.6c0-1.4 1.2-1.9 1.2-3.2" opacity=".55"/>',
@@ -102,7 +103,6 @@ export const ICONES = {
   // Hors THEMES : themeDe ne la rend jamais. Elle sert aux objectifs, dont un
   // type est « une pensee » -- ce qu'aucun fait date ne peut etre.
   pensee:   '<path d="M12 3.2a5.4 5.4 0 0 0-4.3 8.7c.7.9 1.1 1.6 1.1 2.6v1.3h6.4v-1.3c0-1 .4-1.7 1.1-2.6A5.4 5.4 0 0 0 12 3.2z"/><path d="M9.6 19h4.8"/><path d="M10.4 21.4h3.2"/>',
-  jalon:    '<path d="M12 3.5 20.5 12 12 20.5 3.5 12z"/>',
   deuil:    '<path d="M12 3c1.8 2 2.6 3.4 2.6 4.7A2.6 2.6 0 0 1 12 10.3a2.6 2.6 0 0 1-2.6-2.6C9.4 6.4 10.2 5 12 3z"/><path d="M12 10.5V14"/><path d="M7 21v-3.4a5 5 0 0 1 10 0V21z"/>',
   rupture:  '<path d="M12 20.3 4.8 13a4.4 4.4 0 0 1 6.2-6.2l.4.4"/><path d="M12.6 7.2l.4-.4A4.4 4.4 0 0 1 19.2 13L12 20.3"/><path d="M13.4 8.6 10.6 11l3.2 2.2-2.6 2.6"/>',
   soin:     '<rect x="2.6" y="9" width="18.8" height="6" rx="3" transform="rotate(-40 12 12)"/><path d="M9.4 8.2 15.8 14.6"/>',
