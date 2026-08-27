@@ -313,7 +313,7 @@ async function renderTonight() {
 function monterPet() {
   const art = $('#art');
   if (!art) return;
-  art.innerHTML = petMarkup(S.settings);
+  art.innerHTML = petMarkup(S.settings, S.ambiance);
   if (art.dataset.lie) return;
   art.dataset.lie = '1';
   art.onclick = () => $('#petPick').click();
@@ -757,7 +757,7 @@ function drawEchoes() {
  */
 function renderNoData(why) {
   $('#view').innerHTML = `<div class="card" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
-    <div style="width:84px;height:84px;flex:none">${petMarkup(S.settings)}</div>
+    <div style="width:84px;height:84px;flex:none">${petMarkup(S.settings, S.ambiance)}</div>
     <div style="flex:1;min-width:240px">
       <h2 style="margin:0 0 5px">Rien à afficher</h2>
       <p class="sub" style="margin:0 0 13px">${esc(why)}</p>
@@ -1516,7 +1516,7 @@ async function renderMirror(date) {
         </div>`).join('')}
       </div>` : ''}
       ${!m.rawPast?.length && !m.yesterday.text ? `<div class="card" style="display:flex;align-items:center;gap:20px">
-        <div style="width:76px;height:76px;flex:none">${petMarkup(S.settings)}</div>
+        <div style="width:76px;height:76px;flex:none">${petMarkup(S.settings, S.ambiance)}</div>
         <div>
           <p style="margin:0 0 4px">Il n'y a rien d'écrit à te remontrer pour l'instant.</p>
           <p class="sub" style="margin:0 0 12px">Le miroir a besoin de tes mots pour servir à quelque chose. Il n'en a pas encore.</p>
@@ -2856,6 +2856,11 @@ function syncAmbiance() {
   const a = S.ambiance;
   if (a) Ambiance.set(a.scene, a.energie);
   syncAmbianceRail();
+  // Le chaton suit le decor, pas la note. Il vit dans le rail et n'est pas
+  // redessine par les vues : c'est ici, et nulle part ailleurs, qu'il change
+  // de visage.
+  const art = $('#art');
+  if (art && S.settings?.petSprite !== 'custom') art.innerHTML = petMarkup(S.settings, a);
 }
 
 async function boot() {

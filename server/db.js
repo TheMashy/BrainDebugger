@@ -216,8 +216,8 @@ export const countUsers = () => db.prepare('SELECT COUNT(*) c FROM users').get()
 /* ---------- settings ---------- */
 
 export const DEFAULT_SETTINGS = {
-  petName: 'Cerf',
-  petSprite: 'deer',          // id integre, ou 'custom'
+  petName: 'Chaton',
+  petSprite: 'chaton',        // id integre, ou 'custom'
   petImage: null,             // data URL si petSprite === 'custom'
   blipEnabled: true,          // la voix du compagnon : un blip par syllabe
   blipVoice: 'aa',            // identifiant de timbre (voir web/blips.js)
