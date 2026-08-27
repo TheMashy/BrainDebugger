@@ -1,4 +1,5 @@
 import { PETS, petMarkup } from './pets.js';
+import { Ambiance } from './ambiance.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -1330,6 +1331,7 @@ function drawImportPreview(p) {
       const r = await api('/api/import', { csv: IMPORT_CSV, apply: true });
       S = await api('/api/state');
       syncHeader();
+      syncAmbiance();
       SERIES = null;                 // la série complète doit être rechargée
       IMPORT_CSV = null;
       renderSettings();
@@ -1391,6 +1393,7 @@ function drawNotesPreview(p) {
       const r = await api('/api/import-notes', { text: NOTES_PASTE, apply: true });
       S = await api('/api/state');
       syncHeader();
+      syncAmbiance();
       SERIES = null;
       NOTES_PASTE = null;
       renderSettings();
@@ -1452,9 +1455,18 @@ function suivreSession() {
   addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') fermer(); });
 }
 
+/** Applique la scène choisie par le serveur. Sans effet si le fond est absent. */
+function syncAmbiance() {
+  const a = S.ambiance;
+  if (a) Ambiance.set(a.scene, a.energie);
+}
+
 async function boot() {
   S = await api('/api/state');
   suivreSession();
+  // Le fond démarre après l'état : il doit savoir quelle scène poser d'entrée,
+  // sinon on voit la scène par défaut céder la place trois secondes plus tard.
+  if (Ambiance.start()) syncAmbiance();
   document.querySelector('nav').addEventListener('click', e => {
     const b = e.target.closest('button[data-view]');
     if (b) go(b.dataset.view);

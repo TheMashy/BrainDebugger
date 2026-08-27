@@ -8,6 +8,7 @@ import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays
 import { inspectCSV, applyImport } from './import-csv.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
+import { readMood, readEnergy } from './mood.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search } from './search.js';
 import { reply, memoryBlock, anchorBlock, gridBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
@@ -69,6 +70,25 @@ export function recentMemory(date, userId = OWNER) {
   return morceaux.length ? morceaux.join('\n\n---\n\n') : null;
 }
 
+/**
+ * La scene du fond, pour le navigateur.
+ *
+ * Calculee sur le fil COURANT, pas sur tout l'historique : le decor suit la
+ * conversation en train de se tenir. Rien de ce qui est ici ne remonte au
+ * compagnon -- s'il savait qu'un decor existe, il en parlerait, et commenter le
+ * decor revient a commenter l'humeur.
+ */
+export function ambiance(userId = OWNER) {
+  const msgs = recentMessages(80, userId).filter(m => m.role === 'user');
+  const texte = msgs.map(m => m.text).join(' ');
+  const t = today();
+  const note = getEntry(t, userId)?.note ?? null;
+  const { series: ser } = series(userId);
+  const ref = ser.length ? ser[ser.length - 1].reference : null;
+  const m = readMood(texte, note);
+  return { scene: m.scene, force: m.force, energie: readEnergy(note, ref) };
+}
+
 /** Ce que le navigateur a le droit de savoir de la personne connectée. */
 export function publicUser(userId) {
   const u = getUser(userId);
@@ -115,6 +135,7 @@ export const routes = {
       messages: recentMessages(80, userId),
       user: publicUser(userId),
       usage: usageFor(userId),
+      ambiance: ambiance(userId),
       stats: {
         days: ser.length,
         textDays: textCount,
