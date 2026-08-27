@@ -550,8 +550,12 @@ nav button { white-space: nowrap; }
      bas, et sur 844 px de haut chaque rangée d'en-tête est prise sur le fil. */
   .viewname { display: none; }
   nav { flex: 1 1 100%; gap: 0; justify-content: space-between; }
-  nav button { flex: 1 1 0; min-width: 0; padding: 10px 2px; font-size: 9.5px;
-               letter-spacing: .1em; min-height: 40px; }
+  /* Le nowrap du bureau fait deborder « JE REMARQUE » sur « REGLAGES » : cinq
+     parts egales de soixante-dix pixels, et l'etiquette en fait soixante-et-onze.
+     Sur deux lignes elles tiennent toutes, sans rien renommer. */
+  nav button { flex: 1 1 0; min-width: 0; padding: 7px 2px; font-size: 9.5px;
+               letter-spacing: .08em; min-height: 40px;
+               white-space: normal; line-height: 1.2; text-align: center; }
 
   /* Tout ce qui se touche. 40 px est le minimum recommandé par Apple ; sur
      cette application un bouton raté efface des journées. */
@@ -827,69 +831,122 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
    le passé renvoie. La navigation était le point faible — deux flèches et un
    titre ne disent pas qu'on se promène dans quatre ans d'écriture. */
 
+/* ---------- la lecture ---------- */
+
+.lecture { max-width: 720px; }
+.lechead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 26px; }
+.lecmeta { font-size: 11.5px; }
+.lecmeta b { color: var(--warn); font-weight: 500; }
+
+/* Le curseur : trois positions, pas un menu. Une seule pastille se déplace —
+   c'est ce qui donne l'impression de dézoomer plutôt que de choisir. */
+.horizons { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--panel-2); }
+.horizons button {
+  background: none; border: 0; border-radius: 8px; padding: 6px 13px;
+  font-size: 12.5px; color: var(--ink-faint); transition: color .15s, background .15s;
+}
+.horizons button:hover { color: var(--ink-dim); }
+.horizons button[aria-pressed="true"] { background: var(--surface); color: var(--ink); }
+
+.synthese {
+  font: 300 19px/1.6 var(--serif); color: var(--ink);
+  margin: 0 0 34px; max-width: 34em;
+}
+
+.lectvide { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 40px 0; }
+.lectvide p { margin: 0; }
+.lectvide .btn { margin-top: 10px; }
+.spin {
+  width: 15px; height: 15px; border-radius: 50%; margin-bottom: 6px;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  animation: tourne .9s linear infinite;
+}
+.spin.petit { width: 10px; height: 10px; border-width: 1.5px; margin: 0 4px 0 0; display: inline-block; vertical-align: -1px; }
+@keyframes tourne { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* --- un thème --- */
+
+.themes { display: flex; flex-direction: column; gap: 2px; margin-bottom: 34px; }
+.theme { border-radius: 11px; transition: background .13s; }
+.theme:hover { background: var(--panel-2); }
+.theme.ouvert { background: var(--panel-2); }
+.thead {
+  display: flex; align-items: center; gap: 13px; width: 100%;
+  background: none; border: 0; padding: 11px 13px; text-align: left; color: inherit;
+}
+/* L'intensité est une TAILLE, jamais une couleur : la couleur dit déjà l'écart
+   d'une journée partout ailleurs dans l'application. */
+.tpuce { flex: none; border-radius: 50%; background: var(--ink-dim); }
+.tpuce[data-i="0"] { width: 4px; height: 4px; opacity: .45; }
+.tpuce[data-i="1"] { width: 6px; height: 6px; opacity: .6; }
+.tpuce[data-i="2"] { width: 8px; height: 8px; opacity: .8; }
+.tpuce[data-i="3"] { width: 10px; height: 10px; background: var(--accent); }
+.tnom { flex: 1; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* La série : une forme, pas un graphe. Pas d'axe, pas d'échelle — on y lit
+   « ça monte », « ça revient par vagues », et c'est tout ce qu'on lui demande. */
+.tserie { display: flex; align-items: flex-end; gap: 1.5px; height: 20px; flex: none; }
+.tserie i { width: 3px; background: var(--ink-faint); border-radius: 1px; opacity: .7; }
+.theme.ouvert .tserie i, .theme:hover .tserie i { background: var(--accent); opacity: .85; }
+
+.tcorps { padding: 0 13px 14px 39px; }
+.tquoi { margin: 0 0 12px; font-size: 14px; color: var(--ink-dim); max-width: 40em; }
+.tpreuves { display: flex; flex-direction: column; gap: 2px; }
+.tpreuve {
+  display: flex; align-items: baseline; gap: 11px; width: 100%; text-align: left;
+  background: none; border: 0; padding: 6px 8px; border-radius: 8px; color: inherit;
+  border-left: 2px solid var(--line);
+}
+.tpreuve:hover { background: var(--surface); border-left-color: var(--accent); }
+.tpreuve .mono { font-size: 11px; color: var(--ink-faint); flex: none; }
+.tpreuve span:last-child {
+  font: 300 14px/1.5 var(--serif); color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tliens { margin: 12px 0 0; font-size: 12px; color: var(--ink-faint); }
+.tliens button { background: none; border: 0; padding: 0; color: var(--ink-dim); text-decoration: underline;
+  text-underline-offset: 3px; font-size: 12px; }
+.tliens button:hover { color: var(--accent); }
+
+/* --- la carte des thèmes --- */
+
+.cartethemes { max-width: 330px; margin: 6px auto 0; }
+.cartethemes svg { width: 100%; height: auto; overflow: visible; }
+.ct-liens line { stroke: var(--line); stroke-width: .45; }
+.ct-noeud circle { fill: var(--ink-faint); transition: fill .15s; }
+.ct-noeud text { fill: var(--ink-faint); font-size: 3.6px; font-family: var(--sans); transition: fill .15s; }
+.ct-capte { fill: transparent; cursor: pointer; }
+.ct-noeud:hover circle, .ct-noeud.on circle { fill: var(--accent); }
+.ct-noeud:hover text, .ct-noeud.on text { fill: var(--ink); }
+
+.retourlect { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; }
+.retourlect button {
+  background: none; border: 0; color: var(--ink-faint); border-radius: 7px;
+  padding: 5px 9px; font-size: 12.5px; transition: color .13s, background .13s;
+}
+.retourlect button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
+.retourlect button:disabled { opacity: .3; }
+.retourlect button:first-child { color: var(--ink-dim); margin-right: 6px; }
+.retourlect .faint { flex: 1; font-size: 12.5px; }
+
 .mirror { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px 34px; }
 .mcol { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
 @media (max-width: 900px) { .mirror { grid-template-columns: 1fr; } }
 
-.calhead { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
-.calhead button {
-  background: none; border: 0; color: var(--ink-faint);
-  padding: 3px 8px; border-radius: 6px; font-size: 15px; line-height: 1;
-}
-.calhead button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
-.calhead button:disabled { opacity: .25; }
-.calmois { font-size: 13px; color: var(--ink-dim); text-transform: capitalize; min-width: 7.5em; }
-/* Le retour a aujourd'hui est le seul geste qu'on refait sans arret dans le
-   Miroir : il reste a sa place, meme quand on y est deja. Le faire disparaitre
-   une case sur deux deplacait les fleches sous le curseur. */
-.calnow {
-  font-size: 11.5px !important; margin-left: auto;
-  border: 1px solid var(--line) !important; color: var(--ink-dim) !important;
-}
-/* Quand on y est déjà, il s'éteint plutôt que de s'allumer en vert : la case du
-   jour porte déjà l'anneau, deux marques vertes pour la même information font
-   deux fois trop. */
-.calnow:disabled { opacity: 1 !important; border-color: var(--line-soft) !important; color: var(--ink-faint) !important; }
-.calhead { max-width: 320px; }
-
-/* Largeur bornée : sans ça, chaque case fait cent pixels dans une colonne
-   large et le calendrier avale la page. C'est un repère de navigation, pas la
-   pièce maîtresse — celle-ci est le texte du jour, juste en dessous. */
-.calgrid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px;
-  max-width: 320px;
-}
-.cald {
-  text-align: center; font-size: 10px; color: var(--ink-faint);
-  padding-bottom: 4px; font-family: var(--mono);
-}
-.calcase {
-  aspect-ratio: 1; border: 0; border-radius: 5px;
-  max-height: 42px;
-  background: var(--line-soft); color: #0d120f;
-  font-size: 11px; font-weight: 600; font-family: var(--mono);
-  display: flex; align-items: center; justify-content: center;
-  position: relative;
-  transition: transform .1s, outline-color .1s;
-  outline: 1.5px solid transparent; outline-offset: -1.5px;
-}
-.calcase:hover:not(:disabled) { transform: scale(1.12); z-index: 2; }
-.calcase.vide { background: var(--line-soft); color: var(--ink-faint); font-weight: 400; }
-.calcase:disabled { opacity: .2; }
-.calcase.on { outline-color: var(--ink); }
-/* Aujourd'hui, en permanence. Deux marques differentes plutot qu'une seule
-   partagee : le contour blanc suit le regard, l'anneau vert reste sur la date
-   du jour meme quand on est parti trois mois en arriere. */
-.calcase.auj {
-  box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--accent), 0 0 10px -1px var(--accent);
-}
-.calcase.auj.vide { color: var(--accent); }
-/* Un point sous la case : cette journée porte du texte. C'est ce qu'on cherche
-   quand on remonte — les jours écrits, pas les jours notés. */
-.calcase.texte::after {
-  content: ''; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
-  width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .55;
-}
+/* Le calendrier du Miroir vient du MEME module que celui du composeur de
+   repères. Il y avait deux calendriers, aux mêmes noms de classes — .calhead,
+   .calgrid, .calmois — et le second écrasait le premier depuis plus bas dans la
+   feuille. Ici on ajoute seulement ce que le Miroir a en plus : la teinte des
+   journées, qui n'a de sens que sur un journal. */
+.calcard .cal { width: 100%; }
+.calcard .calgrid button { height: 34px; }
+.calj.teinte { background: color-mix(in srgb, var(--jc) 62%, transparent); color: #08110c; font-weight: 500; }
+.calj.teinte.hors { opacity: .45; }
+/* La borne — le jour ouvert — passe devant la teinte : on doit toujours savoir
+   ce qu'on regarde, même sur une journée à 9/10 déjà claire. */
+.calj.borne.teinte { background: var(--accent); }
+.calj.teinte::after { background: #08110c; opacity: .55; }
 
 /* La ligne d'en-tête d'une journée : la note, la référence, l'écart, puis
    « effacer ». En flex avec wrap, la colonne du Miroir étant devenue plus

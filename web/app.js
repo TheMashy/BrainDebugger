@@ -1396,6 +1396,15 @@ function carnetItemMarkup(n) {
 
 let MIRROR_DATE = null;
 let MIRROR_CARNET = null;   // les notes du jour ouvert, pour le message de suppression
+/*
+ * Le curseur du calendrier, distinct du jour ouvert.
+ *
+ * L'ancien calendrier naviguait avec des liens vers le 1er du mois voisin : on
+ * ne pouvait pas regarder mars sans ouvrir le 1er mars. Feuilleter et choisir
+ * sont deux gestes differents, et les confondre fait perdre la journee qu'on
+ * etait en train de lire.
+ */
+let MIR_CAL = { vue: 'jour', curseur: null };
 
 /**
  * Surligne les termes qui ont fait matcher. Montrer POURQUOI ca ressort.
@@ -1468,14 +1477,233 @@ function termesMarkup(it) {
     .join(' · ');
 }
 
-async function renderMirror(date) {
+/* ===================== la lecture =====================
+ *
+ * CE QUE LE MIROIR MONTRE MAINTENANT.
+ *
+ * Il montrait une journee : son texte, sa note, celles qui lui ressemblaient.
+ * C'etait utile et ca reste la -- mais ce n'etait pas une vue d'ensemble, et
+ * une vue d'ensemble est exactement ce qu'un journal de quatre ans ne donne
+ * jamais tout seul.
+ *
+ * La lecture est faite par le compagnon, sur tout le corpus, et elle n'est PAS
+ * une carte de mots. La carte compte des co-occurrences : elle sait dire que
+ * « fatigue » et « boulot » tombent la meme semaine, et elle s'arrete la. Un
+ * fonctionnement comme « les remontees ne tiennent pas trois jours » n'a aucun
+ * mot en commun d'une occurrence a l'autre.
+ *
+ * TROIS FENETRES, UN CURSEUR. Court, moyen, long : la meme question posee a
+ * trois distances. Ce qui domine le mois n'est pas ce qui structure quatre ans,
+ * et lire l'un pour l'autre est l'erreur qu'une seule fenetre garantit.
+ */
+
+let MIR_HORIZON = 'moyen';
+let MIR_THEME = null;          // le theme deplie
+let LECTURE = null;
+let LECTURE_EN_COURS = false;
+
+const HORIZONS_UI = [['court', 'court terme'], ['moyen', 'moyen terme'], ['long', 'long terme']];
+
+/** Une barre par période. Petite, sans axe : c'est une forme, pas un graphe. */
+function serieMarkup(serie) {
+  if (!serie?.length) return '';
+  return `<span class="tserie" aria-hidden="true">${serie.map(p =>
+    `<i style="height:${[2, 34, 66, 100][p.valeur]}%" title="${esc(p.periode)} · ${p.valeur}/3"></i>`
+  ).join('')}</span>`;
+}
+
+function themeMarkup(t) {
+  const ouvert = MIR_THEME === t.nom;
+  return `<div class="theme${ouvert ? ' ouvert' : ''}" data-theme-nom="${esc(t.nom)}">
+    <button class="thead" aria-expanded="${ouvert}">
+      <span class="tpuce" data-i="${t.intensite}"></span>
+      <span class="tnom">${esc(t.nom)}</span>
+      ${serieMarkup(t.serie)}
+    </button>
+    ${ouvert ? `<div class="tcorps">
+      <p class="tquoi">${esc(t.quoi)}</p>
+      <div class="tpreuves">${t.preuves.map(p => `<button class="tpreuve" data-jour="${p.date}">
+        <span class="mono">${fmtDay(p.date)}</span>
+        <span>${esc(p.extrait)}</span>
+      </button>`).join('')}</div>
+      ${t.liens?.length ? `<p class="tliens">avec ${t.liens.map(l =>
+        `<button data-theme-aller="${esc(l)}">${esc(l)}</button>`).join(' · ')}</p>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+
+/**
+ * La carte des thèmes.
+ *
+ * Des nœuds sur un cercle, reliés par ce que le compagnon a lié. Un cercle et
+ * pas un placement calculé : sur trois à six nœuds, une simulation de forces
+ * donne un résultat différent à chaque rendu, et une carte qui bouge quand on
+ * ne l'a pas touchée n'est pas lisible. Le rayon du nœud dit l'intensité.
+ */
+function carteThemesMarkup(themes) {
+  if (themes.length < 2) return '';
+  // Le viewBox fait 100 d'unites pour ~340 px : un rayon de 7 devient une bille
+  // de trente pixels, et trois billes de trente pixels ne sont plus une carte.
+  const R = 33, W = 100, H = 100;
+  const pos = new Map(themes.map((t, i) => {
+    const a = (i / themes.length) * Math.PI * 2 - Math.PI / 2;
+    return [t.nom, { x: 50 + R * Math.cos(a), y: 50 + R * Math.sin(a) }];
+  }));
+  const traits = [];
+  const vus = new Set();
+  for (const t of themes) for (const l of t.liens ?? []) {
+    const cle = [t.nom, l].sort().join('|');
+    if (vus.has(cle)) continue;
+    vus.add(cle);
+    const a = pos.get(t.nom), b = pos.get(l);
+    if (a && b) traits.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}"
+      x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`);
+  }
+  return `<div class="cartethemes">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Les thèmes et ce qui les relie">
+      <g class="ct-liens">${traits.join('')}</g>
+      ${themes.map(t => {
+        const p = pos.get(t.nom);
+        const r = 1.7 + t.intensite * 0.7;
+        return `<g class="ct-noeud${MIR_THEME === t.nom ? ' on' : ''}" data-theme-aller="${esc(t.nom)}">
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}"/>
+          <text x="${p.x.toFixed(1)}" y="${(p.y + (p.y < 50 ? -r - 3 : r + 6.2)).toFixed(1)}"
+                text-anchor="middle">${esc(t.nom)}</text>
+          <circle class="ct-capte" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="8"/>
+        </g>`;
+      }).join('')}
+    </svg>
+  </div>`;
+}
+
+async function renderLecture() {
+  MIRROR_DATE = null;
+  if (!LECTURE || LECTURE.horizon !== MIR_HORIZON) {
+    LECTURE = await api(`/api/lecture?horizon=${MIR_HORIZON}`);
+  }
+  const L = LECTURE;
+  const themes = L.lecture?.themes ?? [];
+
+  const curseur = `<div class="horizons" role="group" aria-label="Fenêtre">
+    ${HORIZONS_UI.map(([id, nom]) => `<button data-horizon="${id}"
+      aria-pressed="${MIR_HORIZON === id}">${nom}</button>`).join('')}
+  </div>`;
+
+  /*
+   * UNE LECTURE EXISTANTE PASSE AVANT TOUT LE RESTE.
+   *
+   * Les conditions (assez de journées, une clé) disent s'il est possible d'en
+   * FAIRE une, pas s'il faut en montrer une. Testées d'abord, elles cachaient
+   * une lecture parfaitement valide derrière « il faut au moins 12 journées » à
+   * la première fois qu'on retire sa clé.
+   */
+  let corps;
+  if (L.lecture) {
+    corps = `
+      <p class="synthese">${esc(L.lecture.synthese)}</p>
+      <div class="themes">${themes.map(themeMarkup).join('')}</div>
+      ${carteThemesMarkup(themes)}`;
+  } else if (LECTURE_EN_COURS) {
+    corps = `<div class="lectvide"><span class="spin"></span>
+      <p>Il relit ton journal.</p>
+      <p class="sub">Ça prend un moment — il lit tout, pas un résumé.</p></div>`;
+  } else if (!L.possible) {
+    corps = `<div class="lectvide">
+      <p>Il faut au moins ${L.minimum} journées écrites.</p>
+      <p class="sub">Tu en as ${L.ecrites}. En dessous, ce qui ressortirait serait du bruit.</p></div>`;
+  } else if (!L.cle) {
+    corps = `<div class="lectvide">
+      <p>Cette lecture demande une clé Claude.</p>
+      <p class="sub">Sans elle, l'application sait compter tes mots — elle le fait dans « Je remarque » —
+      mais elle ne sait pas te dire ce qui se répète sans se répéter dans les mêmes mots.</p>
+      <button class="btn" data-aller-reglages>Réglages</button></div>`;
+  } else {
+    corps = `<div class="lectvide">
+      <p>Rien de lu sur cette fenêtre.</p>
+      <button class="btn primary" data-lire>Lancer la lecture</button></div>`;
+  }
+
+  $('#view').innerHTML = `<div class="lecture">
+    <div class="lechead">
+      ${curseur}
+      ${L.lecture ? `<span class="lecmeta faint">${L.jours} journées · ${fmtDay(L.fait_le.slice(0, 10))}${
+        L.perime ? ` · <b>${L.retard} journée${L.retard > 1 ? 's' : ''} depuis</b>` : ''}</span>` : ''}
+      ${L.lecture ? (LECTURE_EN_COURS
+        ? `<span class="lecmeta faint"><span class="spin petit"></span> il relit</span>`
+        : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus.">relire</button>`) : ''}
+    </div>
+    ${corps}
+  </div>`;
+
+  wireLecture();
+
+  // « elle doit toujours faire de l'analyse de fond » : si elle manque, on la
+  // lance en arrivant, sans rien demander. Si elle existe mais a pris du
+  // retard, on ne relance que quand le retard compte vraiment — le serveur en
+  // décide, fenêtre par fenêtre. Sinon écrire tous les soirs relancerait une
+  // relecture complète tous les soirs, pour un thème qui n'aura pas bougé.
+  // L'ancienne reste affichée pendant ce temps : une lecture d'hier vaut mieux
+  // qu'un écran d'attente.
+  if (!LECTURE_EN_COURS && L.possible && L.cle && L.arelire) lancerLecture();
+}
+
+async function lancerLecture() {
+  if (LECTURE_EN_COURS) return;
+  LECTURE_EN_COURS = true;
+  const avait = !!LECTURE?.lecture;
+  if (!avait) await renderLecture();       // l'attente ne s'affiche que s'il n'y a rien à montrer
+  try {
+    const r = await api('/api/lecture', { horizon: MIR_HORIZON });
+    LECTURE = r;
+    if (r.usage) { S.usage = r.usage; syncGauge(); }
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    LECTURE_EN_COURS = false;
+    if (view === 'mirror' && !MIRROR_DATE) await renderLecture();
+  }
+}
+
+function wireLecture() {
+  $('#view').onclick = async e => {
+    const h = e.target.closest('[data-horizon]');
+    if (h) { MIR_HORIZON = h.dataset.horizon; MIR_THEME = null; LECTURE = null; return renderLecture(); }
+    if (e.target.closest('[data-lire]')) return lancerLecture();
+    if (e.target.closest('[data-aller-reglages]')) { view = 'settings'; syncNav(); return renderSettings(); }
+    const j = e.target.closest('[data-jour]');
+    if (j) return renderMirror(j.dataset.jour);
+    const a = e.target.closest('[data-theme-aller]');
+    if (a) { MIR_THEME = a.dataset.themeAller; return renderLecture(); }
+    const t = e.target.closest('[data-theme-nom]');
+    if (t) {
+      MIR_THEME = MIR_THEME === t.dataset.themeNom ? null : t.dataset.themeNom;
+      return renderLecture();
+    }
+  };
+}
+
+/* ===================== le jour ===================== */
+
+/**
+ * @param {string|null} date
+ * @param {{garderCal?: boolean}} [opt]
+ *   `garderCal` : on vient de feuilleter le calendrier, le curseur ne doit PAS
+ *   se recaler sur la journée ouverte — c'est tout l'intérêt du geste. Partout
+ *   ailleurs il se recale : ouvrir une preuve de 2023 en laissant le calendrier
+ *   sur août 2026 montre un mois qui n'a rien à voir avec ce qu'on lit.
+ */
+async function renderMirror(date, { garderCal = false } = {}) {
   if (!S.stats.days) return renderNoData('Le miroir a besoin de journées passées pour te montrer quoi que ce soit.');
-  date = date ?? MIRROR_DATE ?? S.today;
+  // Sans date, on est sur la lecture. C'est elle, la vue d'ensemble ; le jour
+  // s'ouvre depuis une preuve, un repère, la frise ou le calendrier.
+  if (!date) return renderLecture();
+  if (!garderCal) MIR_CAL = { vue: 'jour', curseur: date.slice(0, 7) };
   MIRROR_DATE = date;
-  const m = await api(`/api/mirror?date=${date}`);
+  const m = await api(`/api/mirror?date=${date}&mois=${MIR_CAL.curseur}`);
   MIRROR_CARNET = m.carnet ?? [];
   const prev = dayShift(date, -1), next = dayShift(date, 1);
   const nav = `<div class="daynav">
+      <button class="wide" data-lecture title="Revenir à la vue d'ensemble">‹ la lecture</button>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
       <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button class="wide" data-goto="${S.today}">aujourd'hui</button>` : ''}
@@ -1589,6 +1817,15 @@ async function renderMirror(date) {
   </div>`;
 
   $('#view').innerHTML = `
+    ${/* Le retour vers la lecture. Sans lui, ouvrir une journée depuis une
+          preuve est un aller simple : la vue d'ensemble n'a plus de porte. */''}
+    <div class="retourlect">
+      <button data-lecture>‹ la lecture</button>
+      <span class="faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</span>
+      <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
+      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      ${date !== S.today ? `<button data-goto="${S.today}">aujourd'hui</button>` : ''}
+    </div>
     <div class="mirror">
       <div class="mcol">
         ${calendarMarkup(m, date)}
@@ -1681,44 +1918,27 @@ function reperesMarkup(rep, date) {
 function calendarMarkup(m, date) {
   const cases = m.calendrier ?? [];
   if (!cases.length) return '';
-  const mois = date.slice(0, 7);
-  const [an, mo] = mois.split('-').map(Number);
-  // Lundi en premiere colonne : getUTCDay() rend 0 pour dimanche.
-  const premier = (new Date(Date.UTC(an, mo - 1, 1)).getUTCDay() + 6) % 7;
-
-  const moisPrec = new Date(Date.UTC(an, mo - 2, 1)).toISOString().slice(0, 10);
-  const moisSuiv = new Date(Date.UTC(an, mo, 1)).toISOString().slice(0, 10);
-  const suivDispo = moisSuiv.slice(0, 7) <= S.today.slice(0, 7);
-
-  const nom = new Date(Date.UTC(an, mo - 1, 1))
-    .toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-
-  return `<div class="card cal">
-    <div class="calhead">
-      <button data-goto="${moisPrec}" aria-label="Mois précédent">‹</button>
-      <span class="calmois">${esc(nom)}</span>
-      <button data-goto="${moisSuiv}" ${suivDispo ? '' : 'disabled'} aria-label="Mois suivant">›</button>
-      <button class="calnow" data-goto="${S.today}" ${date === S.today ? 'disabled' : ''}>aujourd'hui</button>
-    </div>
-    <div class="calgrid">
-      ${JOURS_COURT.map(j => `<span class="cald">${j}</span>`).join('')}
-      ${'<span></span>'.repeat(premier)}
-      ${cases.map(c => {
-        const sel = c.date === date;
-        // Deux reperes distincts, et c'est volontaire : « on » dit ou on
-        // regarde, « auj » dit ou on est. Les confondre fait perdre le nord des
-        // qu'on s'eloigne de quelques jours -- on ne sait plus si le cadre
-        // blanc est la date du jour ou celle qu'on a ouverte.
-        const auj = c.date === S.today;
-        const futur = c.date > S.today;
-        const fond = c.note !== null ? `background:${deltaColor(c.delta ?? 0)}` : '';
-        return `<button class="calcase${sel ? ' on' : ''}${auj ? ' auj' : ''}${c.note === null ? ' vide' : ''}${c.texte ? ' texte' : ''}"
-          data-goto="${c.date}" ${futur ? 'disabled' : ''} style="${fond}"
-          data-tip="${esc(fmtDay(c.date))}${auj ? " · aujourd'hui" : ''}${c.note !== null ? ` · ${c.note}/10` : ' · non notée'}"
-          >${Number(c.date.slice(-2))}</button>`;
-      }).join('')}
-    </div>
-  </div>`;
+  const par = new Map(cases.map(c => [c.date, c]));
+  return `<div class="card calcard">${calMarkup({
+    vue: MIR_CAL.vue,
+    curseur: MIR_CAL.curseur ?? date.slice(0, 7),
+    debut: date,
+    min: '1900-01-01', max: S.today, aujourdhui: S.today,
+    /*
+     * Une journée notée porte la couleur de son écart, exactement celle de sa
+     * case dans la grille de l'Année. Une journée écrite mais non notée porte
+     * un point : dans un journal, un trou est une information, et le masquer
+     * ferait croire qu'il ne s'est rien passé.
+     */
+    jour: d => {
+      const c = par.get(d);
+      if (!c) return null;
+      if (c.note !== null && c.note !== undefined) {
+        return { couleur: deltaColor(c.delta ?? 0), ecrit: c.texte };
+      }
+      return c.texte ? { ecrit: true } : null;
+    }
+  })}</div>`;
 }
 
 function wireMirror() {
@@ -1732,6 +1952,15 @@ function wireMirror() {
       return renderMirror(MIRROR_DATE);
     }
 
+    // Le calendrier : feuilleter ne change pas le jour ouvert ; cliquer une
+    // case, si. Deux gestes, deux effets.
+    const c = e.target.closest('[data-cal]');
+    if (c) {
+      if (c.dataset.cal === 'jour') { MIR_CAL.curseur = c.dataset.d.slice(0, 7); return renderMirror(c.dataset.d); }
+      MIR_CAL = calClic({ ...MIR_CAL, debut: MIRROR_DATE }, c.dataset);
+      return renderMirror(MIRROR_DATE, { garderCal: true });
+    }
+    if (e.target.closest('[data-lecture]')) { MIRROR_DATE = null; return renderLecture(); }
     const g = e.target.closest('[data-goto]');
     if (g) return renderMirror(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');

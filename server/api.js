@@ -4,7 +4,8 @@ import {
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
-  updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif, TEINTES
+  updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
+  getLecture, setLecture, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -13,6 +14,7 @@ import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMood, readEnergy } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
+import { corpusPour, lire, HORIZONS, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
@@ -23,7 +25,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
+import { reply, resolveKey, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -283,9 +285,11 @@ export const routes = {
     // baladait dans l'historique sans jamais voir ce qu'on avait ecrit CE jour-la.
     const jour = { date, note, text: entry?.text ?? '' };
 
-    // Le mois affiche, pour le calendrier. Les journees sans note en font partie :
-    // c'est un calendrier, les trous s'y voient et c'est une information.
-    const mois = date.slice(0, 7);
+    // Le mois affiche, pour le calendrier. Il ne suit PAS forcement le jour
+    // ouvert : on feuillette mars sans quitter la journee qu'on lisait.
+    // Les journees sans note en font partie : c'est un calendrier, les trous s'y
+    // voient et c'est une information.
+    const mois = /^\d{4}-\d{2}$/.test(String(query.mois ?? '')) ? query.mois : date.slice(0, 7);
     const [an, mo] = mois.split('-').map(Number);
     const nbJours = new Date(Date.UTC(an, mo, 0)).getUTCDate();
     const calendrier = [];
@@ -820,6 +824,81 @@ export const routes = {
     }
     invalidate(userId);
     return rendre();
+  },
+
+  /**
+   * LA LECTURE : ce que le compagnon comprend du fonctionnement.
+   *
+   * GET rend ce qui est en base, avec de quoi savoir s'il faut relancer. Une
+   * lecture est perimee quand des journees ont ete ecrites APRES la derniere
+   * qu'elle a vue -- pas quand elle est vieille. Une lecture faite il y a un
+   * mois sur un journal auquel on n'a rien ajoute est toujours juste, et la
+   * relancer couterait des jetons pour rendre exactement la meme chose.
+   */
+  'GET /api/lecture': ({ query, userId }) => {
+    const horizon = HORIZONS[query.horizon] ? query.horizon : 'moyen';
+    const { rows } = series(userId);
+    const ecrites = rows.filter(r => r.text && r.text.trim());
+    const dernier = ecrites.at(-1)?.date ?? null;
+    const l = getLecture(horizon, userId);
+    /*
+     * Le RETARD : combien de journees ecrites depuis la derniere que la lecture
+     * a vue. C'est ce qui decide de relancer toute seule, et pas le simple fait
+     * qu'une journee ait ete ajoutee -- ecrire tous les soirs declencherait
+     * alors une relecture complete du corpus tous les soirs, pour un theme qui
+     * n'aura pas bouge d'un cheveu.
+     *
+     * Le seuil suit la fenetre : sur trente jours, une semaine de plus est un
+     * quart du corpus ; sur quatre ans, elle ne change rien.
+     */
+    const retard = l?.jusqu_au
+      ? ecrites.filter(r => r.date > l.jusqu_au).length
+      : ecrites.length;
+    const SEUIL = { court: 3, moyen: 14, long: 30 }[horizon] ?? 14;
+    return {
+      horizon,
+      lecture: l?.contenu ?? null,
+      fait_le: l?.fait_le ?? null,
+      jours: l?.jours ?? 0,
+      modele: l?.modele ?? null,
+      // Assez de matiere pour que la question ait un sens ?
+      possible: ecrites.length >= LECTURE_MIN,
+      minimum: LECTURE_MIN,
+      ecrites: ecrites.length,
+      retard,
+      perime: !!l && retard > 0,
+      // Ce qui declenche une relecture sans qu'on la demande.
+      arelire: !l || retard >= SEUIL,
+      cle: resolveKey(getSettings(userId)).source !== 'none'
+    };
+  },
+
+  'POST /api/lecture': async ({ body, userId }) => {
+    const horizon = HORIZONS[body.horizon] ? body.horizon : 'moyen';
+    const s = getSettings(userId);
+    const { rows, carnet } = series(userId);
+    const ecrites = rows.filter(r => r.text && r.text.trim());
+    if (ecrites.length < LECTURE_MIN) {
+      return { error: `Il faut au moins ${LECTURE_MIN} journées écrites pour que ça veuille dire quelque chose.` };
+    }
+    const corpus = corpusPour(horizon, {
+      rows, events: allEvents(userId), carnet,
+      motifs: allMotifs(userId), objectifs: allObjectifs(userId)
+    }, today());
+    if (!corpus.dates.size) {
+      return { error: "Rien d'écrit sur cette fenêtre. Essaie une fenêtre plus large." };
+    }
+    let r;
+    try { r = await lire(horizon, corpus, s); }
+    catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+    const l = setLecture({
+      horizon, contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
+      jours: corpus.jours, modele: r.modele, userId
+    });
+    return { horizon, lecture: l.contenu, fait_le: l.fait_le, jours: l.jours,
+             modele: l.modele, possible: true, perime: false, retard: 0,
+             arelire: false, cle: true, usage: usageFor(userId) };
   },
 
   'GET /api/objectifs': ({ userId }) => ({ objectifs: allObjectifs(userId) }),

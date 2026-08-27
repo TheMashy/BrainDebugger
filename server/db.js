@@ -179,6 +179,30 @@ CREATE INDEX IF NOT EXISTS idx_objectifs_user ON objectifs(user_id);
 -- tenu a 62 % n'apprend rien a la personne qui le vit, et transforme un
 -- indicateur en note.
 
+/*
+ * Les lectures : ce que le compagnon a compris du fonctionnement, par horizon.
+ *
+ * Une ligne par (personne, horizon), remplacee a chaque analyse. On ne garde
+ * pas l'historique des lectures, et c'est un choix : l'evolution d'un theme est
+ * DANS le theme (sa serie periode par periode), calculee sur tout le corpus a
+ * chaque fois. La deduire d'une suite de lectures ferait dependre la courbe des
+ * jours ou on a pense a lancer l'analyse.
+ *
+ * « jusqu_au » est ce qui dit qu'une lecture est perimee : la derniere journee
+ * qu'elle a vue. Une date de calcul ne suffirait pas -- une lecture faite hier
+ * sur un journal auquel on n'a rien ajoute est toujours juste.
+ */
+CREATE TABLE IF NOT EXISTS lectures (
+  user_id  TEXT NOT NULL DEFAULT '${OWNER}',
+  horizon  TEXT NOT NULL,          -- 'court' | 'moyen' | 'long'
+  fait_le  TEXT NOT NULL,          -- ISO 8601
+  jusqu_au TEXT,                   -- derniere journee ecrite du corpus
+  jours    INTEGER NOT NULL,       -- journees ecrites derriere cette lecture
+  modele   TEXT,
+  contenu  TEXT NOT NULL,          -- JSON { synthese, themes }
+  PRIMARY KEY (user_id, horizon)
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
@@ -567,6 +591,30 @@ export function countCarnet(userId = OWNER) {
   const r = db.prepare('SELECT COUNT(*) t, COUNT(jour) d FROM carnet WHERE user_id = ?').get(userId);
   return { total: r.t, datees: r.d, libres: r.t - r.d };
 }
+
+/* ---------- lectures ---------- */
+
+export function getLecture(horizon, userId = OWNER) {
+  const r = db.prepare('SELECT * FROM lectures WHERE user_id = ? AND horizon = ?').get(userId, horizon);
+  if (!r) return null;
+  try { return { ...r, contenu: JSON.parse(r.contenu) }; }
+  catch { return null; }        // un JSON casse vaut une lecture absente
+}
+
+export function setLecture({ horizon, contenu, jusqu_au, jours, modele, userId = OWNER,
+                             quand = new Date().toISOString() }) {
+  db.prepare(`
+    INSERT INTO lectures(user_id, horizon, fait_le, jusqu_au, jours, modele, contenu)
+    VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(user_id, horizon) DO UPDATE SET
+      fait_le = excluded.fait_le, jusqu_au = excluded.jusqu_au,
+      jours = excluded.jours, modele = excluded.modele, contenu = excluded.contenu
+  `).run(userId, horizon, quand, jusqu_au, jours, modele ?? null, JSON.stringify(contenu));
+  return getLecture(horizon, userId);
+}
+
+export const deleteLectures = (userId = OWNER) =>
+  db.prepare('DELETE FROM lectures WHERE user_id = ?').run(userId).changes;
 
 /* ---------- objectifs ---------- */
 

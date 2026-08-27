@@ -136,6 +136,9 @@ export function calMarkup({ vue = 'jour', curseur, debut = null, fin = null,
     if (hi && c.date === hi && hi !== lo) cls.push('borne', 'hi');
     if (lo && hi && c.date > lo && c.date < hi) cls.push('entre');
     if (info?.ecrit) cls.push('ecrit');
+    // La teinte est une option du Miroir : elle n'a de sens que sur un journal.
+    // Le calendrier d'un composeur de repère n'en reçoit jamais.
+    if (info?.couleur) cls.push('teinte');
     const ok = borne(c.date, min, max);
     return `<button type="button" class="${cls.join(' ')}" data-cal="jour" data-d="${c.date}"
       ${ok ? '' : 'disabled'} ${info?.couleur ? `style="--jc:${esc(info.couleur)}"` : ''}
