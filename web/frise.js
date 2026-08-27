@@ -244,11 +244,43 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
              : F?.etendue;
   if (!et) return '';
 
+  /*
+   * SOUS UN GRAPHE ON FILTRE ; DANS UN CADRE ON RAMENE AU BORD.
+   *
+   * situer() borne a [0,1] : ce qui precede le debut se pose sur le bord
+   * gauche, et son infobulle garde les vraies dates. C'est le bon geste pour
+   * les cadres « vie » et « journal », qui montrent tout ce qui existe.
+   *
+   * Sous une courbe, c'est un mensonge. La frise ne sert la qu'a une chose --
+   * faire tomber un fait sur l'inflexion qu'il explique -- et une rupture de
+   * 2020 collee au bord d'une fenetre de sept jours designe le mauvais jour. Le
+   * lecteur n'a aucun moyen de savoir qu'elle a ete deplacee. Sur « 7 j », six
+   * reperes s'empilaient d'ailleurs sur le meme pixel.
+   *
+   * Une periode qui CHEVAUCHE la fenetre reste : sa barre est coupee aux
+   * bornes, ce qui est vrai -- cette periode couvrait bien ce moment-la.
+   */
+  let PTS = F.points ?? [], PER = F.periodes ?? [];
+  if (domaine) {
+    PTS = PTS.filter(p => p.date >= et.debut && p.date <= et.fin);
+    PER = PER.filter(p => p.fin >= et.debut && p.date <= et.fin);
+    // Les voies viennent du serveur, calculees sur TOUTES les periodes. Apres
+    // filtrage la voie 3 peut etre la seule occupee : trois rangees vides
+    // au-dessus de l'unique barre, et une frise trois fois trop haute.
+    const rang = new Map([...new Set(PER.map(p => p.voie))].sort((a, b) => a - b)
+      .map((v, i) => [v, i]));
+    PER = PER.map(p => ({ ...p, voie: rang.get(p.voie) }));
+    // Rien dans la fenetre : pas de bande vide sous la courbe. Le fond, l'axe
+    // et les guides se dessineraient quand meme, et une bande grise de
+    // cinquante pixels sans un seul repere se lit comme un defaut d'affichage.
+    if (!PTS.length && !PER.length) return '';
+  }
+
   const W = 1000, MG = mg, MD = md;
   const iw = W - MG - MD;
   const X = d => MG + situer(d, et) * iw;
 
-  const nbVoies = F.periodes.length ? Math.max(...F.periodes.map(p => p.voie)) + 1 : 0;
+  const nbVoies = PER.length ? Math.max(...PER.map(p => p.voie)) + 1 : 0;
   const HAUT = domaine ? 6 : 20;                     // la rangee des annees, inutile sous un graphe
   const VOIES = nbVoies * hauteurVoie;
   const POINTS = 52;                                 // la rangee des instants
@@ -271,7 +303,11 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
     ${cadre === 'vie' && !domaine ? `<text x="${(X(j.debut) + 5).toFixed(1)}" y="${HAUT - 9}" class="frisejournal">ton journal</text>` : ''}` : '';
 
   const ans = graduations(et).map(a => {
-    const x = X(`${a}-01-01`);
+    const d = `${a}-01-01`;
+    // situer() borne : un 1er janvier hors domaine se poserait pile sur le bord
+    // et dessinerait un guide qui ne gradue rien.
+    if (d < et.debut || d > et.fin) return '';
+    const x = X(d);
     if (x < MG - 1 || x > W - MD + 1) return '';
     // Sous un graphe, les annees sont deja ecrites juste au-dessus : on ne garde
     // que les guides, qui font le lien entre les deux figures.
@@ -286,15 +322,21 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
    * suivante : au-dela, on n'ecrit pas.
    */
   const suivanteSurLaVoie = new Map();
-  for (const v of new Set(F.periodes.map(p => p.voie))) {
-    const surV = F.periodes.filter(p => p.voie === v).sort((a, b) => a.date.localeCompare(b.date));
+  for (const v of new Set(PER.map(p => p.voie))) {
+    const surV = PER.filter(p => p.voie === v).sort((a, b) => a.date.localeCompare(b.date));
     surV.forEach((p, i) => suivanteSurLaVoie.set(p.id, surV[i + 1] ? X(surV[i + 1].date) : W - MD));
   }
 
-  const barres = F.periodes.map(p => {
+  const barres = PER.map(p => {
     const x1 = X(p.date), x2 = Math.max(X(p.fin), x1 + 4);
     const y = yVoie(p.voie);
-    const g = degradeDeriode(`fp${p.id}`, p.jours, x1, x2);
+    // Le degrade ne couvre que la portion DESSINEE : passer les journees de
+    // toute la periode a une barre coupee comprimerait quatre ans de couleur
+    // dans la largeur d'une semaine.
+    const vus = domaine
+      ? (p.jours ?? []).filter(j => j.date >= et.debut && j.date <= et.fin)
+      : p.jours;
+    const g = degradeDeriode(`fp${p.id}`, vus, x1, x2);
     if (g.def) defs.push(g.def);
     const actif = survol === p.id;
     const h = p.fort ? 20 : 15;
@@ -319,7 +361,7 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
   }).join('');
 
   /* --- les instants : une icone sur l'axe --- */
-  const marques = F.points.map(p => {
+  const marques = PTS.map(p => {
     const x = X(p.date);
     // REMPLI = MESURE : la couleur de sa case dans la grille, exactement.
     const remplissage = p.ecart === null ? SANS_DONNEES : deltaColor(p.ecart);

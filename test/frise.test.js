@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { voies, etendue, situer, estPeriode, finEffective, JOUR_MS } from '../web/frise.js';
+import { voies, etendue, situer, estPeriode, finEffective, friseMarkup, JOUR_MS } from '../web/frise.js';
 
 /* ------------------------------ les voies ------------------------------ */
 
@@ -155,4 +155,51 @@ test('une date de repère malformée est ignorée comme borne', () => {
                       premierJour: '2022-01-01', dernierJour: '2026-08-27', aujourdhui: '2026-08-27' });
   assert.equal(e.debut, '1996-04-12');
   assert.ok(!Number.isNaN(e.jours));
+});
+
+/* --------------------- le domaine sous une courbe --------------------- */
+
+const ico = () => '<svg></svg>';
+const F = {
+  etendue: { debut: '2019-01-01', fin: '2026-08-26',
+             journal: { debut: '2022-01-01', fin: '2026-08-26' }, jours: 2794 },
+  points: [
+    { id: 1, date: '2021-03-02', label: 'loin', theme: 'maison', teinte: null, fort: 0, ecart: null, note: null },
+    { id: 2, date: '2026-08-20', label: 'proche', theme: 'crise', teinte: null, fort: 0, ecart: 1, note: 7 }
+  ],
+  periodes: [
+    { id: 3, date: '2019-01-01', fin: '2020-06-30', ouvert: 0, label: 'ancienne', theme: 'crise',
+      teinte: null, fort: 0, voie: 0, duree: 546, jours: [] },
+    { id: 4, date: '2026-01-01', fin: '2026-08-26', ouvert: 0, label: 'en cours', theme: 'conso',
+      teinte: null, fort: 0, voie: 1, duree: 238, jours: [] }
+  ]
+};
+
+test('sous un domaine, ce qui est hors fenêtre est retiré, pas ramené au bord', () => {
+  // situer() borne a [0,1] : sans filtrage, « loin » se poserait sur le bord
+  // gauche et designerait un jour qui n'est pas le sien.
+  const svg = friseMarkup(F, ico, { domaine: { debut: '2026-08-01', fin: '2026-08-26' } });
+  assert.match(svg, /data-label="proche"/);
+  assert.doesNotMatch(svg, /data-label="loin"/);
+  assert.doesNotMatch(svg, /data-label="ancienne"/);
+  assert.match(svg, /data-label="en cours"/);   // chevauche : coupee, pas retiree
+});
+
+test('sans domaine, tout reste : le cadre montre ce qui existe', () => {
+  const svg = friseMarkup(F, ico, { cadre: 'vie' });
+  for (const l of ['loin', 'proche', 'ancienne', 'en cours']) {
+    assert.match(svg, new RegExp(`data-label="${l}"`), l);
+  }
+});
+
+test('les voies sont retassées après filtrage', () => {
+  // « en cours » est sur la voie 1 cote serveur ; seule dans la fenetre, elle
+  // laisserait une rangee vide au-dessus d'elle.
+  const svg = friseMarkup(F, ico, { domaine: { debut: '2026-01-01', fin: '2026-08-26' } });
+  const y = Number(svg.match(/<rect x="[\d.]+" y="(\d+)"/)[1]);
+  assert.ok(y < 26, `la barre restait sur la voie 1 (y=${y})`);
+});
+
+test('une fenêtre sans aucun repère ne dessine rien', () => {
+  assert.equal(friseMarkup(F, ico, { domaine: { debut: '2023-01-01', fin: '2023-02-01' } }), '');
 });

@@ -681,6 +681,36 @@ let FRISE_CADRE = 'journal';
 let CUMMODE = 'etalon';
 let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
+/*
+ * LA FENETRE DU CUMUL.
+ *
+ * Le cumul est une somme depuis le premier jour. Sur quatre ans, sa pente dit
+ * une chose vraie mais lointaine, et la derniere saison y est invisible : elle
+ * fait trois pixels au bout d'une courbe qui en fait mille.
+ *
+ * Une fenetre repart de zero a son debut. « Sur les trente derniers jours, ou
+ * est-ce que je suis par rapport a mon etalon » est une question differente de
+ * « sur quatre ans », et c'est celle qu'on se pose le plus souvent.
+ *
+ * La soustraction est exacte : cumul[i] - cumul[i0-1] EST la somme sur la
+ * fenetre, parce que c'est la meme somme. On ne recalcule rien cote navigateur
+ * -- deux arithmetiques pour le meme chiffre finissent toujours par diverger.
+ *
+ * Les bornes sont en JOURS CALENDAIRES, pas en indices : « 30 j » doit vouloir
+ * dire trente jours, pas trente journees ecrites, sinon la fenetre s'etire
+ * silencieusement sur six mois quand on a peu ecrit.
+ */
+const FENETRES = [['7j', 7, '7 j'], ['30j', 30, '30 j'], ['365j', 365, '1 an'], ['tout', null, 'tout']];
+let CUMWIN = 'tout';
+
+function fenetreCumul() {
+  const f = FENETRES.find(x => x[0] === CUMWIN) ?? FENETRES.at(-1);
+  if (f[1] === null) return { i0: 0, jours: null };
+  const depuis = dayShift(SERIES.date.at(-1), -(f[1] - 1));
+  const i0 = SERIES.date.findIndex(d => d >= depuis);
+  return { i0: i0 < 0 ? SERIES.date.length - 1 : i0, jours: f[1] };
+}
+
 async function renderYear(year) {
   if (!S.stats.days) return renderNoData('Les courbes ont besoin de journées notées.');
   year = year ?? Number(S.stats.lastDate.slice(0, 4));
@@ -692,7 +722,11 @@ async function renderYear(year) {
   const eta = SERIES.etalon;
 
   const cumKey = CUMMODE === 'etalon' ? 'cumEtalon' : 'cumDeltaRef';
-  const drift = SERIES[cumKey][SERIES[cumKey].length - 1] / SERIES[cumKey].length;
+  const { i0: CUM0 } = fenetreCumul();
+  const base = CUM0 > 0 ? SERIES[cumKey][CUM0 - 1] : 0;
+  const cumX = SERIES.date.slice(CUM0);
+  const cumY = SERIES[cumKey].slice(CUM0).map(v => Math.round((v - base) * 1000) / 1000);
+  const drift = cumY.length ? cumY.at(-1) / cumY.length : 0;
 
   $('#view').innerHTML = `
     <div class="stack">
@@ -731,37 +765,50 @@ async function renderYear(year) {
       </div>
 
       <div class="card">
-        <div class="cardhead">
+        ${/* Une seule rangee de commandes. Il y en avait trois empilees :
+              la fenetre, le cadre, puis le mode et l'etalon -- soixante pixels
+              de hauteur avant d'atteindre la courbe qu'on est venu voir. */''}
+        <div class="cardhead cumhead">
           <h2>Cumul</h2>
-          ${FRISE?.etendue?.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
-            ? `<div class="centerpick" style="margin-left:auto">
+          <div class="centerpick">
+            ${FENETRES.map(([id, , lib]) => `<button data-win="${id}"
+              aria-pressed="${CUMWIN === id}">${lib}</button>`).join('')}
+          </div>
+          ${/* « vie » n'a de sens que sur tout : une fenetre de sept jours n'a
+                pas d'avant-journal a montrer. */''}
+          ${CUMWIN === 'tout' && FRISE?.etendue?.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
+            ? `<div class="centerpick">
                  <button data-cadre="journal" aria-pressed="${FRISE_CADRE === 'journal'}">journal</button>
                  <button data-cadre="vie" aria-pressed="${FRISE_CADRE === 'vie'}">vie</button>
                </div>` : ''}
-        </div>
-        <div class="centerpick">
-          <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}">étalon fixe<span class="drift mono">${eta}</span></button>
-          <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}">référence glissante<span class="drift">365 j</span></button>
+          <div class="centerpick" style="margin-left:auto">
+            <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}"
+              title="Somme des écarts à un étalon fixe.">étalon</button>
+            <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}"
+              title="Somme des écarts à la médiane glissante des 365 jours précédents.">glissante</button>
+          </div>
           <label class="field etalonfield"
-                 title="Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}. Dérive de la courbe : ${drift > 0 ? '+' : ''}${drift.toFixed(3)}/jour.">
-            <span>étalon</span>
-            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}">
+                 title="Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}. Dérive sur la fenêtre : ${drift > 0 ? '+' : ''}${drift.toFixed(3)}/jour.">
+            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}"
+                   aria-label="étalon">
           </label>
         </div>
-        ${lineChart(SERIES.date, SERIES[cumKey], { height: 250, events: SERIES.events, colore: true })}
+        ${lineChart(cumX, cumY, { height: 250, events: SERIES.events, colore: true })}
 
         ${/* La frise se pose sous la courbe et partage EXACTEMENT son axe : les
               marges de lineChart, à l'unité près. Un repère tombe alors sur
               l'inflexion qu'il explique, ce qu'aucune légende n'aurait obtenu. */''}
-        ${FRISE && (FRISE.points.length || FRISE.periodes.length) ? `
-          <div class="frisewrap" id="frisewrap">
-            ${friseSVG(FRISE, icone, {
-              mg: 46, md: 12,
-              domaine: FRISE_CADRE === 'vie' ? FRISE.etendue
-                     : { debut: SERIES.date[0], fin: SERIES.date.at(-1) }
-            })}
-            <div class="frisetip" id="frisetip" hidden></div>
-          </div>` : ''}
+        ${/* Le cadre ne s'ouvre que si la frise a quelque chose a dessiner :
+              sous une fenetre de sept jours, elle peut etre vide. */''}
+        ${(() => {
+          const svg = FRISE ? friseSVG(FRISE, icone, {
+            mg: 46, md: 12,
+            domaine: (CUMWIN === 'tout' && FRISE_CADRE === 'vie') ? FRISE.etendue
+                   : { debut: cumX[0], fin: cumX.at(-1) }
+          }) : '';
+          return svg ? `<div class="frisewrap" id="frisewrap">${svg}
+            <div class="frisetip" id="frisetip" hidden></div></div>` : '';
+        })()}
       </div>
 
       ${carnetCardMarkup({
@@ -808,6 +855,8 @@ async function renderYear(year) {
     if (y) return renderYear(Number(y.dataset.year));
     const c = e.target.closest('[data-cum]');
     if (c) { CUMMODE = c.dataset.cum; return renderYear(year); }
+    const w = e.target.closest('[data-win]');
+    if (w) { CUMWIN = w.dataset.win; return renderYear(year); }
     const dl = e.target.closest('[data-daily]');
     if (dl) { DAILYALL = dl.dataset.daily === 'all'; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
