@@ -264,6 +264,71 @@ export function recentUserMessages(limit = 40, userId = OWNER) {
   ).all(userId, limit).reverse();
 }
 
+/**
+ * Suppression d'une journee : la note, le texte, et les messages qui l'ont
+ * produit. Les trois ensemble, sinon rebuildEntryText la ferait renaitre au
+ * prochain message.
+ */
+export function deleteDay(date, userId = OWNER) {
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM messages WHERE user_id = ? AND date = ?').run(userId, date);
+    db.prepare('DELETE FROM entries  WHERE user_id = ? AND date = ?').run(userId, date);
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  return true;
+}
+
+/** Efface la note d'une journee en gardant ce qui a ete ecrit ce jour-la. */
+export function clearNote(date, userId = OWNER) {
+  db.prepare('UPDATE entries SET note = NULL WHERE user_id = ? AND date = ?').run(userId, date);
+  // Une journee qui n'a plus ni note ni texte n'a plus de raison d'exister.
+  db.prepare(
+    "DELETE FROM entries WHERE user_id = ? AND date = ? AND note IS NULL AND (text IS NULL OR TRIM(text) = '')"
+  ).run(userId, date);
+  return true;
+}
+
+/**
+ * Remise a zero. Trois portees, de la plus etroite a la plus large.
+ *
+ * C'est la seule fonction du fichier qui detruit sans retour. Elle est
+ * volontairement explicite : pas de valeur par defaut sur `portee`, pas de
+ * suppression partielle silencieuse. Ce que l'appelant demande est ce qui part,
+ * et le compte de ce qui a ete efface est rendu pour pouvoir le dire.
+ */
+export function wipe(portee, userId = OWNER) {
+  const compte = {};
+  const n = (t, sql, ...a) => { compte[t] = db.prepare(sql).run(...a).changes; };
+
+  db.exec('BEGIN');
+  try {
+    if (portee === 'notes') {
+      // Les notes seules : le texte reste, le journal ecrit survit.
+      compte.notes = db.prepare('UPDATE entries SET note = NULL WHERE user_id = ? AND note IS NOT NULL').run(userId).changes;
+      db.prepare("DELETE FROM entries WHERE user_id = ? AND note IS NULL AND (text IS NULL OR TRIM(text) = '')").run(userId);
+    } else if (portee === 'texte') {
+      // Le texte seul : les notes restent, la courbe survit.
+      n('messages', 'DELETE FROM messages WHERE user_id = ?', userId);
+      compte.texte = db.prepare('UPDATE entries SET text = NULL WHERE user_id = ? AND text IS NOT NULL').run(userId).changes;
+      db.prepare('DELETE FROM entries WHERE user_id = ? AND note IS NULL').run(userId);
+    } else if (portee === 'tout') {
+      n('entries',    'DELETE FROM entries    WHERE user_id = ?', userId);
+      n('messages',   'DELETE FROM messages   WHERE user_id = ?', userId);
+      n('events',     'DELETE FROM events     WHERE user_id = ?', userId);
+      n('anchors',    'DELETE FROM anchors    WHERE user_id = ?', userId);
+      n('embeddings', 'DELETE FROM embeddings WHERE user_id = ?', userId);
+      // Les reglages ne partent pas : le compagnon choisi, le timbre, la cle.
+      // Remettre a zero son journal n'est pas redemander son prenom.
+      db.prepare("DELETE FROM settings WHERE user_id = ? AND key = 'chatSince'").run(userId);
+    } else {
+      throw new Error(`portée inconnue : ${portee}`);
+    }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  return compte;
+}
+
 /* ---------- events ---------- */
 
 export function allEvents(userId = OWNER) {

@@ -786,29 +786,112 @@ async function renderMirror(date) {
   </div>`;
 
   $('#view').innerHTML = `
-    <div class="card" style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">
-      <div>
-        <div class="k faint" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em">${fmtDay(date)}</div>
-        <div class="bignum" style="color:${m.note !== null ? deltaColor(m.delta) : 'var(--ink-faint)'}">
-          ${m.note ?? '—'}<span style="font-size:16px;color:var(--ink-faint)">/10</span>
+    <div class="mirror">
+      <div class="mcol">
+        ${calendarMarkup(m, date)}
+
+        <div class="card dayread">
+          <div class="dayhead">
+            <div>
+              <div class="k faint">${fmtDay(date)}</div>
+              <div class="bignum" style="color:${m.note !== null ? deltaColor(m.delta) : 'var(--ink-faint)'}">
+                ${m.note ?? '—'}<span class="sl">/10</span>
+              </div>
+            </div>
+            <div class="statgrid tight">
+              <div class="s"><div class="k">Référence</div><div class="v">${m.reference ?? '—'}</div></div>
+              <div class="s"><div class="k">Écart</div><div class="v">${m.delta > 0 ? '+' : ''}${m.delta ?? '—'}</div></div>
+            </div>
+            <button class="daydrop" data-erase="${date}" title="Effacer cette journée">effacer</button>
+          </div>
+          ${m.jour?.text
+            ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
+            : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
         </div>
+
+        ${epCard}
       </div>
-      <div class="statgrid" style="flex:1;min-width:220px">
-        <div class="s"><div class="k">Référence glissante</div><div class="v">${m.reference ?? '—'}</div></div>
-        <div class="s"><div class="k">Écart</div><div class="v">${m.delta > 0 ? '+' : ''}${m.delta ?? '—'}</div></div>
-        <div class="s"><div class="k">Corpus texte</div><div class="v">${m.textCount ?? 0}<span class="u"> jours</span></div></div>
+
+      <div class="mcol">
+        ${simCard || `<div class="card"><h2>Tu as déjà écrit ça</h2>
+          <p class="sub" style="margin:0">Rien d'assez proche pour l'instant.</p></div>`}
+        ${yCard}
       </div>
-      ${nav}
-    </div>
-    ${epCard}${simCard}${yCard}`;
+    </div>`;
   wireMirror();
 }
 
+/**
+ * Le calendrier du mois. Le point du Miroir n'etait pas evident : on y navigue
+ * dans son passe, un jour a la fois, mais rien ne le montrait -- deux fleches
+ * et un titre. Une grille de mois rend le deplacement visible et donne le
+ * contexte immediat : ou tombe ce jour dans la semaine, ce qu'il y avait autour,
+ * quelles journees portent du texte.
+ *
+ * Les journees non notees restent affichees, en creux. Dans un journal, un trou
+ * est une information -- pas une case a masquer.
+ */
+const JOURS_COURT = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+
+function calendarMarkup(m, date) {
+  const cases = m.calendrier ?? [];
+  if (!cases.length) return '';
+  const mois = date.slice(0, 7);
+  const [an, mo] = mois.split('-').map(Number);
+  // Lundi en premiere colonne : getUTCDay() rend 0 pour dimanche.
+  const premier = (new Date(Date.UTC(an, mo - 1, 1)).getUTCDay() + 6) % 7;
+
+  const moisPrec = new Date(Date.UTC(an, mo - 2, 1)).toISOString().slice(0, 10);
+  const moisSuiv = new Date(Date.UTC(an, mo, 1)).toISOString().slice(0, 10);
+  const suivDispo = moisSuiv.slice(0, 7) <= S.today.slice(0, 7);
+
+  const nom = new Date(Date.UTC(an, mo - 1, 1))
+    .toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+  return `<div class="card cal">
+    <div class="calhead">
+      <button data-goto="${moisPrec}" aria-label="Mois précédent">‹</button>
+      <span class="calmois">${esc(nom)}</span>
+      <button data-goto="${moisSuiv}" ${suivDispo ? '' : 'disabled'} aria-label="Mois suivant">›</button>
+      ${date !== S.today ? `<button class="calnow" data-goto="${S.today}">aujourd'hui</button>` : ''}
+    </div>
+    <div class="calgrid">
+      ${JOURS_COURT.map(j => `<span class="cald">${j}</span>`).join('')}
+      ${'<span></span>'.repeat(premier)}
+      ${cases.map(c => {
+        const sel = c.date === date;
+        const futur = c.date > S.today;
+        const fond = c.note !== null ? `background:${deltaColor(c.delta ?? 0)}` : '';
+        return `<button class="calcase${sel ? ' on' : ''}${c.note === null ? ' vide' : ''}${c.texte ? ' texte' : ''}"
+          data-goto="${c.date}" ${futur ? 'disabled' : ''} style="${fond}"
+          data-tip="${esc(fmtDay(c.date))}${c.note !== null ? ` · ${c.note}/10` : ' · non notée'}"
+          >${Number(c.date.slice(-2))}</button>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
 function wireMirror() {
-  $('#view').onclick = e => {
+  $('#view').onclick = async e => {
     const g = e.target.closest('[data-goto]');
     if (g) return renderMirror(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
+
+    const del = e.target.closest('[data-erase]');
+    if (del) {
+      const d = del.dataset.erase;
+      // Une seule journée : pas de mot à retaper, mais une confirmation quand
+      // même. Le geste est petit, la perte ne l'est pas.
+      if (!confirm(`Effacer la journée du ${fmtDay(d)} — sa note et son texte ?`)) return;
+      try {
+        await api('/api/delete-day', { date: d });
+        S = await api('/api/state');
+        SERIES = null;
+        syncHeader();
+        renderMirror(d);
+        toast('Journée effacée');
+      } catch (err) { toast(err.message); }
+    }
   };
 }
 
@@ -926,6 +1009,20 @@ async function renderSettings() {
           <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">Se déconnecter</button></form>
         </div>
       </div>
+
+      <div class="card danger">
+        <h2>Effacer</h2>
+        <p class="sub">Sans retour. Exporte d'abord si tu hésites — c'est le bouton juste au-dessus.</p>
+        <div class="wipepick" id="wipePick">
+          <button data-portee="notes" aria-pressed="false">
+            <b>Les notes</b><span>les chiffres partent, le texte reste</span></button>
+          <button data-portee="texte" aria-pressed="false">
+            <b>Le texte</b><span>les mots partent, la courbe reste</span></button>
+          <button data-portee="tout" aria-pressed="false">
+            <b>Tout</b><span>journées, texte, repères, jalons</span></button>
+        </div>
+        <div id="wipeConfirm"></div>
+      </div>
     </div>`;
 
   renderBackendCfg();
@@ -962,6 +1059,45 @@ async function renderSettings() {
   // ouvert. Le navigateur rouvrait alors le popup sur l'élément neuf, la
   // sélection repartait, et le menu clignotait sans fin. On ne redessine que
   // le bloc qui dépend réellement du choix.
+  $('#wipePick')?.addEventListener('click', e => {
+    const b = e.target.closest('button[data-portee]');
+    if (!b) return;
+    const portee = b.dataset.portee;
+    for (const x of $('#wipePick').querySelectorAll('button')) {
+      x.setAttribute('aria-pressed', String(x === b));
+    }
+    const quoi = { notes: 'toutes tes notes', texte: 'tout ton texte', tout: 'tout ton journal' }[portee];
+    // Un mot à retaper, pas une case à cocher : c'est la seule action de
+    // l'application qui détruise des années sans retour, et un bouton seul se
+    // clique par réflexe.
+    $('#wipeConfirm').innerHTML = `
+      <div class="wipeask">
+        <p>Pour effacer <b>${quoi}</b>, tape <b class="mono">SUPPRIMER</b> ci-dessous.</p>
+        <div class="wipefield">
+          <input type="text" id="wipeWord" autocomplete="off" spellcheck="false" placeholder="SUPPRIMER">
+          <button class="btn danger" id="wipeGo" disabled>Effacer</button>
+        </div>
+      </div>`;
+    const mot = $('#wipeWord'), go = $('#wipeGo');
+    mot.focus();
+    mot.addEventListener('input', () => { go.disabled = mot.value.trim() !== 'SUPPRIMER'; });
+    go.addEventListener('click', async () => {
+      go.disabled = true; go.textContent = 'Effacement…';
+      try {
+        const r = await api('/api/wipe', { portee, confirm: mot.value.trim() });
+        S = await api('/api/state');
+        SERIES = null; ECHOES = { items: [], textCount: 0 };
+        syncHeader();
+        renderSettings();
+        const n = Object.values(r.compte).reduce((a, b) => a + b, 0);
+        toast(n ? `${n} lignes effacées · ${r.restant.days} journées restantes` : 'Rien à effacer');
+      } catch (err) {
+        go.disabled = false; go.textContent = 'Réessayer';
+        toast(err.message);
+      }
+    });
+  });
+
   $('#chatBackend').addEventListener('change', async e => {
     await saveSettings({ chatBackend: e.target.value });
     renderBackendCfg();

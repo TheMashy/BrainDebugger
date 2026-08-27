@@ -544,3 +544,109 @@ input[type=date] { color-scheme: dark; }
 
 /* .sub n'est stylé que dans .card : le panneau de jauge a besoin du même rendu */
 .gaugepanel .sub { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-dim); line-height: 1.5; }
+
+/* ---------- effacer ----------
+   Le seul endroit de l'application qui détruise sans retour. Il porte donc
+   une couleur qu'on ne trouve nulle part ailleurs, et un geste qu'on ne fait
+   pas distraitement. */
+
+.card.danger h2 { color: var(--danger); }
+
+.wipepick { display: flex; gap: 9px; flex-wrap: wrap; }
+.wipepick button {
+  flex: 1 1 190px; min-width: 0; text-align: left;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+  transition: border-color .14s, background .14s;
+}
+.wipepick button:hover { border-color: #4a3330; }
+.wipepick button[aria-pressed="true"] {
+  border-color: var(--danger);
+  background: #1c100e;
+}
+.wipepick b { font-size: 13.5px; font-weight: 600; }
+.wipepick span { font-size: 11.5px; color: var(--ink-faint); line-height: 1.35; }
+
+.wipeask { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.wipeask p { margin: 0 0 10px; font-size: 13px; color: var(--ink-dim); }
+.wipefield { display: flex; gap: 9px; flex-wrap: wrap; }
+.wipefield input {
+  flex: 1 1 200px; min-width: 0;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 11px;
+  font-family: var(--mono); letter-spacing: .08em;
+}
+.wipefield input:focus { outline: none; border-color: var(--danger); }
+button.btn.danger {
+  background: #2a1512; border-color: #5a2f29; color: #f0a89f;
+}
+button.btn.danger:hover:not(:disabled) { background: #3a1c17; border-color: var(--danger); }
+button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ---------- le miroir ----------
+   Deux colonnes : à gauche on se déplace dans ses journées, à droite ce que
+   le passé renvoie. La navigation était le point faible — deux flèches et un
+   titre ne disent pas qu'on se promène dans quatre ans d'écriture. */
+
+.mirror { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px 34px; }
+.mcol { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
+@media (max-width: 900px) { .mirror { grid-template-columns: 1fr; } }
+
+.calhead { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+.calhead button {
+  background: none; border: 0; color: var(--ink-faint);
+  padding: 3px 8px; border-radius: 6px; font-size: 15px; line-height: 1;
+}
+.calhead button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
+.calhead button:disabled { opacity: .25; }
+.calmois { font-size: 13px; color: var(--ink-dim); text-transform: capitalize; min-width: 7.5em; }
+.calnow { font-size: 11.5px !important; }
+.calhead { max-width: 320px; }
+
+/* Largeur bornée : sans ça, chaque case fait cent pixels dans une colonne
+   large et le calendrier avale la page. C'est un repère de navigation, pas la
+   pièce maîtresse — celle-ci est le texte du jour, juste en dessous. */
+.calgrid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px;
+  max-width: 320px;
+}
+.cald {
+  text-align: center; font-size: 10px; color: var(--ink-faint);
+  padding-bottom: 4px; font-family: var(--mono);
+}
+.calcase {
+  aspect-ratio: 1; border: 0; border-radius: 5px;
+  max-height: 42px;
+  background: var(--line-soft); color: #0d120f;
+  font-size: 11px; font-weight: 600; font-family: var(--mono);
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  transition: transform .1s, outline-color .1s;
+  outline: 1.5px solid transparent; outline-offset: -1.5px;
+}
+.calcase:hover:not(:disabled) { transform: scale(1.12); z-index: 2; }
+.calcase.vide { background: var(--line-soft); color: var(--ink-faint); font-weight: 400; }
+.calcase:disabled { opacity: .2; }
+.calcase.on { outline-color: var(--ink); }
+/* Un point sous la case : cette journée porte du texte. C'est ce qu'on cherche
+   quand on remonte — les jours écrits, pas les jours notés. */
+.calcase.texte::after {
+  content: ''; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .55;
+}
+
+.dayhead { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; }
+.dayhead .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.dayhead .bignum .sl { font-size: 16px; color: var(--ink-faint); }
+.statgrid.tight { flex: 1; min-width: 150px; gap: 10px 18px; }
+.daydrop {
+  background: none; border: 0; color: var(--ink-faint);
+  font-size: 11.5px; padding: 3px 7px; border-radius: 5px; align-self: center;
+}
+.daydrop:hover { color: var(--danger); background: var(--surface); }
+
+.dayText {
+  white-space: pre-wrap; font-size: 15.5px; line-height: 1.65; margin: 0;
+  max-height: 42vh; overflow-y: auto; overscroll-behavior: contain;
+}

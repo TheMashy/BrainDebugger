@@ -1,7 +1,7 @@
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, messagesForDate, recentMessages, allEvents, addEvent, deleteEvent,
-  allAnchors, setAnchor, getUser, OWNER
+  allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -211,6 +211,28 @@ export const routes = {
 
     const floor = floorState(note, reference, s);
 
+    // Ce que le Miroir montrait le moins bien : la journee qu'on regarde. On se
+    // baladait dans l'historique sans jamais voir ce qu'on avait ecrit CE jour-la.
+    const jour = { date, note, text: entry?.text ?? '' };
+
+    // Le mois affiche, pour le calendrier. Les journees sans note en font partie :
+    // c'est un calendrier, les trous s'y voient et c'est une information.
+    const mois = date.slice(0, 7);
+    const [an, mo] = mois.split('-').map(Number);
+    const nbJours = new Date(Date.UTC(an, mo, 0)).getUTCDate();
+    const calendrier = [];
+    for (let d = 1; d <= nbJours; d++) {
+      const j = `${mois}-${String(d).padStart(2, '0')}`;
+      const pt = byDate.get(j);
+      const e = rows.find(r => r.date === j);
+      calendrier.push({
+        date: j,
+        note: e?.note ?? null,
+        delta: pt?.delta ?? null,
+        texte: !!(e?.text && e.text.trim())
+      });
+    }
+
     // 3. CONTRADICTION : l'entree d'hier, brute, sans commentaire.
     const y = addDays(date, -1);
     const yEntry = getEntry(y, userId);
@@ -221,7 +243,7 @@ export const routes = {
       const past = rows.filter(r => r.text && r.text.trim() && r.date < date)
         .slice(-5).reverse()
         .map(r => ({ date: r.date, text: r.text, note: r.note }));
-      return { date, note, floored: true, floor, yesterday, rawPast: past, episodes: null, similar: null };
+      return { date, note, jour, calendrier, floored: true, floor, yesterday, rawPast: past, episodes: null, similar: null };
     }
 
     // 1. PREUVE DE RESOLUTION
@@ -262,7 +284,14 @@ export const routes = {
       };
     }
 
-    return { date, note, reference, delta: cur?.delta ?? null, floored: false, floor, yesterday, episodes: ep, similar, textCount };
+    // Les rapprochements partent des plus recents : ce qu'on a ecrit le mois
+    // dernier eclaire mieux aujourd'hui qu'une journee de 2022, meme si le score
+    // de similitude y est plus fort.
+    if (similar?.items?.length) {
+      similar.items = similar.items.slice().sort((a, b) => b.date.localeCompare(a.date));
+    }
+    return { date, note, jour, calendrier, reference, delta: cur?.delta ?? null,
+             floored: false, floor, yesterday, episodes: ep, similar, textCount };
   },
 
   /**
@@ -385,6 +414,39 @@ export const routes = {
     const since = new Date().toISOString();
     setSettings({ chatSince: since }, userId);
     return { chatSince: since, messages: recentMessages(80, userId) };
+  },
+
+  /**
+   * Suppression d'une journee, depuis le Miroir ou la grille.
+   * `note: true` n'efface que le chiffre et garde ce qui a ete ecrit.
+   */
+  'POST /api/delete-day': ({ body, userId }) => {
+    const date = String(body.date ?? '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'date invalide' };
+    if (body.noteOnly) clearNote(date, userId); else deleteDay(date, userId);
+    invalidate(userId);
+    return { date, ok: true };
+  },
+
+  /**
+   * Remise a zero.
+   *
+   * Le mot a retaper n'est pas de la ceremonie : c'est la seule action de
+   * l'application qui detruise des annees sans retour, et un bouton seul se
+   * clique par reflexe. On demande donc un geste qui ne peut pas etre fait
+   * distraitement, et on rend le compte de ce qui est parti -- sans quoi
+   * personne ne sait si l'action a marche.
+   */
+  'POST /api/wipe': ({ body, userId }) => {
+    const portee = String(body.portee ?? '');
+    if (!['notes', 'texte', 'tout'].includes(portee)) return { error: 'portée inconnue' };
+    if (String(body.confirm ?? '') !== 'SUPPRIMER') {
+      return { error: 'confirmation manquante' };
+    }
+    const compte = wipe(portee, userId);
+    invalidate(userId);
+    const { series: ser, textCount } = series(userId);
+    return { portee, compte, restant: { days: ser.length, textDays: textCount } };
   },
 
   'GET /api/events': ({ userId }) => ({ events: allEvents(userId) }),
