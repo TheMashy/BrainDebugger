@@ -122,7 +122,24 @@ export function ensureUserTables(db) {
     CREATE INDEX IF NOT EXISTS idx_messages_user_date ON messages(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_events_user_date   ON events(user_id, date);
   `);
+
+  /*
+   * Colonnes ajoutees apres coup. ALTER TABLE ADD COLUMN n'a pas d'equivalent
+   * « IF NOT EXISTS » en SQLite : on regarde avant d'ajouter, sinon le
+   * deuxieme demarrage plante sur une base deja a jour.
+   *
+   * Une colonne ajoutee vaut NULL sur toutes les lignes existantes, et c'est
+   * exactement le sens qu'on veut : un repere pose avant cette version n'a pas
+   * de fin, donc c'est un instant.
+   */
+  for (const [table, col, type] of AJOUTS) {
+    if (!hasColumn(db, table, col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  }
 }
+
+const AJOUTS = [
+  ['events', 'fin', 'TEXT']
+];
 
 /**
  * Premier login Discord sur une instance qui contenait deja un journal :

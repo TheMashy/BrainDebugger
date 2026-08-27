@@ -2,7 +2,8 @@ import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, messagesForDate, recentMessages, allEvents, deleteEvent,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
-  addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif
+  addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
+  addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -12,13 +13,17 @@ import * as sessions from './sessions.js';
 import { readMood, readEnergy } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 const { presence, presenceNote } = sessions;
-import { buildIndex, search } from './search.js';
+import { buildIndex, search, tokenize } from './search.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
 // cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
 // de web/reperes.js.
 import { themeDe } from '../web/reperes.js';
-import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock,
-         ANTHROPIC_MODELS, testKey } from './chat.js';
+// Meme raison : la geometrie de la frise doit etre calculee une seule fois, au
+// meme endroit, sinon le serveur annonce une hauteur et le navigateur en
+// dessine une autre.
+import { voies, etendue } from '../web/frise.js';
+import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock,
+         CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -32,7 +37,18 @@ function series(userId = OWNER) {
     const rows = allEntries(userId);
     const s = buildSeries(rows, { etalon: getSettings(userId).etalon });
     const textDocs = rows.filter(r => r.text && r.text.trim()).map(r => ({ id: r.date, text: r.text }));
-    _cache.set(userId, { rows, series: s, byDate: indexByDate(s), index: buildIndex(textDocs), textCount: textDocs.length });
+    // Le carnet a SON index, jamais fusionne avec celui des journees. BM25
+    // normalise par la longueur moyenne des documents : verser les notes dans
+    // l'index des journees deplacerait cette moyenne pour TOUTES les journees et
+    // degraderait « Tu as deja ecrit ca » partout, y compris sur des journees
+    // sans aucun rapport. Le prefixe « n » garantit qu'un identifiant de note ne
+    // peut jamais etre confondu avec une cle de date.
+    const carnet = allCarnet(userId);
+    _cache.set(userId, {
+      rows, series: s, byDate: indexByDate(s),
+      index: buildIndex(textDocs), textCount: textDocs.length,
+      carnet, indexCarnet: buildIndex(carnet.map(c => ({ id: `n${c.id}`, text: c.texte })))
+    });
   }
   return _cache.get(userId);
 }
@@ -78,6 +94,15 @@ export function recentMemory(date, userId = OWNER) {
   if (jalons) morceaux.push(jalons);
   const motifs = motifBlock(allMotifs(userId));
   if (motifs) morceaux.push(motifs);
+
+  // Le carnet, sous le MEME `if (days)` que les journees : l'interface promet
+  // qu'a zero le compagnon ne connait que la conversation du jour, et ca doit
+  // rester vrai. C'est aussi la maniere de retirer le carnet du contexte sans
+  // rien detruire.
+  if (days && s.carnetMemoire !== false) {
+    const c = carnetBlock(series(userId).carnet);
+    if (c) morceaux.push(c);
+  }
 
   const note = presenceNote(presence(userId));
   if (note) morceaux.push(note);
@@ -284,7 +309,8 @@ export const routes = {
       // Les reperes passent le plancher : ce sont des faits que la personne a
       // elle-meme poses, pas une statistique calculee sur elle.
       return { date, note, jour, calendrier, floored: true, floor, yesterday, rawPast: past,
-               episodes: null, similar: null, reperes: reperesDuJour(date, userId) };
+               episodes: null, similar: null, reperes: reperesDuJour(date, userId),
+               carnet: carnetDuJour(date, userId) };
     }
 
     // 1. PREUVE DE RESOLUTION
@@ -340,7 +366,11 @@ export const routes = {
     }
     return { date, note, jour, calendrier, reference, delta: cur?.delta ?? null,
              floored: false, floor, yesterday, episodes: ep, similar, textCount,
-             reperes: reperesDuJour(date, userId) };
+             reperes: reperesDuJour(date, userId),
+             // Les notes apportees passent le plancher, pour la meme raison que
+             // les reperes : ce sont des faits que la personne a poses
+             // elle-meme, pas une statistique calculee sur elle.
+             carnet: carnetDuJour(date, userId) };
   },
 
   /**
@@ -522,10 +552,239 @@ export const routes = {
     const since = jours ? addDays(t, -jours) : null;
 
     return { floored: false, fenetre: f, minimum: MIN_JOURS,
-             ...buildGraph(rows, allAnchors(userId), { since }) };
+             ...buildGraph(rows, allAnchors(userId), { since, carnet: series(userId).carnet }) };
   },
 
   'GET /api/events': ({ userId }) => ({ events: allEvents(userId) }),
+
+  /**
+   * La frise de vie.
+   *
+   * Elle ne calcule AUCUNE statistique : elle place des faits que la personne a
+   * elle-meme poses, et va chercher la couleur des journees qu'ils couvrent.
+   * C'est pourquoi elle traverse le plancher de la SPEC 4.1 la ou la carte
+   * s'arrete -- il n'y a rien ici qui puisse etre rendu contre quelqu'un un
+   * mauvais soir, seulement ce qu'il a ecrit lui-meme.
+   */
+  'GET /api/frise': ({ userId }) => {
+    const s = getSettings(userId);
+    const { series: ser, byDate } = series(userId);
+    const events = allEvents(userId);
+    const t = today();
+
+    const et = etendue({
+      naissance: s.naissance,
+      events,
+      premierJour: ser.length ? ser[0].date : null,
+      dernierJour: ser.length ? ser[ser.length - 1].date : null,
+      aujourdhui: t
+    });
+
+    /*
+     * La couleur d'un repere, c'est la couleur des jours qu'il couvre.
+     *
+     * Elle resout la tension entre « je veux colorer mes reperes » et « la
+     * couleur vient des notes ». Un repere n'a pas de couleur a lui : il prend
+     * celle de la periode qu'il marque, sur la meme echelle que la grille et
+     * que la carte. Une addiction traversee a 3/10 est rouge, un contrat vecu a
+     * 8/10 est vert, et personne n'a decide de rien -- c'est deja dans les
+     * notes.
+     *
+     * Et surtout : la ou il n'y a pas de journees -- l'enfance, tout ce qui
+     * precede le journal -- il n'y a PAS de couleur. On ne colorie pas ce qu'on
+     * ne sait pas, et un gris au milieu de couleurs se lit tout de suite comme
+     * « ici, aucune donnee ».
+     */
+    const ecartMoyen = (debut, fin) => {
+      const dans = ser.filter(x => x.date >= debut && x.date <= (fin ?? debut));
+      if (!dans.length) return null;
+      const m = dans.reduce((a, x) => a + (x.delta ?? 0), 0) / dans.length;
+      return Math.round(m * 100) / 100;
+    };
+
+    // Bornes INCLUSES : une periode du 1er au 3 dure trois jours, pas deux. La
+    // difference brute donnait 570 jours pour une periode dont on a 571 ecrits,
+    // ce qui se lit comme un bug de comptage -- et qui en etait un.
+    const jours = (a, b) => Math.round(
+      (Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000) + 1;
+
+    const periodes = events.filter(e => e.fin);
+    const lanes = voies(periodes, 14);
+
+    return {
+      etendue: et,
+      naissance: s.naissance,
+      points: events.filter(e => !e.fin).map(e => ({
+        id: e.id, date: e.date, label: e.label, theme: themeDe(e.label),
+        ecart: byDate.get(e.date)?.delta ?? null,
+        note: byDate.get(e.date)?.note ?? null
+      })),
+      periodes: periodes.map((e, i) => ({
+        id: e.id, date: e.date, fin: e.fin, label: e.label, theme: themeDe(e.label),
+        voie: lanes[i].voie,
+        jours: jours(e.date, e.fin),
+        ecart: ecartMoyen(e.date, e.fin),
+        // Combien de ces journees sont ecrites : la barre peut ainsi montrer
+        // qu'elle ne repose que sur trois mois sur quatre ans.
+        couvert: ser.filter(x => x.date >= e.date && x.date <= e.fin).length
+      }))
+    };
+  },
+
+  /**
+   * Le carnet.
+   *
+   * N'appelle JAMAIS floorState : elle ne rend aucun agregat calcule sur la
+   * personne, seulement des lignes qu'elle a posees elle-meme. Meme exception
+   * que pour les reperes -- le plancher retire des chiffres, jamais des faits
+   * qu'on a soi-meme deposes, et c'est precisement un mauvais soir qu'on a
+   * quelque chose a deposer.
+   */
+  /**
+   * « Ce que je remarque » — l'etat global.
+   *
+   * Un recensement du corpus, pas un bulletin. Il repond a « qu'est-ce que ce
+   * journal contient », jamais a « comment vas-tu ». Le sujet de chaque ligne
+   * est un MOT ; la personne n'y est jamais sujet.
+   *
+   * Le plancher est teste ICI, avant tout calcul : une regle qui ne vit que
+   * dans l'interface finit toujours par etre contournee.
+   */
+  'GET /api/remarque': ({ query, userId }) => {
+    const s = getSettings(userId);
+    const { rows, series: ser, carnet } = series(userId);
+    const t = today();
+    const note = getEntry(t, userId)?.note ?? null;
+    const reference = ser.length ? ser[ser.length - 1].reference : null;
+    const floor = floorState(note, reference, s);
+    if (floor.floored) return { floored: true, floor };
+
+    const f = String(query.fenetre ?? 'tout');
+    const j = f === '30' ? 30 : f === '90' ? 90 : f === '365' ? 365 : null;
+    const since = j ? addDays(t, -j) : null;
+    const anchors = allAnchors(userId);
+    const G = buildGraph(rows, anchors, { since, carnet });
+
+    return {
+      ...G,
+      fenetre: f,
+      // Les journees ECRITES qui portent aussi une note, pas toutes les journees
+      // notees : « 425 écrites · 1700 notées » posait deux populations
+      // differentes sous deux etiquettes voisines, ce que cet ecran existe
+      // precisement pour empecher.
+      notees: rows.filter(r => r.text && r.text.trim() && r.note !== null
+                            && (!since || r.date >= since)).length,
+      bouge: G.assez ? deplacements(rows, anchors, carnet, t) : [],
+      carnetNotes: carnet.slice(-3).reverse()
+    };
+  },
+
+  /**
+   * Le dossier d'un theme.
+   *
+   * `nom` est verifie contre l'amas trouve par son id : les amas sont
+   * renumerotes a chaque construction du graphe, donc un identifiant seul,
+   * garde dans un lien ou dans l'historique du navigateur, designerait un jour
+   * un autre theme sans que rien ne le signale.
+   */
+  'GET /api/theme': ({ query, userId }) => {
+    const s = getSettings(userId);
+    const { rows, series: ser, byDate, carnet } = series(userId);
+    const t = today();
+    const note = getEntry(t, userId)?.note ?? null;
+    const reference = ser.length ? ser[ser.length - 1].reference : null;
+    const floor = floorState(note, reference, s);
+    if (floor.floored) return { floored: true, floor };
+
+    const f = String(query.fenetre ?? 'tout');
+    const j = f === '30' ? 30 : f === '90' ? 90 : f === '365' ? 365 : null;
+    const since = j ? addDays(t, -j) : null;
+    const G = buildGraph(rows, allAnchors(userId), { since, carnet });
+    if (!G.assez) return { assez: false, jours: G.jours, minimum: G.minimum };
+
+    const id = Number(query.amas);
+    const amas = G.amas.find(a => a.id === id);
+    if (!amas) return { perime: true };
+    if (query.nom && amas.nom !== String(query.nom)) return { perime: true, nom: amas.nom };
+
+    const membres = G.noeuds.filter(n => n.amas === id);
+    const mots = new Set(membres.map(n => n.mot));
+
+    // Les journees ou au moins un mot du theme apparait. On repart du texte :
+    // `n.dates` n'expose que les six dernieres, de quoi ouvrir le Miroir, pas de
+    // quoi lister.
+    const dedans = rows
+      .filter(r => r.text && r.text.trim() && (!since || r.date >= since))
+      .map(r => ({ r, hits: [...new Set(tokenize(r.text))].filter(m => mots.has(m)) }))
+      .filter(x => x.hits.length)
+      .map(x => ({
+        date: x.r.date, note: x.r.note ?? null,
+        delta: byDate.get(x.r.date)?.delta ?? null,
+        mots: x.hits,
+        extrait: x.r.text.slice(0, 260)
+      }))
+      .reverse();
+
+    // Les notes du carnet qui contiennent un mot du theme. Rendues ENTIERES, et
+    // jamais melangees aux journees : aucune moyenne, aucun ecart, et le mot
+    // « jours » n'apparait pas a cote d'elles.
+    const notes = carnet
+      .filter(c => tokenize(c.texte).some(m => mots.has(m)))
+      .map(c => ({ ...c, mots: [...new Set(tokenize(c.texte))].filter(m => mots.has(m)) }))
+      .reverse();
+
+    const idx = new Map(G.noeuds.map((n, i) => [i, n]));
+    const liens = G.liens
+      .filter(l => idx.get(l.s)?.amas === id && idx.get(l.t)?.amas === id)
+      .map(l => ({
+        a: idx.get(l.s).mot, b: idx.get(l.t).mot, n: l.jours ?? null,
+        ja: idx.get(l.s).jours, jb: idx.get(l.t).jours, force: l.force
+      }))
+      .sort((x, y) => y.force - x.force)
+      .slice(0, 12);
+
+    return {
+      amas, membres, liens, jours: dedans, notes,
+      fenetre: f, minNotees: G.minNotees,
+      moyenneGlobale: G.moyenneGlobale,
+      carnetTotal: carnet.length
+    };
+  },
+
+  'GET /api/carnet': ({ userId }) => ({ notes: allCarnet(userId), compte: countCarnet(userId) }),
+
+  /**
+   * Ecrire dans le carnet. La validation est ICI et pas dans une consigne.
+   *
+   * `jour` et `quand` s'excluent : une date connue OU les mots de la personne
+   * quand elle ne l'est pas. Les garder tous les deux ferait deux verites sur
+   * la meme note, et l'affichage devrait en choisir une.
+   */
+  'POST /api/carnet': ({ body, userId }) => {
+    const rendre = () => ({ notes: allCarnet(userId), compte: countCarnet(userId) });
+
+    if (body.delete) { deleteCarnet(Number(body.delete), userId); invalidate(userId); return rendre(); }
+
+    const texte = String(body.texte ?? '').trim();
+    if (!texte) return { error: 'Rien à ajouter.' };
+    if (texte.length > 4000) {
+      return { error: "Trop long pour une note (4000 caractères). Pour un bloc entier, passe par « Coller des notes déjà écrites » dans Réglages : il découpe par date." };
+    }
+
+    let jour = body.jour ? String(body.jour) : null;
+    if (jour && !/^\d{4}-\d{2}-\d{2}$/.test(jour)) return { error: 'Date invalide : il faut AAAA-MM-JJ.' };
+    if (jour && jour > today()) return { error: "Cette date est dans le futur." };
+    // Exclusifs : une date connue, ou des mots a la place. Jamais les deux.
+    const quand = jour ? null : (String(body.quand ?? '').trim().slice(0, 60) || null);
+
+    if (body.id) {
+      if (!updateCarnet(Number(body.id), { texte, jour, quand }, userId)) return { error: 'Note introuvable.' };
+    } else {
+      addCarnet({ texte, jour, quand, source: body.source === 'colle' ? 'colle' : 'saisie', userId });
+    }
+    invalidate(userId);
+    return rendre();
+  },
 
   'GET /api/motifs': ({ userId }) => motifsDuFil(userId),
 
@@ -542,7 +801,13 @@ export const routes = {
     const rendre = () => ({ events: allEvents(userId).map(e => ({ ...e, theme: themeDe(e.label) })) });
     if (body.delete) { deleteEvent(Number(body.delete), userId); return rendre(); }
     if (!body.date || !body.label) return { error: 'date et label requis' };
-    addEvent(body.date, String(body.label).slice(0, 120), userId);
+    // `fin` accepte ici, et c'est ce qui rend une periode possible : la colonne
+    // existait, l'affectation en voies etait ecrite et testee, et aucun chemin
+    // ne pouvait en creer une.
+    const fin = body.fin ? String(body.fin) : null;
+    if (fin && !/^\d{4}-\d{2}-\d{2}$/.test(fin)) return { error: 'Fin invalide : il faut AAAA-MM-JJ.' };
+    if (fin && fin < body.date) return { error: 'La fin est avant le début.' };
+    addEvent({ date: body.date, fin, label: String(body.label).slice(0, 120), userId });
     return rendre();
   },
 
@@ -552,6 +817,23 @@ export const routes = {
     // une action explicite.
     const patch = { ...body };
     if (patch.apiKey === '' && !body.clearKey) delete patch.apiKey;
+
+    // setSettings ne verifie que l'existence de la cle, jamais la forme. Une
+    // naissance dans le futur etire la frise de plusieurs annees sur du vide ;
+    // une naissance posterieure a la premiere journee ecrite la ferait
+    // commencer apres son propre journal.
+    if (patch.naissance !== undefined && patch.naissance !== null && patch.naissance !== '') {
+      const n = String(patch.naissance);
+      const { series: ser } = series(userId);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(n) || n < '1900-01-01') {
+        return { error: 'Date de naissance invalide.' };
+      }
+      if (n > today()) return { error: "Cette date est dans le futur." };
+      if (ser.length && n > ser[0].date) {
+        return { error: `Ta première journée écrite est le ${ser[0].date} : la naissance ne peut pas être après.` };
+      }
+    }
+    if (patch.naissance === '') patch.naissance = null;
     if (body.clearKey) patch.apiKey = '';
     delete patch.clearKey;
     return { settings: publicSettings(setSettings(patch, userId)) };
@@ -585,6 +867,37 @@ export const routes = {
  *   delta -> fragments de texte, au fil de la generation
  *   done  -> message complet enregistre, etat du backend
  */
+/**
+ * Ce qui a change de place.
+ *
+ * DEUX FRACTIONS posees cote a cote, jamais une tendance. « augmente »,
+ * « progresse », « s'ameliore » sont des verbes de trajectoire, et une
+ * trajectoire est deja une these sur quelqu'un. On rend les deux proportions
+ * avec leurs denominateurs, on classe par leur ecart, et on s'arrete la.
+ */
+function deplacements(rows, anchors, carnet, t) {
+  const recent = buildGraph(rows, anchors, { since: addDays(t, -90), carnet });
+  if (!recent.assez) return [];
+  const tout = buildGraph(rows, anchors, { carnet });
+  if (!tout.assez) return [];
+
+  const parMot = new Map(tout.noeuds.map(n => [n.mot, n]));
+  return recent.noeuds
+    .filter(n => parMot.has(n.mot))
+    .map(n => {
+      const g = parMot.get(n.mot);
+      return {
+        mot: n.mot,
+        recentJours: n.jours, recentSur: recent.jours,
+        toutJours: g.jours, toutSur: tout.jours,
+        // Ce nombre ne s'affiche pas : il ne sert qu'a classer.
+        ecart: (n.jours / recent.jours) - (g.jours / tout.jours)
+      };
+    })
+    .sort((a, b) => Math.abs(b.ecart) - Math.abs(a.ecart))
+    .slice(0, 8);
+}
+
 /**
  * Les reperes d'une journee, plus le voisinage.
  *
@@ -666,7 +979,7 @@ export function outilsPour(userId, messageId, send = () => {}) {
       const doublon = allEvents(userId).some(e => e.date === d && e.label.toLowerCase() === l.toLowerCase());
       if (doublon) return { erreur: 'Ce repère existe déjà à cette date.' };
 
-      const ev = addEvent(d, l, userId);
+      const ev = addEvent({ date: d, label: l, userId });
       const fait = { type: 'repere', ...ev, theme: themeDe(l) };
       send('geste', fait);
       return { message: `Repère posé le ${d} : « ${l} ».`, fait };
@@ -687,6 +1000,29 @@ export function outilsPour(userId, messageId, send = () => {}) {
       const fait = { type: 'motif', nouveau: true, ...motif };
       send('geste', fait);
       return { message: `Motif « ${n} » suivi, identifiant ${id}.`, fait };
+    },
+
+    /*
+     * Lecture seule, et c'est tout le point. Le carnet est l'endroit ou la
+     * personne apporte SES mots ; un outil d'ecriture y glisserait du texte
+     * genere qui lui reviendrait ensuite, dans « explorer un theme », comme si
+     * elle l'avait ecrit.
+     */
+    lire_carnet: ({ mot }) => {
+      const m = String(mot ?? '').trim();
+      if (m.length < 2 || m.length > 40) return { erreur: 'Donne un seul mot, entre 2 et 40 caractères.' };
+      const { indexCarnet, carnet } = series(userId);
+      const hits = search(indexCarnet, m, { limit: 5 });
+      if (!hits.length) return { message: `Rien dans son carnet sur « ${m} ».` };
+      const parId = new Map(carnet.map(c => [`n${c.id}`, c]));
+      const lignes = hits.map(h => {
+        const c = parId.get(h.id);
+        if (!c) return null;
+        const etiq = c.jour ? `[le ${c.jour}]` : c.quand ? `[sans date, « ${c.quand} »]` : '[sans date]';
+        const t = c.texte.length > CARNET_CAR ? c.texte.slice(0, CARNET_CAR) + '… (coupée)' : c.texte;
+        return `${etiq} ${t}`;
+      }).filter(Boolean);
+      return { message: `${lignes.length} note(s) de son carnet sur « ${m} » :\n${lignes.join('\n')}` };
     },
 
     marquer_motif: ({ id }) => {

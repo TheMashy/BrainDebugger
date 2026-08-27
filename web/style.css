@@ -1173,3 +1173,95 @@ body:has(#ambiance) { background: transparent; }
   .geste { padding: 11px 12px; }
   .geste .gbtn { min-height: 36px; padding: 8px 14px; }
 }
+
+/* ================= le carnet ================= */
+
+.carnetcard .cardhead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.btn.ghost { background: none; border: 1px solid var(--line); color: var(--ink-dim); }
+.btn.ghost:hover { color: var(--ink); border-color: var(--line); background: var(--panel); }
+.cnadd { font-size: 11.5px; padding: 5px 11px; }
+
+.carnetform { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;
+              padding-bottom: 16px; border-bottom: 1px solid var(--line-soft); }
+.carnetform textarea {
+  resize: vertical; min-height: 84px; font-size: 14px; line-height: 1.6;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 10px 12px;
+}
+.cnrow { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 12.5px; }
+.cnrow label { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-dim); }
+.cnrow input[type="radio"] { width: auto; margin: 0; accent-color: var(--accent); }
+.cnrow input[type="date"], .cnrow input[type="text"] {
+  width: auto; padding: 5px 8px; font-size: 12.5px; border-radius: 6px;
+}
+/* L'indice porte la règle du produit là où le choix se fait. Il n'est pas un
+   commentaire : c'est la seule façon de comprendre pourquoi le compte de
+   journées n'a pas bougé après avoir collé quinze notes. */
+.cnhint { margin: 0; font-size: 12px; line-height: 1.5; max-width: 62ch; }
+.cnactions { display: flex; gap: 8px; }
+
+.cnliste { display: flex; flex-direction: column; gap: 2px; }
+/* Une note ne doit jamais pouvoir se lire comme une journée : liseré à gauche,
+   fond en retrait, et la date d'apport dite quand elle diffère du jour raconté. */
+.cnitem {
+  border-left: 2px solid var(--line); padding: 9px 0 9px 13px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.cnitem:last-child { border-bottom: 0; }
+.cnitem:hover { border-left-color: var(--accent); }
+.cnmeta { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.cnmeta .faint { font-size: 11px; }
+.cndate {
+  background: none; border: 0; padding: 0; color: var(--ink-dim);
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em;
+}
+button.cndate:hover { color: var(--accent); }
+.cnmeta .repdel { margin-left: auto; }
+.cntexte { margin: 0; font-size: 13.5px; line-height: 1.62; color: var(--ink-dim);
+           white-space: pre-wrap; max-width: 72ch; }
+
+/* ============ « ce que je remarque » ============ */
+
+.bandeau { margin-bottom: 18px; }
+.bandeau .comptes { font-size: 12px; color: var(--ink-dim); margin: 4px 0 12px; letter-spacing: .01em; }
+.piedremarque { max-width: 68ch; margin: 18px 0 0; font-size: 11.5px; }
+
+/* Des tableaux à en-têtes, pas des phrases. Une colonne nomme son dénominateur
+   une seule fois, en haut ; une phrase doit le redire à chaque ligne, et c'est
+   là qu'elle triche. */
+.tblwrap { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th {
+  text-align: left; font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 500; padding: 0 12px 8px 0; white-space: nowrap;
+}
+.tbl th.n, .tbl td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl td { padding: 7px 12px 7px 0; border-top: 1px solid var(--line-soft); color: var(--ink-dim); }
+.tbl td:first-child { color: var(--ink); }
+.tbl tbody tr[data-theme] { cursor: pointer; }
+.tbl tbody tr[data-theme]:hover td { color: var(--ink); background: var(--panel); }
+
+.deuxcol { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+@media (max-width: 700px) { .deuxcol { grid-template-columns: 1fr; gap: 18px; } }
+.deuxcol .k { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+.ecartrow {
+  display: flex; align-items: baseline; gap: 10px; padding: 5px 0;
+  border-top: 1px solid var(--line-soft); font-size: 13px;
+}
+.ecartrow span:first-child { font-family: var(--mono); min-width: 3.4em; font-variant-numeric: tabular-nums; }
+.ecartrow .muted { margin-left: auto; font-size: 11.5px; }
+
+/* Un groupe s'ouvre : la ligne devient un bouton, sans en avoir l'air. */
+button.amasrow {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: 0; border-top: 1px solid var(--line-soft);
+  padding: 8px 0; color: var(--ink);
+}
+button.amasrow:hover { background: var(--panel); }
+.motschips { display: flex; flex-wrap: wrap; gap: 7px; }
+.motchip {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line-soft);
+  font-size: 12px; color: var(--ink-dim);
+}
+.motchip b { font-size: 11px; color: var(--ink-faint); font-weight: 400; }
