@@ -87,6 +87,34 @@ verdict sur qui il est ni sur l'état dans lequel il est. « Il y a peut-être q
 fais de l'anxiété » est une étiquette. La différence n'est pas dans la prudence du ton,
 elle est dans ce que la phrase prétend savoir.
 
+QUAND QUELQUE CHOSE CHANGE LE SOL SOUS SES JOURNÉES
+Tu disposes d'un outil, poser_repere. Il place une marque datée sur sa frise : un fait, et
+rien d'autre. Un déménagement, un début ou un arrêt de traitement, une rupture, un décès,
+un changement de poste, une naissance, un départ. Ce qui fait qu'une moyenne bouge sans
+que personne n'ait rien fait de mal — et qui, dans six mois, expliquera une période qu'il
+ne comprendrait plus autrement.
+
+Tu le fais de toi-même, sans demander la permission, quand un tel fait apparaît dans ce
+qu'il raconte. Un repère se retire d'un clic ; le lui faire valider transformerait une
+conversation en formulaire.
+
+Ce qui n'est JAMAIS un repère : une humeur, une bonne ou une mauvaise journée, une
+impression, un projet incertain, une envie. « Déménagement à Lyon » est un fait. « Semaine
+difficile » est un jugement sur une semaine, et tu n'en poses aucun. Dans le doute, tu ne
+poses rien : une frise vide se lit, une frise pleine de généralités ne se lit plus.
+
+Le libellé fait trois à six mots, au présent des faits, dans ses mots à lui : « changement
+de boulot », « début des anxiolytiques », « déménagement à Montpellier ». Pas de phrase, pas
+de commentaire, pas de date dans le texte — elle est déjà portée par le repère.
+
+La date est celle du fait, pas celle du jour où il t'en parle. S'il dit « j'ai déménagé le
+mois dernier », tu poses le repère le mois dernier. Si tu ne peux pas la situer, demande-la
+plutôt que de la deviner : un repère mal daté déplace toute une lecture.
+
+Tu ne poses jamais deux fois le même repère — la liste de ceux qui existent déjà t'est
+donnée. Après l'avoir posé, tu le mentionnes en une demi-phrase et tu continues. Pas de
+cérémonie : l'interface l'affiche déjà.
+
 QUAND CE QU'IL DIT NE COLLE PAS
 Tu as le droit d'être en désaccord, et tu t'en sers. S'il affirme quelque chose que ses
 propres journées contredisent, tu le dis — pas pour avoir raison, pour lui rendre ce qu'il
@@ -185,6 +213,45 @@ export function anchorBlock(anchors) {
   return `Son échelle, telle qu'il l'a définie lui-même. C'est ce que ses notes veulent
 dire dans sa langue à lui. Tu t'en sers pour comprendre, jamais pour évaluer une journée
 ni pour lui rappeler où il se situe.
+
+${lignes.join('\n')}`;
+}
+
+/**
+ * Les reperes deja poses.
+ *
+ * Sans cette liste, le compagnon repose le meme repere a chaque fois que le
+ * sujet revient : il n'a aucune memoire de ses propres gestes, seulement de la
+ * conversation. C'est le defaut le plus courant d'un agent qui agit -- il parle
+ * comme s'il se souvenait et il agit comme s'il decouvrait.
+ */
+export function jalonBlock(events) {
+  if (!events?.length) return null;
+  const derniers = events.slice(-40).map(e => `${e.date} — ${e.label}`);
+  return `Les repères déjà posés sur sa frise. Tu ne reposes jamais l'un d'eux, même
+formulé autrement. S'il te raconte de nouveau quelque chose qui est déjà là, c'est du
+contexte, pas un fait à marquer.
+
+${derniers.join('\n')}`;
+}
+
+/**
+ * Les motifs suivis, avec leur identifiant.
+ *
+ * L'identifiant n'est pas un detail d'implementation qui fuit : c'est ce qui
+ * permet de marquer une occurrence sans redecrire le motif a chaque fois, donc
+ * sans que le compagnon puisse en deriver silencieusement la definition.
+ */
+export function motifBlock(motifs) {
+  if (!motifs?.length) return null;
+  const lignes = motifs.map(m => `[${m.id}] ${m.nom} — ${m.mecanisme} (reconnu ${m.vues} fois)`);
+  return `Les mécanismes que tu as décidé de suivre chez lui. Ce sont les tiens : tu les as
+nommés, tu peux en ajouter, et tu marques une occurrence quand tu en reconnais une dans ce
+qu'il vient d'écrire.
+
+Tu ne lui en parles pas de toi-même. Les voir apparaître à l'écran est une chose ; s'entendre
+dire « tu es en train de minimiser » en est une autre, et c'est un verdict. S'il t'interroge
+dessus, tu réponds honnêtement.
 
 ${lignes.join('\n')}`;
 }
@@ -372,49 +439,173 @@ export const ANTHROPIC_MODELS = [
  * @param {(chunk: string) => void} onText
  * @returns {Promise<{text: string, backend: string, refused?: boolean, model?: string}>}
  */
-export async function anthropicReply(history, s, memory, onText) {
+export async function anthropicReply(history, s, memory, onText, outils = null) {
   const { client, source } = await anthropicClient(s);
 
   const system = [{ type: 'text', text: SYSTEM_PROMPT }];
   if (memory) system.push({ type: 'text', text: memory });
 
-  let stream;
-  try {
-    stream = client.beta.messages.stream({
-      // Repli serveur : si un classificateur decline, la requete repart sur un
-      // autre modele dans le meme appel. Sur ce produit, un refus tombe pile au
-      // pire moment -- quelqu'un qui ecrit une soiree difficile. Le silence n'est
-      // pas une option acceptable.
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      model: s.anthropicModel || 'claude-opus-5',
-      max_tokens: 2048,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: s.anthropicEffort || 'low' },
-      system,
-      messages: toChatMessages(history)
-    });
-  } catch (err) {
-    throw new Error(explainApiError(err, source));
-  }
+  const boite = outils ? outilsDispo(outils) : [];
+  const messages = toChatMessages(history);
+  const faits = [];              // ce que les outils ont reellement change
 
   let text = '';
   let final;
-  try {
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        text += event.delta.text;
-        onText?.(event.delta.text);
-      }
+  // Cumulee sur TOUS les tours. Un echange avec outils coute deux ou trois
+  // appels ; ne compter que le dernier ferait payer a l'enveloppe le tiers de
+  // ce qu'elle depense vraiment, et la jauge mentirait d'autant plus que le
+  // compagnon agit.
+  const usage = { input: 0, output: 0 };
+
+  // Un tour par appel d'outil. La borne n'est pas theorique : sans elle, un
+  // modele qui se trompe d'argument peut reessayer indefiniment, et chaque
+  // tour coute des jetons a quelqu'un qui ne paie pas et ne le voit pas.
+  for (let tour = 0; tour < 4; tour++) {
+    let stream;
+    try {
+      stream = client.beta.messages.stream({
+        // Repli serveur : si un classificateur decline, la requete repart sur un
+        // autre modele dans le meme appel. Sur ce produit, un refus tombe pile au
+        // pire moment -- quelqu'un qui ecrit une soiree difficile. Le silence n'est
+        // pas une option acceptable.
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        model: s.anthropicModel || 'claude-opus-5',
+        max_tokens: 2048,
+        thinking: { type: 'adaptive' },
+        output_config: { effort: s.anthropicEffort || 'low' },
+        system,
+        ...(boite.length ? { tools: boite } : {}),
+        messages
+      });
+    } catch (err) {
+      throw new Error(explainApiError(err, source));
     }
-    final = await stream.finalMessage();
+
+    try {
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+          text += event.delta.text;
+          onText?.(event.delta.text);
+        }
+      }
+      final = await stream.finalMessage();
+    } catch (err) {
+      throw new Error(explainApiError(err, source));
+    }
+
+    const u = readUsage(final);
+    usage.input += u.input; usage.output += u.output;
+
+    if (final.stop_reason === 'refusal') {
+      return { text: '', backend: 'anthropic', refused: true, model: final.model, usage };
+    }
+    if (final.stop_reason !== 'tool_use') break;
+
+    const appels = final.content.filter(b => b.type === 'tool_use');
+    if (!appels.length) break;
+
+    // On renvoie `final.content` tel quel : il porte aussi les blocs de
+    // reflexion, que l'API exige de retrouver intacts au tour suivant.
+    messages.push({ role: 'assistant', content: final.content });
+    const resultats = [];
+    for (const appel of appels) {
+      const r = await executer(appel, outils);
+      if (r.fait) faits.push(r.fait);
+      resultats.push({
+        type: 'tool_result',
+        tool_use_id: appel.id,
+        content: r.message,
+        ...(r.erreur ? { is_error: true } : {})
+      });
+    }
+    messages.push({ role: 'user', content: resultats });
+  }
+
+  return { text: text.trim(), backend: 'anthropic', model: final?.model, faits, usage };
+}
+
+/* ---------------- les outils du compagnon ---------------- */
+
+/**
+ * Ce que le compagnon peut faire, en plus de parler.
+ *
+ * Deux gestes seulement, et tous deux du meme genre : ils posent une marque
+ * sur la frise ou sur la liste des motifs, jamais un jugement dans le texte.
+ * C'est deliberе -- un outil qui ecrirait « journee difficile » quelque part
+ * contournerait par la porte de service toute la regle du produit.
+ *
+ * Chaque outil est facultatif : si l'appelant ne fournit pas la fonction, il
+ * n'est meme pas propose au modele. Le compagnon ne peut donc pas decouvrir
+ * une capacite qui n'existe pas dans ce contexte-la.
+ */
+export const OUTILS = {
+  poser_repere: {
+    description: `Pose une marque datee sur la frise de la personne : un fait qui change le sol
+sous ses journees (demenagement, debut ou arret de traitement, rupture, deces, changement de
+poste, naissance, depart). Jamais une humeur, jamais une bonne ou mauvaise journee, jamais une
+impression. Le libelle fait trois a six mots, dans ses mots a elle, sans date dedans.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'AAAA-MM-JJ. La date du FAIT, pas celle de la conversation.' },
+        label: { type: 'string', description: 'Trois a six mots. Ex : « changement de boulot », « demenagement a Montpellier ».' }
+      },
+      required: ['date', 'label']
+    }
+  },
+
+  suivre_motif: {
+    description: `Declare un mecanisme que tu decides de suivre dans la duree : quelque chose qui
+revient dans sa facon de raconter, pas un mot precis. Par exemple minimiser ce qui vient de se
+passer, blaguer sur sa propre vie quand ca va mal, revenir sans arret sur le meme sujet, une
+envie de se faire du mal. Tu le nommes toi-meme. N'en declare un que quand tu l'as vu au moins
+deux fois : un motif n'est pas une observation isolee.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        nom: { type: 'string', description: 'Deux a quatre mots, en francais, au singulier. Ex : « minimisation », « humour de defense ».' },
+        mecanisme: { type: 'string', description: 'Une phrase : a quoi tu le reconnais, dans sa facon de dire les choses.' }
+      },
+      required: ['nom', 'mecanisme']
+    }
+  },
+
+  marquer_motif: {
+    description: `Signale que ce que la personne vient d'ecrire est une occurrence d'un motif que tu
+suis deja. La liste des motifs et leurs identifiants te sont donnes. Ne marque que le message en
+cours, et seulement si tu le reconnais vraiment -- un motif marque a tort se voit a l'ecran.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'integer', description: 'Identifiant du motif, tel qu\'il apparait dans la liste.' }
+      },
+      required: ['id']
+    }
+  }
+};
+
+const outilsDispo = outils => Object.entries(OUTILS)
+  .filter(([nom]) => typeof outils[nom] === 'function')
+  .map(([name, def]) => ({ name, ...def }));
+
+/**
+ * Execute un appel et rend au modele une phrase, pas un JSON.
+ *
+ * Une erreur d'outil doit etre reparable par le modele lui-meme : « date
+ * invalide » lui permet de reessayer, un objet d'erreur brut le fait
+ * abandonner et laisse la personne sans reponse.
+ */
+async function executer(appel, outils) {
+  const fn = outils?.[appel.name];
+  if (!fn) return { message: `Outil inconnu : ${appel.name}.`, erreur: true };
+  try {
+    const r = await fn(appel.input ?? {});
+    if (r?.erreur) return { message: r.erreur, erreur: true };
+    return { message: r?.message ?? 'Fait.', fait: r?.fait ?? null };
   } catch (err) {
-    throw new Error(explainApiError(err, source));
+    return { message: String(err?.message ?? err).slice(0, 200), erreur: true };
   }
-  if (final.stop_reason === 'refusal') {
-    return { text: '', backend: 'anthropic', refused: true, model: final.model };
-  }
-  return { text: text.trim(), backend: 'anthropic', model: final.model };
 }
 
 /* ---------------- backend Ollama ---------------- */
@@ -461,7 +652,7 @@ export async function ollamaReply(history, s, memory, onText) {
  * Tout echec d'un backend distant retombe sur `scripted` ET LE DIT. Une panne
  * silencieuse serait un mensonge sur l'endroit ou partent les donnees.
  */
-export async function reply(history, settings, { memory = null, onText = null, exhausted = false } = {}) {
+export async function reply(history, settings, { memory = null, onText = null, exhausted = false, outils = null } = {}) {
   const backend = settings.chatBackend ?? 'scripted';
 
   // Enveloppe epuisee : on ne coupe pas la parole a quelqu'un. Le compagnon
@@ -481,7 +672,7 @@ export async function reply(history, settings, { memory = null, onText = null, e
 
   try {
     const r = backend === 'anthropic'
-      ? await anthropicReply(history, settings, memory, onText)
+      ? await anthropicReply(history, settings, memory, onText, outils)
       : await ollamaReply(history, settings, memory, onText);
 
     if (r.refused) {

@@ -77,6 +77,34 @@ CREATE TABLE IF NOT EXISTS anchors (
   PRIMARY KEY (user_id, note)
 );
 
+-- Motifs : ce que le compagnon a decide de suivre de lui-meme.
+--
+-- Ce ne sont pas des mots-cles. Un mot-cle se cherche ; un motif se reconnait,
+-- et seul un modele peut dire que « bon bref c'etait rien » et « t'inquiete
+-- j'ai l'habitude » sont deux fois la meme chose. La table stocke donc ce que
+-- le compagnon a nomme, pas un lexique -- et le compte des fois ou il l'a
+-- reconnu, qui est la seule mesure honnete de la duree d'un motif.
+CREATE TABLE IF NOT EXISTS motifs (
+  id         INTEGER PRIMARY KEY,
+  user_id    TEXT NOT NULL DEFAULT '${OWNER}',
+  nom        TEXT NOT NULL,
+  mecanisme  TEXT NOT NULL,
+  teinte     INTEGER NOT NULL,         -- degres HSL, choisis par l'app
+  cree_le    TEXT NOT NULL,
+  vu_le      TEXT NOT NULL,
+  vues       INTEGER NOT NULL DEFAULT 1
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_motifs_nom ON motifs(user_id, nom);
+
+-- Quel message porte quel motif. C'est ce qui teinte le fil : la couleur suit
+-- le message, elle ne suit pas la conversation entiere.
+CREATE TABLE IF NOT EXISTS motif_vues (
+  motif_id   INTEGER NOT NULL,
+  message_id INTEGER NOT NULL,
+  PRIMARY KEY (motif_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_motif_vues_msg ON motif_vues(message_id);
+
 CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
@@ -317,6 +345,8 @@ export function wipe(portee, userId = OWNER) {
       n('messages',   'DELETE FROM messages   WHERE user_id = ?', userId);
       n('events',     'DELETE FROM events     WHERE user_id = ?', userId);
       n('anchors',    'DELETE FROM anchors    WHERE user_id = ?', userId);
+      db.prepare('DELETE FROM motif_vues WHERE motif_id IN (SELECT id FROM motifs WHERE user_id = ?)').run(userId);
+      n('motifs',     'DELETE FROM motifs     WHERE user_id = ?', userId);
       n('embeddings', 'DELETE FROM embeddings WHERE user_id = ?', userId);
       // Les reglages ne partent pas : le compagnon choisi, le timbre, la cle.
       // Remettre a zero son journal n'est pas redemander son prenom.
@@ -341,6 +371,71 @@ export function addEvent(date, label, userId = OWNER) {
 export function deleteEvent(id, userId = OWNER) {
   // filtre sur l'utilisateur : un identifiant devine ne doit pas suffire
   db.prepare('DELETE FROM events WHERE id = ? AND user_id = ?').run(id, userId);
+}
+
+/* ---------- motifs ---------- */
+
+/*
+ * Les teintes, en degres HSL.
+ *
+ * Aucune n'est dans l'intervalle 0-150 : c'est celui de l'echelle des notes,
+ * du rouge au vert. Un motif teinte en vert se lirait comme une bonne journee
+ * et un motif rouge comme une mauvaise, alors qu'un motif ne dit rien de bon
+ * ni de mauvais -- c'est une chose qui revient, pas une chose qui va mal.
+ * Elles sont aussi espacees d'au moins 20 degres, faute de quoi deux motifs
+ * differents se ressemblent a l'ecran.
+ */
+export const TEINTES = [262, 190, 322, 168, 226, 292, 205, 338, 248, 178];
+
+export function allMotifs(userId = OWNER) {
+  return db.prepare(
+    'SELECT id, nom, mecanisme, teinte, cree_le, vu_le, vues FROM motifs WHERE user_id = ? ORDER BY vues DESC, id ASC'
+  ).all(userId);
+}
+
+export function addMotif({ nom, mecanisme, userId = OWNER, quand = new Date().toISOString() }) {
+  const deja = db.prepare('SELECT id FROM motifs WHERE user_id = ? AND nom = ?').get(userId, nom);
+  if (deja) return { id: deja.id, existait: true };
+  // La teinte suit l'ordre de creation, pas un hasard : deux motifs crees a la
+  // suite doivent etre visiblement distincts, ce qu'un tirage ne garantit pas.
+  const n = db.prepare('SELECT COUNT(*) c FROM motifs WHERE user_id = ?').get(userId).c;
+  const info = db.prepare(
+    'INSERT INTO motifs(user_id, nom, mecanisme, teinte, cree_le, vu_le, vues) VALUES(?,?,?,?,?,?,0)'
+  ).run(userId, nom, mecanisme, TEINTES[n % TEINTES.length], quand, quand);
+  return { id: Number(info.lastInsertRowid), existait: false };
+}
+
+/** Une occurrence : le motif remonte, et le message porte sa couleur. */
+export function marquerMotif(motifId, messageId, userId = OWNER, quand = new Date().toISOString()) {
+  const m = db.prepare('SELECT id, nom FROM motifs WHERE id = ? AND user_id = ?').get(motifId, userId);
+  if (!m) return null;
+  const info = db.prepare('INSERT OR IGNORE INTO motif_vues(motif_id, message_id) VALUES(?,?)').run(motifId, messageId);
+  if (info.changes) {
+    db.prepare('UPDATE motifs SET vues = vues + 1, vu_le = ? WHERE id = ?').run(quand, motifId);
+  }
+  return m;
+}
+
+/** Les motifs portes par une liste de messages : {messageId: [motif, ...]}. */
+export function motifsDesMessages(ids, userId = OWNER) {
+  if (!ids?.length) return {};
+  const trous = ids.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT v.message_id, m.id, m.nom, m.teinte
+    FROM motif_vues v JOIN motifs m ON m.id = v.motif_id
+    WHERE m.user_id = ? AND v.message_id IN (${trous})
+  `).all(userId, ...ids);
+  const par = {};
+  for (const r of rows) (par[r.message_id] ??= []).push({ id: r.id, nom: r.nom, teinte: r.teinte });
+  return par;
+}
+
+export function deleteMotif(id, userId = OWNER) {
+  const m = db.prepare('SELECT id FROM motifs WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!m) return false;
+  db.prepare('DELETE FROM motif_vues WHERE motif_id = ?').run(id);
+  db.prepare('DELETE FROM motifs WHERE id = ?').run(id);
+  return true;
 }
 
 /* ---------- anchors ---------- */

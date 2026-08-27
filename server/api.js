@@ -1,7 +1,8 @@
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
-  addMessage, messagesForDate, recentMessages, allEvents, addEvent, deleteEvent,
-  allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER
+  addMessage, messagesForDate, recentMessages, allEvents, deleteEvent,
+  allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
+  addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -12,7 +13,12 @@ import { readMood, readEnergy } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search } from './search.js';
-import { reply, memoryBlock, anchorBlock, gridBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
+// Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
+// cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
+// de web/reperes.js.
+import { themeDe } from '../web/reperes.js';
+import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock,
+         ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -64,6 +70,14 @@ export function recentMemory(date, userId = OWNER) {
   const ref = ser.length ? ser[ser.length - 1].reference : null;
   const grille = gridBlock(rows, { reference: ref });
   if (grille) morceaux.push(grille);
+
+  // Ce que le compagnon a deja pose. Sans cette liste il reposerait chaque
+  // matin le repere de la veille, et declarerait trois fois le meme motif sous
+  // trois noms voisins -- l'echec classique d'un agent sans etat.
+  const jalons = jalonBlock(allEvents(userId));
+  if (jalons) morceaux.push(jalons);
+  const motifs = motifBlock(allMotifs(userId));
+  if (motifs) morceaux.push(motifs);
 
   const note = presenceNote(presence(userId));
   if (note) morceaux.push(note);
@@ -134,6 +148,7 @@ export const routes = {
       entry,
       anchors: allAnchors(userId),
       messages: recentMessages(80, userId),
+      motifs: motifsDuFil(userId),
       user: publicUser(userId),
       usage: usageFor(userId),
       ambiance: ambiance(userId),
@@ -213,7 +228,8 @@ export const routes = {
       etalon: getSettings(userId).etalon ?? median(s.map(x => x.note).sort((a, b) => a - b)),
       globalMedian: median(s.map(x => x.note).sort((a, b) => a - b)),
       mean: s.length ? Math.round(s.reduce((a, b) => a + b.note, 0) / s.length * 1000) / 1000 : null,
-      events: allEvents(userId)
+      events: allEvents(userId).map(e => ({ ...e, theme: themeDe(e.label) })),
+      motifs: motifsDuFil(userId)
     };
   },
 
@@ -265,7 +281,10 @@ export const routes = {
       const past = rows.filter(r => r.text && r.text.trim() && r.date < date)
         .slice(-5).reverse()
         .map(r => ({ date: r.date, text: r.text, note: r.note }));
-      return { date, note, jour, calendrier, floored: true, floor, yesterday, rawPast: past, episodes: null, similar: null };
+      // Les reperes passent le plancher : ce sont des faits que la personne a
+      // elle-meme poses, pas une statistique calculee sur elle.
+      return { date, note, jour, calendrier, floored: true, floor, yesterday, rawPast: past,
+               episodes: null, similar: null, reperes: reperesDuJour(date, userId) };
     }
 
     // 1. PREUVE DE RESOLUTION
@@ -320,7 +339,8 @@ export const routes = {
       similar.items = similar.items.slice().sort((a, b) => b.date.localeCompare(a.date));
     }
     return { date, note, jour, calendrier, reference, delta: cur?.delta ?? null,
-             floored: false, floor, yesterday, episodes: ep, similar, textCount };
+             floored: false, floor, yesterday, episodes: ep, similar, textCount,
+             reperes: reperesDuJour(date, userId) };
   },
 
   /**
@@ -506,11 +526,24 @@ export const routes = {
   },
 
   'GET /api/events': ({ userId }) => ({ events: allEvents(userId) }),
+
+  'GET /api/motifs': ({ userId }) => motifsDuFil(userId),
+
+  /**
+   * Retirer un motif. C'est le compagnon qui les cree, mais c'est la personne
+   * qui decide de ce qui est suivi chez elle -- sans quoi une observation posee
+   * de travers s'installe pour de bon.
+   */
+  'POST /api/motifs': ({ body, userId }) => {
+    if (body.delete) deleteMotif(Number(body.delete), userId);
+    return motifsDuFil(userId);
+  },
   'POST /api/events': ({ body, userId }) => {
-    if (body.delete) { deleteEvent(Number(body.delete), userId); return { events: allEvents(userId) }; }
+    const rendre = () => ({ events: allEvents(userId).map(e => ({ ...e, theme: themeDe(e.label) })) });
+    if (body.delete) { deleteEvent(Number(body.delete), userId); return rendre(); }
     if (!body.date || !body.label) return { error: 'date et label requis' };
     addEvent(body.date, String(body.label).slice(0, 120), userId);
-    return { events: allEvents(userId) };
+    return rendre();
   },
 
   'POST /api/settings': ({ body, userId }) => {
@@ -552,12 +585,34 @@ export const routes = {
  *   delta -> fragments de texte, au fil de la generation
  *   done  -> message complet enregistre, etat du backend
  */
+/**
+ * Les reperes d'une journee, plus le voisinage.
+ *
+ * Le repere exact du jour est rare -- il y en a peut-etre quinze sur quatre
+ * ans. N'afficher que celui-la laisserait le bloc vide 99 % du temps, donc
+ * invisible. Le dernier repere pose AVANT ce jour, lui, existe toujours, et
+ * c'est lui qui repond a la question qu'on se pose vraiment en rouvrant une
+ * vieille journee : « j'en etais ou, a ce moment-la ? »
+ */
+function reperesDuJour(date, userId) {
+  const tous = allEvents(userId);
+  const decore = e => ({ ...e, theme: themeDe(e.label) });
+  const avant = tous.filter(e => e.date < date).slice(-1)[0] ?? null;
+  return {
+    jour: tous.filter(e => e.date === date).map(decore),
+    avant: avant ? { ...decore(avant), jours: joursEntre(avant.date, date) } : null
+  };
+}
+
+const joursEntre = (a, b) =>
+  Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+
 export async function streamMessage(body, send, userId = OWNER) {
   const text = String(body.text ?? '').trim();
   if (!text) { send('error', { error: 'texte vide' }); return; }
 
   const date = body.date ?? today();
-  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
+  const messageId = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
   invalidate(userId);
   send('user', { messages: recentMessages(80, userId) });
 
@@ -568,13 +623,15 @@ export async function streamMessage(body, send, userId = OWNER) {
   const r = await reply(history, settings, {
     memory: recentMemory(date, userId),
     onText: chunk => send('delta', { text: chunk }),
-    exhausted: before.exhausted
+    exhausted: before.exhausted,
+    outils: outilsPour(userId, messageId, send)
   });
   if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
 
   addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
   send('done', {
     messages: recentMessages(80, userId),
+    motifs: motifsDuFil(userId),
     usage: usageFor(userId),
     backend: r.backend,
     model: r.model ?? null,
@@ -582,4 +639,72 @@ export async function streamMessage(body, send, userId = OWNER) {
     refused: r.refused ?? false,
     exhausted: r.exhausted ?? false
   });
+}
+
+/**
+ * Les outils, cables sur CE fil et CE message.
+ *
+ * Chaque geste est diffuse tout de suite (`send`) plutot qu'a la fin : le
+ * compagnon pose souvent un repere avant d'ecrire sa phrase, et voir la marque
+ * apparaitre pendant qu'il parle rend le geste lisible. Attendre la fin donnerait
+ * l'impression que l'interface a change toute seule.
+ *
+ * La validation est ici et pas dans le prompt. Un modele peut halluciner une
+ * date, un identifiant, un libelle de trois cents mots ; le prompt le lui
+ * deconseille, le code le lui refuse. Un refus explicite lui permet de
+ * corriger -- c'est pour ca qu'il rend une phrase et pas un code d'erreur.
+ */
+export function outilsPour(userId, messageId, send = () => {}) {
+  return {
+    poser_repere: ({ date, label }) => {
+      const d = String(date ?? '').trim();
+      const l = String(label ?? '').trim().replace(/\s+/g, ' ');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+      if (d > today()) return { erreur: "Cette date est dans le futur. Un repère marque ce qui a eu lieu." };
+      if (l.length < 3) return { erreur: 'Libellé trop court.' };
+      if (l.length > 60) return { erreur: 'Libellé trop long : trois à six mots.' };
+      const doublon = allEvents(userId).some(e => e.date === d && e.label.toLowerCase() === l.toLowerCase());
+      if (doublon) return { erreur: 'Ce repère existe déjà à cette date.' };
+
+      const ev = addEvent(d, l, userId);
+      const fait = { type: 'repere', ...ev, theme: themeDe(l) };
+      send('geste', fait);
+      return { message: `Repère posé le ${d} : « ${l} ».`, fait };
+    },
+
+    suivre_motif: ({ nom, mecanisme }) => {
+      const n = String(nom ?? '').trim().replace(/\s+/g, ' ');
+      const m = String(mecanisme ?? '').trim().replace(/\s+/g, ' ');
+      if (n.length < 3 || n.length > 40) return { erreur: 'Le nom fait deux à quatre mots.' };
+      if (m.length < 10) return { erreur: 'Décris le mécanisme en une phrase.' };
+      if (allMotifs(userId).length >= 12) {
+        return { erreur: 'Douze motifs suivis, c\'est le maximum. Au-delà, plus rien ne ressort.' };
+      }
+      const { id, existait } = addMotif({ nom: n, mecanisme: m, userId });
+      if (existait) return { erreur: `Ce motif existe déjà (identifiant ${id}).` };
+      marquerMotif(id, messageId, userId);
+      const motif = allMotifs(userId).find(x => x.id === id);
+      const fait = { type: 'motif', nouveau: true, ...motif };
+      send('geste', fait);
+      return { message: `Motif « ${n} » suivi, identifiant ${id}.`, fait };
+    },
+
+    marquer_motif: ({ id }) => {
+      const m = marquerMotif(Number(id), messageId, userId);
+      if (!m) return { erreur: `Aucun motif d'identifiant ${id}.` };
+      const motif = allMotifs(userId).find(x => x.id === m.id);
+      const fait = { type: 'motif', nouveau: false, messageId, ...motif };
+      send('geste', fait);
+      return { message: `Occurrence notée pour « ${m.nom} ».` };
+    }
+  };
+}
+
+/** Les motifs portes par les messages du fil courant, pour les teinter. */
+export function motifsDuFil(userId = OWNER) {
+  const msgs = recentMessages(80, userId);
+  return {
+    liste: allMotifs(userId),
+    parMessage: motifsDesMessages(msgs.map(m => m.id), userId)
+  };
 }
