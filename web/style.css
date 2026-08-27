@@ -1007,6 +1007,8 @@ body:has(#ambiance) { background: transparent; }
 /* Un motif porte SA couleur, jamais celle de l'échelle des notes : la teinte
    dit « ceci revient », pas « ceci va mal ». Voir TEINTES dans server/db.js. */
 .geste.motif { border-color: hsl(var(--motif) 42% 32% / .55); }
+.geste.objectif.rompu .gicone { color: var(--warn); }
+
 .geste.motif .gpuce {
   flex: none; width: 10px; height: 10px; border-radius: 50%;
   background: hsl(var(--motif) 70% 62%);
@@ -1120,6 +1122,36 @@ body:has(#ambiance) { background: transparent; }
 }
 .pop.droite { left: auto; right: 0; }
 @media (max-width: 700px) { .pop { left: 0; right: auto; } }
+
+/* --- le trombone, et ce qu'il ouvre --- */
+
+.composer { position: relative; }
+.clip {
+  position: relative; flex: none; align-self: flex-end;
+  display: grid; place-items: center; width: 34px; height: 34px;
+  background: none; border: 0; border-radius: 9px; color: var(--ink-faint);
+  transition: color .15s, background .15s;
+}
+.clip:hover, .clip[aria-expanded="true"] { color: var(--ink-dim); background: var(--surface); }
+/* Le point ne dit pas « attention » : il dit qu'il y a quelque chose de rompu
+   là-dedans, ce qui est la seule raison d'ouvrir sans y penser. */
+.clipdot {
+  position: absolute; top: 5px; right: 5px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--warn);
+}
+.objpop { bottom: calc(100% + 9px); top: auto; left: 0; width: 288px; max-width: calc(100vw - 32px); }
+.objliste { display: flex; flex-direction: column; gap: 3px; }
+.objitem {
+  display: flex; align-items: center; gap: 11px;
+  padding: 7px 8px; border-radius: 9px;
+}
+.objitem:hover { background: var(--surface); }
+.objitem .objico { flex: none; color: var(--accent); display: grid; place-items: center; }
+.objitem.rompu .objico { color: var(--warn); }
+.objtxt { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.objtxt b { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objtxt span { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.objitem:hover .repdel { opacity: 1; }
 
 .cal { width: 246px; user-select: none; }
 .calhead { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }

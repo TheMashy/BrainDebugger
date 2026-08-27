@@ -148,6 +148,37 @@ CREATE TABLE IF NOT EXISTS motif_vues (
 );
 CREATE INDEX IF NOT EXISTS idx_motif_vues_msg ON motif_vues(message_id);
 
+/*
+ * Les objectifs : ce que la personne a decide d'arreter, de tenir, de changer.
+ *
+ * CE N'EST PAS UNE LISTE DE TACHES, et la difference tient dans ce que la table
+ * ne contient pas : ni echeance, ni rappel, ni score. Une resolution qu'on ne
+ * tient pas n'est pas un echec a signaler -- c'est une information, et la seule
+ * chose que l'application en fasse est de la montrer telle quelle.
+ *
+ * « depuis » est la date du DEBUT DE LA SERIE EN COURS, pas celle de la
+ * decision. C'est le seul chiffre qui compte quand on regarde : « douze jours »
+ * veut dire douze jours d'affilee, pas douze jours depuis qu'on s'est dit qu'on
+ * arreterait. « reprises » garde le reste -- recommencer trois fois est un
+ * fait, et l'effacer a chaque rupture rendrait la ligne fausse dans l'autre
+ * sens.
+ */
+CREATE TABLE IF NOT EXISTS objectifs (
+  id       INTEGER PRIMARY KEY,
+  user_id  TEXT NOT NULL DEFAULT '${OWNER}',
+  quoi     TEXT NOT NULL,       -- dans SES mots : « arreter la cigarette »
+  genre    TEXT NOT NULL,       -- un theme de reperes.js, pour l'icone
+  cree_le  TEXT NOT NULL,
+  depuis   TEXT NOT NULL,       -- 'AAAA-MM-JJ', debut de la serie en cours
+  tenu     INTEGER NOT NULL DEFAULT 1,
+  reprises INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_objectifs_user ON objectifs(user_id);
+
+-- LA COLONNE QU'ON N'AJOUTE JAMAIS : un pourcentage de reussite. Un objectif
+-- tenu a 62 % n'apprend rien a la personne qui le vit, et transforme un
+-- indicateur en note.
+
 CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
@@ -535,6 +566,44 @@ export function rangerMessage(id, { jour = null, quand = null } = {}, userId = O
 export function countCarnet(userId = OWNER) {
   const r = db.prepare('SELECT COUNT(*) t, COUNT(jour) d FROM carnet WHERE user_id = ?').get(userId);
   return { total: r.t, datees: r.d, libres: r.t - r.d };
+}
+
+/* ---------- objectifs ---------- */
+
+/** Les plus fragiles d'abord : un objectif rompu est celui dont on parle. */
+export const allObjectifs = (userId = OWNER) => db.prepare(
+  'SELECT id, quoi, genre, cree_le, depuis, tenu, reprises FROM objectifs WHERE user_id = ? ORDER BY tenu ASC, depuis DESC'
+).all(userId);
+
+export function addObjectif({ quoi, genre = 'jalon', depuis, userId = OWNER,
+                              quandCree = new Date().toISOString() }) {
+  const info = db.prepare(
+    'INSERT INTO objectifs(user_id, quoi, genre, cree_le, depuis, tenu, reprises) VALUES(?,?,?,?,?,1,0)'
+  ).run(userId, quoi, genre, quandCree, depuis);
+  return { id: Number(info.lastInsertRowid), quoi, genre, cree_le: quandCree, depuis, tenu: 1, reprises: 0 };
+}
+
+/**
+ * Rompu, ou repris.
+ *
+ * Une rupture ne remet PAS `depuis` a la date de rupture : on veut pouvoir dire
+ * « rompu, apres onze jours ». C'est la reprise qui redemarre la serie, et qui
+ * incremente `reprises` -- recommencer est un fait, pas une remise a zero.
+ */
+export function marquerObjectif(id, { tenu, date }, userId = OWNER) {
+  const o = db.prepare('SELECT * FROM objectifs WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!o) return null;
+  if (tenu) {
+    db.prepare('UPDATE objectifs SET tenu = 1, depuis = ?, reprises = reprises + ? WHERE id = ?')
+      .run(date, o.tenu ? 0 : 1, id);
+  } else {
+    db.prepare('UPDATE objectifs SET tenu = 0 WHERE id = ?').run(id);
+  }
+  return db.prepare('SELECT id, quoi, genre, cree_le, depuis, tenu, reprises FROM objectifs WHERE id = ?').get(id);
+}
+
+export function deleteObjectif(id, userId = OWNER) {
+  return db.prepare('DELETE FROM objectifs WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
 }
 
 /* ---------- motifs ---------- */

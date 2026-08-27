@@ -4,7 +4,7 @@ import {
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
-  updateEvent, rangerMessage, TEINTES
+  updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -18,12 +18,12 @@ import { buildIndex, search, tokenize } from './search.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
 // cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
 // de web/reperes.js.
-import { themeDe } from '../web/reperes.js';
+import { themeDe, ICONES } from '../web/reperes.js';
 // Meme raison : la geometrie de la frise doit etre calculee une seule fois, au
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock,
+import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -95,6 +95,10 @@ export function recentMemory(date, userId = OWNER) {
   if (jalons) morceaux.push(jalons);
   const motifs = motifBlock(allMotifs(userId));
   if (motifs) morceaux.push(motifs);
+  // Hors du `if (days)` : un objectif est un engagement pris AVEC lui, pas un
+  // souvenir de journee. A memoire zero il doit encore savoir ce qu'on tient.
+  const obj = objectifBlock(allObjectifs(userId), today());
+  if (obj) morceaux.push(obj);
 
   // Le carnet, sous le MEME `if (days)` que les journees : l'interface promet
   // qu'a zero le compagnon ne connait que la conversation du jour, et ca doit
@@ -818,6 +822,18 @@ export const routes = {
     return rendre();
   },
 
+  'GET /api/objectifs': ({ userId }) => ({ objectifs: allObjectifs(userId) }),
+
+  /**
+   * Retirer un objectif. C'est le compagnon qui les enregistre, mais c'est la
+   * personne qui decide de ce qu'elle s'engage a tenir -- sans quoi une
+   * resolution prise un soir la suit pour de bon.
+   */
+  'POST /api/objectifs': ({ body, userId }) => {
+    if (body.delete) deleteObjectif(Number(body.delete), userId);
+    return { objectifs: allObjectifs(userId) };
+  },
+
   'GET /api/motifs': ({ userId }) => motifsDuFil(userId),
 
   /**
@@ -1094,6 +1110,43 @@ export function outilsPour(userId, messageId, send = () => {}) {
       send('geste', fait);
       return { message: `Rangé dans ses notes${j ? ` (le ${j})` : q ? ` (« ${q} »)` : ''}. `
                       + `Ce texte ne compte plus comme sa journée.`, fait };
+    },
+
+    /*
+     * Un objectif n'est jamais pose sans accord : le prompt le dit, et le code
+     * ne peut pas le verifier -- seule la conversation sait si la personne a
+     * dit oui. Ce qui EST verifiable est ici : un libelle court, un genre
+     * connu, une date qui existe, et un plafond.
+     */
+    poser_objectif: ({ quoi, genre, depuis }) => {
+      const q = String(quoi ?? '').trim().replace(/\s+/g, ' ');
+      if (q.length < 3 || q.length > 70) return { erreur: 'Trois à huit mots, dans ses mots à elle.' };
+      const g = ICONES[String(genre ?? '')] ? String(genre) : 'jalon';
+      const d = depuis == null ? today() : String(depuis).trim();
+      if (!ISO_JOUR.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+      if (d > today()) return { erreur: 'Cette date est dans le futur.' };
+      const liste = allObjectifs(userId);
+      // Huit, et pas douze comme les motifs : un objectif se REGARDE, et une
+      // liste ou rien ne ressort ne se regarde plus.
+      if (liste.length >= 8) return { erreur: 'Huit objectifs, c\'est le maximum. Au-delà, plus rien ne ressort.' };
+      if (liste.some(o => o.quoi.toLowerCase() === q.toLowerCase())) {
+        return { erreur: 'Cet objectif existe déjà.' };
+      }
+      const o = addObjectif({ quoi: q, genre: g, depuis: d, userId });
+      const fait = { type: 'objectif', nouveau: true, ...o };
+      send('geste', fait);
+      return { message: `Objectif noté : « ${q} », identifiant ${o.id}, depuis le ${d}.`, fait };
+    },
+
+    marquer_objectif: ({ id, tenu, date }) => {
+      const d = date == null ? today() : String(date).trim();
+      if (!ISO_JOUR.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+      if (d > today()) return { erreur: 'Cette date est dans le futur.' };
+      const o = marquerObjectif(Number(id), { tenu: !!tenu, date: d }, userId);
+      if (!o) return { erreur: `Aucun objectif d'identifiant ${id}.` };
+      const fait = { type: 'objectif', nouveau: false, ...o };
+      send('geste', fait);
+      return { message: tenu ? `« ${o.quoi} » repart du ${d}.` : `« ${o.quoi} » marqué rompu.`, fait };
     },
 
     /*

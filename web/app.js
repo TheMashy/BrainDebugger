@@ -161,12 +161,26 @@ async function renderTonight() {
   const t = S.today;
   const note = S.entry?.note ?? null;
   const s = S.settings;
+  // Un echec ici ne doit pas empecher d'ecrire : le trombone est un indicateur,
+  // la conversation est le produit.
+  try { OBJECTIFS = (await api('/api/objectifs')).objectifs ?? []; } catch { OBJECTIFS = []; }
 
   $('#view').innerHTML = `
     <div class="tonight">
       <div class="thread" id="thread"></div>
 
       <div class="composer">
+        ${/* Le trombone. Il n'ouvre rien qu'on remplisse : c'est un indicateur,
+              et il n'apparait que s'il y a quelque chose a indiquer. */''}
+        <button class="clip" id="clip" aria-expanded="false" aria-label="Ce que tu tiens"
+                title="Ce que tu tiens" ${OBJECTIFS.length ? '' : 'hidden'}>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.4 11.6 12.3 19.7a5 5 0 0 1-7.1-7.1l8.1-8.1a3.3 3.3 0 0 1 4.7 4.7l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.5-7.5"/>
+          </svg>
+          ${OBJECTIFS.some(o => !o.tenu) ? '<i class="clipdot"></i>' : ''}
+        </button>
+        <div class="pop objpop" id="objpop" hidden>${objectifsMarkup()}</div>
         <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
         <button class="sendarrow" id="send" aria-label="Envoyer" title="Envoyer">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
@@ -262,6 +276,28 @@ async function renderTonight() {
   };
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
+
+  const clip = $('#clip'), pop = $('#objpop');
+  clip.onclick = () => {
+    const ouvert = pop.hidden;
+    pop.hidden = !ouvert;
+    clip.setAttribute('aria-expanded', String(ouvert));
+  };
+  pop.onclick = async e => {
+    const d = e.target.closest('[data-delobj]');
+    if (!d) return;
+    OBJECTIFS = (await api('/api/objectifs', { delete: Number(d.dataset.delobj) })).objectifs ?? [];
+    if (!OBJECTIFS.length) { pop.hidden = true; clip.hidden = true; return; }
+    pop.innerHTML = objectifsMarkup();
+  };
+  // Un panneau flottant qui ne se ferme qu'en recliquant son bouton reste
+  // ouvert par-dessus la conversation qu'on est venu reprendre.
+  document.addEventListener('click', e => {
+    if (pop.hidden || e.target.closest('#objpop, #clip')) return;
+    pop.hidden = true;
+    clip.setAttribute('aria-expanded', 'false');
+  });
+
   input.focus();
 }
 
@@ -392,11 +428,54 @@ function drawThread() {
  * l'application et donne le moyen d'aller le voir. Elle disparaît au prochain
  * message -- l'endroit où un repère vit pour de bon, c'est la frise.
  */
+/* ===================== ce qu'il tient =====================
+ *
+ * C'EST UN INDICATEUR, PAS UN SUIVI.
+ *
+ * Pas de case a cocher, pas de rappel, pas de pourcentage : la liste dit ce
+ * qu'il a decide, depuis combien de jours ca tient, et si c'est rompu en ce
+ * moment. Rien d'autre. Une resolution qu'on ne tient pas n'est pas un echec a
+ * signaler, et une application qui la note transforme un appui en jugement.
+ *
+ * Les objectifs se posent et se mettent a jour dans la CONVERSATION -- c'est la
+ * qu'on dit « il faudrait vraiment que j'arrete » et « j'ai craque samedi ».
+ * Le seul geste ici est de retirer.
+ */
+let OBJECTIFS = [];
+
+const joursTenus = d => Math.max(0, joursEntre(d, S.today) - 1);
+
+function objectifsMarkup() {
+  if (!OBJECTIFS.length) return '';
+  return `<div class="objliste">${OBJECTIFS.map(o => {
+    const n = joursTenus(o.depuis);
+    const duree = n === 0 ? "aujourd'hui" : `${n} jour${n > 1 ? 's' : ''}`;
+    return `<div class="objitem${o.tenu ? '' : ' rompu'}">
+      <span class="objico">${icone(o.genre, 18)}</span>
+      <div class="objtxt">
+        <b>${esc(o.quoi)}</b>
+        <span>${o.tenu ? `tenu · ${duree}` : `rompu · ${duree} avant`}${
+          o.reprises ? ` · ${o.reprises}<sup>e</sup> reprise` : ''}</span>
+      </div>
+      <button class="repdel" data-delobj="${o.id}" title="Retirer" aria-label="Retirer ${esc(o.quoi)}">×</button>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 let GESTES = [];
 
 function gestesMarkup() {
   if (!GESTES.length) return '';
-  return `<div class="gestes">${GESTES.map(g => g.type === 'note'
+  return `<div class="gestes">${GESTES.map(g => g.type === 'objectif'
+    ? `<div class="geste objectif${g.tenu ? '' : ' rompu'}">
+         <span class="gicone">${icone(g.genre, 20)}</span>
+         <div class="gtxt">
+           <b>${g.nouveau ? 'Objectif noté' : g.tenu ? 'Ça repart' : 'Rompu'}</b>
+           <span>${esc(g.quoi)}</span>
+         </div>
+         <button class="gbtn" data-clip="1">voir</button>
+       </div>`
+    : g.type === 'note'
     ? `<div class="geste note">
          <span class="gicone">${icone('pensee', 20)}</span>
          <div class="gtxt">
@@ -494,6 +573,13 @@ function bindGestes(th) {
     }
     const m = e.target.closest('[data-motifs]') || e.target.closest('[data-motif]');
     if (m) { view = 'settings'; syncNav(); return renderSettings(); }
+    // « voir » sur un objectif ouvre le trombone, pas une autre vue : ce qu'on
+    // vient de poser est a deux centimetres, sous le composeur.
+    const c = e.target.closest('[data-clip]');
+    if (c) {
+      const pop = $('#objpop');
+      if (pop) { pop.hidden = false; $('#clip')?.setAttribute('aria-expanded', 'true'); }
+    }
   });
 }
 
@@ -571,7 +657,20 @@ async function send() {
       // Un geste arrive pendant que le compagnon parle : la marque apparaît
       // en même temps que la phrase qui la mentionne, pas plusieurs secondes
       // après, où elle aurait l'air d'être tombée toute seule.
-      if (ev === 'geste') { GESTES.push(data); dessinerGestes(); return; }
+      if (ev === 'geste') {
+        GESTES.push(data);
+        // Le trombone suit le geste immediatement : voir apparaitre « objectif
+        // note » et trouver un trombone vide en cliquant serait une panne.
+        if (data.type === 'objectif') {
+          OBJECTIFS = [data, ...OBJECTIFS.filter(o => o.id !== data.id)]
+            .sort((a, b) => (a.tenu - b.tenu) || b.depuis.localeCompare(a.depuis));
+          const clip = $('#clip'), pop = $('#objpop');
+          if (clip) clip.hidden = false;
+          if (pop) pop.innerHTML = objectifsMarkup();
+        }
+        dessinerGestes();
+        return;
+      }
 
       if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
 
