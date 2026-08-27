@@ -671,6 +671,7 @@ function renderNoData(why) {
                                                                           */
 
 let SERIES = null;
+let CARNET = { notes: [], compte: { total: 0, datees: 0, libres: 0 } };
 let CUMMODE = 'etalon';
 let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
@@ -678,6 +679,7 @@ async function renderYear(year) {
   if (!S.stats.days) return renderNoData('Les courbes ont besoin de journées notées.');
   year = year ?? Number(S.stats.lastDate.slice(0, 4));
   SERIES ??= await api('/api/series');
+  CARNET = await api('/api/carnet');
   const grid = await api(`/api/year?year=${year}`);
   const years = S.stats.years;
   const eta = SERIES.etalon;
@@ -733,7 +735,7 @@ async function renderYear(year) {
             <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}" style="width:76px">
           </label>
         </div>
-        ${lineChart(SERIES.date, SERIES[cumKey], { height: 250, events: SERIES.events })}
+        ${lineChart(SERIES.date, SERIES[cumKey], { height: 250, events: SERIES.events, colore: true })}
         <p class="sub" style="margin:13px 0 0">
           ${CUMMODE === 'etalon'
             ? `Ta moyenne réelle est à <b class="mono">${SERIES.mean}</b>, ta médiane à <b class="mono">${SERIES.globalMedian}</b>.
@@ -743,6 +745,12 @@ async function renderYear(year) {
                Dérive résiduelle <b class="mono">${drift > 0 ? '+' : ''}${drift.toFixed(3)}</b>/jour, sans rien avoir à régler à la main.`}
         </p>
       </div>
+
+      ${carnetCardMarkup({
+        notes: CARNET.notes ?? [],
+        titre: 'Ton carnet',
+        vide: "Rien encore. Tu peux déposer ici des notes prises ailleurs — datées ou non."
+      })}
 
       <div class="card">
         <h2>Repères</h2>
@@ -776,7 +784,18 @@ async function renderYear(year) {
       SERIES.events = events;
       return renderYear(year);
     }
+    const dcn = e.target.closest('[data-delcn]');
+    if (dcn) {
+      CARNET = await api('/api/carnet', { delete: Number(dcn.dataset.delcn) });
+      toast('Note retirée');
+      return renderYear(year);
+    }
+    // Une note datée ouvre sa journée dans le Miroir.
+    const gto = e.target.closest('.cndate[data-goto]');
+    if (gto) { view = 'mirror'; syncNav(); return renderMirror(gto.dataset.goto); }
   };
+
+  wireCarnet(async () => { CARNET = await api('/api/carnet'); renderYear(year); });
 
   $('#etalon').onchange = async e => {
     const v = Number(e.target.value);
@@ -860,9 +879,143 @@ function gridMarkup(grid) {
   </table>`;
 }
 
+/* ========================= le carnet ==========================
+ *
+ * Les notes prises ailleurs et apportees ici. Un seul composeur, rendu a
+ * plusieurs endroits : le Miroir sur une journee ouverte, l'Annee sur
+ * l'ensemble. Jamais duplique -- deux formulaires aux memes identifiants se
+ * branchent l'un sur l'autre sans qu'aucune erreur ne le signale.
+ *
+ * Le mot « note » n'apparait sur aucun bouton : dans cette application, une
+ * note est le chiffre de 0 a 10. Ici on dit « note apportee ».
+ */
+
+let CARNET_OUVERT = false;      // le formulaire est replie par defaut
+
+function carnetCardMarkup({ notes = [], jour = null, titre = 'Notes apportées', vide = null } = {}) {
+  const liste = notes.length
+    ? `<div class="cnliste">${notes.map(n => carnetItemMarkup(n)).join('')}</div>`
+    : `<p class="sub" style="margin:0">${esc(vide ?? "Rien d'ajouté ici.")}</p>`;
+
+  return `<div class="card carnetcard">
+    <div class="cardhead">
+      <h2>${esc(titre)}</h2>
+      <button class="btn ghost cnadd" id="cnOuvrir" style="margin-left:auto">+ une note apportée</button>
+    </div>
+
+    <form id="cnForm" class="carnetform" ${CARNET_OUVERT ? '' : 'hidden'}>
+      <textarea id="cnTexte" required rows="4" maxlength="4000"
+                placeholder="tes mots, tels quels"></textarea>
+      <div class="cnrow" id="cnRow">
+        ${jour ? `<label><input type="radio" name="cnq" value="jour" checked>
+          <span>le ${fmtDay(jour)}</span></label>` : ''}
+        <label><input type="radio" name="cnq" value="autre" ${jour ? '' : 'checked'}>
+          <span>une autre date</span>
+          <input type="date" id="cnJour" min="1900-01-01" max="${S.today}" value="${jour ?? S.today}"></label>
+        <label><input type="radio" name="cnq" value="libre">
+          <span>je ne sais pas</span>
+          <input type="text" id="cnQuand" maxlength="60" placeholder="vers 2019…"></label>
+      </div>
+      <p class="sub cnhint" id="cnHint"></p>
+      <div class="cnactions">
+        <button class="btn primary" type="submit">Ajouter</button>
+        <button class="btn" type="button" id="cnCancel">Annuler</button>
+      </div>
+    </form>
+
+    ${liste}
+  </div>`;
+}
+
+/*
+ * Une note ne doit jamais pouvoir se lire comme une journee : lisere a gauche,
+ * fond en retrait, et la date d'apport affichee quand elle differe du jour dont
+ * la note parle. Une note ecrite quatre ans apres le jour qu'elle raconte n'a
+ * pas le meme statut qu'une note du soir meme, et le cacher serait un
+ * deplacement silencieux.
+ */
+function carnetItemMarkup(n) {
+  const apporte = n.cree_le?.slice(0, 10);
+  const decale = n.jour && apporte && apporte !== n.jour;
+  const situe = n.jour ? fmtDay(n.jour)
+              : n.quand ? `sans date · ${esc(n.quand)}`
+              : 'sans date';
+  return `<div class="cnitem">
+    <div class="cnmeta">
+      ${n.jour ? `<button class="cndate" data-goto="${n.jour}">${situe}</button>`
+               : `<span class="cndate faint">${situe}</span>`}
+      ${decale ? `<span class="faint">apportée le ${fmtDay(apporte)}</span>` : ''}
+      <button class="repdel" data-delcn="${n.id}" title="Retirer cette note"
+              aria-label="Retirer cette note">×</button>
+    </div>
+    <p class="cntexte">${esc(n.texte)}</p>
+  </div>`;
+}
+
+/**
+ * Branche le composeur. `apres` est rappele apres chaque ecriture -- c'est la
+ * vue qui decide quoi redessiner, pas le carnet.
+ */
+function wireCarnet(apres) {
+  const form = $('#cnForm');
+  if (!form) return;
+  const ouvrir = $('#cnOuvrir');
+  const texte = $('#cnTexte');
+
+  const choix = () => document.querySelector('input[name="cnq"]:checked')?.value ?? 'autre';
+
+  // L'indice porte la regle du produit a l'endroit exact ou le choix se fait.
+  // La phrase « ne compte pas comme une journée écrite » n'est pas décorative :
+  // c'est la seule façon de comprendre pourquoi le compte de journées n'a pas
+  // bougé après avoir collé quinze notes.
+  const indice = () => {
+    const h = $('#cnHint');
+    if (!h) return;
+    const c = choix();
+    if (c === 'libre') {
+      h.textContent = "Sans date. Elle nourrit le compagnon et apparaît dans les thèmes qui "
+        + "contiennent ses mots. Elle n'entre dans aucun compte de journées.";
+    } else {
+      const d = c === 'jour' ? (form.dataset.jour || S.today) : ($('#cnJour')?.value || S.today);
+      h.textContent = `Elle se posera sur le ${fmtDay(d)} : tu la retrouveras dans le Miroir ce `
+        + "jour-là. Elle ne porte pas de /10 et ne compte pas comme une journée écrite.";
+    }
+  };
+
+  ouvrir.onclick = () => {
+    CARNET_OUVERT = !CARNET_OUVERT;
+    form.hidden = !CARNET_OUVERT;
+    if (CARNET_OUVERT) { texte.focus(); indice(); }
+  };
+  $('#cnCancel').onclick = () => { CARNET_OUVERT = false; form.hidden = true; };
+  form.querySelectorAll('input[name="cnq"]').forEach(r => { r.onchange = indice; });
+  $('#cnJour')?.addEventListener('change', indice);
+  indice();
+
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const t = texte.value.trim();
+    if (!t) return;
+    const c = choix();
+    const corps = { texte: t };
+    if (c === 'jour') corps.jour = form.dataset.jour || S.today;
+    else if (c === 'autre') corps.jour = $('#cnJour').value;
+    else corps.quand = $('#cnQuand').value.trim();
+
+    try {
+      await api('/api/carnet', corps);
+      texte.value = '';
+      CARNET_OUVERT = false;
+      toast('Note ajoutée à ton carnet');
+      await apres?.();
+    } catch (err) { toast(err.message); }
+  };
+}
+
 /* ============================= vue : miroir ============================= */
 
 let MIRROR_DATE = null;
+let MIRROR_CARNET = null;   // les notes du jour ouvert, pour le message de suppression
 
 /**
  * Surligne les termes qui ont fait matcher. Montrer POURQUOI ca ressort.
@@ -940,6 +1093,7 @@ async function renderMirror(date) {
   date = date ?? MIRROR_DATE ?? S.today;
   MIRROR_DATE = date;
   const m = await api(`/api/mirror?date=${date}`);
+  MIRROR_CARNET = m.carnet ?? [];
   const prev = dayShift(date, -1), next = dayShift(date, 1);
   const nav = `<div class="daynav">
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
@@ -963,6 +1117,14 @@ async function renderMirror(date) {
           Si tu as besoin de parler à quelqu'un maintenant : <b>3114</b>, gratuit, 24h/24, partout en France.
         </div>
       </div>
+
+      ${/* L'API renvoyait déjà `reperes` dans cette branche, et le markup ne
+            l'affichait jamais : le champ était reçu et jeté. Le plancher retire
+            des chiffres, pas des faits qu'on a soi-même posés. */''}
+      ${reperesMarkup(m.reperes, date)}
+      ${carnetCardMarkup({ notes: m.carnet ?? [], jour: date,
+          vide: "Rien d'ajouté sur cette journée." })}
+
       ${m.yesterday.text ? `<div class="card">
         <h2>Hier</h2>
         <p class="serif" style="white-space:pre-wrap;font-size:15.5px;line-height:1.65;margin:0">${esc(m.yesterday.text)}</p>
@@ -982,6 +1144,8 @@ async function renderMirror(date) {
           <button class="btn" id="backToChat">Écrire</button>
         </div>
       </div>` : ''}`;
+    const f = $('#cnForm'); if (f) f.dataset.jour = date;
+    wireCarnet(() => renderMirror(date));
     wireMirror();
     return;
   }
@@ -1073,6 +1237,9 @@ async function renderMirror(date) {
             : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
         </div>
 
+        ${carnetCardMarkup({ notes: m.carnet ?? [], jour: date,
+            vide: "Rien d'ajouté sur cette journée." })}
+
         ${epCard}
       </div>
 
@@ -1082,6 +1249,8 @@ async function renderMirror(date) {
         ${yCard}
       </div>
     </div>`;
+  const form = $('#cnForm'); if (form) form.dataset.jour = date;
+  wireCarnet(() => renderMirror(date));
   wireMirror();
 }
 
@@ -1178,6 +1347,15 @@ function calendarMarkup(m, date) {
 
 function wireMirror() {
   $('#view').onclick = async e => {
+    // AVANT [data-goto] : une note datée porte les deux (sa date ouvre le
+    // Miroir, sa croix la retire), et [data-goto] fait un return immédiat.
+    const dcn = e.target.closest('[data-delcn]');
+    if (dcn) {
+      await api('/api/carnet', { delete: Number(dcn.dataset.delcn) });
+      toast('Note retirée');
+      return renderMirror(MIRROR_DATE);
+    }
+
     const g = e.target.closest('[data-goto]');
     if (g) return renderMirror(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
@@ -1187,7 +1365,11 @@ function wireMirror() {
       const d = del.dataset.erase;
       // Une seule journée : pas de mot à retaper, mais une confirmation quand
       // même. Le geste est petit, la perte ne l'est pas.
-      if (!confirm(`Effacer la journée du ${fmtDay(d)} — sa note et son texte ?`)) return;
+      // Ce que le geste ne détruit PAS doit être dit : une note apportée n'a pas
+      // été écrite ce jour-là, elle a été rangée là, et elle survit.
+      const n = (MIRROR_CARNET ?? []).length;
+      const garde = n ? `\n\n${n} note${n > 1 ? 's' : ''} apportée${n > 1 ? 's' : ''} sur ce jour rester${n > 1 ? 'ont' : 'a'} dans ton carnet.` : '';
+      if (!confirm(`Effacer la journée du ${fmtDay(d)} — sa note et son texte ?${garde}`)) return;
       try {
         await api('/api/delete-day', { date: d });
         S = await api('/api/state');
@@ -1207,10 +1389,13 @@ function wireMirror() {
    mots déjà écrits, on les colore par les notes déjà posées.            */
 
 let CARTE_FENETRE = 'tout';
+let REMQ_MODE = 'global';        // 'global' | 'theme'
+let REMQ_THEME = null;           // { id, nom }
 let CARTE = null, CARTE_DISPO = null, CARTE_SURVOL = -1;
 
 async function renderCarte() {
-  const G = await api(`/api/graph?fenetre=${CARTE_FENETRE}`);
+  if (REMQ_MODE === 'theme' && REMQ_THEME) return renderTheme();
+  const G = await api(`/api/remarque?fenetre=${CARTE_FENETRE}`);
 
   if (G.floored) {
     $('#view').innerHTML = `
@@ -1251,12 +1436,13 @@ async function renderCarte() {
 
   CARTE = G;
   $('#view').innerHTML = `
+    ${bandeauRemarque(G)}
+
     <div class="carte">
       <div class="card cartebox">
         <div class="cardhead">
           <h2>Carte de tes mots</h2>
-          <span class="sub" style="margin:0">${G.jours} journées écrites · ${G.noeuds.length} mots qui reviennent</span>
-          <div class="centerpick" style="margin-left:auto">${choix}</div>
+          <span class="sub" style="margin:0">${G.noeuds.length} mots qui reviennent</span>
         </div>
         <div class="cartewrap"><canvas id="carteCv"></canvas>
           <div class="cartetip" id="carteTip" hidden></div>
@@ -1264,37 +1450,260 @@ async function renderCarte() {
         <p class="sub cartelegende">
           La taille dit combien de journées portent ce mot. La couleur est celle de leur note,
           sur la même échelle que la grille. Un anneau marque tes repères d'étalonnage.
+          La taille dit les journées, jamais les notes apportées.
         </p>
       </div>
 
       <div class="mcol">
         <div class="card">
-          <h2>Ce qui revient</h2>
-          ${G.faits.length
-            ? G.faits.map(f => `<p class="fait">${esc(f.texte)}</p>`).join('')
-            : `<p class="sub" style="margin:0">Rien qui ressorte assez nettement pour être compté.</p>`}
-          <p class="sub" style="margin:14px 0 0;font-size:11.5px">
-            Des comptes sur tes propres journées, rien de plus. L'application ne dit pas ce
-            qu'ils veulent dire — le lien, c'est toi qui le fais.
-          </p>
+          <h2>Les groupes</h2>
+          <p class="sub">Clique sur un groupe pour l'ouvrir.</p>
+          <div class="amaslist">
+            ${G.amas.filter(a => a.taille >= 2).map(a => `
+              <button class="amasrow" data-theme="${a.id}" data-nom="${esc(a.nom)}">
+                <span class="pastille" style="background:${a.note !== null ? deltaColor(a.note - G.moyenneGlobale) : 'var(--line)'}"></span>
+                <b>${esc(a.nom)}</b>
+                <span class="muted">${a.taille} mots · ${a.jours} j</span>
+                <span class="mono muted" style="margin-left:auto">${a.note !== null ? a.note : '—'}</span>
+              </button>`).join('')}
+          </div>
         </div>
 
         <div class="card">
-          <h2>Les groupes</h2>
-          <div class="amaslist">
-            ${G.amas.filter(a => a.taille >= 2).map(a => `
-              <div class="amasrow">
-                <span class="pastille" style="background:${a.note !== null ? deltaColor(a.note - G.moyenneGlobale) : 'var(--line)'}"></span>
-                <b>${esc(a.nom)}</b>
-                <span class="muted">${a.taille} mots</span>
-                <span class="mono muted" style="margin-left:auto">${a.note !== null ? a.note : '—'}</span>
-              </div>`).join('')}
-          </div>
+          <h2>Ce qui revient</h2>
+          ${G.faits.length
+            ? G.faits.map(f => `<p class="fait">${esc(f.texte)}</p>`).join('')
+            : `<p class="sub" style="margin:0">Rien qui ressorte assez nettement pour être compté.
+               Il faut au moins ${G.minNotees} journées notées portant le même mot pour qu'une
+               moyenne en dise autant.</p>`}
         </div>
+      </div>
+    </div>
+
+    ${tableauMots(G)}
+    ${tableauEcarts(G)}
+    ${tableauPaires(G)}
+    ${tableauBouge(G)}
+
+    ${carnetCardMarkup({
+      notes: G.carnetNotes ?? [],
+      titre: 'Ton carnet',
+      vide: "Rien encore. Tu peux déposer ici des notes prises ailleurs — datées ou non."
+    })}
+
+    <p class="sub piedremarque">
+      Des comptes sur tes propres journées, rien de plus. L'application ne dit pas ce qu'ils
+      veulent dire — le lien, c'est toi qui le fais.
+    </p>`;
+
+  monterCarte();
+  wireCarnet(() => renderCarte());
+}
+
+/*
+ * LA DECISION DE FORME QUI TIENT TOUT ICI : des tableaux a en-tetes, pas des
+ * phrases.
+ *
+ * Une colonne nomme son denominateur une seule fois, en haut. Une phrase doit
+ * le redire a chaque ligne, et c'est la qu'elle triche : « insomnie revient 31
+ * jours · moyenne 4,8 contre 6,1 » aligne trois denominateurs differents dans
+ * une syntaxe qui les presente comme un seul constat -- 31 journees ecrites,
+ * une moyenne sur les seules journees NOTEES parmi elles, et une moyenne
+ * generale sur un troisieme ensemble encore.
+ */
+
+function bandeauRemarque(G) {
+  const choix = [['30', '30 j'], ['90', '90 j'], ['365', '1 an'], ['tout', 'tout']]
+    .map(([v, l]) => `<button data-fen="${v}" aria-pressed="${CARTE_FENETRE === v}">${l}</button>`).join('');
+  const c = G.carnet ?? { notes: 0, datees: 0, libres: 0 };
+  return `<div class="card bandeau">
+    <div class="cardhead">
+      <h2>Ce que je remarque</h2>
+      <div class="centerpick" style="margin-left:auto">
+        <button data-mode="global" aria-pressed="${REMQ_MODE === 'global'}">état global</button>
+        <button data-mode="theme" aria-pressed="${REMQ_MODE === 'theme'}">explorer un thème</button>
+      </div>
+    </div>
+    <p class="mono comptes">${G.jours} journées écrites${G.notees !== undefined ? ` · dont ${G.notees} notées` : ''}
+      · ${c.notes} note${c.notes > 1 ? 's' : ''} apportée${c.notes > 1 ? 's' : ''} (${c.datees} datée${c.datees > 1 ? 's' : ''}, ${c.libres} sans date)${G.depuis ? ` · depuis le ${fmtDay(G.depuis)}` : ''}</p>
+    <div class="centerpick">${choix}</div>
+    ${c.libres ? `<p class="sub" style="margin:8px 0 0;font-size:11.5px">Les ${c.libres} notes sans date sont comptées dans les quatre fenêtres.</p>` : ''}
+  </div>`;
+}
+
+function tableauMots(G) {
+  const lignes = G.noeuds.slice().sort((a, b) => b.jours - a.jours).slice(0, 20);
+  if (!lignes.length) return '';
+  return `<div class="card">
+    <h2>Ce qui revient le plus</h2>
+    <p class="sub">Classé par nombre de journées. Clique une ligne pour ouvrir son groupe.</p>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th>mot</th><th class="n">journées</th><th class="n">dont notées</th>
+        <th class="n">moyenne</th><th class="n">écart</th><th class="n">notes apportées</th>
+      </tr></thead>
+      <tbody>${lignes.map(n => `<tr data-theme="${n.amas}" data-nom="${esc(G.amas.find(a => a.id === n.amas)?.nom ?? '')}">
+        <td>${esc(n.mot)}</td>
+        <td class="n">${n.jours}</td>
+        <td class="n">${n.joursNotees ?? '—'}</td>
+        <td class="n">${(n.joursNotees ?? 0) >= G.minNotees ? n.note : '—'}</td>
+        <td class="n" style="color:${(n.joursNotees ?? 0) >= G.minNotees && n.ecart !== null ? deltaColor(n.ecart) : 'var(--ink-faint)'}">
+          ${(n.joursNotees ?? 0) >= G.minNotees && n.ecart !== null ? (n.ecart > 0 ? '+' : '') + n.ecart : '—'}</td>
+        <td class="n">${n.carnet || '—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <p class="sub" style="margin:10px 0 0;font-size:11.5px">
+      « dont notées » existe pour que le nombre de journées et la moyenne ne puissent pas se lire
+      comme portant sur le même ensemble. En dessous de ${G.minNotees} journées notées : un tiret,
+      pas un chiffre prudent. « notes apportées » est une colonne à part, jamais additionnée.
+    </p>
+  </div>`;
+}
+
+function tableauEcarts(G) {
+  const eligibles = G.noeuds.filter(n => (n.joursNotees ?? 0) >= G.minNotees && n.ecart !== null);
+  if (eligibles.length < 2) return '';
+  const bas = eligibles.slice().sort((a, b) => a.ecart - b.ecart).slice(0, 6);
+  const haut = eligibles.slice().sort((a, b) => b.ecart - a.ecart).slice(0, 6);
+  const col = (titre, liste) => `<div>
+    <div class="k faint">${titre}</div>
+    ${liste.map(n => `<div class="ecartrow">
+      <span style="color:${deltaColor(n.ecart)}">${n.ecart > 0 ? '+' : ''}${n.ecart}</span>
+      <b>${esc(n.mot)}</b>
+      <span class="muted">sur ${n.joursNotees} journées notées</span>
+    </div>`).join('')}
+  </div>`;
+  return `<div class="card">
+    <h2>Ce qui s'écarte le plus</h2>
+    <div class="deuxcol">
+      ${col(`plus bas que l'ensemble (${G.moyenneGlobale})`, bas)}
+      ${col(`plus haut que l'ensemble (${G.moyenneGlobale})`, haut)}
+    </div>
+  </div>`;
+}
+
+function tableauPaires(G) {
+  if (!G.liens?.length) return '';
+  const top = G.liens.slice().sort((a, b) => b.force - a.force).slice(0, 8);
+  return `<div class="card">
+    <h2>Ce qui va avec quoi</h2>
+    <p class="sub">Le nombre de journées où les deux mots apparaissent ensemble.</p>
+    ${top.map(l => {
+      const a = G.noeuds[l.s], b = G.noeuds[l.t];
+      if (!a || !b) return '';
+      // Les deux dénominateurs sont là pour que le compte se lise. Sans eux,
+      // « 14 » se lit comme fort ou faible selon l'humeur du lecteur.
+      return `<p class="fait"><b>${esc(a.mot)}</b> · <b>${esc(b.mot)}</b> —
+        ${l.jours ?? '?'} journées ensemble <span class="muted">(sur ${a.jours} et ${b.jours})</span></p>`;
+    }).join('')}
+  </div>`;
+}
+
+function tableauBouge(G) {
+  if (!G.bouge?.length || CARTE_FENETRE === '90') return '';
+  return `<div class="card">
+    <h2>Ce qui a changé de place</h2>
+    <p class="sub">Classé par l'écart entre les deux proportions. Deux fractions, rien d'autre.</p>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>mot</th><th class="n">90 derniers jours</th><th class="n">sur l'ensemble</th></tr></thead>
+      <tbody>${G.bouge.map(b => `<tr>
+        <td>${esc(b.mot)}</td>
+        <td class="n mono">${b.recentJours} j / ${b.recentSur} écrites</td>
+        <td class="n mono">${b.toutJours} j / ${b.toutSur} écrites</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+/**
+ * Le dossier d'un theme.
+ *
+ * Deux colonnes, et la separation entre elles EST la regle du produit : a
+ * gauche ce qui est COMPTE sur des journees vecues, a droite ce qui est
+ * APPORTE. Aucune moyenne, aucun ecart et aucun emploi du mot « jours » ne
+ * traverse vers la droite -- une note n'a pas ete vecue le jour dont elle
+ * parle, et la melanger aux comptes fabriquerait un denominateur invisible.
+ */
+async function renderTheme() {
+  const T = await api(`/api/theme?amas=${REMQ_THEME.id}&nom=${encodeURIComponent(REMQ_THEME.nom)}&fenetre=${CARTE_FENETRE}`);
+
+  // Les amas sont renumerotes a chaque construction du graphe : un identifiant
+  // seul designerait un jour un autre theme sans que rien ne le signale. D'ou
+  // le nom, verifie cote serveur.
+  if (T.perime) {
+    REMQ_THEME = null; REMQ_MODE = 'global';
+    toast('Ce thème a changé de forme — retour à l\'état global.');
+    return renderCarte();
+  }
+  if (T.floored || T.assez === false) { REMQ_MODE = 'global'; return renderCarte(); }
+
+  const a = T.amas;
+  $('#view').innerHTML = `
+    <div class="card bandeau">
+      <div class="cardhead">
+        <h2>${esc(a.nom)}</h2>
+        <div class="centerpick" style="margin-left:auto">
+          <button data-retour="1">← état global</button>
+        </div>
+      </div>
+      <p class="mono comptes">${a.taille} mots · ${a.jours} journées écrites où ils apparaissent
+        · moyenne ${a.note ?? '—'} contre ${T.moyenneGlobale} sur l'ensemble</p>
+      <div class="motschips">${T.membres.map(m => `<span class="motchip">${esc(m.mot)}
+        <b class="mono">${m.jours} j</b></span>`).join('')}</div>
+    </div>
+
+    <div class="carte">
+      <div class="mcol">
+        <div class="card">
+          <h2>Les journées</h2>
+          <p class="sub">${T.jours.length} journées écrites contiennent un de ces mots. Clique une date pour l'ouvrir.</p>
+          <div class="cnliste">
+            ${T.jours.slice(0, 40).map(j => `<div class="cnitem">
+              <div class="cnmeta">
+                <button class="cndate" data-goto="${j.date}">${fmtDay(j.date)}</button>
+                ${j.note !== null
+                  ? `<span class="mono" style="color:${deltaColor(j.delta ?? 0)}">${j.note}/10</span>`
+                  : '<span class="faint">non notée</span>'}
+                <span class="faint">${j.mots.map(esc).join(' · ')}</span>
+              </div>
+              <p class="cntexte">${highlight(j.extrait, j.mots)}…</p>
+            </div>`).join('')}
+          </div>
+          ${T.jours.length > 40 ? `<p class="sub" style="margin:12px 0 0">40 des ${T.jours.length} affichées.</p>` : ''}
+        </div>
+      </div>
+
+      <div class="mcol">
+        <div class="card">
+          <h2>Dans ton carnet</h2>
+          ${T.notes.length
+            ? `<p class="sub">${T.notes.length} note${T.notes.length > 1 ? 's' : ''} sur les ${T.carnetTotal} de
+                 ton carnet. Elles n'entrent dans aucun chiffre de cette page — elles sont là
+                 parce qu'elles contiennent un de ces mots.</p>
+               <div class="cnliste">${T.notes.map(n => carnetItemMarkup(n)).join('')}</div>`
+            : `<p class="sub" style="margin:0">Aucune note de ton carnet ne contient un de ces mots.</p>`}
+        </div>
+
+        ${T.liens.length ? `<div class="card">
+          <h2>Ce qui revient avec</h2>
+          <p class="sub">Les deux dénominateurs sont là pour que le compte se lise.</p>
+          ${T.liens.map(l => `<p class="fait"><b>${esc(l.a)}</b> · <b>${esc(l.b)}</b> —
+            ${l.n ?? '?'} journées ensemble <span class="muted">(sur ${l.ja} et ${l.jb})</span></p>`).join('')}
+        </div>` : ''}
       </div>
     </div>`;
 
-  monterCarte();
+  $('#view').onclick = async e => {
+    if (e.target.closest('[data-retour]')) { REMQ_MODE = 'global'; REMQ_THEME = null; return renderCarte(); }
+    const dcn = e.target.closest('[data-delcn]');
+    if (dcn) {
+      await api('/api/carnet', { delete: Number(dcn.dataset.delcn) });
+      toast('Note retirée');
+      return renderTheme();
+    }
+    const g = e.target.closest('[data-goto]');
+    if (g) { view = 'mirror'; syncNav(); return renderMirror(g.dataset.goto); }
+  };
 }
 
 function monterCarte() {
@@ -1348,9 +1757,29 @@ function monterCarte() {
 
   addEventListener('resize', redimensionner, { passive: true });
 
-  $('#view').onclick = e => {
+  $('#view').onclick = async e => {
     const b = e.target.closest('[data-fen]');
-    if (b) { CARTE_FENETRE = b.dataset.fen; CARTE_SURVOL = -1; renderCarte(); }
+    if (b) { CARTE_FENETRE = b.dataset.fen; CARTE_SURVOL = -1; return renderCarte(); }
+    const md = e.target.closest('[data-mode]');
+    if (md) {
+      REMQ_MODE = md.dataset.mode;
+      CARTE_SURVOL = -1;
+      // « explorer un theme » sans theme choisi : on ouvre le plus dense.
+      if (REMQ_MODE === 'theme' && !REMQ_THEME && CARTE?.amas?.length) {
+        REMQ_THEME = { id: CARTE.amas[0].id, nom: CARTE.amas[0].nom };
+      }
+      return renderCarte();
+    }
+    const th = e.target.closest('[data-theme]');
+    if (th) {
+      REMQ_MODE = 'theme';
+      REMQ_THEME = { id: Number(th.dataset.theme), nom: th.dataset.nom ?? '' };
+      return renderCarte();
+    }
+    const dcn = e.target.closest('[data-delcn]');
+    if (dcn) { await api('/api/carnet', { delete: Number(dcn.dataset.delcn) }); toast('Note retirée'); return renderCarte(); }
+    const gto = e.target.closest('.cndate[data-goto]');
+    if (gto) { view = 'mirror'; syncNav(); return renderMirror(gto.dataset.goto); }
   };
 }
 
@@ -1392,6 +1821,7 @@ function motifsMarkup() {
 
 async function renderSettings() {
   const s = S.settings;
+  try { CARNET = await api('/api/carnet'); } catch { /* le carnet ne doit pas casser les réglages */ }
 
   $('#view').innerHTML = `
     ${motifsMarkup()}
@@ -1731,6 +2161,18 @@ async function renderBackendCfg() {
       Ce qui donne la continuité : sans mémoire, il repart de zéro chaque soir. Seul le
       <b>texte</b> de ces journées est transmis — jamais tes notes, jamais tes statistiques.
       À 0, il ne connaît que la conversation du jour.
+    </p>
+    <label class="field" style="margin-top:14px"><span>
+      <input type="checkbox" id="carnetMemoire" ${s.carnetMemoire !== false ? 'checked' : ''}
+             style="width:auto;margin-right:7px">
+      Lui transmettre ton carnet</span></label>
+    <p class="sub" style="margin:0;font-size:12px">
+      ${CARNET.compte?.total
+        ? `Les ${Math.min(12, CARNET.compte.total)} dernières des ${CARNET.compte.total} notes de ton carnet sont transmises, tronquées.`
+        : "Ton carnet est vide pour l'instant."}
+      Il peut aller chercher les autres lui-même quand la conversation y touche.
+      Décocher les retire du contexte sans rien effacer.
+      <br>Hors ligne, le compagnon n'a ni tes journées ni ton carnet.
     </p>` + SORTIE_ANTHROPIC;
   } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
@@ -1778,6 +2220,11 @@ async function renderBackendCfg() {
     renderSettings();
     toast('Clé effacée');
   });
+  $('#carnetMemoire')?.addEventListener('change', async e => {
+    await saveSettings({ carnetMemoire: e.target.checked });
+    toast(e.target.checked ? 'Carnet transmis' : 'Carnet retiré du contexte — rien n\'est effacé');
+  });
+
   $('#memoryDays')?.addEventListener('change', async e => {
     await saveSettings({ memoryDays: Number(e.target.value) });
     renderSettings();
@@ -1917,7 +2364,7 @@ const VIEWS = {
   settings: renderSettings
 };
 
-const NOM_VUE = { tonight: 'Parler', year: 'Année', mirror: 'Miroir', carte: 'Carte', settings: 'Réglages' };
+const NOM_VUE = { tonight: 'Parler', year: 'Année', mirror: 'Miroir', carte: 'Ce que je remarque', settings: 'Réglages' };
 
 function syncNav() {
   for (const b of document.querySelectorAll('nav button')) {

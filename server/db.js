@@ -59,10 +59,17 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
 
+-- Les reperes. La colonne date est le debut ; fin n'existe que pour ce qui DURE.
+--
+-- Un repere ponctuel et une periode ne sont pas deux objets differents : une
+-- addiction de trois ans, un contrat, une relation sont des faits dates comme
+-- les autres, ils ont seulement deux bornes au lieu d'une. Une table separee
+-- aurait double chaque requete et chaque affichage pour la meme chose.
 CREATE TABLE IF NOT EXISTS events (
   id      INTEGER PRIMARY KEY,
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
+  fin     TEXT,                        -- NULL = un instant, sinon une periode
   label   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
@@ -76,6 +83,37 @@ CREATE TABLE IF NOT EXISTS anchors (
   descr   TEXT,
   PRIMARY KEY (user_id, note)
 );
+
+-- Le carnet : ce que la personne a ecrit AILLEURS et apporte ici.
+--
+-- Ce n'est PAS une journee. Une journee est vecue, ecrite ce jour-la, notee, et
+-- elle sert de denominateur a tout ce que l'application compte. Une note
+-- apportee n'a rien de tout ca. Comptee comme une journee, elle deplacerait le
+-- plancher et le plafond de la carte (qui sont des proportions du nombre de
+-- jours), le denominateur de Jaccard, et la moyenne de reference de tous les
+-- ecarts. D'ou une table a elle, et l'invariant qui tient tout : une note
+-- n'entre jamais dans un compte de journees.
+CREATE TABLE IF NOT EXISTS carnet (
+  id      INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  cree_le TEXT NOT NULL,   -- quand la note a ete APPORTEE. Toujours connu.
+  jour    TEXT,            -- le jour dont elle PARLE, ou NULL.
+                           -- NULL, jamais '' ni la date du jour : une chaine vide
+                           -- est fausse contre une comparaison de fenetre, et la
+                           -- date du jour ferait ressortir un souvenir de 1998
+                           -- comme s'il avait ete ecrit ce soir.
+  quand   TEXT,            -- « vers 2019 », « je sais plus » : les mots de la
+                           -- personne quand il n'y a pas de date. Affiche tel
+                           -- quel, JAMAIS analyse, jamais trie, jamais converti.
+  texte   TEXT NOT NULL,
+  source  TEXT NOT NULL DEFAULT 'saisie'
+);
+CREATE INDEX IF NOT EXISTS idx_carnet_user ON carnet(user_id, jour);
+
+-- LA COLONNE QU'ON N'AJOUTE JAMAIS : une note chiffree. Un seul /10 dans le
+-- carnet translaterait la moyenne globale, donc TOUS les ecarts de la carte, y
+-- compris ceux de mots sans aucun rapport avec ce qui a ete colle. L'absence de
+-- colonne rend la faute impossible, pas seulement deconseillee.
 
 -- Motifs : ce que le compagnon a decide de suivre de lui-meme.
 --
@@ -156,10 +194,19 @@ export const DEFAULT_SETTINGS = {
   anthropicModel: 'claude-opus-5',
   anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
   memoryDays: 14,             // journees passees transmises au compagnon (0 = aucune)
+  carnetMemoire: true,        // le carnet est transmis au compagnon
+                              // (coupe de toute facon quand memoryDays vaut 0 :
+                              //  l'interface promet qu'a 0 il ne connait que la
+                              //  conversation du jour, et ca doit rester vrai)
   floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
   floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
   sustain: 2,                 // jours consecutifs >= reference pour valider un retour
   etalon: 5.7,                // constante de calage du cumul (null = mediane globale)
+  // La naissance. Elle ne sert qu'a une chose : donner une origine a la frise,
+  // pour qu'un repere d'enfance ait ou se poser. Aucun calcul ne s'en sert, et
+  // surtout aucun ne calcule d'age -- ce serait une donnee sur la personne, pas
+  // sur ses journees.
+  naissance: null,            // 'AAAA-MM-JJ' ou null
   cumMode: 'etalon',          // 'etalon' | 'reference'
   contrastCenter: 'reference', // 'fixed5' (formule tableur) | 'reference' (glissante)
   // Debut du fil courant. « Nouveau chat » avance ce curseur : les messages
@@ -337,6 +384,10 @@ export function wipe(portee, userId = OWNER) {
       db.prepare("DELETE FROM entries WHERE user_id = ? AND note IS NULL AND (text IS NULL OR TRIM(text) = '')").run(userId);
     } else if (portee === 'texte') {
       // Le texte seul : les notes restent, la courbe survit.
+      // Le carnet part avec le texte, et le compte rendu le dit. Quelqu'un qui
+      // clique « effacer le texte » et retrouve son carnet intact -- et toujours
+      // dans le contexte du compagnon -- a ete trompe.
+      n('carnet',   'DELETE FROM carnet   WHERE user_id = ?', userId);
       n('messages', 'DELETE FROM messages WHERE user_id = ?', userId);
       compte.texte = db.prepare('UPDATE entries SET text = NULL WHERE user_id = ? AND text IS NOT NULL').run(userId).changes;
       db.prepare('DELETE FROM entries WHERE user_id = ? AND note IS NULL').run(userId);
@@ -345,6 +396,7 @@ export function wipe(portee, userId = OWNER) {
       n('messages',   'DELETE FROM messages   WHERE user_id = ?', userId);
       n('events',     'DELETE FROM events     WHERE user_id = ?', userId);
       n('anchors',    'DELETE FROM anchors    WHERE user_id = ?', userId);
+      n('carnet',     'DELETE FROM carnet     WHERE user_id = ?', userId);
       db.prepare('DELETE FROM motif_vues WHERE motif_id IN (SELECT id FROM motifs WHERE user_id = ?)').run(userId);
       n('motifs',     'DELETE FROM motifs     WHERE user_id = ?', userId);
       n('embeddings', 'DELETE FROM embeddings WHERE user_id = ?', userId);
@@ -362,15 +414,72 @@ export function wipe(portee, userId = OWNER) {
 /* ---------- events ---------- */
 
 export function allEvents(userId = OWNER) {
-  return db.prepare('SELECT id, date, label FROM events WHERE user_id = ? ORDER BY date ASC').all(userId);
+  return db.prepare('SELECT id, date, fin, label FROM events WHERE user_id = ? ORDER BY date ASC').all(userId);
 }
-export function addEvent(date, label, userId = OWNER) {
-  const info = db.prepare('INSERT INTO events(user_id, date, label) VALUES(?,?,?)').run(userId, date, label);
-  return { id: Number(info.lastInsertRowid), date, label };
+/*
+ * Un objet, pas des positions.
+ *
+ * `fin` etait un quatrieme argument positionnel derriere un `userId` a valeur
+ * par defaut : l'appelant de l'API ecrivait addEvent(date, label, userId) et
+ * aucune periode ne pouvait donc jamais etre creee -- la colonne existait,
+ * l'affectation en voies etait ecrite et testee, et rien ne pouvait s'en
+ * servir. Un jour quelqu'un aurait ecrit une date dans user_id.
+ */
+export function addEvent({ date, fin = null, label, userId = OWNER }) {
+  const info = db.prepare('INSERT INTO events(user_id, date, fin, label) VALUES(?,?,?,?)')
+    .run(userId, date, fin, label);
+  return { id: Number(info.lastInsertRowid), date, fin, label };
 }
 export function deleteEvent(id, userId = OWNER) {
   // filtre sur l'utilisateur : un identifiant devine ne doit pas suffire
   db.prepare('DELETE FROM events WHERE id = ? AND user_id = ?').run(id, userId);
+}
+
+/* ---------- carnet ---------- */
+
+export function addCarnet({ texte, jour = null, quand = null, source = 'saisie',
+                            userId = OWNER, quandCree = new Date().toISOString() }) {
+  // N'appelle NI addMessage NI rebuildEntryText, et c'est le point entier de
+  // cette table. rebuildEntryText REMPLACE entries.text par la concatenation
+  // des messages du jour : une note posee a cote serait effacee au prochain
+  // message. Et passer par messages ferait DIRE ces mots a la personne -- ils
+  // repartiraient dans le fil, dans le decor, et dans le Miroir comme sa parole
+  // de ce jour-la. Surtout : une note posee sur une journee sans texte
+  // transformerait une journee NON ECRITE en journee ecrite, et tous les
+  // comptes de la carte bougeraient.
+  const info = db.prepare(
+    'INSERT INTO carnet(user_id, cree_le, jour, quand, texte, source) VALUES(?,?,?,?,?,?)'
+  ).run(userId, quandCree, jour, quand, texte, source);
+  return { id: Number(info.lastInsertRowid), cree_le: quandCree, jour, quand, texte, source };
+}
+
+/** Dans l'ordre d'AJOUT : c'est la seule chose que la personne controle. */
+export const allCarnet = (userId = OWNER) => db.prepare(
+  'SELECT id, cree_le, jour, quand, texte, source FROM carnet WHERE user_id = ? ORDER BY cree_le ASC, id ASC'
+).all(userId);
+
+export const carnetDuJour = (date, userId = OWNER) => db.prepare(
+  'SELECT id, cree_le, jour, quand, texte, source FROM carnet WHERE user_id = ? AND jour = ? ORDER BY cree_le ASC, id ASC'
+).all(userId, date);
+
+export function updateCarnet(id, { texte, jour, quand }, userId = OWNER) {
+  const c = db.prepare('SELECT * FROM carnet WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!c) return null;
+  db.prepare('UPDATE carnet SET texte = ?, jour = ?, quand = ? WHERE id = ?').run(
+    texte ?? c.texte,
+    jour === undefined ? c.jour : jour,
+    quand === undefined ? c.quand : quand,
+    id);
+  return db.prepare('SELECT id, cree_le, jour, quand, texte, source FROM carnet WHERE id = ?').get(id);
+}
+
+export function deleteCarnet(id, userId = OWNER) {
+  return db.prepare('DELETE FROM carnet WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+}
+
+export function countCarnet(userId = OWNER) {
+  const r = db.prepare('SELECT COUNT(*) t, COUNT(jour) d FROM carnet WHERE user_id = ?').get(userId);
+  return { total: r.t, datees: r.d, libres: r.t - r.d };
 }
 
 /* ---------- motifs ---------- */

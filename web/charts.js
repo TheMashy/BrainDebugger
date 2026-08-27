@@ -70,7 +70,47 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
  * Courbe cumulative. `values` et `dates` paralleles.
  * Marqueurs d'evenements optionnels (SPEC 5, table events).
  */
-export function lineChart(dates, values, { height = 210, events = [], color = '#4ade80' } = {}) {
+/**
+ * Le degrade d'un jour a l'autre.
+ *
+ * La courbe de cumul monte quand la journee est au-dessus de l'etalon et
+ * descend quand elle est en dessous : sa pente EST l'ecart du jour. Une ligne
+ * verte uniforme cachait donc l'information la plus simple du graphe -- on
+ * voyait que ca montait, jamais avec quelle sorte de journees.
+ *
+ * Un seul <path> et un degrade, pas mille segments. Sur 1700 jours, un segment
+ * par jour ferait 1700 noeuds dans le DOM pour 0,6 pixel chacun ; le degrade en
+ * fait un seul, et les arrets identiques consecutifs sont fusionnes -- une
+ * periode calme de trois mois ne coute qu'un arret.
+ */
+function degradeParJour(values, id) {
+  const n = values.length;
+  if (n < 2) return { def: '', ref: null };
+
+  const arrets = [];
+  let derniere = null;
+  for (let i = 1; i < n; i++) {
+    const c = deltaColor(values[i] - values[i - 1]) ?? 'rgb(120,130,124)';
+    if (c === derniere) continue;                 // meme couleur : rien a poser
+    arrets.push({ o: (i - 0.5) / (n - 1), c });
+    derniere = c;
+  }
+  if (!arrets.length) return { def: '', ref: null };
+  // Les bords : sans eux le degrade demarre a la premiere couleur posee et la
+  // premiere semaine du graphe n'a pas de teinte.
+  if (arrets[0].o > 0) arrets.unshift({ o: 0, c: arrets[0].c });
+  if (arrets[arrets.length - 1].o < 1) arrets.push({ o: 1, c: arrets[arrets.length - 1].c });
+
+  const def = `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">
+    ${arrets.map(a => `<stop offset="${(a.o * 100).toFixed(3)}%" stop-color="${a.c}"/>`).join('')}
+  </linearGradient>`;
+  return { def, ref: `url(#${id})`, arrets: arrets.length };
+}
+
+/** Un identifiant unique par graphe : deux <defs> homonymes se marchent dessus. */
+let _gradN = 0;
+
+export function lineChart(dates, values, { height = 210, events = [], color = '#4ade80', colore = false } = {}) {
   const n = values.length;
   if (!n) return '<div class="empty">Pas encore de donnees.</div>';
 
@@ -111,13 +151,21 @@ export function lineChart(dates, values, { height = 210, events = [], color = '#
                  stroke="#ffffff" stroke-opacity=".18" stroke-dasharray="2 3"/>
                <title>${esc(e.date)} — ${esc(e.label)}</title>`).join('');
 
+  const g = colore ? degradeParJour(values, `cg${++_gradN}`) : { def: '', ref: null };
+  const trait = g.ref ?? color;
+
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">
+    ${g.def ? `<defs>${g.def}</defs>` : ''}
     ${ticks.map(v => `<line class="grid-l" x1="${PL}" y1="${Y(v).toFixed(1)}" x2="${W - PR}" y2="${Y(v).toFixed(1)}"/>
        <text x="${PL - 7}" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end">${Math.round(v)}</text>`).join('')}
     <line class="axis" x1="${PL}" y1="${Y(0).toFixed(1)}" x2="${W - PR}" y2="${Y(0).toFixed(1)}"/>
     ${evMarks}
-    <path d="${area}" fill="${color}" fill-opacity=".10"/>
-    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linejoin="round"/>
+    <!-- L'aire garde une teinte unie. Remplie du meme degrade, elle devenait mille
+         raies verticales : la couleur cessait d'etre une lecture pour devenir du
+         bruit, et la courbe elle-meme se perdait dedans. C'est la LIGNE qui porte
+         l'information, l'aire ne fait que lui donner du poids. -->
+    <path d="${area}" fill="${color}" fill-opacity=".07"/>
+    <path d="${path}" fill="none" stroke="${trait}" stroke-width="${colore ? 1.8 : 1.4}" stroke-linejoin="round"/>
     ${xl.map(t => `<text x="${X(t.i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${t.label}</text>`).join('')}
   </svg>`;
 }
