@@ -6,6 +6,7 @@ import {
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
+import { inspectNotes, applyNotes } from './import-notes.js';
 import { buildIndex, search } from './search.js';
 import { reply, memoryBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
 
@@ -301,6 +302,31 @@ export const routes = {
     const written = applyImport(report.entries, report.anchors, userId);
     invalidate(userId);
     const { entries, ...preview } = report;
+    return { imported: written, preview };
+  },
+
+  /**
+   * Import de notes deja ecrites, collees en bloc.
+   *
+   * Le pendant texte de l'import CSV. Les notes du tableur donnent des chiffres ;
+   * celles-ci donnent des mots, et sans mots le miroir n'a rien a comparer : la
+   * recherche par similitude reste muette sur des annees de journal.
+   *
+   * Meme regle qu'ailleurs : un apercu qui ne touche a rien, puis l'ecriture.
+   */
+  'POST /api/import-notes': ({ body, userId }) => {
+    const texte = String(body.text ?? '');
+    if (!texte.trim()) return { error: 'rien à importer' };
+
+    const report = inspectNotes(texte, userId);
+    if (!report.total) {
+      return { error: "Aucune journée reconnue. Chaque journée doit commencer par une date sur sa propre ligne — 2024-03-12, 12/03/2024 ou 12 mars 2024 — suivie du texte." };
+    }
+    const { entries, ...preview } = report;
+    if (!body.apply) return { preview };
+
+    const written = applyNotes(entries, userId);
+    invalidate(userId);
     return { imported: written, preview };
   },
 
