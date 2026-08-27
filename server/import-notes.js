@@ -77,13 +77,14 @@ function iso(y, m, d) {
  *   Contexte de lecture, pour les dates sans annee. Voir `anneeProbable`.
  */
 export function parseDateLine(line, ctx = {}) {
-  let s = String(line).trim()
-    .replace(/^[-–—*•>#\s]+/, '')          // puces et titres Markdown
+  let s = decaper(normaliser(line))
+    .replace(ETIQUETTES, '')               // « Date : 05/01/2026 », « date: 2024-04-02 »
     .replace(/^[[({<]\s*/, '')             // [2024-03-12]  (12 mars 2024)
     .replace(/\s*[\])}>]\s*$/, '')
     .replace(/^le\s+/i, '')                // « Le 12 mars 2024 »
     .replace(/\.md$/i, '');                // en-tete recopie d'un fichier Obsidian
   if (!s) return null;
+  if (faussePiste(s)) return null;
 
   // On tente d'abord la chaine telle quelle. Retirer un jour de semaine en
   // premier ferait lire « mars 12, 2024 » comme « mardi » suivi de « 12, 2024 »,
@@ -144,8 +145,14 @@ function formats(s, ctx = {}) {
   const suite = rest => rest.replace(/^\s*[-–—:,.]+\s*/, '').trim();
   // Une heure accrochee a la date n'est pas du texte de journal : on la coupe
   // pour qu'elle ne se retrouve pas en premiere ligne de la journee.
+  // L'heure accolee a la date, secondes comprises, et la fermeture d'un en-tete
+  // entre crochets. Sans les secondes, « 06:44:33] Moi: » laissait « 33] Moi: »
+  // en premiere ligne de la journee -- du bruit dans le corpus que le miroir
+  // fouille, a chaque message d'un export.
   const sansHeure = rest => suite(rest)
-    .replace(/^(?:[àa]\s+)?\d{1,2}\s*[h:]\s*\d{0,2}\s*(?:am|pm)?[\s,:—–-]*/i, '');
+    .replace(/^(?:[àa]\s+)?\d{1,2}\s*[h:]\s*\d{0,2}(?::\d{2})?\s*(?:am|pm)?[\s,:—–\])>-]*/i, '')
+    .replace(/^[^:]{0,28}:\s+/, '')        // « Moi : », « Alex Plagne: »
+    .trim();
 
   // 2024-03-12  |  2024/03/12
   let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b(.*)$/);
@@ -216,8 +223,10 @@ function formats(s, ctx = {}) {
     }
   }
 
-  // 12/03  |  12-03 — jour/mois, l'annee vient du contexte
-  m = s.match(/^(\d{1,2})[-/.](\d{1,2})\b(.*)$/);
+  // 12/03  |  12-03 — jour/mois, l'annee vient du contexte.
+  // La frontiere refuse explicitement un troisieme groupe : `\b` laissait
+  // passer « 2.3.1 », lu comme le 2 mars avec « .1 » en reste.
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})(?![-/.]?\d)(.*)$/);
   if (m) {
     const mo = +m[2];
     const y = anneeProbable(mo, +m[1], ctx);
@@ -265,10 +274,11 @@ export function parseTable(text, ctx = {}) {
   const lignes = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
 
   const grille = [];
+  const horsTable = [];
   for (const l of lignes) {
-    if (!l.trim() || separatriceMd(l)) continue;
+    if (!l.trim() || separatriceMd(l)) { horsTable.push(l); continue; }
     const c = cellules(l);
-    if (c && c.length >= 2) grille.push(c);
+    if (c && c.length >= 2) grille.push(c); else horsTable.push(l);
   }
   // Deux lignes de deux cellules peuvent etre une coincidence de mise en page.
   // A partir de trois, c'est un tableau.
@@ -363,7 +373,11 @@ export function parseTable(text, ctx = {}) {
   const entries = ordre.map(date => ({ date, text: par.get(date).join('\n') }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  return { entries, ignore: '', table: true, lignesIgnorees: ignorees };
+  // Les lignes hors tableau remontent : le lecteur tabulaire les jetait
+  // silencieusement, et `ignore` revenait VIDE -- donc l'apercu affichait une
+  // perte de zero ligne alors que des journees entieres de prose disparaissaient.
+  // Un import qui perd du texte sans le dire est pire qu'un import qui echoue.
+  return { entries, ignore: '', table: true, lignesIgnorees: ignorees, horsTable };
 }
 
 /**
@@ -377,12 +391,244 @@ export function parseTable(text, ctx = {}) {
  * journal recopie a la main, une date qui revient est presque toujours un ajout
  * du soir, pas une correction.
  */
+/**
+ * Nettoyage du presse-papier, avant toute lecture.
+ *
+ * Le piege le plus couteux du lot, parce qu'il est invisible : un export
+ * WhatsApp iOS commence chaque ligne par U+200E (marque gauche-a-droite). Ni
+ * `trim()`, ni `\s`, ni le decapage des puces ne le voient -- la ligne ne
+ * commence donc jamais par « [ », la date n'est jamais reconnue, et un fichier
+ * parfaitement date rend ZERO journee. Sans message.
+ *
+ * Meme famille : l'espace insecable de Word, l'espace fine du francais
+ * typographique, la marque d'ordre d'octets en tete de fichier.
+ */
+const INVISIBLES = /[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g;
+const ESPACES = /[\u00A0\u202F\u2009\u2007]/g;
+
+function normaliser(texte) {
+  return String(texte ?? '')
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .replace(INVISIBLES, '')
+    .replace(ESPACES, ' ');
+}
+
+/*
+ * Decapage de tete de ligne.
+ *
+ * Elargi bien au-dela des puces : cases a cocher Markdown et Notion, puces
+ * Word en zone privee, emoji suivi ou non d'un selecteur de variante, liens
+ * wiki d'Obsidian. Le decapage actuel laissait « x] Mon Aug 10 » sur
+ * « - [x] Mon Aug 10 » : c'est le nettoyage lui-meme qui detruisait la date.
+ *
+ * « @ » n'est JAMAIS retire : c'est le signe d'une mention en ligne.
+ */
+const PUCES = /^[\s\t\-–—*+•·▪◦‣>#\uF000-\uF0FF]+/;
+const CASE_COCHEE = /^\[[ xX✓]\]\s*/;
+const CASE_UNICODE = /^[☑☐✅⬜]\s*/;
+const EMOJI = /^(?:[\u2600-\u27BF\uFE0F\u{1F300}-\u{1FAFF}]\s*)+/u;
+const WIKILINK = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/;
+
+function decaper(ligne) {
+  let s = ligne;
+  for (let i = 0; i < 4; i++) {          // deux ou trois couches suffisent en pratique
+    const avant = s;
+    s = s.replace(PUCES, '');
+    s = s.replace(CASE_COCHEE, '');
+    s = s.replace(CASE_UNICODE, '');
+    s = s.replace(EMOJI, '');
+    const w = s.match(WIKILINK);
+    if (w) s = w[1] + s.slice(w[0].length);
+    if (s === avant) break;
+  }
+  return s.trim();
+}
+
+/**
+ * Une ligne qui ne porte qu'une annee, sous une forme ou une autre.
+ *
+ *   2019            === 2019 ===            --- 2021 ---
+ *   Journal 2016    # Journal — mars 2026   ## 2024
+ *
+ * On refuse tout ce qui contient un autre nombre : « 12 mars 2019 » est une
+ * date, pas un ancrage, et « 2019 kilometres » n'est ni l'un ni l'autre.
+ */
+function anneeSeule(ligne) {
+  const s = decaper(ligne).replace(/[=_~*·—–-]/g, ' ').trim();
+  if (!s) return null;
+  const nombres = s.match(/\d+/g) ?? [];
+  if (nombres.length !== 1) return null;
+  const m = nombres[0].match(/^(19|20)\d{2}$/);
+  if (!m) return null;
+  // Le reste de la ligne doit etre un titre, pas une phrase : quelques mots au
+  // plus, et rien qui ressemble a du recit.
+  const reste = s.replace(/\d+/, '').trim();
+  if (reste.split(/\s+/).filter(Boolean).length > 4) return null;
+  return Number(nombres[0]);
+}
+
+/*
+ * Etiquettes derriere lesquelles une date OUVRE une journee.
+ *
+ * Liste blanche, et c'est le point : « Date : 05/01/2026 » ouvre une fiche,
+ * « Derniere modification : 18 aout 2025 » n'ouvre RIEN. Sans cette
+ * distinction, chaque page Notion collee creerait une journee fantome a la date
+ * de sa derniere retouche, qui volerait le contenu de la vraie.
+ */
+const ETIQUETTES = /^(date|jour|day|le|date du|created|cree le|créé le)\s*::?\s*/i;
+
+/**
+ * Trouve une date dans un en-tete de message.
+ *
+ * Beaucoup de gens tiennent leur journal en s'ecrivant a eux-memes. La date y
+ * est au milieu de la ligne, pas en tete :
+ *
+ *   [17/08/2026, 06:44:33] Alex : texte
+ *   17/08/2026, 21:04 - Moi : texte
+ *   Alex — 17/08/2026 21:04
+ *
+ * On ne cherche QUE dans le debut de ligne (60 caracteres) : plus loin, un
+ * nombre qui ressemble a une date appartient au recit, et le prendre
+ * decouperait une phrase en deux journees.
+ */
+function dateEnTete(ligne, ctx) {
+  const s = decaper(ligne);
+  if (faussePiste(s)) return null;         // meme garde que la lecture normale
+
+  // La date doit etre accompagnee d'une HEURE : c'est ce qui distingue un
+  // en-tete de message d'un nombre qui traine dans une phrase. Sans cette
+  // exigence, « rendez-vous reporte au 3/4 » ouvrirait une journee.
+  const m = s.slice(0, 64).match(
+    /[\[(]?\s*(\d{1,4}[-/.]\d{1,2}[-/.]\d{2,4})[,\s]+(\d{1,2}[:h]\d{2}(?::\d{2})?\s*(?:AM|PM)?)/i
+  );
+  if (!m) return null;
+  const hit = parseDateLine(m[1], ctx);
+  if (!hit) return null;
+
+  // Un en-tete entre crochets se ferme au premier « ] » : on coupe la, plutot
+  // que de se fier a la longueur du motif horaire, qui varie selon que les
+  // secondes sont ecrites ou non.
+  let reste;
+  if (/^[\[(]/.test(s)) {
+    const fin = s.search(/[\])]/);
+    reste = fin >= 0 ? s.slice(fin + 1) : s.slice(s.indexOf(m[0]) + m[0].length);
+  } else {
+    reste = s.slice(s.indexOf(m[0]) + m[0].length);
+  }
+  reste = reste.replace(/^[\s,\])>-]*/, '');
+  // Le nom de l'expediteur, s'il arrive tot : « Moi : », « Alex Plagne: ».
+  const deuxPoints = reste.indexOf(':');
+  if (deuxPoints >= 0 && deuxPoints <= 28) reste = reste.slice(deuxPoints + 1);
+  return { date: hit.date, reste: reste.trim() };
+}
+
+/*
+ * Ce qui ressemble a une date sans en etre.
+ *
+ * C'est la moitie du travail, et la plus chere : une fausse date range du texte
+ * sous une journee inventee, et le miroir le rendra un jour comme s'il en
+ * venait. Un mot manque se remarque ; un mot deplace, non.
+ */
+
+// Numero de telephone ou reference : QUATRE groupes ou plus. Une date en a
+// trois au maximum, donc trois separateurs sont deja de trop.
+// « 06.12.34.56.78 ». Attention a ne pas mordre sur « 2024-03-12 », qui a
+// exactement deux separateurs : c'est la date la plus courante du corpus.
+const SUITE_LONGUE = /^\d{1,4}([-/.])\d{1,4}\1\d{1,4}\1\d/;
+
+// Une unite ou un article juste apres : « 8/10 de sommeil », « 5/10 mg »,
+// « 2/3 des seances », « 1/2 Lexomil ». Une date n'est jamais suivie de ca.
+const UNITE_APRES = /^\s*(mg|kg|g|ml|cl|l|h|km|m|%|de|des|du|d'|par|sur|fois|comprimes?|cachets?|gouttes?)\b/i;
+
+// Score sportif : « 3-1 pour l'Islande », « 6-3 6-4 ». Deux petits nombres
+// separes d'un tiret, suivis d'un autre score ou d'un mot de match.
+const SCORE = /^\d{1,2}-\d{1,2}(\s+\d{1,2}-\d{1,2})+/;
+
+function faussePiste(s) {
+  if (SUITE_LONGUE.test(s)) return true;
+  if (SCORE.test(s)) return true;
+  // Le reste de la ligne est le groupe 1 : le (?!...) qui le precede est une
+  // anticipation, pas une capture. Lire m[2] revenait a tester la chaine
+  // « undefined », donc a ne rien filtrer du tout.
+  const m = s.match(/^\d{1,2}[-/.]\d{1,2}(?![-/.\d])(.*)$/);
+  if (m && UNITE_APRES.test(m[1])) return true;
+  return false;
+}
+
+/**
+ * Lignes repetees a l'identique : en-tete ou pied de page d'impression.
+ *
+ * Le cas observe est particulierement mauvais : « 27/08/2026 10:32  Journal —
+ * aout » se repete a chaque page d'un PDF. C'est une date complete en tete de
+ * ligne, elle ouvre donc une journee au jour de l'IMPRESSION -- et elle vole au
+ * passage la fin du paragraphe coupe par le saut de page.
+ */
+function mobilierDePage(lignes) {
+  const vues = new Map();
+  for (const l of lignes) {
+    const k = l.trim();
+    if (k.length > 3) vues.set(k, (vues.get(k) ?? 0) + 1);
+  }
+  const repetees = new Set();
+  for (const [k, n] of vues) if (n >= 3) repetees.add(k);
+  return repetees;
+}
+
 export function parseNotes(text, ctx0 = {}) {
+  text = normaliser(text);
+
+  // Le mobilier de page part AVANT tout choix de lecture. Un en-tete
+  // d'impression a souvent des colonnes d'espaces, donc il fait basculer le
+  // collage en mode tableau -- ou le filtre ligne-a-ligne ne le voyait jamais.
+  {
+    const lignes = text.split('\n');
+    const repetees = mobilierDePage(lignes);
+    if (repetees.size) text = lignes.filter(l => !repetees.has(l.trim())).join('\n');
+  }
+
+  // L'annee ecrite en tete de document doit etre connue AVANT d'essayer la
+  // lecture tabulaire : dans un carnet a colonnes, le « 2014 » est sur sa
+  // propre ligne, donc hors du tableau. Sans ce pre-balayage, le tableau
+  // repartait sans repere et rangeait onze ans plus tard.
+  const premiereAnnee = (() => {
+    for (const l of text.split('\n')) {
+      const an = anneeSeule(l);
+      if (an) return an;
+      if (parseDateLine(l, { ...ctx0, annee: null })) break;  // une vraie date : trop tard
+    }
+    return null;
+  })();
+
   // Un tableau colle depuis un tableur ne se lit pas ligne a ligne : la date y
   // occupe une colonne, pas une ligne a elle. On tente donc cette forme
   // d'abord -- elle ne repond que si la structure est franchement tabulaire.
-  const table = parseTable(text, { ...ctx0 });
-  if (table) return table;
+  const table = parseTable(text, { ...ctx0, annee: premiereAnnee });
+  if (table) {
+    // Un collage est rarement PUREMENT tabulaire : on trouve un tableau de suivi
+    // au milieu de notes datees. Ce qui n'etait pas dans le tableau repasse donc
+    // par la lecture en prose, et les deux jeux fusionnent.
+    const reste = (table.horsTable ?? []).join('\n');
+    const prose = reste.trim() ? lireEnProse(reste, { ...ctx0, annee: premiereAnnee }) : null;
+    if (!prose?.entries.length) {
+      return { ...table, ignore: reste.trim().slice(0, 400) };
+    }
+    const par = new Map();
+    for (const e of [...table.entries, ...prose.entries]) {
+      par.set(e.date, par.has(e.date) ? `${par.get(e.date)}\n${e.text}` : e.text);
+    }
+    return {
+      entries: [...par.entries()].map(([date, text]) => ({ date, text }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+      ignore: prose.ignore, table: true
+    };
+  }
+  return lireEnProse(text, { ...ctx0, annee: premiereAnnee });
+}
+
+/** Lecture ligne a ligne : une date ouvre une journee, la suite lui appartient. */
+function lireEnProse(text, ctx0 = {}) {
+  const premiereAnnee = ctx0.annee ?? null;
 
   const lignes = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
   const ordre = [];
@@ -393,13 +639,28 @@ export function parseNotes(text, ctx0 = {}) {
   // Contexte de lecture, pour les dates sans annee. Il avance ligne a ligne :
   // une annee explicite le recale, une ligne isolee « 2024 » aussi -- c'est
   // ainsi qu'un cahier est ecrit, l'annee en tete puis plus jamais.
-  const ctx = { annee: null, precedente: null, ...ctx0 };
+  const ctx = { annee: premiereAnnee, precedente: null, ...ctx0 };
+  const repetees = mobilierDePage(lignes);
 
   for (const ligne of lignes) {
-    const seule = ligne.trim().match(/^(19|20)(\d{2})$/);
-    if (seule && courant === null) { ctx.annee = Number(seule[0]); continue; }
+    if (repetees.has(ligne.trim())) continue;
+    // Une annee ecrite RE-ANCRE le contexte, meme si une journee est deja
+    // ouverte. Le garde-fou « seulement avant la premiere date » etait un bug :
+    // dans un carnet a blocs annuels, « === 2019 === » puis « 2021 » plus bas
+    // etaient ignores, et cinq journees partaient sous une annee inventee --
+    // classees dans le mauvais ordre, en prime.
+    const an = anneeSeule(ligne);
+    if (an) {
+      ctx.annee = an;
+      ctx.precedente = null;
+      // Elle ancre l'annee ET reste signalee comme ecartee : l'apercu doit
+      // montrer tout ce qui n'est pas devenu du contenu, sinon on ne peut pas
+      // verifier ce qui a ete lu.
+      if (courant === null && ligne.trim()) avant.push(ligne.trim());
+      continue;
+    }
 
-    const hit = parseDateLine(ligne, ctx);
+    const hit = parseDateLine(ligne, ctx) ?? dateEnTete(ligne, ctx);
     if (hit) {
       courant = hit.date;
       ctx.annee = Number(hit.date.slice(0, 4));

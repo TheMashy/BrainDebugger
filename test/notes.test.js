@@ -319,3 +319,110 @@ test('tableau : un texte ordinaire ne bascule pas en mode tableau', () => {
   assert.notEqual(table, true);
   assert.equal(entries.length, 2);
 });
+
+/* ---------- pieges trouves sur un corpus reel ----------
+   Huit sources de collage (tableur, Notion, Obsidian, notes mobiles, Word et
+   PDF, messageries, fiches de therapie, carnet brut), 74 cas. Ce qui suit sont
+   les erreurs qui coutaient le plus cher, chacune observee pour de vrai. */
+
+test('piege : un caractere invisible ne doit pas rendre un export muet', () => {
+  // WhatsApp iOS prefixe CHAQUE ligne d'un U+200E. Ni trim(), ni \s, ni le
+  // decapage des puces ne le voient : la ligne ne commence donc jamais par
+  // « [ », aucune date n'est reconnue, et un export parfaitement date rend
+  // zero journee. Sans message.
+  const wa = '‎[17/08/2026, 06:44:33] Moi: Nuit blanche, encore.\n'
+           + '‎[18/08/2026, 21:10:02] Moi: Journée correcte finalement.';
+  const { entries } = parseNotes(wa, { today: '2026-08-27' });
+  assert.deepEqual(entries.map(e => e.date), ['2026-08-17', '2026-08-18']);
+  assert.match(entries[0].text, /Nuit blanche/);
+  assert.doesNotMatch(entries[0].text, /Moi:/, "l'en-tete de message ne doit pas rester dans le texte");
+});
+
+test('piege : une case a cocher ne doit pas detruire la date qui la suit', () => {
+  // Le decapage laissait « x] Mon Aug 10 » : c'est le nettoyage lui-meme qui
+  // cassait la date.
+  assert.equal(parseDateLine('- [x] 10 août 2026').date, '2026-08-10');
+  assert.equal(parseDateLine('☑ 11 août 2026').date, '2026-08-11');
+  assert.equal(parseDateLine('☀️ 12 août 2026').date, '2026-08-12');
+  assert.equal(parseDateLine('[[2024-03-12]]').date, '2024-03-12');
+});
+
+test('piege : une annee ecrite plus bas doit re-ancrer le contexte', () => {
+  // Le garde-fou « seulement avant la premiere date » etait un bug : dans un
+  // carnet a blocs annuels, les blocs suivants partaient sous une annee
+  // inventee, et se retrouvaient classes dans le mauvais ordre.
+  const { entries } = parseNotes(
+    '2019\n\n5 février\nun\n\n=== 2021 ===\n\n8 mars\ndeux', { today: '2026-08-27' });
+  assert.deepEqual(entries.map(e => e.date), ['2019-02-05', '2021-03-08']);
+});
+
+test('piege : une etiquette de date ouvre une journee, les autres non', () => {
+  // « Date : 05/01/2026 » ouvre une fiche. « Derniere modification : … » n'ouvre
+  // rien -- sinon chaque page Notion collee creerait une journee fantome a la
+  // date de sa retouche, qui volerait le contenu de la vraie.
+  assert.equal(parseDateLine('Date : 05/01/2026').date, '2026-01-05');
+  assert.equal(parseDateLine('date: 2024-04-02').date, '2024-04-02');
+  assert.equal(parseDateLine('Dernière modification: 18 août 2025'), null);
+});
+
+test('piege : chiffres du quotidien qui ressemblent a des dates', () => {
+  // Une fausse date range du texte sous une journee inventee, et le miroir le
+  // rendra un jour comme s'il en venait. Un mot manque se remarque ; un mot
+  // deplace, non.
+  const faux = [
+    '8/10 de sommeil, pour une fois',
+    '5/10 mg de Lexapro, on monte encore',
+    '2/3 des séances payées',
+    '06.12.34.56.78 rappeler le cabinet',
+    '2.3.1 — la version qui a perdu trois mois',
+    '6-3 6-4 en une heure dix'
+  ];
+  for (const l of faux) assert.equal(parseDateLine(l, { today: '2026-08-27' }), null, `pris pour une date : ${l}`);
+});
+
+test('piege : les vraies dates survivent aux gardes', () => {
+  // Le risque d'un filtre trop large : « 2024-03-12 » a deux separateurs, comme
+  // un numero de version. La garde ne doit mordre qu'a partir de quatre groupes.
+  const bonnes = [['2024-03-12', '2024-03-12'], ['12/03/2024', '2024-03-12'],
+                  ['12/03', '2026-03-12'], ['17/08 réveil difficile', '2026-08-17']];
+  for (const [l, attendu] of bonnes) {
+    const r = parseDateLine(l, { today: '2026-08-27' });
+    assert.ok(r, `refusee a tort : ${l}`);
+    assert.equal(r.date, attendu);
+  }
+});
+
+test('piege : un en-tete de page repete ne vole pas le texte', () => {
+  // « 27/08/2026 10:32  Journal — août » se repete a chaque page d'un PDF. C'est
+  // une date complete : elle ouvrait une journee au jour de l'IMPRESSION et
+  // avalait la fin du paragraphe coupe par le saut de page.
+  const pdf = ['27/08/2026 10:32   Journal — août', '', '18 août 2026', 'Vraie entrée du 18.',
+               '27/08/2026 10:32   Journal — août', 'suite du 18.',
+               '27/08/2026 10:32   Journal — août', 'fin du 18.'].join('\n');
+  const { entries } = parseNotes(pdf, { today: '2026-08-27' });
+  assert.deepEqual(entries.map(e => e.date), ['2026-08-18']);
+  assert.match(entries[0].text, /fin du 18/);
+});
+
+test('piege : la prose autour d\'un tableau ne disparait pas', () => {
+  // Le lecteur tabulaire jetait tout ce qui n'etait pas dans le tableau, et
+  // `ignore` revenait VIDE -- l'apercu affichait donc une perte de zero ligne
+  // alors que des journees entieres partaient. Un import qui perd du texte sans
+  // le dire est pire qu'un import qui echoue.
+  const mixte = [
+    '2024-03-10',
+    'Une journée écrite en prose, avant le tableau.',
+    '',
+    'Date\tHeure\tCe qui se passait',
+    '11/03/2024\tmatin\tRéveil correct, café tranquille',
+    '12/03/2024\tsoir\tDispute puis réconciliation',
+    '',
+    '2024-03-13',
+    'Et une autre journée en prose, après.'
+  ].join('\n');
+  const { entries } = parseNotes(mixte, { today: '2026-08-27' });
+  assert.deepEqual(entries.map(e => e.date),
+    ['2024-03-10', '2024-03-11', '2024-03-12', '2024-03-13']);
+  assert.match(entries[0].text, /avant le tableau/);
+  assert.match(entries[3].text, /après/);
+});
