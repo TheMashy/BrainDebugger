@@ -18,6 +18,7 @@ const { addMessage, allEvents, allMotifs, addMotif, marquerMotif, motifsDesMessa
         TEINTES, OWNER } = await import('../server/db.js');
 const { outilsPour } = await import('../server/api.js');
 const { OUTILS } = await import('../server/chat.js');
+const { deltaColor } = await import('../web/charts.js');
 
 /* --------------------------- le catalogue --------------------------- */
 
@@ -34,16 +35,46 @@ test("chaque outil déclare un schéma exploitable", () => {
 
 /* ------------------------------ motifs ------------------------------ */
 
-test('les teintes évitent l’échelle des notes', () => {
-  // 0-150° est du rouge au vert : la couleur d'un motif ne doit jamais pouvoir
-  // se lire comme « bonne journée » ou « mauvaise journée ».
-  for (const t of TEINTES) assert.ok(t > 150 && t < 360, `${t}° tombe dans l'échelle des notes`);
+/*
+ * Ce test RECALCULE la rampe au lieu de faire confiance à un commentaire.
+ *
+ * Le test précédent affirmait `t > 150` en expliquant que « 0-150° est
+ * l'échelle des notes ». C'était faux : la rampe monte jusqu'à 208° et
+ * redescend par 357°. Le test passait donc en laissant six teintes sur dix en
+ * collision — dont 205°, à trois degrés de « +4, une de tes meilleures
+ * journées ». Un test qui garde une propriété doit la mesurer.
+ */
+const teinteDe = rgbStr => {
+  const [r, g, b] = rgbStr.match(/\d+/g).map(Number).map(v => v / 255);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d) return 0;
+  let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+};
+const ecartAngulaire = (a, b) => { const x = Math.abs(a - b); return Math.min(x, 360 - x); };
+
+/** La distance minimale d'une teinte à TOUTE la rampe des notes, échantillonnée. */
+function distanceALaRampe(t) {
+  let min = 360;
+  for (let d = -4; d <= 4; d += 0.01) {
+    const e = ecartAngulaire(teinteDe(deltaColor(d)), t);
+    if (e < min) min = e;
+  }
+  return min;
+}
+
+test('aucune teinte déclarée ne peut se confondre avec une note', () => {
+  for (const t of TEINTES) {
+    const d = distanceALaRampe(t);
+    assert.ok(d >= 20, `${t}° n'est qu'à ${d.toFixed(1)}° de la rampe des notes`);
+  }
 });
 
 test('deux teintes voisines restent distinguables', () => {
   const tri = [...TEINTES].sort((a, b) => a - b);
   for (let i = 1; i < tri.length; i++) {
-    assert.ok(tri[i] - tri[i - 1] >= 8, `${tri[i - 1]}° et ${tri[i]}° se ressemblent trop`);
+    assert.ok(tri[i] - tri[i - 1] >= 20, `${tri[i - 1]}° et ${tri[i]}° se ressemblent trop`);
   }
 });
 

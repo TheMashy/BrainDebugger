@@ -4,7 +4,8 @@ import { disposer, dessiner, auPoint } from './carte.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
-import { icone, iconeDe, themeDe, NOMS } from './reperes.js';
+import { icone, iconeDe, themeDe, NOMS, TEINTES_DECLAREES } from './reperes.js';
+import { friseMarkup as friseSVG } from './frise.js';
 
 /* ============================= socle ============================= */
 
@@ -672,6 +673,8 @@ function renderNoData(why) {
 
 let SERIES = null;
 let CARNET = { notes: [], compte: { total: 0, datees: 0, libres: 0 } };
+let FRISE = null;
+let FRISE_CADRE = 'vie';   // 'vie' | 'journal' — un cadre, jamais une échelle déformée
 let CUMMODE = 'etalon';
 let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
@@ -680,6 +683,7 @@ async function renderYear(year) {
   year = year ?? Number(S.stats.lastDate.slice(0, 4));
   SERIES ??= await api('/api/series');
   CARNET = await api('/api/carnet');
+  FRISE = await api('/api/frise');
   const grid = await api(`/api/year?year=${year}`);
   const years = S.stats.years;
   const eta = SERIES.etalon;
@@ -753,17 +757,50 @@ async function renderYear(year) {
       })}
 
       <div class="card">
-        <h2>Repères</h2>
-        <p class="sub">En pointillés sur les deux courbes.</p>
+        <div class="cardhead">
+          <h2>Repères</h2>
+          <label class="naissance">
+            <span>née / né le</span>
+            <input type="date" id="naissance" min="1900-01-01" max="${S.today}"
+                   value="${S.settings.naissance ?? ''}">
+          </label>
+        </div>
+        <p class="sub">En pointillés sur les deux courbes, et posés sur la frise.
+          La naissance ne sert qu'à donner une origine à la frise — aucun âge n'est calculé.</p>
         <form id="evform" class="repform">
           <span class="repapercu" id="evicone">${icone('jalon', 22)}</span>
           <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
                  placeholder="changement de boulot, déménagement, début d'un traitement…">
-          <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.today}" value="${S.today}">
+          <input type="date" id="evdate" required min="1900-01-01" max="${S.today}" value="${S.today}">
+          <label class="evduree"><input type="checkbox" id="evPeriode"> ça a duré</label>
+          <input type="date" id="evfin" min="1900-01-01" max="${S.today}" hidden>
+          <span class="evteintes" id="evteintes" role="group" aria-label="Couleur du contour">
+            <button type="button" class="evt" data-teinte="" aria-pressed="true" title="sans couleur"></button>
+            ${TEINTES_DECLAREES.map(t => `<button type="button" class="evt" data-teinte="${t}"
+              aria-pressed="false" style="--t:${t}" title="teinte ${t}°"></button>`).join('')}
+          </span>
           <button class="btn primary" type="submit">Poser</button>
         </form>
-        ${SERIES.events.length
-          ? `<div class="frise">${friseMarkup(SERIES.events)}</div>`
+        <p class="sub" style="margin:-6px 0 14px;font-size:11.5px">
+          Une date pour un instant, deux pour une période — une addiction, un contrat, une
+          relation. La couleur choisie ne touche que le contour : le remplissage vient de tes
+          journées, et il ne se choisit pas.
+        </p>
+        ${FRISE && (FRISE.points.length || FRISE.periodes.length)
+          ? `${FRISE.etendue.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
+              ? `<div class="centerpick frisecadre">
+                   <button data-cadre="vie" aria-pressed="${FRISE_CADRE === 'vie'}">toute la vie</button>
+                   <button data-cadre="journal" aria-pressed="${FRISE_CADRE === 'journal'}">ton journal</button>
+                 </div>` : ''}
+             <div class="frisewrap">${friseSVG(FRISE, icone, { cadre: FRISE_CADRE })}</div>
+             <p class="sub frisenote">
+               Le rempli est mesuré, le contour est déclaré : la couleur d'un repère est celle
+               des journées qu'il couvre, sur la même échelle que la grille. Là où tu n'as rien
+               écrit — l'enfance, tout ce qui précède ton journal — il n'y a pas de couleur.
+             </p>
+             <details class="friseliste"><summary>La liste, par année</summary>
+               <div class="frise">${friseMarkup(SERIES.events)}</div>
+             </details>`
           : `<p class="sub" style="margin:0">Aucun repère pour l'instant. Le compagnon en pose
              aussi de lui-même, quand tu lui racontes quelque chose qui change le sol sous tes journées.</p>`}
       </div>
@@ -784,6 +821,8 @@ async function renderYear(year) {
       SERIES.events = events;
       return renderYear(year);
     }
+    const cad = e.target.closest('[data-cadre]');
+    if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
     const dcn = e.target.closest('[data-delcn]');
     if (dcn) {
       CARNET = await api('/api/carnet', { delete: Number(dcn.dataset.delcn) });
@@ -796,6 +835,14 @@ async function renderYear(year) {
   };
 
   wireCarnet(async () => { CARNET = await api('/api/carnet'); renderYear(year); });
+
+  $('#naissance')?.addEventListener('change', async e => {
+    try {
+      await saveSettings({ naissance: e.target.value || null });
+      FRISE = null;
+      toast(e.target.value ? 'Naissance enregistrée' : 'Naissance retirée');
+    } catch (err) { toast(err.message); e.target.value = S.settings.naissance ?? ''; }
+  });
 
   $('#etalon').onchange = async e => {
     const v = Number(e.target.value);
@@ -817,16 +864,35 @@ async function renderYear(year) {
     $('#evicone').title = NOMS[t] ?? 'jalon';
   };
 
+  // « ça a duré » revele la seconde date : un repere ponctuel et une periode ne
+  // sont pas deux objets differents, seulement une borne de plus.
+  $('#evPeriode').onchange = e => {
+    const f = $('#evfin');
+    f.hidden = !e.target.checked;
+    if (e.target.checked && !f.value) f.value = S.today;
+  };
+
+  let TEINTE = null;
+  $('#evteintes').onclick = e => {
+    const b = e.target.closest('[data-teinte]');
+    if (!b) return;
+    TEINTE = b.dataset.teinte ? Number(b.dataset.teinte) : null;
+    $('#evteintes').querySelectorAll('.evt').forEach(x =>
+      x.setAttribute('aria-pressed', String(x === b)));
+  };
+
   $('#evform').onsubmit = async e => {
     e.preventDefault();
     const date = $('#evdate').value, label = champ.value.trim();
     if (!date || !label) return;
+    const fin = $('#evPeriode').checked ? $('#evfin').value : null;
     try {
-      const { events } = await api('/api/events', { date, label });
+      const { events } = await api('/api/events', { date, fin, label, theme: themeDe(label), teinte: TEINTE });
       SERIES.events = events;
       champ.value = '';
+      $('#evPeriode').checked = false; $('#evfin').hidden = true;
       await renderYear(year);
-      toast('Repère posé');
+      toast(fin ? 'Période posée' : 'Repère posé');
     } catch (err) { toast(err.message); }
   };
 }

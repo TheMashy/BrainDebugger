@@ -103,6 +103,29 @@ export const ICONES = {
   creation: '<path d="M12 3.2 13.9 9l5.9 1.9-5.9 1.9L12 18.6l-1.9-5.8L4.2 10.9 10.1 9z"/><path d="M18.4 16.6l.8 2.3 2.3.8-2.3.8-.8 2.3-.8-2.3-2.3-.8 2.3-.8z" opacity=".55"/>'
 };
 
+/**
+ * LA REGLE DE COULEUR, EN UNE PHRASE :
+ *
+ *   Ce qui est REMPLI est MESURE, ce qui est CONTOURE est DECLARE.
+ *
+ * Aucun remplissage n'est jamais choisi, aucun contour n'est jamais calcule, et
+ * les deux gammes de teinte sont disjointes par construction. C'est ce qui
+ * permet de donner de la couleur a choisir sans que la couleur cesse de vouloir
+ * dire quelque chose partout ailleurs : un remplissage rouge est toujours une
+ * suite de journees basses, jamais un gout.
+ *
+ * LES MESURES QUI FIXENT LA BANDE. La rampe des notes (deltaColor) traverse
+ * 357-360 degres au plus bas et 0-208 au plus haut -- elle occupe donc plus de
+ * la moitie du cercle. La bande libre avec 20 degres de degagement est 229-337,
+ * large de 109. Cinq valeurs y tiennent avec 26 degres entre elles.
+ *
+ * Quinze teintes de theme seraient arithmetiquement impossibles (15 x 20 = 280
+ * dans 109) et perceptivement fausses de toute facon : quinze categories ne se
+ * distinguent pas par la teinte, meme sur 360 degres. C'est le travail de
+ * l'icone, et elle le fait deja.
+ */
+export const TEINTES_DECLAREES = [232, 258, 284, 310, 336];
+
 /** Les noms lisibles, pour les infobulles et le champ de saisie. */
 export const NOMS = {
   jalon: 'jalon', deuil: 'deuil', rupture: 'rupture', soin: 'traitement',

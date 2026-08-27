@@ -1265,3 +1265,62 @@ button.amasrow:hover { background: var(--panel); }
   font-size: 12px; color: var(--ink-dim);
 }
 .motchip b { font-size: 11px; color: var(--ink-faint); font-weight: 400; }
+
+/* ================= la frise de vie ================= */
+
+.frisewrap { width: 100%; overflow-x: auto; margin-bottom: 10px; }
+.frisesvg { display: block; width: 100%; min-width: 620px; }
+.frisesvg text { font-family: var(--mono); fill: var(--ink-faint); }
+.frisesvg .frisean { font-size: 9.5px; letter-spacing: .06em; }
+.frisesvg .frisejournal { font-size: 8.5px; letter-spacing: .14em;
+                          text-transform: uppercase; fill: var(--accent); opacity: .7; }
+.frisesvg .fetiq { font-family: var(--sans); font-size: 10.5px; fill: var(--ink-dim); }
+.frisesvg .fetiq.dedans { fill: var(--ink); }
+.frisesvg .fperiode.fort .fetiq, .frisesvg .fpoint.fort .fetiq { fill: var(--ink); font-weight: 500; }
+.frisesvg .fperiode, .frisesvg .fpoint { cursor: default; }
+.frisesvg .fperiode:hover rect { fill-opacity: .9 !important; }
+.frisesvg .fpoint:hover circle { r: 4; }
+.frisenote { max-width: 68ch; margin: 0 0 16px; font-size: 11.5px; }
+
+.friseliste { margin-top: 6px; }
+.friseliste summary {
+  cursor: pointer; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-faint); padding: 6px 0; list-style: none;
+}
+.friseliste summary::-webkit-details-marker { display: none; }
+.friseliste summary::before { content: '▸ '; }
+.friseliste[open] summary::before { content: '▾ '; }
+.friseliste summary:hover { color: var(--ink-dim); }
+
+/* Le choix de couleur. Cinq pastilles, et rien d'autre : un sélecteur libre
+   rendrait la règle inapplicable — les teintes déclarées doivent rester hors
+   de la rampe des notes, sinon un repère peut se lire comme une journée. */
+.evteintes { display: inline-flex; gap: 5px; align-items: center; flex: none; }
+.evt {
+  width: 18px; height: 18px; border-radius: 50%; padding: 0;
+  border: 1.5px solid hsl(var(--t, 0) 55% 58%); background: none;
+  transition: transform .1s, box-shadow .1s;
+}
+.evt[data-teinte=""] { border-color: var(--line); position: relative; }
+.evt[data-teinte=""]::after {
+  content: ''; position: absolute; inset: 4px; border-top: 1.5px solid var(--ink-faint);
+  transform: rotate(-45deg); transform-origin: center;
+}
+.evt:hover { transform: scale(1.15); }
+.evt[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px hsl(var(--t, 0) 55% 58%); }
+.evt[data-teinte=""][aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--ink-faint); }
+
+.evduree { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+           color: var(--ink-dim); flex: none; white-space: nowrap; }
+.evduree input { width: auto; margin: 0; accent-color: var(--accent); }
+
+@media (max-width: 560px) {
+  .repform { flex-wrap: wrap; }
+  .evteintes { order: 5; }
+  .evt { width: 26px; height: 26px; }
+  .frisesvg { min-width: 560px; }
+}
+.frisecadre { margin-bottom: 10px; }
+.naissance { display: inline-flex; align-items: center; gap: 8px; margin-left: auto;
+             font-size: 11.5px; color: var(--ink-faint); }
+.naissance input { width: auto; padding: 5px 8px; font-size: 12px; border-radius: 6px; }

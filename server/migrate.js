@@ -138,7 +138,11 @@ export function ensureUserTables(db) {
 }
 
 const AJOUTS = [
-  ['events', 'fin', 'TEXT']
+  ['events', 'fin',    'TEXT'],     // NULL = un instant, sinon une periode
+  ['events', 'ouvert', 'INTEGER'],  // 1 = periode en cours. INVARIANT : ouvert=1 => fin IS NULL
+  ['events', 'theme',  'TEXT'],     // NULL = deduit du libelle
+  ['events', 'teinte', 'INTEGER'],  // degres HSL, uniquement dans TEINTES_DECLAREES
+  ['events', 'fort',   'INTEGER']   // 1 = mis en avant. De la taille, jamais de la couleur.
 ];
 
 /**

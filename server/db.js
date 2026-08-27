@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,7 +71,11 @@ CREATE TABLE IF NOT EXISTS events (
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
   fin     TEXT,                        -- NULL = un instant, sinon une periode
-  label   TEXT NOT NULL
+  ouvert  INTEGER,                     -- 1 = periode en cours. ouvert=1 => fin IS NULL
+  label   TEXT NOT NULL,
+  theme   TEXT,                        -- NULL = deduit du libelle
+  teinte  INTEGER,                     -- degres HSL, uniquement TEINTES_DECLAREES
+  fort    INTEGER                      -- 1 = mis en avant : de la TAILLE, jamais de la couleur
 );
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
 
@@ -414,7 +419,7 @@ export function wipe(portee, userId = OWNER) {
 /* ---------- events ---------- */
 
 export function allEvents(userId = OWNER) {
-  return db.prepare('SELECT id, date, fin, label FROM events WHERE user_id = ? ORDER BY date ASC').all(userId);
+  return db.prepare('SELECT id, date, fin, label, theme, teinte, fort, ouvert FROM events WHERE user_id = ? ORDER BY date ASC').all(userId);
 }
 /*
  * Un objet, pas des positions.
@@ -425,10 +430,26 @@ export function allEvents(userId = OWNER) {
  * l'affectation en voies etait ecrite et testee, et rien ne pouvait s'en
  * servir. Un jour quelqu'un aurait ecrit une date dans user_id.
  */
-export function addEvent({ date, fin = null, label, userId = OWNER }) {
-  const info = db.prepare('INSERT INTO events(user_id, date, fin, label) VALUES(?,?,?,?)')
-    .run(userId, date, fin, label);
-  return { id: Number(info.lastInsertRowid), date, fin, label };
+export function addEvent({ date, fin = null, label, theme = null, teinte = null,
+                           fort = 0, ouvert = 0, userId = OWNER }) {
+  if (ouvert) fin = null;               // l'invariant, tenu a l'ecriture
+  const info = db.prepare(
+    'INSERT INTO events(user_id, date, fin, label, theme, teinte, fort, ouvert) VALUES(?,?,?,?,?,?,?,?)'
+  ).run(userId, date, fin, label, theme, teinte, fort ? 1 : 0, ouvert ? 1 : 0);
+  return { id: Number(info.lastInsertRowid), date, fin, label, theme, teinte, fort, ouvert };
+}
+
+/** Champs autorises seulement, et filtre sur user_id comme deleteEvent. */
+export function updateEvent(id, patch, userId = OWNER) {
+  const cur = db.prepare('SELECT * FROM events WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!cur) return null;
+  const n = { ...cur, ...patch };
+  if (n.ouvert) n.fin = null;
+  db.prepare(`UPDATE events SET date=?, fin=?, label=?, theme=?, teinte=?, fort=?, ouvert=?
+              WHERE id = ? AND user_id = ?`)
+    .run(n.date, n.fin, n.label, n.theme ?? null, n.teinte ?? null,
+         n.fort ? 1 : 0, n.ouvert ? 1 : 0, id, userId);
+  return db.prepare('SELECT id, date, fin, label, theme, teinte, fort, ouvert FROM events WHERE id = ?').get(id);
 }
 export function deleteEvent(id, userId = OWNER) {
   // filtre sur l'utilisateur : un identifiant devine ne doit pas suffire
@@ -485,16 +506,20 @@ export function countCarnet(userId = OWNER) {
 /* ---------- motifs ---------- */
 
 /*
- * Les teintes, en degres HSL.
+ * Les teintes des motifs viennent de la table DECLAREE, partagee avec la frise.
  *
- * Aucune n'est dans l'intervalle 0-150 : c'est celui de l'echelle des notes,
- * du rouge au vert. Un motif teinte en vert se lirait comme une bonne journee
- * et un motif rouge comme une mauvaise, alors qu'un motif ne dit rien de bon
- * ni de mauvais -- c'est une chose qui revient, pas une chose qui va mal.
- * Elles sont aussi espacees d'au moins 20 degres, faute de quoi deux motifs
- * differents se ressemblent a l'ecran.
+ * Le commentaire qui vivait ici promettait « aucune dans l'intervalle 0-150,
+ * celui de l'echelle des notes » et « au moins 20 degres d'ecart ». Les deux
+ * etaient faux, et le test qui les gardait -- TEINTES.every(t => t > 150) --
+ * passait sans rien empecher : la rampe des notes ne s'arrete pas a 150, elle
+ * monte jusqu'a 208 et redescend par 357. Six des dix teintes etaient donc en
+ * collision, dont 205 a trois degres de « +4, une de tes meilleures journees ».
+ * Mesure : hsl(205 55% 55%) = rgb(77,151,203) contre deltaColor(+4) =
+ * rgb(61,134,198) -- seize unites RGB. Le meme bleu.
  */
-export const TEINTES = [262, 190, 322, 168, 226, 292, 205, 338, 248, 178];
+// `export … from` NE cree PAS de liaison locale : addMotif() se serait retrouve
+// avec un TEINTES indefini, et seuls les tests qui creent un motif l'auraient vu.
+export { TEINTES };
 
 export function allMotifs(userId = OWNER) {
   return db.prepare(
