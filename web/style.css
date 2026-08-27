@@ -650,3 +650,16 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   white-space: pre-wrap; font-size: 15.5px; line-height: 1.65; margin: 0;
   max-height: 42vh; overflow-y: auto; overscroll-behavior: contain;
 }
+
+/* ---------- le fond ----------
+   Derrière tout, sans jamais rien intercepter. `position: fixed` et pas
+   `absolute` : la coquille défile à l'intérieur d'elle-même, un fond absolu
+   partirait avec. */
+#ambiance {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  z-index: -1; pointer-events: none;
+  display: block;
+}
+/* Le fond peint déjà le noir. Laisser body opaque par-dessus le masquerait. */
+body:has(#ambiance) { background: transparent; }
