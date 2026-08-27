@@ -4,7 +4,8 @@ import {
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
-  updateEvent, TEINTES
+  updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
+  getLecture, setLecture, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -13,17 +14,18 @@ import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMood, readEnergy } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
+import { corpusPour, lire, HORIZONS, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
 // cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
 // de web/reperes.js.
-import { themeDe } from '../web/reperes.js';
+import { themeDe, ICONES } from '../web/reperes.js';
 // Meme raison : la geometrie de la frise doit etre calculee une seule fois, au
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock,
+import { reply, resolveKey, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -95,6 +97,10 @@ export function recentMemory(date, userId = OWNER) {
   if (jalons) morceaux.push(jalons);
   const motifs = motifBlock(allMotifs(userId));
   if (motifs) morceaux.push(motifs);
+  // Hors du `if (days)` : un objectif est un engagement pris AVEC lui, pas un
+  // souvenir de journee. A memoire zero il doit encore savoir ce qu'on tient.
+  const obj = objectifBlock(allObjectifs(userId), today());
+  if (obj) morceaux.push(obj);
 
   // Le carnet, sous le MEME `if (days)` que les journees : l'interface promet
   // qu'a zero le compagnon ne connait que la conversation du jour, et ca doit
@@ -254,7 +260,7 @@ export const routes = {
       etalon: getSettings(userId).etalon ?? median(s.map(x => x.note).sort((a, b) => a - b)),
       globalMedian: median(s.map(x => x.note).sort((a, b) => a - b)),
       mean: s.length ? Math.round(s.reduce((a, b) => a + b.note, 0) / s.length * 1000) / 1000 : null,
-      events: allEvents(userId).map(e => ({ ...e, theme: themeDe(e.label) })),
+      events: reperes(userId).events,
       motifs: motifsDuFil(userId)
     };
   },
@@ -279,9 +285,11 @@ export const routes = {
     // baladait dans l'historique sans jamais voir ce qu'on avait ecrit CE jour-la.
     const jour = { date, note, text: entry?.text ?? '' };
 
-    // Le mois affiche, pour le calendrier. Les journees sans note en font partie :
-    // c'est un calendrier, les trous s'y voient et c'est une information.
-    const mois = date.slice(0, 7);
+    // Le mois affiche, pour le calendrier. Il ne suit PAS forcement le jour
+    // ouvert : on feuillette mars sans quitter la journee qu'on lisait.
+    // Les journees sans note en font partie : c'est un calendrier, les trous s'y
+    // voient et c'est une information.
+    const mois = /^\d{4}-\d{2}$/.test(String(query.mois ?? '')) ? query.mois : date.slice(0, 7);
     const [an, mo] = mois.split('-').map(Number);
     const nbJours = new Date(Date.UTC(an, mo, 0)).getUTCDate();
     const calendrier = [];
@@ -756,6 +764,36 @@ export const routes = {
   'GET /api/carnet': ({ userId }) => ({ notes: allCarnet(userId), compte: countCarnet(userId) }),
 
   /**
+   * CE QUE LE COMPAGNON A LU.
+   *
+   * Une seule question : « qu'est-ce qu'il sait de moi ? ». Elle se pose, et
+   * jusqu'ici rien n'y repondait -- les notes rangees depuis la conversation
+   * disparaissaient dans une table que rien n'affichait en entier.
+   *
+   * Trois populations, jamais melangees, parce qu'elles ne veulent pas dire la
+   * meme chose : les JOURNEES ecrites (ce qu'il a vecu et note), les MESSAGES
+   * du fil (ce qu'ils se sont dit), les NOTES rangees (ce qu'il a apporte
+   * d'ailleurs). Une seule addition des trois et le compte de journees, qui
+   * sert de denominateur a toute la carte, cesserait de vouloir dire quelque
+   * chose.
+   */
+  'GET /api/contexte': ({ userId }) => {
+    const { rows, carnet } = series(userId);
+    const msg = db.prepare(
+      "SELECT COUNT(*) t, COUNT(DISTINCT date) j FROM messages WHERE user_id = ? AND role = 'user'"
+    ).get(userId);
+    const ecrites = rows.filter(r => r.text && r.text.trim()).length;
+    return {
+      notes: carnet,
+      compte: countCarnet(userId),
+      journal: { jours: rows.length, ecrites,
+                 premier: rows[0]?.date ?? null, dernier: rows.at(-1)?.date ?? null },
+      fil: { messages: msg.t, jours: msg.j },
+      memoire: getSettings(userId).memoryDays
+    };
+  },
+
+  /**
    * Ecrire dans le carnet. La validation est ICI et pas dans une consigne.
    *
    * `jour` et `quand` s'excluent : une date connue OU les mots de la personne
@@ -788,6 +826,93 @@ export const routes = {
     return rendre();
   },
 
+  /**
+   * LA LECTURE : ce que le compagnon comprend du fonctionnement.
+   *
+   * GET rend ce qui est en base, avec de quoi savoir s'il faut relancer. Une
+   * lecture est perimee quand des journees ont ete ecrites APRES la derniere
+   * qu'elle a vue -- pas quand elle est vieille. Une lecture faite il y a un
+   * mois sur un journal auquel on n'a rien ajoute est toujours juste, et la
+   * relancer couterait des jetons pour rendre exactement la meme chose.
+   */
+  'GET /api/lecture': ({ query, userId }) => {
+    const horizon = HORIZONS[query.horizon] ? query.horizon : 'moyen';
+    const { rows } = series(userId);
+    const ecrites = rows.filter(r => r.text && r.text.trim());
+    const dernier = ecrites.at(-1)?.date ?? null;
+    const l = getLecture(horizon, userId);
+    /*
+     * Le RETARD : combien de journees ecrites depuis la derniere que la lecture
+     * a vue. C'est ce qui decide de relancer toute seule, et pas le simple fait
+     * qu'une journee ait ete ajoutee -- ecrire tous les soirs declencherait
+     * alors une relecture complete du corpus tous les soirs, pour un theme qui
+     * n'aura pas bouge d'un cheveu.
+     *
+     * Le seuil suit la fenetre : sur trente jours, une semaine de plus est un
+     * quart du corpus ; sur quatre ans, elle ne change rien.
+     */
+    const retard = l?.jusqu_au
+      ? ecrites.filter(r => r.date > l.jusqu_au).length
+      : ecrites.length;
+    const SEUIL = { court: 3, moyen: 14, long: 30 }[horizon] ?? 14;
+    return {
+      horizon,
+      lecture: l?.contenu ?? null,
+      fait_le: l?.fait_le ?? null,
+      jours: l?.jours ?? 0,
+      modele: l?.modele ?? null,
+      // Assez de matiere pour que la question ait un sens ?
+      possible: ecrites.length >= LECTURE_MIN,
+      minimum: LECTURE_MIN,
+      ecrites: ecrites.length,
+      retard,
+      perime: !!l && retard > 0,
+      // Ce qui declenche une relecture sans qu'on la demande.
+      arelire: !l || retard >= SEUIL,
+      cle: resolveKey(getSettings(userId)).source !== 'none'
+    };
+  },
+
+  'POST /api/lecture': async ({ body, userId }) => {
+    const horizon = HORIZONS[body.horizon] ? body.horizon : 'moyen';
+    const s = getSettings(userId);
+    const { rows, carnet } = series(userId);
+    const ecrites = rows.filter(r => r.text && r.text.trim());
+    if (ecrites.length < LECTURE_MIN) {
+      return { error: `Il faut au moins ${LECTURE_MIN} journées écrites pour que ça veuille dire quelque chose.` };
+    }
+    const corpus = corpusPour(horizon, {
+      rows, events: allEvents(userId), carnet,
+      motifs: allMotifs(userId), objectifs: allObjectifs(userId)
+    }, today());
+    if (!corpus.dates.size) {
+      return { error: "Rien d'écrit sur cette fenêtre. Essaie une fenêtre plus large." };
+    }
+    let r;
+    try { r = await lire(horizon, corpus, s); }
+    catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+    const l = setLecture({
+      horizon, contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
+      jours: corpus.jours, modele: r.modele, userId
+    });
+    return { horizon, lecture: l.contenu, fait_le: l.fait_le, jours: l.jours,
+             modele: l.modele, possible: true, perime: false, retard: 0,
+             arelire: false, cle: true, usage: usageFor(userId) };
+  },
+
+  'GET /api/objectifs': ({ userId }) => ({ objectifs: allObjectifs(userId) }),
+
+  /**
+   * Retirer un objectif. C'est le compagnon qui les enregistre, mais c'est la
+   * personne qui decide de ce qu'elle s'engage a tenir -- sans quoi une
+   * resolution prise un soir la suit pour de bon.
+   */
+  'POST /api/objectifs': ({ body, userId }) => {
+    if (body.delete) deleteObjectif(Number(body.delete), userId);
+    return { objectifs: allObjectifs(userId) };
+  },
+
   'GET /api/motifs': ({ userId }) => motifsDuFil(userId),
 
   /**
@@ -800,25 +925,39 @@ export const routes = {
     return motifsDuFil(userId);
   },
   'POST /api/events': ({ body, userId }) => {
-    const rendre = () => ({ events: allEvents(userId).map(e => ({ ...e, theme: themeDe(e.label) })) });
-    if (body.delete) { deleteEvent(Number(body.delete), userId); return rendre(); }
+    if (body.delete) { deleteEvent(Number(body.delete), userId); return reperes(userId); }
     if (!body.date || !body.label) return { error: 'date et label requis' };
+    if (!ISO_JOUR.test(String(body.date))) return { error: 'Date invalide : il faut AAAA-MM-JJ.' };
     // `fin` accepte ici, et c'est ce qui rend une periode possible : la colonne
     // existait, l'affectation en voies etait ecrite et testee, et aucun chemin
     // ne pouvait en creer une.
     const fin = body.fin ? String(body.fin) : null;
-    if (fin && !/^\d{4}-\d{2}-\d{2}$/.test(fin)) return { error: 'Fin invalide : il faut AAAA-MM-JJ.' };
+    if (fin && !ISO_JOUR.test(fin)) return { error: 'Fin invalide : il faut AAAA-MM-JJ.' };
     if (fin && fin < body.date) return { error: 'La fin est avant le début.' };
     // Validation en code, jamais dans une consigne : la teinte doit venir de la
     // table declaree, sinon la separation avec la rampe des notes ne tient plus.
     const teinte = body.teinte == null ? null : Number(body.teinte);
     if (teinte !== null && !TEINTES.includes(teinte)) return { error: 'Teinte inconnue.' };
-    addEvent({
-      date: body.date, fin, label: String(body.label).slice(0, 120),
+
+    const champs = {
+      date: String(body.date), fin, label: String(body.label).slice(0, 120),
       theme: body.theme ?? null, teinte, fort: body.fort ? 1 : 0,
-      ouvert: body.ouvert ? 1 : 0, userId
-    });
-    return rendre();
+      ouvert: body.ouvert ? 1 : 0
+    };
+    /*
+     * MODIFIER, ET PAS SEULEMENT POSER.
+     *
+     * Sans ce chemin, corriger une date se faisait en supprimant le repere et
+     * en le reposant -- sur le fait le plus lourd d'une frise, avec un bouton
+     * « × » comme premiere etape. updateEvent filtre deja sur user_id : un
+     * identifiant devine ne suffit pas.
+     */
+    if (body.id) {
+      if (!updateEvent(Number(body.id), champs, userId)) return { error: 'Repère introuvable.' };
+    } else {
+      addEvent({ ...champs, userId });
+    }
+    return reperes(userId);
   },
 
   'POST /api/settings': ({ body, userId }) => {
@@ -917,9 +1056,24 @@ function deplacements(rows, anchors, carnet, t) {
  * c'est lui qui repond a la question qu'on se pose vraiment en rouvrant une
  * vieille journee : « j'en etais ou, a ce moment-la ? »
  */
+const ISO_JOUR = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Les reperes, decores de leur theme.
+ *
+ * `e.theme ?? themeDe(e.label)`, et jamais `themeDe(e.label)` seul : la colonne
+ * dit « NULL = deduit du libelle », donc une valeur presente est un CHOIX. La
+ * liste ecrasait ce choix a chaque lecture -- on pouvait changer l'icone d'un
+ * repere, le serveur l'enregistrait, et il revenait a l'icone du libelle au
+ * rechargement suivant, sans que rien ne le signale.
+ */
+export const reperes = userId => ({
+  events: allEvents(userId).map(e => ({ ...e, theme: e.theme ?? themeDe(e.label) }))
+});
+
 function reperesDuJour(date, userId) {
   const tous = allEvents(userId);
-  const decore = e => ({ ...e, theme: themeDe(e.label) });
+  const decore = e => ({ ...e, theme: e.theme ?? themeDe(e.label) });
   const avant = tous.filter(e => e.date < date).slice(-1)[0] ?? null;
   return {
     jour: tous.filter(e => e.date === date).map(decore),
@@ -1013,11 +1167,84 @@ export function outilsPour(userId, messageId, send = () => {}) {
     },
 
     /*
-     * Lecture seule, et c'est tout le point. Le carnet est l'endroit ou la
-     * personne apporte SES mots ; un outil d'ecriture y glisserait du texte
-     * genere qui lui reviendrait ensuite, dans « explorer un theme », comme si
-     * elle l'avait ecrit.
+     * Ranger : le seul chemin d'ecriture vers le carnet, et il ne prend PAS de
+     * texte. Le texte vient de la ligne `messages`, telle qu'elle a ete ecrite.
+     * Le compagnon declenche le rangement ; il ne dicte jamais ce qui est
+     * range. Du texte genere qui se glisserait ici lui reviendrait ensuite,
+     * dans « explorer un theme », comme si la personne l'avait ecrit.
      */
+    ranger_notes: ({ jour, quand }) => {
+      if (!messageId) return { erreur: "Rien a ranger : aucun message en cours." };
+      const j = jour == null ? null : String(jour).trim();
+      if (j !== null && !ISO_JOUR.test(j)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+      if (j !== null && j > today()) return { erreur: 'Cette date est dans le futur.' };
+      // « quand » est recopie tel quel et n'est JAMAIS analyse ni trie : ce sont
+      // les mots de la personne pour dire qu'elle ne sait plus.
+      const q = quand == null ? null : String(quand).trim().slice(0, 60) || null;
+      const r = rangerMessage(messageId, { jour: j, quand: q }, userId);
+      if (r.erreur) return { erreur: r.erreur };
+      invalidate(userId);
+      const fait = { type: 'note', id: r.note.id, jour: j, quand: q,
+                     taille: r.note.texte.length };
+      send('geste', fait);
+      return { message: `Rangé dans ses notes${j ? ` (le ${j})` : q ? ` (« ${q} »)` : ''}. `
+                      + `Ce texte ne compte plus comme sa journée.`, fait };
+    },
+
+    /*
+     * Un objectif n'est jamais pose sans accord : le prompt le dit, et le code
+     * ne peut pas le verifier -- seule la conversation sait si la personne a
+     * dit oui. Ce qui EST verifiable est ici : un libelle court, un genre
+     * connu, une date qui existe, et un plafond.
+     */
+    poser_objectif: ({ quoi, genre, depuis }) => {
+      const q = String(quoi ?? '').trim().replace(/\s+/g, ' ');
+      if (q.length < 3 || q.length > 70) return { erreur: 'Trois à huit mots, dans ses mots à elle.' };
+      const g = ICONES[String(genre ?? '')] ? String(genre) : 'jalon';
+      const d = depuis == null ? today() : String(depuis).trim();
+      if (!ISO_JOUR.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+      if (d > today()) return { erreur: 'Cette date est dans le futur.' };
+      const liste = allObjectifs(userId);
+      // Huit, et pas douze comme les motifs : un objectif se REGARDE, et une
+      // liste ou rien ne ressort ne se regarde plus.
+      if (liste.length >= 8) return { erreur: 'Huit objectifs, c\'est le maximum. Au-delà, plus rien ne ressort.' };
+      if (liste.some(o => o.quoi.toLowerCase() === q.toLowerCase())) {
+        return { erreur: 'Cet objectif existe déjà.' };
+      }
+      const o = addObjectif({ quoi: q, genre: g, depuis: d, userId });
+      const fait = { type: 'objectif', nouveau: true, ...o };
+      send('geste', fait);
+      return { message: `Objectif noté : « ${q} », identifiant ${o.id}, depuis le ${d}.`, fait };
+    },
+
+    marquer_objectif: ({ id, tenu, date }) => {
+      const d = date == null ? today() : String(date).trim();
+      if (!ISO_JOUR.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+      if (d > today()) return { erreur: 'Cette date est dans le futur.' };
+      const o = marquerObjectif(Number(id), { tenu: !!tenu, date: d }, userId);
+      if (!o) return { erreur: `Aucun objectif d'identifiant ${id}.` };
+      const fait = { type: 'objectif', nouveau: false, ...o };
+      send('geste', fait);
+      return { message: tenu ? `« ${o.quoi} » repart du ${d}.` : `« ${o.quoi} » marqué rompu.`, fait };
+    },
+
+    /*
+     * Sur une frise de quarante reperes, la liste transmise ne suffit plus a
+     * voir si celui qu'on allait poser existe deja sous d'autres mots.
+     */
+    chercher_repere: ({ mot }) => {
+      const m = String(mot ?? '').trim();
+      if (m.length < 2 || m.length > 40) return { erreur: 'Donne un ou deux mots, entre 2 et 40 caractères.' };
+      const mots = m.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/);
+      const norm = t => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const hits = allEvents(userId)
+        .filter(e => mots.some(w => norm(e.label).includes(w)))
+        .slice(0, 6);
+      if (!hits.length) return { message: `Aucun repère sur « ${m} ».` };
+      return { message: `${hits.length} repère(s) sur « ${m} » :\n`
+        + hits.map(e => `#${e.id} ${e.date}${e.fin ? ` → ${e.fin}` : ''} · ${e.label}`).join('\n') };
+    },
+
     lire_carnet: ({ mot }) => {
       const m = String(mot ?? '').trim();
       if (m.length < 2 || m.length > 40) return { erreur: 'Donne un seul mot, entre 2 et 40 caractères.' };

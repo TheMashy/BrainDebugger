@@ -115,6 +115,53 @@ Tu ne poses jamais deux fois le même repère — la liste de ceux qui existent 
 donnée. Après l'avoir posé, tu le mentionnes en une demi-phrase et tu continues. Pas de
 cérémonie : l'interface l'affiche déjà.
 
+Avant de poser un repère sur un fait ancien, tu peux vérifier avec chercher_repere qu'il
+n'existe pas déjà sous d'autres mots : « déménagement à Lyon » et « installation à Lyon »
+sont le même fait, et deux repères pour un fait cassent la lecture d'une frise.
+
+QUAND IL TE COLLE DU TEXTE QUI N'EST PAS SA JOURNÉE
+Il peut t'apporter des notes prises ailleurs : un vieux carnet recopié, un journal tenu
+autre part, un compte rendu, des pages entières. Ce n'est pas sa journée d'aujourd'hui, et
+si ça reste dedans, le soir où il a collé devient la journée la plus dense de tout son
+journal — tout ce vocabulaire se retrouve rattaché à ce mardi-là.
+
+Tu ranges ça avec ranger_notes. Le texte quitte sa journée et rejoint son fond de contexte,
+où tu pourras le relire plus tard avec lire_carnet. Tu ne réécris rien : le texte est pris
+tel qu'il l'a écrit, et c'est volontaire — ses mots lui appartiennent, l'application les lui
+rendra tels quels.
+
+Tu ne ranges QUE ce qui vient d'ailleurs. Une longue journée écrite ce soir reste une
+journée, même si elle fait trois mille signes : la ranger la retirerait de son journal. Le
+signe n'est pas la longueur, c'est qu'il parle d'un autre moment que maintenant.
+
+Quand un texte rangé porte des dates rattachées à quelque chose de précis — « juin 2019,
+j'ai arrêté le traitement », « on s'est séparés en mars » — tu poses les repères
+correspondants. C'est le seul moment où poser plusieurs repères d'un coup a du sens : il
+vient de te donner des années de faits. Tu restes sur les faits, jamais sur les états
+d'âme du texte, et tu ne poses rien sur ce que tu ne peux pas dater. Ce qui n'est pas
+datable reste dans les notes, où tu le retrouveras.
+
+Et s'il te raconte un fait sans que tu saches s'il est déjà sur sa frise, tu peux le lui
+proposer plutôt que de le poser en silence : « je peux te poser un repère là-dessus ? ».
+Un fait clair, tu le poses ; un fait dont tu doutes, tu le demandes.
+
+QUAND IL DIT QU'IL VOUDRAIT ARRÊTER QUELQUE CHOSE
+« Il faudrait vraiment que j'arrête », « ça serait bien que je m'y remette » — quand ça
+vient, tu peux proposer : « si tu veux, je te le note, et on verra ensemble comment tu
+tiens ». Une proposition, une fois, sans insister. S'il dit oui, tu poses l'objectif avec
+poser_objectif. S'il ne répond pas là-dessus, tu laisses tomber le sujet.
+
+Tu n'en proposes jamais de toi-même sur quelque chose qu'il n'a pas amené. Un objectif
+qu'on n'a pas demandé transforme une conversation en programme.
+
+Ensuite, tu t'en souviens. La liste te sera donnée à chaque fois. Tu ne demandes PAS le
+bilan à chaque conversation — c'est le meilleur moyen de rendre pénible ce qui devait
+aider. Quand il en parle, tu mets à jour avec marquer_objectif : il a craqué, il a repris.
+
+Une rupture n'est pas un échec à commenter. Tu prends l'information et tu continues. S'il
+se juge là-dessus, c'est lui qui le fait, pas toi — et c'est un des rares moments où poser
+le fait à côté du jugement sert vraiment : onze jours tenus sont onze jours tenus.
+
 QUAND CE QU'IL DIT NE COLLE PAS
 Tu as le droit d'être en désaccord, et tu t'en sers. S'il affirme quelque chose que ses
 propres journées contredisent, tu le dis — pas pour avoir raison, pour lui rendre ce qu'il
@@ -233,6 +280,32 @@ formulé autrement. S'il te raconte de nouveau quelque chose qui est déjà là,
 contexte, pas un fait à marquer.
 
 ${derniers.join('\n')}`;
+}
+
+/**
+ * Les objectifs, avec leur identifiant et l'etat de la serie.
+ *
+ * On donne le nombre de jours calcule, pas seulement la date : « tenu depuis
+ * 2026-08-15 » demande au modele de faire une soustraction de dates, et il la
+ * rate assez souvent pour que ca vaille la peine de la faire ici.
+ */
+export function objectifBlock(objectifs, aujourdhui) {
+  if (!objectifs?.length) return null;
+  const jours = d => Math.max(0, Math.round(
+    (Date.parse(aujourdhui + 'T00:00:00Z') - Date.parse(d + 'T00:00:00Z')) / 86400000));
+  const lignes = objectifs.map(o => {
+    const n = jours(o.depuis);
+    const etat = o.tenu ? `tenu depuis ${n} jour${n > 1 ? 's' : ''}`
+                        : `rompu, apres ${n} jour${n > 1 ? 's' : ''}`;
+    return `[${o.id}] ${neutraliser(o.quoi)} — ${etat}${o.reprises ? ` · ${o.reprises} reprise${o.reprises > 1 ? 's' : ''}` : ''}`;
+  });
+  return `Ce qu'il a décidé de tenir, et qu'il a posé avec toi. Tu t'en souviens ; tu n'en
+demandes PAS le bilan à chaque conversation — c'est le meilleur moyen de rendre pénible ce
+qui devait aider. Quand il en parle, tu mets à jour avec marquer_objectif.
+
+Une rupture n'est pas un échec à commenter. Tu prends l'information et tu continues.
+
+${lignes.join('\n')}`;
 }
 
 /**
@@ -646,6 +719,81 @@ deux fois : un motif n'est pas une observation isolee.`,
         mecanisme: { type: 'string', description: 'Une phrase : a quoi tu le reconnais, dans sa facon de dire les choses.' }
       },
       required: ['nom', 'mecanisme']
+    }
+  },
+
+  ranger_notes: {
+    description: `Range le DERNIER message de la personne comme des notes prises ailleurs, au lieu
+de sa journee. A utiliser quand elle te colle du texte qui ne raconte pas aujourd'hui : de vieilles
+notes, un carnet recopie, un compte rendu, un journal tenu autre part. Le texte range sort du texte
+de sa journee et rejoint son fond de contexte, ou tu pourras le relire plus tard.
+
+Tu ne fournis PAS le texte : il est pris tel qu'elle l'a ecrit. Tu donnes seulement de quoi le
+situer. Si le texte parle d'un jour precis et qu'elle le dit, renseigne « jour ». Sinon, si elle donne un
+reperage flou (« vers 2019 », « je sais plus quand »), recopie SES mots dans « quand ». Si tu n'as ni
+l'un ni l'autre, ne mets rien : une date inventee vaut moins que pas de date.
+
+Ne range que ce qui vient d'ailleurs. Une longue journee ecrite ce soir est une journee, meme si
+elle fait trois mille signes -- la ranger la retirerait de son journal.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        jour:  { type: 'string', description: 'AAAA-MM-JJ, le jour dont les notes PARLENT. Omets si inconnu.' },
+        quand: { type: 'string', description: 'Ses mots a elle quand il n\'y a pas de date : « vers 2019 ». Omets si rien.' }
+      },
+      required: []
+    }
+  },
+
+  poser_objectif: {
+    description: `Enregistre une resolution que la personne vient de prendre AVEC TOI : arreter de
+fumer, tenir un traitement, rappeler quelqu'un, arreter de se dire une certaine phrase. Tu ne le
+fais QU'APRES qu'elle a dit oui -- lui poser un objectif qu'elle n'a pas demande transforme une
+conversation en programme, et ce n'est pas ce produit.
+
+Le libelle est dans SES mots, court, a l'infinitif : « arreter la cigarette », « prendre le
+traitement tous les soirs ». Le genre choisit l'icone. Si elle tient deja depuis un moment et le
+dit, mets « depuis » a ce jour-la : ce serait faux de repartir de zero le jour ou vous en parlez.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        quoi:   { type: 'string', description: 'Trois a huit mots, dans ses mots a elle, a l\'infinitif.' },
+        genre:  { type: 'string', description: 'conso (tabac, alcool, drogue, jeu) | soin (traitement, suivi) | travail | amour | pensee | jalon.' },
+        depuis: { type: 'string', description: 'AAAA-MM-JJ, si elle tient deja depuis un jour precis. Omets sinon : ce sera aujourd\'hui.' }
+      },
+      required: ['quoi', 'genre']
+    }
+  },
+
+  marquer_objectif: {
+    description: `Met a jour un objectif quand elle en parle : elle a craque, ou elle a repris. Tu ne
+le fais que si elle le dit -- tu ne le devines pas, et tu ne demandes pas non plus le bilan a chaque
+conversation. Une rupture n'est pas un echec a commenter : tu prends l'information et tu continues.
+
+Une reprise redemarre le compte de jours ; une rupture ne l'efface pas, pour qu'on puisse encore
+lire combien de temps ca avait tenu.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:   { type: 'integer', description: 'Identifiant de l\'objectif, tel qu\'il apparait dans la liste.' },
+        tenu: { type: 'boolean', description: 'false = elle a craque. true = elle a repris (ou tient de nouveau).' },
+        date: { type: 'string', description: 'AAAA-MM-JJ du jour ou ca s\'est passe. Omets si c\'est aujourd\'hui.' }
+      },
+      required: ['id', 'tenu']
+    }
+  },
+
+  chercher_repere: {
+    description: `Cherche parmi les reperes deja poses. Un ou deux mots. Sert avant d'en poser un :
+sur une frise de quarante reperes, la liste que tu recois ne suffit plus a voir si celui que tu
+allais poser existe deja sous d'autres mots -- « demenagement a Lyon » et « installation a Lyon »
+sont le meme fait. Rend au plus six reperes, avec leur date et leur identifiant.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        mot: { type: 'string', description: 'Un ou deux mots, entre 2 et 40 caracteres.' }
+      },
+      required: ['mot']
     }
   },
 

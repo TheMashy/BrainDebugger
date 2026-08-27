@@ -20,6 +20,8 @@
  * suppose la racine immobile : le <svg> porte la respiration en CSS.
  */
 
+import { chaton, humeurDe } from './chaton.js';
+
 const f = n => Math.round(n * 100) / 100;
 
 /* Les trois degrades du regard. Un jeu par animal, la teinte du rebond change,
@@ -86,6 +88,17 @@ const OWL_D = 'M50 28.5C61 28.5 69.6 35.6 71 46.5 72.2 56 66.6 62.6 60 65.6 55.6
 const BLOB_M = 'M50.4 21.8C67.4 21.8 80.2 37 80.2 56.2 80.2 75.4 66.2 88.6 50 88.6 33.8 88.6 19.8 75.4 19.8 56 19.8 36.8 33.4 21.8 50.4 21.8Z';
 
 export const PETS = {
+  /*
+   * Le chaton n'est pas une figurine comme les cinq autres : il est dessine au
+   * trait et son visage CHANGE. Son `svg` est donc une fonction de l'humeur,
+   * pas une chaine -- petMarkup s'en occupe. Ici on garde la vignette neutre,
+   * qui est ce que montre le selecteur des Reglages.
+   */
+  chaton: {
+    name: 'Chaton',
+    trait: true,
+    svg: chaton('neutre')
+  },
   deer: {
     name: 'Cerf',
     svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><defs>
@@ -417,9 +430,20 @@ export const PETS = {
   }
 };
 
-export function petMarkup(settings) {
+/**
+ * @param {object} settings
+ * @param {{scene?:string, energie?:number}|null} ambiance
+ *        Le DECOR, pas la note : le decor est explicitement « pas une lecture
+ *        de ta journee », alors que la note EST la journee. Un compagnon qui
+ *        fait la moue en la voyant qualifierait ce que l'application s'interdit
+ *        de qualifier partout ailleurs.
+ */
+export function petMarkup(settings, ambiance = null) {
   if (settings.petSprite === 'custom' && settings.petImage) {
     return `<img src="${settings.petImage}" alt="">`;
   }
-  return (PETS[settings.petSprite] ?? PETS.deer).svg;
+  if (settings.petSprite === 'chaton') {
+    return chaton(ambiance ? humeurDe(ambiance.scene, ambiance.energie) : 'neutre');
+  }
+  return (PETS[settings.petSprite] ?? PETS.chaton).svg;
 }

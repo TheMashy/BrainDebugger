@@ -148,6 +148,61 @@ CREATE TABLE IF NOT EXISTS motif_vues (
 );
 CREATE INDEX IF NOT EXISTS idx_motif_vues_msg ON motif_vues(message_id);
 
+/*
+ * Les objectifs : ce que la personne a decide d'arreter, de tenir, de changer.
+ *
+ * CE N'EST PAS UNE LISTE DE TACHES, et la difference tient dans ce que la table
+ * ne contient pas : ni echeance, ni rappel, ni score. Une resolution qu'on ne
+ * tient pas n'est pas un echec a signaler -- c'est une information, et la seule
+ * chose que l'application en fasse est de la montrer telle quelle.
+ *
+ * « depuis » est la date du DEBUT DE LA SERIE EN COURS, pas celle de la
+ * decision. C'est le seul chiffre qui compte quand on regarde : « douze jours »
+ * veut dire douze jours d'affilee, pas douze jours depuis qu'on s'est dit qu'on
+ * arreterait. « reprises » garde le reste -- recommencer trois fois est un
+ * fait, et l'effacer a chaque rupture rendrait la ligne fausse dans l'autre
+ * sens.
+ */
+CREATE TABLE IF NOT EXISTS objectifs (
+  id       INTEGER PRIMARY KEY,
+  user_id  TEXT NOT NULL DEFAULT '${OWNER}',
+  quoi     TEXT NOT NULL,       -- dans SES mots : « arreter la cigarette »
+  genre    TEXT NOT NULL,       -- un theme de reperes.js, pour l'icone
+  cree_le  TEXT NOT NULL,
+  depuis   TEXT NOT NULL,       -- 'AAAA-MM-JJ', debut de la serie en cours
+  tenu     INTEGER NOT NULL DEFAULT 1,
+  reprises INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_objectifs_user ON objectifs(user_id);
+
+-- LA COLONNE QU'ON N'AJOUTE JAMAIS : un pourcentage de reussite. Un objectif
+-- tenu a 62 % n'apprend rien a la personne qui le vit, et transforme un
+-- indicateur en note.
+
+/*
+ * Les lectures : ce que le compagnon a compris du fonctionnement, par horizon.
+ *
+ * Une ligne par (personne, horizon), remplacee a chaque analyse. On ne garde
+ * pas l'historique des lectures, et c'est un choix : l'evolution d'un theme est
+ * DANS le theme (sa serie periode par periode), calculee sur tout le corpus a
+ * chaque fois. La deduire d'une suite de lectures ferait dependre la courbe des
+ * jours ou on a pense a lancer l'analyse.
+ *
+ * « jusqu_au » est ce qui dit qu'une lecture est perimee : la derniere journee
+ * qu'elle a vue. Une date de calcul ne suffirait pas -- une lecture faite hier
+ * sur un journal auquel on n'a rien ajoute est toujours juste.
+ */
+CREATE TABLE IF NOT EXISTS lectures (
+  user_id  TEXT NOT NULL DEFAULT '${OWNER}',
+  horizon  TEXT NOT NULL,          -- 'court' | 'moyen' | 'long'
+  fait_le  TEXT NOT NULL,          -- ISO 8601
+  jusqu_au TEXT,                   -- derniere journee ecrite du corpus
+  jours    INTEGER NOT NULL,       -- journees ecrites derriere cette lecture
+  modele   TEXT,
+  contenu  TEXT NOT NULL,          -- JSON { synthese, themes }
+  PRIMARY KEY (user_id, horizon)
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
@@ -185,8 +240,8 @@ export const countUsers = () => db.prepare('SELECT COUNT(*) c FROM users').get()
 /* ---------- settings ---------- */
 
 export const DEFAULT_SETTINGS = {
-  petName: 'Cerf',
-  petSprite: 'deer',          // id integre, ou 'custom'
+  petName: 'Chaton',
+  petSprite: 'chaton',        // id integre, ou 'custom'
   petImage: null,             // data URL si petSprite === 'custom'
   blipEnabled: true,          // la voix du compagnon : un blip par syllabe
   blipVoice: 'aa',            // identifiant de timbre (voir web/blips.js)
@@ -290,8 +345,12 @@ export function setNote(date, note, userId = OWNER) {
  * dans le corpus qui sera rendu a l'utilisateur.
  */
 export function rebuildEntryText(date, userId = OWNER) {
+  // `range = 1` : des notes prises ailleurs, collees ici. Elles ne sont pas la
+  // journee de la personne et n'entrent donc pas dans son texte -- sinon le
+  // soir ou elle colle trois ans de notes devient la journee la plus dense de
+  // tout le journal, et la carte relie tout ce vocabulaire a ce mardi-la.
   const rows = db.prepare(
-    "SELECT text FROM messages WHERE user_id = ? AND date = ? AND role = 'user' ORDER BY ts ASC"
+    "SELECT text FROM messages WHERE user_id = ? AND date = ? AND role = 'user' AND COALESCE(rangee, 0) = 0 ORDER BY ts ASC"
   ).all(userId, date);
   const text = rows.map(r => r.text).join('\n');
   db.prepare(`
@@ -498,9 +557,101 @@ export function deleteCarnet(id, userId = OWNER) {
   return db.prepare('DELETE FROM carnet WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
 }
 
+/**
+ * Ranger un message de la personne : il quitte sa journee et devient une note.
+ *
+ * C'EST LE SEUL CHEMIN D'ECRITURE VERS LE CARNET DEPUIS LA CONVERSATION, et il
+ * ne prend PAS de texte. Le texte vient de la ligne `messages`, telle qu'elle a
+ * ete ecrite. Le compagnon peut declencher le rangement, jamais dicter ce qui
+ * est range : du texte genere qui se glisserait ici lui reviendrait ensuite,
+ * dans « explorer un theme », comme si elle l'avait ecrit elle-meme.
+ *
+ * Le message reste dans le fil. Il a bien ete envoye ; c'est seulement qu'il ne
+ * raconte pas ce jour-la.
+ */
+export function rangerMessage(id, { jour = null, quand = null } = {}, userId = OWNER) {
+  const m = db.prepare(
+    "SELECT id, date, role, text, COALESCE(rangee,0) rangee FROM messages WHERE id = ? AND user_id = ?"
+  ).get(id, userId);
+  if (!m) return { erreur: 'Message introuvable.' };
+  if (m.role !== 'user') return { erreur: "On ne range que les mots de la personne." };
+  if (m.rangee) return { erreur: 'Ce message est déjà rangé.' };
+
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE messages SET rangee = 1 WHERE id = ?').run(id);
+    const note = addCarnet({ texte: m.text, jour, quand, source: 'conversation', userId });
+    db.exec('COMMIT');
+    rebuildEntryText(m.date, userId);      // hors transaction : il relit la table
+    return { note };
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+}
+
 export function countCarnet(userId = OWNER) {
   const r = db.prepare('SELECT COUNT(*) t, COUNT(jour) d FROM carnet WHERE user_id = ?').get(userId);
   return { total: r.t, datees: r.d, libres: r.t - r.d };
+}
+
+/* ---------- lectures ---------- */
+
+export function getLecture(horizon, userId = OWNER) {
+  const r = db.prepare('SELECT * FROM lectures WHERE user_id = ? AND horizon = ?').get(userId, horizon);
+  if (!r) return null;
+  try { return { ...r, contenu: JSON.parse(r.contenu) }; }
+  catch { return null; }        // un JSON casse vaut une lecture absente
+}
+
+export function setLecture({ horizon, contenu, jusqu_au, jours, modele, userId = OWNER,
+                             quand = new Date().toISOString() }) {
+  db.prepare(`
+    INSERT INTO lectures(user_id, horizon, fait_le, jusqu_au, jours, modele, contenu)
+    VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(user_id, horizon) DO UPDATE SET
+      fait_le = excluded.fait_le, jusqu_au = excluded.jusqu_au,
+      jours = excluded.jours, modele = excluded.modele, contenu = excluded.contenu
+  `).run(userId, horizon, quand, jusqu_au, jours, modele ?? null, JSON.stringify(contenu));
+  return getLecture(horizon, userId);
+}
+
+export const deleteLectures = (userId = OWNER) =>
+  db.prepare('DELETE FROM lectures WHERE user_id = ?').run(userId).changes;
+
+/* ---------- objectifs ---------- */
+
+/** Les plus fragiles d'abord : un objectif rompu est celui dont on parle. */
+export const allObjectifs = (userId = OWNER) => db.prepare(
+  'SELECT id, quoi, genre, cree_le, depuis, tenu, reprises FROM objectifs WHERE user_id = ? ORDER BY tenu ASC, depuis DESC'
+).all(userId);
+
+export function addObjectif({ quoi, genre = 'jalon', depuis, userId = OWNER,
+                              quandCree = new Date().toISOString() }) {
+  const info = db.prepare(
+    'INSERT INTO objectifs(user_id, quoi, genre, cree_le, depuis, tenu, reprises) VALUES(?,?,?,?,?,1,0)'
+  ).run(userId, quoi, genre, quandCree, depuis);
+  return { id: Number(info.lastInsertRowid), quoi, genre, cree_le: quandCree, depuis, tenu: 1, reprises: 0 };
+}
+
+/**
+ * Rompu, ou repris.
+ *
+ * Une rupture ne remet PAS `depuis` a la date de rupture : on veut pouvoir dire
+ * « rompu, apres onze jours ». C'est la reprise qui redemarre la serie, et qui
+ * incremente `reprises` -- recommencer est un fait, pas une remise a zero.
+ */
+export function marquerObjectif(id, { tenu, date }, userId = OWNER) {
+  const o = db.prepare('SELECT * FROM objectifs WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!o) return null;
+  if (tenu) {
+    db.prepare('UPDATE objectifs SET tenu = 1, depuis = ?, reprises = reprises + ? WHERE id = ?')
+      .run(date, o.tenu ? 0 : 1, id);
+  } else {
+    db.prepare('UPDATE objectifs SET tenu = 0 WHERE id = ?').run(id);
+  }
+  return db.prepare('SELECT id, quoi, genre, cree_le, depuis, tenu, reprises FROM objectifs WHERE id = ?').get(id);
+}
+
+export function deleteObjectif(id, userId = OWNER) {
+  return db.prepare('DELETE FROM objectifs WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
 }
 
 /* ---------- motifs ---------- */

@@ -228,7 +228,10 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
    conversation. Tout ce qui l'entourait volait la place du texte, qui est la
    seule chose qui compte sur cette page. */
 .petcard { text-align: center; }
-.petcard .art { width: 82px; height: 82px; margin: 0 auto; }
+/* `color` et pas `fill` : le chaton est dessine au trait en currentColor, comme
+   les icones de repere. Les cinq figurines portent leurs propres couleurs et
+   ignorent celle-ci. */
+.petcard .art { width: 82px; height: 82px; margin: 0 auto; color: var(--ink); }
 .petcard .art svg, .petcard .art img {
   width: 100%; height: 100%; object-fit: contain;
   animation: breathe 4.6s ease-in-out infinite;
@@ -427,7 +430,9 @@ table.grid td.avg { padding-left: 9px; color: var(--ink-dim); font-size: 11px; t
 .spritepick button {
   width: 62px; height: 62px; padding: 7px; border-radius: 9px;
   background: var(--panel-2); border: 1px solid var(--line);
+  color: var(--ink-dim);            /* le chaton, dessiné en currentColor */
 }
+.spritepick button[aria-pressed="true"] { color: var(--ink); }
 .spritepick button[aria-pressed="true"] { border-color: var(--accent); background: var(--surface); }
 .spritepick svg, .spritepick img { width: 100%; height: 100%; object-fit: contain; }
 
@@ -545,8 +550,12 @@ nav button { white-space: nowrap; }
      bas, et sur 844 px de haut chaque rangée d'en-tête est prise sur le fil. */
   .viewname { display: none; }
   nav { flex: 1 1 100%; gap: 0; justify-content: space-between; }
-  nav button { flex: 1 1 0; min-width: 0; padding: 10px 2px; font-size: 9.5px;
-               letter-spacing: .1em; min-height: 40px; }
+  /* Le nowrap du bureau fait deborder « JE REMARQUE » sur « REGLAGES » : cinq
+     parts egales de soixante-dix pixels, et l'etiquette en fait soixante-et-onze.
+     Sur deux lignes elles tiennent toutes, sans rien renommer. */
+  nav button { flex: 1 1 0; min-width: 0; padding: 7px 2px; font-size: 9.5px;
+               letter-spacing: .08em; min-height: 40px;
+               white-space: normal; line-height: 1.2; text-align: center; }
 
   /* Tout ce qui se touche. 40 px est le minimum recommandé par Apple ; sur
      cette application un bouton raté efface des journées. */
@@ -822,69 +831,122 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
    le passé renvoie. La navigation était le point faible — deux flèches et un
    titre ne disent pas qu'on se promène dans quatre ans d'écriture. */
 
+/* ---------- la lecture ---------- */
+
+.lecture { max-width: 720px; }
+.lechead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 26px; }
+.lecmeta { font-size: 11.5px; }
+.lecmeta b { color: var(--warn); font-weight: 500; }
+
+/* Le curseur : trois positions, pas un menu. Une seule pastille se déplace —
+   c'est ce qui donne l'impression de dézoomer plutôt que de choisir. */
+.horizons { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--panel-2); }
+.horizons button {
+  background: none; border: 0; border-radius: 8px; padding: 6px 13px;
+  font-size: 12.5px; color: var(--ink-faint); transition: color .15s, background .15s;
+}
+.horizons button:hover { color: var(--ink-dim); }
+.horizons button[aria-pressed="true"] { background: var(--surface); color: var(--ink); }
+
+.synthese {
+  font: 300 19px/1.6 var(--serif); color: var(--ink);
+  margin: 0 0 34px; max-width: 34em;
+}
+
+.lectvide { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 40px 0; }
+.lectvide p { margin: 0; }
+.lectvide .btn { margin-top: 10px; }
+.spin {
+  width: 15px; height: 15px; border-radius: 50%; margin-bottom: 6px;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  animation: tourne .9s linear infinite;
+}
+.spin.petit { width: 10px; height: 10px; border-width: 1.5px; margin: 0 4px 0 0; display: inline-block; vertical-align: -1px; }
+@keyframes tourne { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* --- un thème --- */
+
+.themes { display: flex; flex-direction: column; gap: 2px; margin-bottom: 34px; }
+.theme { border-radius: 11px; transition: background .13s; }
+.theme:hover { background: var(--panel-2); }
+.theme.ouvert { background: var(--panel-2); }
+.thead {
+  display: flex; align-items: center; gap: 13px; width: 100%;
+  background: none; border: 0; padding: 11px 13px; text-align: left; color: inherit;
+}
+/* L'intensité est une TAILLE, jamais une couleur : la couleur dit déjà l'écart
+   d'une journée partout ailleurs dans l'application. */
+.tpuce { flex: none; border-radius: 50%; background: var(--ink-dim); }
+.tpuce[data-i="0"] { width: 4px; height: 4px; opacity: .45; }
+.tpuce[data-i="1"] { width: 6px; height: 6px; opacity: .6; }
+.tpuce[data-i="2"] { width: 8px; height: 8px; opacity: .8; }
+.tpuce[data-i="3"] { width: 10px; height: 10px; background: var(--accent); }
+.tnom { flex: 1; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* La série : une forme, pas un graphe. Pas d'axe, pas d'échelle — on y lit
+   « ça monte », « ça revient par vagues », et c'est tout ce qu'on lui demande. */
+.tserie { display: flex; align-items: flex-end; gap: 1.5px; height: 20px; flex: none; }
+.tserie i { width: 3px; background: var(--ink-faint); border-radius: 1px; opacity: .7; }
+.theme.ouvert .tserie i, .theme:hover .tserie i { background: var(--accent); opacity: .85; }
+
+.tcorps { padding: 0 13px 14px 39px; }
+.tquoi { margin: 0 0 12px; font-size: 14px; color: var(--ink-dim); max-width: 40em; }
+.tpreuves { display: flex; flex-direction: column; gap: 2px; }
+.tpreuve {
+  display: flex; align-items: baseline; gap: 11px; width: 100%; text-align: left;
+  background: none; border: 0; padding: 6px 8px; border-radius: 8px; color: inherit;
+  border-left: 2px solid var(--line);
+}
+.tpreuve:hover { background: var(--surface); border-left-color: var(--accent); }
+.tpreuve .mono { font-size: 11px; color: var(--ink-faint); flex: none; }
+.tpreuve span:last-child {
+  font: 300 14px/1.5 var(--serif); color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tliens { margin: 12px 0 0; font-size: 12px; color: var(--ink-faint); }
+.tliens button { background: none; border: 0; padding: 0; color: var(--ink-dim); text-decoration: underline;
+  text-underline-offset: 3px; font-size: 12px; }
+.tliens button:hover { color: var(--accent); }
+
+/* --- la carte des thèmes --- */
+
+.cartethemes { max-width: 330px; margin: 6px auto 0; }
+.cartethemes svg { width: 100%; height: auto; overflow: visible; }
+.ct-liens line { stroke: var(--line); stroke-width: .45; }
+.ct-noeud circle { fill: var(--ink-faint); transition: fill .15s; }
+.ct-noeud text { fill: var(--ink-faint); font-size: 3.6px; font-family: var(--sans); transition: fill .15s; }
+.ct-capte { fill: transparent; cursor: pointer; }
+.ct-noeud:hover circle, .ct-noeud.on circle { fill: var(--accent); }
+.ct-noeud:hover text, .ct-noeud.on text { fill: var(--ink); }
+
+.retourlect { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; }
+.retourlect button {
+  background: none; border: 0; color: var(--ink-faint); border-radius: 7px;
+  padding: 5px 9px; font-size: 12.5px; transition: color .13s, background .13s;
+}
+.retourlect button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
+.retourlect button:disabled { opacity: .3; }
+.retourlect button:first-child { color: var(--ink-dim); margin-right: 6px; }
+.retourlect .faint { flex: 1; font-size: 12.5px; }
+
 .mirror { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px 34px; }
 .mcol { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
 @media (max-width: 900px) { .mirror { grid-template-columns: 1fr; } }
 
-.calhead { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
-.calhead button {
-  background: none; border: 0; color: var(--ink-faint);
-  padding: 3px 8px; border-radius: 6px; font-size: 15px; line-height: 1;
-}
-.calhead button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
-.calhead button:disabled { opacity: .25; }
-.calmois { font-size: 13px; color: var(--ink-dim); text-transform: capitalize; min-width: 7.5em; }
-/* Le retour a aujourd'hui est le seul geste qu'on refait sans arret dans le
-   Miroir : il reste a sa place, meme quand on y est deja. Le faire disparaitre
-   une case sur deux deplacait les fleches sous le curseur. */
-.calnow {
-  font-size: 11.5px !important; margin-left: auto;
-  border: 1px solid var(--line) !important; color: var(--ink-dim) !important;
-}
-/* Quand on y est déjà, il s'éteint plutôt que de s'allumer en vert : la case du
-   jour porte déjà l'anneau, deux marques vertes pour la même information font
-   deux fois trop. */
-.calnow:disabled { opacity: 1 !important; border-color: var(--line-soft) !important; color: var(--ink-faint) !important; }
-.calhead { max-width: 320px; }
-
-/* Largeur bornée : sans ça, chaque case fait cent pixels dans une colonne
-   large et le calendrier avale la page. C'est un repère de navigation, pas la
-   pièce maîtresse — celle-ci est le texte du jour, juste en dessous. */
-.calgrid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px;
-  max-width: 320px;
-}
-.cald {
-  text-align: center; font-size: 10px; color: var(--ink-faint);
-  padding-bottom: 4px; font-family: var(--mono);
-}
-.calcase {
-  aspect-ratio: 1; border: 0; border-radius: 5px;
-  max-height: 42px;
-  background: var(--line-soft); color: #0d120f;
-  font-size: 11px; font-weight: 600; font-family: var(--mono);
-  display: flex; align-items: center; justify-content: center;
-  position: relative;
-  transition: transform .1s, outline-color .1s;
-  outline: 1.5px solid transparent; outline-offset: -1.5px;
-}
-.calcase:hover:not(:disabled) { transform: scale(1.12); z-index: 2; }
-.calcase.vide { background: var(--line-soft); color: var(--ink-faint); font-weight: 400; }
-.calcase:disabled { opacity: .2; }
-.calcase.on { outline-color: var(--ink); }
-/* Aujourd'hui, en permanence. Deux marques differentes plutot qu'une seule
-   partagee : le contour blanc suit le regard, l'anneau vert reste sur la date
-   du jour meme quand on est parti trois mois en arriere. */
-.calcase.auj {
-  box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--accent), 0 0 10px -1px var(--accent);
-}
-.calcase.auj.vide { color: var(--accent); }
-/* Un point sous la case : cette journée porte du texte. C'est ce qu'on cherche
-   quand on remonte — les jours écrits, pas les jours notés. */
-.calcase.texte::after {
-  content: ''; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
-  width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .55;
-}
+/* Le calendrier du Miroir vient du MEME module que celui du composeur de
+   repères. Il y avait deux calendriers, aux mêmes noms de classes — .calhead,
+   .calgrid, .calmois — et le second écrasait le premier depuis plus bas dans la
+   feuille. Ici on ajoute seulement ce que le Miroir a en plus : la teinte des
+   journées, qui n'a de sens que sur un journal. */
+.calcard .cal { width: 100%; }
+.calcard .calgrid button { height: 34px; }
+.calj.teinte { background: color-mix(in srgb, var(--jc) 62%, transparent); color: #08110c; font-weight: 500; }
+.calj.teinte.hors { opacity: .45; }
+/* La borne — le jour ouvert — passe devant la teinte : on doit toujours savoir
+   ce qu'on regarde, même sur une journée à 9/10 déjà claire. */
+.calj.borne.teinte { background: var(--accent); }
+.calj.teinte::after { background: #08110c; opacity: .55; }
 
 /* La ligne d'en-tête d'une journée : la note, la référence, l'écart, puis
    « effacer ». En flex avec wrap, la colonne du Miroir étant devenue plus
@@ -1007,6 +1069,8 @@ body:has(#ambiance) { background: transparent; }
 /* Un motif porte SA couleur, jamais celle de l'échelle des notes : la teinte
    dit « ceci revient », pas « ceci va mal ». Voir TEINTES dans server/db.js. */
 .geste.motif { border-color: hsl(var(--motif) 42% 32% / .55); }
+.geste.objectif.rompu .gicone { color: var(--warn); }
+
 .geste.motif .gpuce {
   flex: none; width: 10px; height: 10px; border-radius: 50%;
   background: hsl(var(--motif) 70% 62%);
@@ -1072,7 +1136,12 @@ body:has(#ambiance) { background: transparent; }
 
 /* --- la frise, dans l'Année --- */
 
+/* Le composeur tenait sur sept elements en ligne : icone, libelle, date, une
+   case a cocher, une seconde date, six pastilles de teinte, un bouton. Il en
+   reste quatre. Ce qui a disparu n'est pas parti : l'apparence est passee sous
+   l'icone, la duree sous la date -- la ou on la cherche. */
 .repform { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.repform .anc { position: relative; flex: none; }
 .repapercu {
   display: grid; place-items: center; flex: none;
   width: 40px; height: 40px; border-radius: 10px;
@@ -1084,8 +1153,10 @@ body:has(#ambiance) { background: transparent; }
 .repapercu:not([data-theme="jalon"]):not([data-theme=""]) {
   color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, transparent);
 }
+/* CONTOURE = DECLARE : une teinte choisie ne touche que le contour, jamais le
+   remplissage. La règle vaut jusque dans l'aperçu du composeur. */
+.repapercu[data-teinte] { color: hsl(var(--t) 62% 62%); border-color: hsl(var(--t) 50% 44%); }
 .repform input[type="text"] { flex: 1 1 220px; min-width: 0; }
-.repform input[type="date"] { flex: 0 0 auto; width: auto; }
 .repform input {
   background: var(--surface); border: 1px solid var(--line); color: var(--ink);
   border-radius: 9px; padding: 10px 12px; font-size: 14px; font-family: inherit;
@@ -1093,10 +1164,136 @@ body:has(#ambiance) { background: transparent; }
 .repform input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .repform .btn { flex: none; height: 40px; }
 
+/* Le bouton de date : il DIT la date, en français, au lieu de la faire
+   deviner dans « 08/27/2026 ». Une période s'y lit d'un coup. */
+.repdatebtn {
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+  border-radius: 9px; padding: 10px 13px; font-size: 13.5px; white-space: nowrap;
+  display: flex; align-items: center; gap: 7px;
+}
+.repdatebtn:hover { border-color: var(--line); background: var(--surface-h); }
+.repdatebtn[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.repdatebtn .fl { color: var(--ink-faint); }
+
+/* --- les panneaux flottants (dates, apparence) --- */
+
+.pop {
+  position: absolute; z-index: 40; top: calc(100% + 7px); left: 0;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 13px; padding: 11px; box-shadow: 0 14px 38px rgb(0 0 0 / .55);
+}
+.pop.droite { left: auto; right: 0; }
+@media (max-width: 700px) { .pop { left: 0; right: auto; } }
+
+/* --- le trombone, et ce qu'il ouvre --- */
+
+.composer { position: relative; }
+.clip {
+  position: relative; flex: none; align-self: flex-end;
+  display: grid; place-items: center; width: 34px; height: 34px;
+  background: none; border: 0; border-radius: 9px; color: var(--ink-faint);
+  transition: color .15s, background .15s;
+}
+.clip:hover, .clip[aria-expanded="true"] { color: var(--ink-dim); background: var(--surface); }
+/* Le point ne dit pas « attention » : il dit qu'il y a quelque chose de rompu
+   là-dedans, ce qui est la seule raison d'ouvrir sans y penser. */
+.clipdot {
+  position: absolute; top: 5px; right: 5px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--warn);
+}
+.objpop { bottom: calc(100% + 9px); top: auto; left: 0; width: 288px; max-width: calc(100vw - 32px); }
+.objliste { display: flex; flex-direction: column; gap: 3px; }
+.objitem {
+  display: flex; align-items: center; gap: 11px;
+  padding: 7px 8px; border-radius: 9px;
+}
+.objitem:hover { background: var(--surface); }
+.objitem .objico { flex: none; color: var(--accent); display: grid; place-items: center; }
+.objitem.rompu .objico { color: var(--warn); }
+.objtxt { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.objtxt b { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objtxt span { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.objitem:hover .repdel { opacity: 1; }
+
+.cal { width: 246px; user-select: none; }
+.calhead { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.calhead button { background: none; border: 0; border-radius: 7px; padding: 4px 7px; }
+.calnav { color: var(--ink-dim); font-size: 17px; line-height: 1; }
+.calnav:hover { background: var(--surface); color: var(--ink); }
+.calmois { flex: 1; text-align: left; font-size: 13.5px; color: var(--ink); }
+.calan { font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim); }
+.calmois:hover, .calan:hover { background: var(--surface); color: var(--ink); }
+.calmois[aria-expanded="true"], .calan[aria-expanded="true"] { background: var(--surface); color: var(--accent); }
+
+.caldows { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 3px; }
+.caldows span { text-align: center; font-size: 10px; color: var(--ink-faint); letter-spacing: .06em; }
+
+.calgrid { display: grid; gap: 2px; }
+.calgrid.jours { grid-template-columns: repeat(7, 1fr); }
+.calgrid.mois  { grid-template-columns: repeat(3, 1fr); }
+.calgrid.ans   { grid-template-columns: repeat(3, 1fr); }
+.calgrid button {
+  background: none; border: 0; border-radius: 7px; color: var(--ink);
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+  padding: 0; height: 30px; transition: background .1s, color .1s;
+}
+.calgrid.mois button, .calgrid.ans button { height: 34px; font-size: 12.5px; }
+.calgrid button:hover:not(:disabled) { background: var(--surface); }
+.calgrid button:disabled { color: var(--ink-faint); opacity: .35; cursor: default; }
+.calgrid button[aria-pressed="true"] { background: var(--surface); color: var(--accent); }
+
+.calj.hors { color: var(--ink-faint); }
+/* Aujourd'hui se voit toujours, même non sélectionné : c'est le point de repère
+   depuis lequel on lit toutes les autres dates. */
+.calj.hui { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+/* La journée écrite porte un point : dans le Miroir, un trou est une information. */
+.calj.ecrit::after {
+  content: ''; position: absolute; translate: 0 11px;
+  width: 3px; height: 3px; border-radius: 50%; background: var(--jc, var(--ink-faint));
+}
+.calj { position: relative; }
+.calj.entre { background: color-mix(in srgb, var(--accent) 13%, transparent); border-radius: 0; }
+.calj.borne { background: var(--accent); color: #06120b; font-weight: 600; }
+.calj.borne.lo { border-radius: 7px 0 0 7px; }
+.calj.borne.hi { border-radius: 0 7px 7px 0; }
+.calj.borne.lo.hi, .calj.borne:not(.hi):not(.lo) { border-radius: 7px; }
+
+.calpied {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line-soft);
+  font-size: 12px; color: var(--ink-dim);
+}
+.calpied .caltog { margin-left: auto; }
+.caltog {
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink-dim);
+  border-radius: 7px; padding: 4px 9px; font-size: 11.5px;
+}
+.caltog[aria-pressed="true"] { background: var(--surface-h); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* --- l'apparence : l'icône et la couleur, ensemble --- */
+
+.apparence { width: 226px; }
+.appgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.appgrid button {
+  display: grid; place-items: center; height: 36px;
+  background: none; border: 1px solid transparent; border-radius: 8px; color: var(--ink-dim);
+}
+.appgrid button:hover { background: var(--surface); color: var(--ink); }
+.appgrid button[aria-pressed="true"] {
+  background: var(--surface); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.appauto {
+  width: 100%; margin-top: 7px; padding: 5px; border-radius: 7px;
+  background: none; border: 1px solid var(--line); color: var(--ink-dim); font-size: 11.5px;
+}
+.appauto:hover { color: var(--ink); background: var(--surface); }
+
 /* Bornée : une liste de neuf lignes étalée sur mille pixels n'est plus une
    liste, c'est un tableau vide avec du texte dans la marge gauche. */
 .frise { display: flex; flex-direction: column; gap: 18px; max-width: 560px; }
-.repform { max-width: 560px; }
+.repform { max-width: 760px; }
 .frisean { display: flex; flex-direction: column; gap: 2px; }
 .frisetitre { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .frisetitre .mono { font-size: 12px; color: var(--ink-dim); letter-spacing: .06em; }
@@ -1110,7 +1307,7 @@ body:has(#ambiance) { background: transparent; }
 }
 .repligne:hover { background: var(--surface); }
 .repligne .ricone-box { width: 30px; height: 30px; border-radius: 8px; }
-.repdate { font-size: 11.5px; flex: 0 0 62px; }
+.repdate { font-size: 11.5px; flex: 0 0 auto; min-width: 62px; }
 .replabel { flex: 1; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repdel {
   flex: none; background: none; border: 0; color: var(--ink-faint);
@@ -1289,15 +1486,12 @@ button.amasrow:hover { background: var(--panel); }
 .frisesvg .fpoint:hover circle { r: 4; }
 .frisenote { max-width: 68ch; margin: 0 0 16px; font-size: 11.5px; }
 
-.friseliste { margin-top: 6px; }
-.friseliste summary {
-  cursor: pointer; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-faint); padding: 6px 0; list-style: none;
-}
-.friseliste summary::-webkit-details-marker { display: none; }
-.friseliste summary::before { content: '▸ '; }
-.friseliste[open] summary::before { content: '▾ '; }
-.friseliste summary:hover { color: var(--ink-dim); }
+/* La liste des repères ne se replie plus derrière « la liste » : c'est là
+   qu'on va pour en corriger un, et un accordéon de plus est un clic de plus
+   sur le seul geste que cette carte serve à faire. */
+.repligne[data-edev] { cursor: pointer; }
+.repligne.ouvert { background: var(--surface-h); box-shadow: inset 2px 0 0 var(--accent); }
+.repdate { font-variant-numeric: tabular-nums; }
 
 /* Le choix de couleur. Cinq pastilles, et rien d'autre : un sélecteur libre
    rendrait la règle inapplicable — les teintes déclarées doivent rester hors
@@ -1360,6 +1554,11 @@ button.amasrow:hover { background: var(--panel); }
 .frisesvg [data-ev] { cursor: pointer; }
 .frisesvg { margin-top: -4px; }
 
-.etalonfield { margin: 0 0 0 auto; display: flex; align-items: center; gap: 8px; }
+/* Une seule rangee : titre, fenetre, cadre, mode, etalon. Les .centerpick
+   portent une marge basse de 14px qui, dans un flex en ligne, decale tout. */
+.cumhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.cumhead h2 { margin: 0; }
+.cumhead .centerpick { margin-bottom: 0; }
+.etalonfield { margin: 0; display: flex; align-items: center; gap: 8px; }
 .etalonfield span { margin: 0; font-size: 12px; }
-.etalonfield input { width: 72px; }
+.etalonfield input { width: 62px; padding: 5px 7px; font-size: 12px; }

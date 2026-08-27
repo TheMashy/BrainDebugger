@@ -4,8 +4,9 @@ import { disposer, dessiner, auPoint } from './carte.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
-import { icone, iconeDe, themeDe, NOMS, TEINTES_DECLAREES } from './reperes.js';
+import { icone, iconeDe, themeDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { friseMarkup as friseSVG } from './frise.js';
+import { calMarkup, calClic, moisDe } from './calendrier.js';
 
 /* ============================= socle ============================= */
 
@@ -18,6 +19,8 @@ const fmtDay = d => {
   return `${Number(dd)} ${MONTHS_FR[Number(m) - 1].toLowerCase()} ${y}`;
 };
 const fmtTime = ts => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const joursEntre = (a, b) => Math.round(
+  (Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000) + 1;
 const dayShift = (d, n) => {
   const [y, m, dd] = d.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, dd) + n * 86400000).toISOString().slice(0, 10);
@@ -158,12 +161,26 @@ async function renderTonight() {
   const t = S.today;
   const note = S.entry?.note ?? null;
   const s = S.settings;
+  // Un echec ici ne doit pas empecher d'ecrire : le trombone est un indicateur,
+  // la conversation est le produit.
+  try { OBJECTIFS = (await api('/api/objectifs')).objectifs ?? []; } catch { OBJECTIFS = []; }
 
   $('#view').innerHTML = `
     <div class="tonight">
       <div class="thread" id="thread"></div>
 
       <div class="composer">
+        ${/* Le trombone. Il n'ouvre rien qu'on remplisse : c'est un indicateur,
+              et il n'apparait que s'il y a quelque chose a indiquer. */''}
+        <button class="clip" id="clip" aria-expanded="false" aria-label="Ce que tu tiens"
+                title="Ce que tu tiens" ${OBJECTIFS.length ? '' : 'hidden'}>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.4 11.6 12.3 19.7a5 5 0 0 1-7.1-7.1l8.1-8.1a3.3 3.3 0 0 1 4.7 4.7l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.5-7.5"/>
+          </svg>
+          ${OBJECTIFS.some(o => !o.tenu) ? '<i class="clipdot"></i>' : ''}
+        </button>
+        <div class="pop objpop" id="objpop" hidden>${objectifsMarkup()}</div>
         <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
         <button class="sendarrow" id="send" aria-label="Envoyer" title="Envoyer">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
@@ -259,6 +276,28 @@ async function renderTonight() {
   };
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
+
+  const clip = $('#clip'), pop = $('#objpop');
+  clip.onclick = () => {
+    const ouvert = pop.hidden;
+    pop.hidden = !ouvert;
+    clip.setAttribute('aria-expanded', String(ouvert));
+  };
+  pop.onclick = async e => {
+    const d = e.target.closest('[data-delobj]');
+    if (!d) return;
+    OBJECTIFS = (await api('/api/objectifs', { delete: Number(d.dataset.delobj) })).objectifs ?? [];
+    if (!OBJECTIFS.length) { pop.hidden = true; clip.hidden = true; return; }
+    pop.innerHTML = objectifsMarkup();
+  };
+  // Un panneau flottant qui ne se ferme qu'en recliquant son bouton reste
+  // ouvert par-dessus la conversation qu'on est venu reprendre.
+  document.addEventListener('click', e => {
+    if (pop.hidden || e.target.closest('#objpop, #clip')) return;
+    pop.hidden = true;
+    clip.setAttribute('aria-expanded', 'false');
+  });
+
   input.focus();
 }
 
@@ -274,7 +313,7 @@ async function renderTonight() {
 function monterPet() {
   const art = $('#art');
   if (!art) return;
-  art.innerHTML = petMarkup(S.settings);
+  art.innerHTML = petMarkup(S.settings, S.ambiance);
   if (art.dataset.lie) return;
   art.dataset.lie = '1';
   art.onclick = () => $('#petPick').click();
@@ -389,11 +428,66 @@ function drawThread() {
  * l'application et donne le moyen d'aller le voir. Elle disparaît au prochain
  * message -- l'endroit où un repère vit pour de bon, c'est la frise.
  */
+/* ===================== ce qu'il tient =====================
+ *
+ * C'EST UN INDICATEUR, PAS UN SUIVI.
+ *
+ * Pas de case a cocher, pas de rappel, pas de pourcentage : la liste dit ce
+ * qu'il a decide, depuis combien de jours ca tient, et si c'est rompu en ce
+ * moment. Rien d'autre. Une resolution qu'on ne tient pas n'est pas un echec a
+ * signaler, et une application qui la note transforme un appui en jugement.
+ *
+ * Les objectifs se posent et se mettent a jour dans la CONVERSATION -- c'est la
+ * qu'on dit « il faudrait vraiment que j'arrete » et « j'ai craque samedi ».
+ * Le seul geste ici est de retirer.
+ */
+let OBJECTIFS = [];
+
+const joursTenus = d => Math.max(0, joursEntre(d, S.today) - 1);
+
+function objectifsMarkup() {
+  if (!OBJECTIFS.length) return '';
+  return `<div class="objliste">${OBJECTIFS.map(o => {
+    const n = joursTenus(o.depuis);
+    const duree = n === 0 ? "aujourd'hui" : `${n} jour${n > 1 ? 's' : ''}`;
+    return `<div class="objitem${o.tenu ? '' : ' rompu'}">
+      <span class="objico">${icone(o.genre, 18)}</span>
+      <div class="objtxt">
+        <b>${esc(o.quoi)}</b>
+        <span>${o.tenu ? `tenu · ${duree}` : `rompu · ${duree} avant`}${
+          o.reprises ? ` · ${o.reprises}<sup>e</sup> reprise` : ''}</span>
+      </div>
+      <button class="repdel" data-delobj="${o.id}" title="Retirer" aria-label="Retirer ${esc(o.quoi)}">×</button>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 let GESTES = [];
 
 function gestesMarkup() {
   if (!GESTES.length) return '';
-  return `<div class="gestes">${GESTES.map(g => g.type === 'repere'
+  return `<div class="gestes">${GESTES.map(g => g.type === 'objectif'
+    ? `<div class="geste objectif${g.tenu ? '' : ' rompu'}">
+         <span class="gicone">${icone(g.genre, 20)}</span>
+         <div class="gtxt">
+           <b>${g.nouveau ? 'Objectif noté' : g.tenu ? 'Ça repart' : 'Rompu'}</b>
+           <span>${esc(g.quoi)}</span>
+         </div>
+         <button class="gbtn" data-clip="1">voir</button>
+       </div>`
+    : g.type === 'note'
+    ? `<div class="geste note">
+         <span class="gicone">${icone('pensee', 20)}</span>
+         <div class="gtxt">
+           <b>Rangé dans tes notes</b>
+           ${/* Le compte de signes, parce que c'est la seule chose qui dit
+                 ce qui vient d'etre range sans le recopier dans le fil. */''}
+           <span>${g.taille} signes${g.jour ? ` · ${fmtDay(g.jour)}` : g.quand ? ` · ${esc(g.quand)}` : ' · sans date'}
+             — ne compte pas comme une journée écrite</span>
+         </div>
+         ${g.jour ? `<button class="gbtn" data-voir="${g.jour}">voir</button>` : ''}
+       </div>`
+    : g.type === 'repere'
     ? `<div class="geste repere">
          <span class="gicone">${icone(g.theme, 20)}</span>
          <div class="gtxt">
@@ -479,6 +573,13 @@ function bindGestes(th) {
     }
     const m = e.target.closest('[data-motifs]') || e.target.closest('[data-motif]');
     if (m) { view = 'settings'; syncNav(); return renderSettings(); }
+    // « voir » sur un objectif ouvre le trombone, pas une autre vue : ce qu'on
+    // vient de poser est a deux centimetres, sous le composeur.
+    const c = e.target.closest('[data-clip]');
+    if (c) {
+      const pop = $('#objpop');
+      if (pop) { pop.hidden = false; $('#clip')?.setAttribute('aria-expanded', 'true'); }
+    }
   });
 }
 
@@ -556,7 +657,20 @@ async function send() {
       // Un geste arrive pendant que le compagnon parle : la marque apparaît
       // en même temps que la phrase qui la mentionne, pas plusieurs secondes
       // après, où elle aurait l'air d'être tombée toute seule.
-      if (ev === 'geste') { GESTES.push(data); dessinerGestes(); return; }
+      if (ev === 'geste') {
+        GESTES.push(data);
+        // Le trombone suit le geste immediatement : voir apparaitre « objectif
+        // note » et trouver un trombone vide en cliquant serait une panne.
+        if (data.type === 'objectif') {
+          OBJECTIFS = [data, ...OBJECTIFS.filter(o => o.id !== data.id)]
+            .sort((a, b) => (a.tenu - b.tenu) || b.depuis.localeCompare(a.depuis));
+          const clip = $('#clip'), pop = $('#objpop');
+          if (clip) clip.hidden = false;
+          if (pop) pop.innerHTML = objectifsMarkup();
+        }
+        dessinerGestes();
+        return;
+      }
 
       if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
 
@@ -643,7 +757,7 @@ function drawEchoes() {
  */
 function renderNoData(why) {
   $('#view').innerHTML = `<div class="card" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
-    <div style="width:84px;height:84px;flex:none">${petMarkup(S.settings)}</div>
+    <div style="width:84px;height:84px;flex:none">${petMarkup(S.settings, S.ambiance)}</div>
     <div style="flex:1;min-width:240px">
       <h2 style="margin:0 0 5px">Rien à afficher</h2>
       <p class="sub" style="margin:0 0 13px">${esc(why)}</p>
@@ -681,6 +795,36 @@ let FRISE_CADRE = 'journal';
 let CUMMODE = 'etalon';
 let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
+/*
+ * LA FENETRE DU CUMUL.
+ *
+ * Le cumul est une somme depuis le premier jour. Sur quatre ans, sa pente dit
+ * une chose vraie mais lointaine, et la derniere saison y est invisible : elle
+ * fait trois pixels au bout d'une courbe qui en fait mille.
+ *
+ * Une fenetre repart de zero a son debut. « Sur les trente derniers jours, ou
+ * est-ce que je suis par rapport a mon etalon » est une question differente de
+ * « sur quatre ans », et c'est celle qu'on se pose le plus souvent.
+ *
+ * La soustraction est exacte : cumul[i] - cumul[i0-1] EST la somme sur la
+ * fenetre, parce que c'est la meme somme. On ne recalcule rien cote navigateur
+ * -- deux arithmetiques pour le meme chiffre finissent toujours par diverger.
+ *
+ * Les bornes sont en JOURS CALENDAIRES, pas en indices : « 30 j » doit vouloir
+ * dire trente jours, pas trente journees ecrites, sinon la fenetre s'etire
+ * silencieusement sur six mois quand on a peu ecrit.
+ */
+const FENETRES = [['7j', 7, '7 j'], ['30j', 30, '30 j'], ['365j', 365, '1 an'], ['tout', null, 'tout']];
+let CUMWIN = 'tout';
+
+function fenetreCumul() {
+  const f = FENETRES.find(x => x[0] === CUMWIN) ?? FENETRES.at(-1);
+  if (f[1] === null) return { i0: 0, jours: null };
+  const depuis = dayShift(SERIES.date.at(-1), -(f[1] - 1));
+  const i0 = SERIES.date.findIndex(d => d >= depuis);
+  return { i0: i0 < 0 ? SERIES.date.length - 1 : i0, jours: f[1] };
+}
+
 async function renderYear(year) {
   if (!S.stats.days) return renderNoData('Les courbes ont besoin de journées notées.');
   year = year ?? Number(S.stats.lastDate.slice(0, 4));
@@ -692,7 +836,11 @@ async function renderYear(year) {
   const eta = SERIES.etalon;
 
   const cumKey = CUMMODE === 'etalon' ? 'cumEtalon' : 'cumDeltaRef';
-  const drift = SERIES[cumKey][SERIES[cumKey].length - 1] / SERIES[cumKey].length;
+  const { i0: CUM0 } = fenetreCumul();
+  const base = CUM0 > 0 ? SERIES[cumKey][CUM0 - 1] : 0;
+  const cumX = SERIES.date.slice(CUM0);
+  const cumY = SERIES[cumKey].slice(CUM0).map(v => Math.round((v - base) * 1000) / 1000);
+  const drift = cumY.length ? cumY.at(-1) / cumY.length : 0;
 
   $('#view').innerHTML = `
     <div class="stack">
@@ -731,74 +879,64 @@ async function renderYear(year) {
       </div>
 
       <div class="card">
-        <div class="cardhead">
+        ${/* Une seule rangee de commandes. Il y en avait trois empilees :
+              la fenetre, le cadre, puis le mode et l'etalon -- soixante pixels
+              de hauteur avant d'atteindre la courbe qu'on est venu voir. */''}
+        <div class="cardhead cumhead">
           <h2>Cumul</h2>
-          ${FRISE?.etendue?.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
-            ? `<div class="centerpick" style="margin-left:auto">
+          <div class="centerpick">
+            ${FENETRES.map(([id, , lib]) => `<button data-win="${id}"
+              aria-pressed="${CUMWIN === id}">${lib}</button>`).join('')}
+          </div>
+          ${/* « vie » n'a de sens que sur tout : une fenetre de sept jours n'a
+                pas d'avant-journal a montrer. */''}
+          ${CUMWIN === 'tout' && FRISE?.etendue?.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
+            ? `<div class="centerpick">
                  <button data-cadre="journal" aria-pressed="${FRISE_CADRE === 'journal'}">journal</button>
                  <button data-cadre="vie" aria-pressed="${FRISE_CADRE === 'vie'}">vie</button>
                </div>` : ''}
-        </div>
-        <div class="centerpick">
-          <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}">étalon fixe<span class="drift mono">${eta}</span></button>
-          <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}">référence glissante<span class="drift">365 j</span></button>
+          <div class="centerpick" style="margin-left:auto">
+            <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}"
+              title="Somme des écarts à un étalon fixe.">étalon</button>
+            <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}"
+              title="Somme des écarts à la médiane glissante des 365 jours précédents.">glissante</button>
+          </div>
           <label class="field etalonfield"
-                 title="Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}. Dérive de la courbe : ${drift > 0 ? '+' : ''}${drift.toFixed(3)}/jour.">
-            <span>étalon</span>
-            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}">
+                 title="Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}. Dérive sur la fenêtre : ${drift > 0 ? '+' : ''}${drift.toFixed(3)}/jour.">
+            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}"
+                   aria-label="étalon">
           </label>
         </div>
-        ${lineChart(SERIES.date, SERIES[cumKey], { height: 250, events: SERIES.events, colore: true })}
+        ${lineChart(cumX, cumY, { height: 250, events: SERIES.events, colore: true })}
 
         ${/* La frise se pose sous la courbe et partage EXACTEMENT son axe : les
               marges de lineChart, à l'unité près. Un repère tombe alors sur
               l'inflexion qu'il explique, ce qu'aucune légende n'aurait obtenu. */''}
-        ${FRISE && (FRISE.points.length || FRISE.periodes.length) ? `
-          <div class="frisewrap" id="frisewrap">
-            ${friseSVG(FRISE, icone, {
-              mg: 46, md: 12,
-              domaine: FRISE_CADRE === 'vie' ? FRISE.etendue
-                     : { debut: SERIES.date[0], fin: SERIES.date.at(-1) }
-            })}
-            <div class="frisetip" id="frisetip" hidden></div>
-          </div>` : ''}
+        ${/* Le cadre ne s'ouvre que si la frise a quelque chose a dessiner :
+              sous une fenetre de sept jours, elle peut etre vide. */''}
+        ${(() => {
+          const svg = FRISE ? friseSVG(FRISE, icone, {
+            mg: 46, md: 12,
+            domaine: (CUMWIN === 'tout' && FRISE_CADRE === 'vie') ? FRISE.etendue
+                   : { debut: cumX[0], fin: cumX.at(-1) }
+          }) : '';
+          return svg ? `<div class="frisewrap" id="frisewrap">${svg}
+            <div class="frisetip" id="frisetip" hidden></div></div>` : '';
+        })()}
       </div>
-
-      ${carnetCardMarkup({
-        notes: CARNET.notes ?? [],
-        titre: 'Ton carnet',
-        vide: "Rien encore. Tu peux déposer ici des notes prises ailleurs — datées ou non."
-      })}
 
       <div class="card">
         <div class="cardhead">
           <h2>Repères</h2>
-          <label class="naissance" title="Donne une origine à la frise. Aucun âge n'est calculé.">
-            <span>naissance</span>
-            <input type="date" id="naissance" min="1900-01-01" max="${S.today}"
-                   value="${S.settings.naissance ?? ''}">
-          </label>
+          <button class="repdatebtn" id="naissbtn" aria-expanded="false"
+                  title="Donne une origine à la frise. Aucun âge n'est calculé."
+                  style="margin-left:auto;font-size:12.5px;padding:7px 11px">
+            <span class="fl">naissance</span>${S.settings.naissance ? fmtDay(S.settings.naissance) : '—'}
+          </button>
         </div>
-        <form id="evform" class="repform">
-          <span class="repapercu" id="evicone">${icone('jalon', 22)}</span>
-          <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
-                 placeholder="changement de boulot, déménagement…">
-          <input type="date" id="evdate" required min="1900-01-01" max="${S.today}" value="${S.today}">
-          <label class="evduree" title="Deux dates : une période — une addiction, un contrat, une relation.">
-            <input type="checkbox" id="evPeriode"> ça a duré</label>
-          <input type="date" id="evfin" min="1900-01-01" max="${S.today}" hidden>
-          <span class="evteintes" id="evteintes" role="group"
-                title="La teinte ne touche que le contour : le remplissage vient de tes journées.">
-            <button type="button" class="evt" data-teinte="" aria-pressed="true" title="sans couleur"></button>
-            ${TEINTES_DECLAREES.map(t => `<button type="button" class="evt" data-teinte="${t}"
-              aria-pressed="false" style="--t:${t}" title="teinte ${t}°"></button>`).join('')}
-          </span>
-          <button class="btn primary" type="submit">Poser</button>
-        </form>
+        ${composeurMarkup()}
         ${SERIES.events.length
-          ? `<details class="friseliste"><summary>la liste</summary>
-               <div class="frise">${friseMarkup(SERIES.events)}</div>
-             </details>`
+          ? `<div class="frise">${friseMarkup(SERIES.events)}</div>`
           : `<p class="sub" style="margin:0">Aucun repère. Le compagnon en pose aussi de lui-même.</p>`}
       </div>
     </div>`;
@@ -808,16 +946,12 @@ async function renderYear(year) {
     if (y) return renderYear(Number(y.dataset.year));
     const c = e.target.closest('[data-cum]');
     if (c) { CUMMODE = c.dataset.cum; return renderYear(year); }
+    const w = e.target.closest('[data-win]');
+    if (w) { CUMWIN = w.dataset.win; return renderYear(year); }
     const dl = e.target.closest('[data-daily]');
     if (dl) { DAILYALL = dl.dataset.daily === 'all'; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
     if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
-    const del = e.target.closest('[data-delev]');
-    if (del) {
-      const { events } = await api('/api/events', { delete: Number(del.dataset.delev) });
-      SERIES.events = events;
-      return renderYear(year);
-    }
     const cad = e.target.closest('[data-cadre]');
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
     const dcn = e.target.closest('[data-delcn]');
@@ -831,16 +965,8 @@ async function renderYear(year) {
     if (gto) { view = 'mirror'; syncNav(); return renderMirror(gto.dataset.goto); }
   };
 
-  wireCarnet(async () => { CARNET = await api('/api/carnet'); renderYear(year); });
   wireFrise();
-
-  $('#naissance')?.addEventListener('change', async e => {
-    try {
-      await saveSettings({ naissance: e.target.value || null });
-      FRISE = null;
-      toast(e.target.value ? 'Naissance enregistrée' : 'Naissance retirée');
-    } catch (err) { toast(err.message); e.target.value = S.settings.naissance ?? ''; }
-  });
+  wireReperes(year);
 
   $('#etalon').onchange = async e => {
     const v = Number(e.target.value);
@@ -851,48 +977,251 @@ async function renderYear(year) {
     renderYear(year);
   };
 
-  // L'icône se décide pendant la frappe. C'est la raison d'être du module
-  // partagé : le classement tourne dans le navigateur, sans aller-retour, et
-  // c'est exactement celui que le serveur appliquera.
+}
+
+/**
+ * Le composeur, câblé.
+ *
+ * Il se redessine à chaque changement d'état plutôt que de muter le DOM :
+ * l'icône, la couleur, les dates et le libellé des boutons dépendent tous du
+ * même objet, et six mutations coordonnées finissent toujours par se
+ * désynchroniser sur un chemin qu'on n'a pas prévu.
+ *
+ * Le libellé, lui, est préservé à la main avant chaque redessin : il vit dans
+ * un champ non contrôlé, et le perdre en ouvrant le calendrier serait la pire
+ * des surprises.
+ */
+function wireReperes(year) {
+  const carte = $('#evform')?.closest('.card');
+  if (!carte) return;
+
+  const saisi = () => { const c = $('#evlabel'); if (c && EV) EV.label = c.value; };
+  /*
+   * `lire` = faut-il reprendre le libelle du champ avant de redessiner ?
+   *
+   * Presque toujours oui : le champ n'est pas controle, et le perdre en
+   * ouvrant le calendrier serait la pire des surprises. Mais quand on vient de
+   * remplacer EV en entier -- ouvrir un repere existant -- le champ contient
+   * encore l'ancien etat, et le relire ecrasait le libelle qu'on venait de
+   * charger. Le champ s'ouvrait vide sur le repere qu'on voulait corriger.
+   */
+  const redessiner = (lire = true) => {
+    if (lire) saisi();
+    $('#evform').outerHTML = composeurMarkup();
+    wireReperes(year);
+    const c = $('#evlabel');
+    if (c && !POP) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); }
+  };
+
+  EV ??= evVide();
+
+  // L'icône se décide pendant la frappe, tant qu'on ne l'a pas choisie à la
+  // main. C'est la raison d'être du module partagé : le classement tourne dans
+  // le navigateur, et c'est exactement celui que le serveur appliquera.
   const champ = $('#evlabel');
   champ.oninput = () => {
+    EV.label = champ.value;
+    if (EV.theme != null) return;                 // choisi à la main : on n'y touche plus
     const t = themeDe(champ.value);
-    $('#evicone').innerHTML = icone(t, 22);
-    $('#evicone').dataset.theme = t;
-    $('#evicone').title = NOMS[t] ?? 'jalon';
+    const ic = $('#evicone');
+    ic.innerHTML = icone(t, 22);
+    ic.dataset.theme = t;
   };
 
-  // « ça a duré » revele la seconde date : un repere ponctuel et une periode ne
-  // sont pas deux objets differents, seulement une borne de plus.
-  $('#evPeriode').onchange = e => {
-    const f = $('#evfin');
-    f.hidden = !e.target.checked;
-    if (e.target.checked && !f.value) f.value = S.today;
+  $('#evicone').onclick = () => { POP = POP === 'app' ? null : 'app'; redessiner(); };
+
+  $('#evdate').onclick = () => {
+    if (POP === 'date') { POP = null; return redessiner(); }
+    ouvrirCal('date', { debut: EV.debut, fin: EV.fin, plage: !!EV.fin,
+                        min: '1900-01-01', max: S.today });
+    redessiner();
   };
 
-  let TEINTE = null;
-  $('#evteintes').onclick = e => {
-    const b = e.target.closest('[data-teinte]');
-    if (!b) return;
-    TEINTE = b.dataset.teinte ? Number(b.dataset.teinte) : null;
-    $('#evteintes').querySelectorAll('.evt').forEach(x =>
-      x.setAttribute('aria-pressed', String(x === b)));
+  $('#naissbtn').onclick = () => {
+    if (POP === 'naiss') { POP = null; return redessiner(); }
+    ouvrirCal('naiss', { debut: S.settings.naissance ?? '1990-01-01', fin: null,
+                         plage: false, min: '1900-01-01', max: S.today });
+    redessiner();
   };
+  // Le panneau de naissance vit hors du formulaire : on le pose à côté du bouton.
+  if (POP === 'naiss') {
+    const anc = $('#naissbtn');
+    anc.parentElement.style.position ||= 'relative';
+    anc.insertAdjacentHTML('afterend', calPopMarkup(false).replace('class="pop"', 'class="pop droite"'));
+  }
+
+  carte.onclick = async e => {
+    const t = e.target;
+
+    // --- le calendrier ---
+    const c = t.closest('[data-cal]');
+    if (c) {
+      CAL = calClic(CAL, c.dataset);
+      if (POP === 'naiss') {
+        if (c.dataset.cal === 'jour') {
+          POP = null;
+          try {
+            await saveSettings({ naissance: CAL.debut });
+            FRISE = null;
+            toast('Naissance enregistrée');
+            return renderYear(year);
+          } catch (err) { toast(err.message); }
+        }
+      } else if (POP === 'date') {
+        EV.debut = CAL.debut; EV.fin = CAL.plage ? CAL.fin : null;
+        // Une plage se ferme quand elle est complète ; un jour, tout de suite.
+        if (c.dataset.cal === 'jour' && (!CAL.plage || CAL.fin)) POP = null;
+      }
+      return redessiner();
+    }
+    const dur = t.closest('[data-plage]');
+    if (dur) {
+      CAL.plage = !CAL.plage;
+      if (!CAL.plage) { CAL.fin = null; EV.fin = null; }
+      return redessiner();
+    }
+
+    // --- l'apparence ---
+    const ic = t.closest('[data-ico]');
+    if (ic) { EV.theme = ic.dataset.ico || null; return redessiner(); }
+    const te = t.closest('.evt[data-teinte]');
+    if (te) { EV.teinte = te.dataset.teinte ? Number(te.dataset.teinte) : null; return redessiner(); }
+
+    // --- la liste ---
+    const del = t.closest('[data-delev]');
+    if (del) {
+      const id = Number(del.dataset.delev);
+      const { events } = await api('/api/events', { delete: id });
+      SERIES.events = events;
+      if (EV?.id === id) EV = null;
+      FRISE = null;
+      return renderYear(year);
+    }
+    const ed = t.closest('[data-edev]');
+    if (ed) {
+      const ev = SERIES.events.find(x => x.id === Number(ed.dataset.edev));
+      if (!ev) return;
+      // Une période ouverte n'a pas de fin en base : on ne s'en invente pas une.
+      EV = { id: ev.id, label: ev.label, theme: ev.theme ?? null, teinte: ev.teinte ?? null,
+             debut: ev.date, fin: ev.fin ?? null };
+      POP = null;
+      return redessiner(false);
+    }
+  };
+
+  $('#evannul')?.addEventListener('click', () => { EV = null; POP = null; redessiner(false); });
 
   $('#evform').onsubmit = async e => {
     e.preventDefault();
-    const date = $('#evdate').value, label = champ.value.trim();
-    if (!date || !label) return;
-    const fin = $('#evPeriode').checked ? $('#evfin').value : null;
+    saisi();
+    const label = (EV.label ?? '').trim();
+    if (!label || !EV.debut) return;
     try {
-      const { events } = await api('/api/events', { date, fin, label, theme: themeDe(label), teinte: TEINTE });
+      const { events } = await api('/api/events', {
+        id: EV.id ?? undefined, date: EV.debut, fin: EV.fin ?? null, label,
+        // `theme` reste NULL tant qu'on ne l'a pas choisi : la colonne dit
+        // « NULL = deduit du libelle ». Y ecrire le theme deduit fige l'icone,
+        // et renommer le repere ne la ferait plus suivre.
+        theme: EV.theme, teinte: EV.teinte
+      });
       SERIES.events = events;
-      champ.value = '';
-      $('#evPeriode').checked = false; $('#evfin').hidden = true;
+      const quoi = EV.id ? 'Repère modifié' : EV.fin ? 'Période posée' : 'Repère posé';
+      EV = null; POP = null; FRISE = null;
       await renderYear(year);
-      toast(fin ? 'Période posée' : 'Repère posé');
+      toast(quoi);
     } catch (err) { toast(err.message); }
   };
+}
+
+/* ===================== le composeur de repères =====================
+ *
+ * UN SEUL COMPOSEUR, QUI POSE ET QUI MODIFIE.
+ *
+ * Il y en avait un pour poser, et rien pour modifier : une date fausse se
+ * corrigeait en supprimant le repère et en le reposant. Un repère mal daté
+ * déplace toute une lecture, et c'est précisément celui qu'on veut corriger.
+ *
+ * Le formulaire tenait sur sept éléments en ligne — icône, libellé, date, case
+ * « ça a duré », seconde date, six pastilles, bouton. Il en reste quatre :
+ * l'apparence est passée sous l'icône, la durée sous la date, là où on les
+ * cherche. Ce n'est pas du rangement : une commande visible en permanence dit
+ * qu'on aura à s'en servir à chaque fois, et neuf fois sur dix on n'a rien à
+ * changer ni à l'icône ni à la couleur.
+ */
+
+/** null = on pose ; un objet = on modifie ce repère-là. */
+let EV = null;
+/** 'date' | 'app' | 'naiss' | null — un seul panneau ouvert à la fois. */
+let POP = null;
+let CAL = null;
+
+const evVide = () => ({ id: null, label: '', theme: null, teinte: null,
+                        debut: S.today, fin: null, plage: false });
+
+/** Le thème effectif : celui qu'on a choisi, sinon celui que le libellé dicte. */
+const evTheme = e => e.theme ?? themeDe(e.label);
+
+function ouvrirCal(cle, { debut, fin, plage, min, max }) {
+  POP = cle;
+  CAL = { vue: 'jour', curseur: moisDe(debut, S.today.slice(0, 7)),
+          debut, fin, plage, min, max };
+}
+
+/** « 10 mai 2020 → 20 nov 2022 », ou « 27 août 2026 ». */
+const quandLisible = e => e.fin ? `${fmtDay(e.debut)} <span class="fl">→</span> ${fmtDay(e.fin)}`
+                                : fmtDay(e.debut);
+
+function calPopMarkup(avecDuree) {
+  return `<div class="pop" id="calpop">
+    ${calMarkup({ ...CAL, aujourdhui: S.today })}
+    ${avecDuree ? `<div class="calpied">
+      ${/* Le pied dit l'etat, pas la fonction : « du debut a la fin » ne
+            distingue pas une plage commencee d'une plage finie, et c'est
+            exactement ce qu'on a besoin de savoir a ce moment-la. */''}
+      <span>${!CAL.plage ? 'un jour'
+              : !CAL.fin ? "clique l'autre borne"
+              : `${joursEntre(CAL.debut, CAL.fin)} jours`}</span>
+      <button type="button" class="caltog" data-plage aria-pressed="${CAL.plage}"
+              title="Une addiction, un contrat, une relation : deux bornes au lieu d'une.">ça a duré</button>
+    </div>` : ''}
+  </div>`;
+}
+
+function composeurMarkup() {
+  const e = EV ?? evVide();
+  const th = evTheme(e);
+  return `<form id="evform" class="repform">
+    <span class="anc">
+      <button type="button" class="repapercu" id="evicone" data-theme="${th}"
+              ${e.teinte != null ? `data-teinte style="--t:${e.teinte}"` : ''}
+              aria-expanded="${POP === 'app'}" title="Icône et couleur">${icone(th, 22)}</button>
+      ${POP === 'app' ? `<div class="pop apparence" id="apppop">
+        <div class="appgrid">
+          ${Object.keys(ICONES).map(t => `<button type="button" data-ico="${t}"
+            aria-pressed="${t === th}" title="${NOMS[t] ?? t}">${icone(t, 18)}</button>`).join('')}
+        </div>
+        <div class="evteintes" style="margin-top:9px;justify-content:center"
+             title="La teinte ne touche que le contour : le remplissage vient de tes journées.">
+          <button type="button" class="evt" data-teinte="" aria-pressed="${e.teinte == null}" title="sans couleur"></button>
+          ${TEINTES_DECLAREES.map(t => `<button type="button" class="evt" data-teinte="${t}"
+            aria-pressed="${e.teinte === t}" style="--t:${t}" title="teinte ${t}°"></button>`).join('')}
+        </div>
+        <button type="button" class="appauto" data-ico="">choisir d'après le libellé</button>
+      </div>` : ''}
+    </span>
+
+    <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
+           value="${esc(e.label)}" placeholder="changement de boulot, déménagement…">
+
+    <span class="anc">
+      <button type="button" class="repdatebtn" id="evdate" aria-expanded="${POP === 'date'}"
+        >${quandLisible(e)}</button>
+      ${POP === 'date' ? calPopMarkup(true) : ''}
+    </span>
+
+    <button class="btn primary" type="submit">${e.id ? 'Enregistrer' : 'Poser'}</button>
+    ${e.id ? `<button type="button" class="btn" id="evannul">Annuler</button>` : ''}
+  </form>`;
 }
 
 /**
@@ -915,9 +1244,15 @@ function friseMarkup(events) {
       <div class="frisetitre"><span class="mono">${an}</span><i></i><span class="faint">${liste.length}</span></div>
       ${liste.map(ev => {
         const t = ev.theme ?? themeDe(ev.label);
-        return `<div class="repligne" data-theme="${t}">
-          <span class="ricone-box">${icone(t, 18)}</span>
-          <span class="repdate mono faint">${Number(ev.date.slice(8))} ${MONTHS_FR[Number(ev.date.slice(5, 7)) - 1].toLowerCase()}</span>
+        const jm = d => `${Number(d.slice(8))} ${MONTHS_FR[Number(d.slice(5, 7)) - 1].toLowerCase()}`;
+        // Une période affiche ses DEUX bornes : la liste en montrait une seule,
+        // et rien ne distinguait un instant d'une addiction de trois ans.
+        const quand = ev.fin ? `${jm(ev.date)} → ${jm(ev.fin)}` : jm(ev.date);
+        return `<div class="repligne${EV?.id === ev.id ? ' ouvert' : ''}" data-theme="${t}"
+                     data-edev="${ev.id}" role="button" tabindex="0"
+                     title="Modifier ce repère">
+          <span class="ricone-box"${ev.teinte != null ? ` style="color:hsl(${ev.teinte} 62% 62%)"` : ''}>${icone(t, 18)}</span>
+          <span class="repdate mono faint">${quand}</span>
           <span class="replabel">${esc(ev.label)}</span>
           <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">×</button>
         </div>`;
@@ -999,51 +1334,36 @@ function gridMarkup(grid) {
   </table>`;
 }
 
-/* ========================= le carnet ==========================
+/* ==================== les notes, en lecture ====================
  *
- * Les notes prises ailleurs et apportees ici. Un seul composeur, rendu a
- * plusieurs endroits : le Miroir sur une journee ouverte, l'Annee sur
- * l'ensemble. Jamais duplique -- deux formulaires aux memes identifiants se
- * branchent l'un sur l'autre sans qu'aucune erreur ne le signale.
+ * IL N'Y A PLUS DE FORMULAIRE.
  *
- * Le mot « note » n'apparait sur aucun bouton : dans cette application, une
- * note est le chiffre de 0 a 10. Ici on dit « note apportee ».
+ * Il y en avait un, replie, dans trois vues : « + une note apportee », une
+ * zone de texte, trois boutons radio pour dire de quand ca parle. Personne
+ * n'ouvre un formulaire pour deposer un souvenir. On le raconte.
+ *
+ * Les notes arrivent donc par la conversation : on colle son texte, le
+ * compagnon reconnait que ce n'est pas la journee du jour et le range avec
+ * ranger_notes. Ce qui est stocke reste le texte de la personne, mot pour mot
+ * -- le compagnon declenche le rangement, il ne dicte jamais ce qui est range.
+ *
+ * Ce qui reste ici : de quoi RELIRE ce qu'il a rangé, et le retirer.
  */
 
-let CARNET_OUVERT = false;      // le formulaire est replie par defaut
-
-function carnetCardMarkup({ notes = [], jour = null, titre = 'Notes apportées', vide = null } = {}) {
-  const liste = notes.length
-    ? `<div class="cnliste">${notes.map(n => carnetItemMarkup(n)).join('')}</div>`
-    : `<p class="sub" style="margin:0">${esc(vide ?? "Rien d'ajouté ici.")}</p>`;
-
+/**
+ * Les notes rattachées à la journée ouverte, en lecture.
+ *
+ * Rien si elle n'en porte aucune — une carte vide qui dit « rien ici » sur
+ * quatre vues sur cinq apprend seulement qu'il existe un endroit où il ne se
+ * passe rien.
+ */
+function notesDuJourMarkup(notes) {
+  if (!notes?.length) return '';
   return `<div class="card carnetcard">
     <div class="cardhead">
-      <h2 title="Des notes prises ailleurs. Elles nourrissent le compagnon et les thèmes, et ne comptent jamais comme des journées écrites.">${esc(titre)}</h2>
-      <button class="btn ghost cnadd" id="cnOuvrir" style="margin-left:auto">+ une note apportée</button>
+      <h2 title="Des notes prises ailleurs, rangées depuis la conversation. Elles ne comptent jamais comme des journées écrites.">Notes rangées ici</h2>
     </div>
-
-    <form id="cnForm" class="carnetform" ${CARNET_OUVERT ? '' : 'hidden'}>
-      <textarea id="cnTexte" required rows="4" maxlength="4000"
-                placeholder="tes mots, tels quels"></textarea>
-      <div class="cnrow" id="cnRow">
-        ${jour ? `<label><input type="radio" name="cnq" value="jour" checked>
-          <span>le ${fmtDay(jour)}</span></label>` : ''}
-        <label><input type="radio" name="cnq" value="autre" ${jour ? '' : 'checked'}>
-          <span>une autre date</span>
-          <input type="date" id="cnJour" min="1900-01-01" max="${S.today}" value="${jour ?? S.today}"></label>
-        <label><input type="radio" name="cnq" value="libre">
-          <span>je ne sais pas</span>
-          <input type="text" id="cnQuand" maxlength="60" placeholder="vers 2019…"></label>
-      </div>
-      <p class="sub cnhint" id="cnHint"></p>
-      <div class="cnactions">
-        <button class="btn primary" type="submit">Ajouter</button>
-        <button class="btn" type="button" id="cnCancel">Annuler</button>
-      </div>
-    </form>
-
-    ${liste}
+    <div class="cnliste">${notes.map(carnetItemMarkup).join('')}</div>
   </div>`;
 }
 
@@ -1072,68 +1392,19 @@ function carnetItemMarkup(n) {
   </div>`;
 }
 
-/**
- * Branche le composeur. `apres` est rappele apres chaque ecriture -- c'est la
- * vue qui decide quoi redessiner, pas le carnet.
- */
-function wireCarnet(apres) {
-  const form = $('#cnForm');
-  if (!form) return;
-  const ouvrir = $('#cnOuvrir');
-  const texte = $('#cnTexte');
-
-  const choix = () => document.querySelector('input[name="cnq"]:checked')?.value ?? 'autre';
-
-  // L'indice porte la regle du produit a l'endroit exact ou le choix se fait.
-  // La phrase « ne compte pas comme une journée écrite » n'est pas décorative :
-  // c'est la seule façon de comprendre pourquoi le compte de journées n'a pas
-  // bougé après avoir collé quinze notes.
-  const indice = () => {
-    const h = $('#cnHint');
-    if (!h) return;
-    const c = choix();
-    if (c === 'libre') {
-      h.textContent = "Sans date. Elle n'entre dans aucun compte de journées.";
-    } else {
-      const d = c === 'jour' ? (form.dataset.jour || S.today) : ($('#cnJour')?.value || S.today);
-      h.textContent = `Sur le ${fmtDay(d)}. Elle ne compte pas comme une journée écrite.`;
-    }
-  };
-
-  ouvrir.onclick = () => {
-    CARNET_OUVERT = !CARNET_OUVERT;
-    form.hidden = !CARNET_OUVERT;
-    if (CARNET_OUVERT) { texte.focus(); indice(); }
-  };
-  $('#cnCancel').onclick = () => { CARNET_OUVERT = false; form.hidden = true; };
-  form.querySelectorAll('input[name="cnq"]').forEach(r => { r.onchange = indice; });
-  $('#cnJour')?.addEventListener('change', indice);
-  indice();
-
-  form.onsubmit = async e => {
-    e.preventDefault();
-    const t = texte.value.trim();
-    if (!t) return;
-    const c = choix();
-    const corps = { texte: t };
-    if (c === 'jour') corps.jour = form.dataset.jour || S.today;
-    else if (c === 'autre') corps.jour = $('#cnJour').value;
-    else corps.quand = $('#cnQuand').value.trim();
-
-    try {
-      await api('/api/carnet', corps);
-      texte.value = '';
-      CARNET_OUVERT = false;
-      toast('Note ajoutée à ton carnet');
-      await apres?.();
-    } catch (err) { toast(err.message); }
-  };
-}
-
 /* ============================= vue : miroir ============================= */
 
 let MIRROR_DATE = null;
 let MIRROR_CARNET = null;   // les notes du jour ouvert, pour le message de suppression
+/*
+ * Le curseur du calendrier, distinct du jour ouvert.
+ *
+ * L'ancien calendrier naviguait avec des liens vers le 1er du mois voisin : on
+ * ne pouvait pas regarder mars sans ouvrir le 1er mars. Feuilleter et choisir
+ * sont deux gestes differents, et les confondre fait perdre la journee qu'on
+ * etait en train de lire.
+ */
+let MIR_CAL = { vue: 'jour', curseur: null };
 
 /**
  * Surligne les termes qui ont fait matcher. Montrer POURQUOI ca ressort.
@@ -1206,14 +1477,233 @@ function termesMarkup(it) {
     .join(' · ');
 }
 
-async function renderMirror(date) {
+/* ===================== la lecture =====================
+ *
+ * CE QUE LE MIROIR MONTRE MAINTENANT.
+ *
+ * Il montrait une journee : son texte, sa note, celles qui lui ressemblaient.
+ * C'etait utile et ca reste la -- mais ce n'etait pas une vue d'ensemble, et
+ * une vue d'ensemble est exactement ce qu'un journal de quatre ans ne donne
+ * jamais tout seul.
+ *
+ * La lecture est faite par le compagnon, sur tout le corpus, et elle n'est PAS
+ * une carte de mots. La carte compte des co-occurrences : elle sait dire que
+ * « fatigue » et « boulot » tombent la meme semaine, et elle s'arrete la. Un
+ * fonctionnement comme « les remontees ne tiennent pas trois jours » n'a aucun
+ * mot en commun d'une occurrence a l'autre.
+ *
+ * TROIS FENETRES, UN CURSEUR. Court, moyen, long : la meme question posee a
+ * trois distances. Ce qui domine le mois n'est pas ce qui structure quatre ans,
+ * et lire l'un pour l'autre est l'erreur qu'une seule fenetre garantit.
+ */
+
+let MIR_HORIZON = 'moyen';
+let MIR_THEME = null;          // le theme deplie
+let LECTURE = null;
+let LECTURE_EN_COURS = false;
+
+const HORIZONS_UI = [['court', 'court terme'], ['moyen', 'moyen terme'], ['long', 'long terme']];
+
+/** Une barre par période. Petite, sans axe : c'est une forme, pas un graphe. */
+function serieMarkup(serie) {
+  if (!serie?.length) return '';
+  return `<span class="tserie" aria-hidden="true">${serie.map(p =>
+    `<i style="height:${[2, 34, 66, 100][p.valeur]}%" title="${esc(p.periode)} · ${p.valeur}/3"></i>`
+  ).join('')}</span>`;
+}
+
+function themeMarkup(t) {
+  const ouvert = MIR_THEME === t.nom;
+  return `<div class="theme${ouvert ? ' ouvert' : ''}" data-theme-nom="${esc(t.nom)}">
+    <button class="thead" aria-expanded="${ouvert}">
+      <span class="tpuce" data-i="${t.intensite}"></span>
+      <span class="tnom">${esc(t.nom)}</span>
+      ${serieMarkup(t.serie)}
+    </button>
+    ${ouvert ? `<div class="tcorps">
+      <p class="tquoi">${esc(t.quoi)}</p>
+      <div class="tpreuves">${t.preuves.map(p => `<button class="tpreuve" data-jour="${p.date}">
+        <span class="mono">${fmtDay(p.date)}</span>
+        <span>${esc(p.extrait)}</span>
+      </button>`).join('')}</div>
+      ${t.liens?.length ? `<p class="tliens">avec ${t.liens.map(l =>
+        `<button data-theme-aller="${esc(l)}">${esc(l)}</button>`).join(' · ')}</p>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+
+/**
+ * La carte des thèmes.
+ *
+ * Des nœuds sur un cercle, reliés par ce que le compagnon a lié. Un cercle et
+ * pas un placement calculé : sur trois à six nœuds, une simulation de forces
+ * donne un résultat différent à chaque rendu, et une carte qui bouge quand on
+ * ne l'a pas touchée n'est pas lisible. Le rayon du nœud dit l'intensité.
+ */
+function carteThemesMarkup(themes) {
+  if (themes.length < 2) return '';
+  // Le viewBox fait 100 d'unites pour ~340 px : un rayon de 7 devient une bille
+  // de trente pixels, et trois billes de trente pixels ne sont plus une carte.
+  const R = 33, W = 100, H = 100;
+  const pos = new Map(themes.map((t, i) => {
+    const a = (i / themes.length) * Math.PI * 2 - Math.PI / 2;
+    return [t.nom, { x: 50 + R * Math.cos(a), y: 50 + R * Math.sin(a) }];
+  }));
+  const traits = [];
+  const vus = new Set();
+  for (const t of themes) for (const l of t.liens ?? []) {
+    const cle = [t.nom, l].sort().join('|');
+    if (vus.has(cle)) continue;
+    vus.add(cle);
+    const a = pos.get(t.nom), b = pos.get(l);
+    if (a && b) traits.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}"
+      x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`);
+  }
+  return `<div class="cartethemes">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Les thèmes et ce qui les relie">
+      <g class="ct-liens">${traits.join('')}</g>
+      ${themes.map(t => {
+        const p = pos.get(t.nom);
+        const r = 1.7 + t.intensite * 0.7;
+        return `<g class="ct-noeud${MIR_THEME === t.nom ? ' on' : ''}" data-theme-aller="${esc(t.nom)}">
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}"/>
+          <text x="${p.x.toFixed(1)}" y="${(p.y + (p.y < 50 ? -r - 3 : r + 6.2)).toFixed(1)}"
+                text-anchor="middle">${esc(t.nom)}</text>
+          <circle class="ct-capte" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="8"/>
+        </g>`;
+      }).join('')}
+    </svg>
+  </div>`;
+}
+
+async function renderLecture() {
+  MIRROR_DATE = null;
+  if (!LECTURE || LECTURE.horizon !== MIR_HORIZON) {
+    LECTURE = await api(`/api/lecture?horizon=${MIR_HORIZON}`);
+  }
+  const L = LECTURE;
+  const themes = L.lecture?.themes ?? [];
+
+  const curseur = `<div class="horizons" role="group" aria-label="Fenêtre">
+    ${HORIZONS_UI.map(([id, nom]) => `<button data-horizon="${id}"
+      aria-pressed="${MIR_HORIZON === id}">${nom}</button>`).join('')}
+  </div>`;
+
+  /*
+   * UNE LECTURE EXISTANTE PASSE AVANT TOUT LE RESTE.
+   *
+   * Les conditions (assez de journées, une clé) disent s'il est possible d'en
+   * FAIRE une, pas s'il faut en montrer une. Testées d'abord, elles cachaient
+   * une lecture parfaitement valide derrière « il faut au moins 12 journées » à
+   * la première fois qu'on retire sa clé.
+   */
+  let corps;
+  if (L.lecture) {
+    corps = `
+      <p class="synthese">${esc(L.lecture.synthese)}</p>
+      <div class="themes">${themes.map(themeMarkup).join('')}</div>
+      ${carteThemesMarkup(themes)}`;
+  } else if (LECTURE_EN_COURS) {
+    corps = `<div class="lectvide"><span class="spin"></span>
+      <p>Il relit ton journal.</p>
+      <p class="sub">Ça prend un moment — il lit tout, pas un résumé.</p></div>`;
+  } else if (!L.possible) {
+    corps = `<div class="lectvide">
+      <p>Il faut au moins ${L.minimum} journées écrites.</p>
+      <p class="sub">Tu en as ${L.ecrites}. En dessous, ce qui ressortirait serait du bruit.</p></div>`;
+  } else if (!L.cle) {
+    corps = `<div class="lectvide">
+      <p>Cette lecture demande une clé Claude.</p>
+      <p class="sub">Sans elle, l'application sait compter tes mots — elle le fait dans « Je remarque » —
+      mais elle ne sait pas te dire ce qui se répète sans se répéter dans les mêmes mots.</p>
+      <button class="btn" data-aller-reglages>Réglages</button></div>`;
+  } else {
+    corps = `<div class="lectvide">
+      <p>Rien de lu sur cette fenêtre.</p>
+      <button class="btn primary" data-lire>Lancer la lecture</button></div>`;
+  }
+
+  $('#view').innerHTML = `<div class="lecture">
+    <div class="lechead">
+      ${curseur}
+      ${L.lecture ? `<span class="lecmeta faint">${L.jours} journées · ${fmtDay(L.fait_le.slice(0, 10))}${
+        L.perime ? ` · <b>${L.retard} journée${L.retard > 1 ? 's' : ''} depuis</b>` : ''}</span>` : ''}
+      ${L.lecture ? (LECTURE_EN_COURS
+        ? `<span class="lecmeta faint"><span class="spin petit"></span> il relit</span>`
+        : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus.">relire</button>`) : ''}
+    </div>
+    ${corps}
+  </div>`;
+
+  wireLecture();
+
+  // « elle doit toujours faire de l'analyse de fond » : si elle manque, on la
+  // lance en arrivant, sans rien demander. Si elle existe mais a pris du
+  // retard, on ne relance que quand le retard compte vraiment — le serveur en
+  // décide, fenêtre par fenêtre. Sinon écrire tous les soirs relancerait une
+  // relecture complète tous les soirs, pour un thème qui n'aura pas bougé.
+  // L'ancienne reste affichée pendant ce temps : une lecture d'hier vaut mieux
+  // qu'un écran d'attente.
+  if (!LECTURE_EN_COURS && L.possible && L.cle && L.arelire) lancerLecture();
+}
+
+async function lancerLecture() {
+  if (LECTURE_EN_COURS) return;
+  LECTURE_EN_COURS = true;
+  const avait = !!LECTURE?.lecture;
+  if (!avait) await renderLecture();       // l'attente ne s'affiche que s'il n'y a rien à montrer
+  try {
+    const r = await api('/api/lecture', { horizon: MIR_HORIZON });
+    LECTURE = r;
+    if (r.usage) { S.usage = r.usage; syncGauge(); }
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    LECTURE_EN_COURS = false;
+    if (view === 'mirror' && !MIRROR_DATE) await renderLecture();
+  }
+}
+
+function wireLecture() {
+  $('#view').onclick = async e => {
+    const h = e.target.closest('[data-horizon]');
+    if (h) { MIR_HORIZON = h.dataset.horizon; MIR_THEME = null; LECTURE = null; return renderLecture(); }
+    if (e.target.closest('[data-lire]')) return lancerLecture();
+    if (e.target.closest('[data-aller-reglages]')) { view = 'settings'; syncNav(); return renderSettings(); }
+    const j = e.target.closest('[data-jour]');
+    if (j) return renderMirror(j.dataset.jour);
+    const a = e.target.closest('[data-theme-aller]');
+    if (a) { MIR_THEME = a.dataset.themeAller; return renderLecture(); }
+    const t = e.target.closest('[data-theme-nom]');
+    if (t) {
+      MIR_THEME = MIR_THEME === t.dataset.themeNom ? null : t.dataset.themeNom;
+      return renderLecture();
+    }
+  };
+}
+
+/* ===================== le jour ===================== */
+
+/**
+ * @param {string|null} date
+ * @param {{garderCal?: boolean}} [opt]
+ *   `garderCal` : on vient de feuilleter le calendrier, le curseur ne doit PAS
+ *   se recaler sur la journée ouverte — c'est tout l'intérêt du geste. Partout
+ *   ailleurs il se recale : ouvrir une preuve de 2023 en laissant le calendrier
+ *   sur août 2026 montre un mois qui n'a rien à voir avec ce qu'on lit.
+ */
+async function renderMirror(date, { garderCal = false } = {}) {
   if (!S.stats.days) return renderNoData('Le miroir a besoin de journées passées pour te montrer quoi que ce soit.');
-  date = date ?? MIRROR_DATE ?? S.today;
+  // Sans date, on est sur la lecture. C'est elle, la vue d'ensemble ; le jour
+  // s'ouvre depuis une preuve, un repère, la frise ou le calendrier.
+  if (!date) return renderLecture();
+  if (!garderCal) MIR_CAL = { vue: 'jour', curseur: date.slice(0, 7) };
   MIRROR_DATE = date;
-  const m = await api(`/api/mirror?date=${date}`);
+  const m = await api(`/api/mirror?date=${date}&mois=${MIR_CAL.curseur}`);
   MIRROR_CARNET = m.carnet ?? [];
   const prev = dayShift(date, -1), next = dayShift(date, 1);
   const nav = `<div class="daynav">
+      <button class="wide" data-lecture title="Revenir à la vue d'ensemble">‹ la lecture</button>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
       <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button class="wide" data-goto="${S.today}">aujourd'hui</button>` : ''}
@@ -1240,8 +1730,7 @@ async function renderMirror(date) {
             l'affichait jamais : le champ était reçu et jeté. Le plancher retire
             des chiffres, pas des faits qu'on a soi-même posés. */''}
       ${reperesMarkup(m.reperes, date)}
-      ${carnetCardMarkup({ notes: m.carnet ?? [], jour: date,
-          vide: "Rien d'ajouté sur cette journée." })}
+      ${notesDuJourMarkup(m.carnet)}
 
       ${m.yesterday.text ? `<div class="card">
         <h2>Hier</h2>
@@ -1255,7 +1744,7 @@ async function renderMirror(date) {
         </div>`).join('')}
       </div>` : ''}
       ${!m.rawPast?.length && !m.yesterday.text ? `<div class="card" style="display:flex;align-items:center;gap:20px">
-        <div style="width:76px;height:76px;flex:none">${petMarkup(S.settings)}</div>
+        <div style="width:76px;height:76px;flex:none">${petMarkup(S.settings, S.ambiance)}</div>
         <div>
           <p style="margin:0 0 4px">Il n'y a rien d'écrit à te remontrer pour l'instant.</p>
           <p class="sub" style="margin:0 0 12px">Le miroir a besoin de tes mots pour servir à quelque chose. Il n'en a pas encore.</p>
@@ -1263,7 +1752,6 @@ async function renderMirror(date) {
         </div>
       </div>` : ''}`;
     const f = $('#cnForm'); if (f) f.dataset.jour = date;
-    wireCarnet(() => renderMirror(date));
     wireMirror();
     return;
   }
@@ -1329,6 +1817,15 @@ async function renderMirror(date) {
   </div>`;
 
   $('#view').innerHTML = `
+    ${/* Le retour vers la lecture. Sans lui, ouvrir une journée depuis une
+          preuve est un aller simple : la vue d'ensemble n'a plus de porte. */''}
+    <div class="retourlect">
+      <button data-lecture>‹ la lecture</button>
+      <span class="faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</span>
+      <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
+      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      ${date !== S.today ? `<button data-goto="${S.today}">aujourd'hui</button>` : ''}
+    </div>
     <div class="mirror">
       <div class="mcol">
         ${calendarMarkup(m, date)}
@@ -1355,8 +1852,7 @@ async function renderMirror(date) {
             : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
         </div>
 
-        ${carnetCardMarkup({ notes: m.carnet ?? [], jour: date,
-            vide: "Rien d'ajouté sur cette journée." })}
+      ${notesDuJourMarkup(m.carnet)}
 
         ${epCard}
       </div>
@@ -1368,7 +1864,6 @@ async function renderMirror(date) {
       </div>
     </div>`;
   const form = $('#cnForm'); if (form) form.dataset.jour = date;
-  wireCarnet(() => renderMirror(date));
   wireMirror();
 }
 
@@ -1423,44 +1918,27 @@ function reperesMarkup(rep, date) {
 function calendarMarkup(m, date) {
   const cases = m.calendrier ?? [];
   if (!cases.length) return '';
-  const mois = date.slice(0, 7);
-  const [an, mo] = mois.split('-').map(Number);
-  // Lundi en premiere colonne : getUTCDay() rend 0 pour dimanche.
-  const premier = (new Date(Date.UTC(an, mo - 1, 1)).getUTCDay() + 6) % 7;
-
-  const moisPrec = new Date(Date.UTC(an, mo - 2, 1)).toISOString().slice(0, 10);
-  const moisSuiv = new Date(Date.UTC(an, mo, 1)).toISOString().slice(0, 10);
-  const suivDispo = moisSuiv.slice(0, 7) <= S.today.slice(0, 7);
-
-  const nom = new Date(Date.UTC(an, mo - 1, 1))
-    .toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-
-  return `<div class="card cal">
-    <div class="calhead">
-      <button data-goto="${moisPrec}" aria-label="Mois précédent">‹</button>
-      <span class="calmois">${esc(nom)}</span>
-      <button data-goto="${moisSuiv}" ${suivDispo ? '' : 'disabled'} aria-label="Mois suivant">›</button>
-      <button class="calnow" data-goto="${S.today}" ${date === S.today ? 'disabled' : ''}>aujourd'hui</button>
-    </div>
-    <div class="calgrid">
-      ${JOURS_COURT.map(j => `<span class="cald">${j}</span>`).join('')}
-      ${'<span></span>'.repeat(premier)}
-      ${cases.map(c => {
-        const sel = c.date === date;
-        // Deux reperes distincts, et c'est volontaire : « on » dit ou on
-        // regarde, « auj » dit ou on est. Les confondre fait perdre le nord des
-        // qu'on s'eloigne de quelques jours -- on ne sait plus si le cadre
-        // blanc est la date du jour ou celle qu'on a ouverte.
-        const auj = c.date === S.today;
-        const futur = c.date > S.today;
-        const fond = c.note !== null ? `background:${deltaColor(c.delta ?? 0)}` : '';
-        return `<button class="calcase${sel ? ' on' : ''}${auj ? ' auj' : ''}${c.note === null ? ' vide' : ''}${c.texte ? ' texte' : ''}"
-          data-goto="${c.date}" ${futur ? 'disabled' : ''} style="${fond}"
-          data-tip="${esc(fmtDay(c.date))}${auj ? " · aujourd'hui" : ''}${c.note !== null ? ` · ${c.note}/10` : ' · non notée'}"
-          >${Number(c.date.slice(-2))}</button>`;
-      }).join('')}
-    </div>
-  </div>`;
+  const par = new Map(cases.map(c => [c.date, c]));
+  return `<div class="card calcard">${calMarkup({
+    vue: MIR_CAL.vue,
+    curseur: MIR_CAL.curseur ?? date.slice(0, 7),
+    debut: date,
+    min: '1900-01-01', max: S.today, aujourdhui: S.today,
+    /*
+     * Une journée notée porte la couleur de son écart, exactement celle de sa
+     * case dans la grille de l'Année. Une journée écrite mais non notée porte
+     * un point : dans un journal, un trou est une information, et le masquer
+     * ferait croire qu'il ne s'est rien passé.
+     */
+    jour: d => {
+      const c = par.get(d);
+      if (!c) return null;
+      if (c.note !== null && c.note !== undefined) {
+        return { couleur: deltaColor(c.delta ?? 0), ecrit: c.texte };
+      }
+      return c.texte ? { ecrit: true } : null;
+    }
+  })}</div>`;
 }
 
 function wireMirror() {
@@ -1474,6 +1952,15 @@ function wireMirror() {
       return renderMirror(MIRROR_DATE);
     }
 
+    // Le calendrier : feuilleter ne change pas le jour ouvert ; cliquer une
+    // case, si. Deux gestes, deux effets.
+    const c = e.target.closest('[data-cal]');
+    if (c) {
+      if (c.dataset.cal === 'jour') { MIR_CAL.curseur = c.dataset.d.slice(0, 7); return renderMirror(c.dataset.d); }
+      MIR_CAL = calClic({ ...MIR_CAL, debut: MIRROR_DATE }, c.dataset);
+      return renderMirror(MIRROR_DATE, { garderCal: true });
+    }
+    if (e.target.closest('[data-lecture]')) { MIRROR_DATE = null; return renderLecture(); }
     const g = e.target.closest('[data-goto]');
     if (g) return renderMirror(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
@@ -1598,16 +2085,9 @@ async function renderCarte() {
     ${tableauPaires(G)}
     ${tableauBouge(G)}
 
-    ${carnetCardMarkup({
-      notes: G.carnetNotes ?? [],
-      titre: 'Ton carnet',
-      vide: "Rien encore. Tu peux déposer ici des notes prises ailleurs — datées ou non."
-    })}
-
 `;
 
   monterCarte();
-  wireCarnet(() => renderCarte());
 }
 
 /*
@@ -1918,12 +2398,45 @@ function motifsMarkup() {
   </div>`;
 }
 
+/**
+ * Ce que le compagnon a lu.
+ *
+ * La question « qu'est-ce qu'il sait de moi ? » se pose, et rien n'y répondait :
+ * les notes rangées depuis la conversation disparaissaient dans une table que
+ * rien n'affichait en entier.
+ *
+ * Trois nombres, jamais additionnés. Une journée écrite, un message du fil et
+ * une note apportée ne veulent pas dire la même chose, et le compte de journées
+ * sert de dénominateur à toute la carte : les mélanger le viderait de son sens.
+ */
+function contexteMarkup(C) {
+  if (!C) return '';
+  const n = (v, u) => `<div class="s"><div class="k">${u}</div><div class="v">${v}</div></div>`;
+  return `<div class="card">
+    <h2>Ce qu'il a lu</h2>
+    ${/* pas `.tight` : cette variante vaut `display: contents`, faite pour se
+          fondre dans l'en-tête du Miroir. Ici elle empilerait les trois. */''}
+    <div class="statgrid" style="margin-bottom:16px;max-width:440px">
+      ${n(C.journal.ecrites, 'journées écrites')}
+      ${n(C.fil.messages, 'messages')}
+      ${n(C.compte.total, 'notes rangées')}
+    </div>
+    ${C.notes.length ? `<div class="cnliste">${C.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>`
+      : `<p class="sub" style="margin:0">Colle-lui tes notes dans la conversation — de vieux carnets,
+         un journal tenu ailleurs. Il les range ici, elles ne comptent jamais comme des journées écrites,
+         et il s'en sert ensuite.</p>`}
+  </div>`;
+}
+
 async function renderSettings() {
   const s = S.settings;
-  try { CARNET = await api('/api/carnet'); } catch { /* le carnet ne doit pas casser les réglages */ }
+  let CTX = null;
+  try { CTX = await api('/api/contexte'); CARNET = { notes: CTX.notes, compte: CTX.compte }; }
+  catch { /* le contexte ne doit pas casser les réglages */ }
 
   $('#view').innerHTML = `
     ${motifsMarkup()}
+    ${contexteMarkup(CTX)}
     <div class="row">
       <div class="card">
         <h2>Le compagnon</h2>
@@ -2058,6 +2571,19 @@ async function renderSettings() {
   bind('floor', 'floor', 'change', el => Number(el.value));
   bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
   $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
+
+  // Retirer une note, ou ouvrir la journée dont elle parle. Réglages n'a pas de
+  // délégué global : chaque bloc branche ce qui le concerne.
+  $('#view').querySelector('.cnliste')?.addEventListener('click', async e => {
+    const d = e.target.closest('[data-delcn]');
+    if (d) {
+      await api('/api/carnet', { delete: Number(d.dataset.delcn) });
+      toast('Note retirée');
+      return renderSettings();
+    }
+    const g = e.target.closest('.cndate[data-goto]');
+    if (g) { view = 'mirror'; syncNav(); return renderMirror(g.dataset.goto); }
+  });
 
   $('.motiflist')?.addEventListener('click', async e => {
     const b = e.target.closest('[data-delmotif]');
@@ -2264,14 +2790,14 @@ async function renderBackendCfg() {
     <label class="field" style="margin-top:14px"><span>
       <input type="checkbox" id="carnetMemoire" ${s.carnetMemoire !== false ? 'checked' : ''}
              style="width:auto;margin-right:7px">
-      Lui transmettre ton carnet</span></label>
+      Lui transmettre les notes que tu lui as données</span></label>
     <p class="sub" style="margin:0;font-size:12px">
       ${CARNET.compte?.total
-        ? `Les ${Math.min(12, CARNET.compte.total)} dernières des ${CARNET.compte.total} notes de ton carnet sont transmises, tronquées.`
-        : "Ton carnet est vide pour l'instant."}
+        ? `Les ${Math.min(12, CARNET.compte.total)} dernières des ${CARNET.compte.total} notes rangées sont transmises, tronquées.`
+        : "Tu ne lui as encore rien donné à ranger."}
       Il peut aller chercher les autres lui-même quand la conversation y touche.
       Décocher les retire du contexte sans rien effacer.
-      <br>Hors ligne, le compagnon n'a ni tes journées ni ton carnet.
+      <br>Hors ligne, le compagnon n'a ni tes journées ni tes notes.
     </p>` + SORTIE_ANTHROPIC;
   } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
@@ -2559,6 +3085,11 @@ function syncAmbiance() {
   const a = S.ambiance;
   if (a) Ambiance.set(a.scene, a.energie);
   syncAmbianceRail();
+  // Le chaton suit le decor, pas la note. Il vit dans le rail et n'est pas
+  // redessine par les vues : c'est ici, et nulle part ailleurs, qu'il change
+  // de visage.
+  const art = $('#art');
+  if (art && S.settings?.petSprite !== 'custom') art.innerHTML = petMarkup(S.settings, a);
 }
 
 async function boot() {

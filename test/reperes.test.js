@@ -68,3 +68,38 @@ test('le SVG rendu est autonome et sans remplissage', () => {
 test('un thème inconnu ne casse pas le rendu', () => {
   assert.equal(icone('nimportequoi', 18), icone(DEFAUT, 18));
 });
+
+test('le jargon clinique a son thème, pas « jalon »', () => {
+  const attendu = {
+    'TS': 'crise',
+    'tentative de suicide': 'crise',
+    'scarification': 'crise',
+    "crise d'angoisse": 'crise',
+    'burnout': 'crise',
+    'rechute alcool': 'conso',
+    'arrêt de la cigarette': 'conso',
+    'début du sevrage': 'conso',
+    'crise de boulimie': 'manger',
+    'purge': 'manger',
+    'début des insomnies': 'dormir',
+    'apnée du sommeil': 'dormir'
+  };
+  for (const [label, theme] of Object.entries(attendu)) {
+    assert.equal(themeDe(label), theme, `« ${label} »`);
+  }
+});
+
+test('les thèmes cliniques ne mangent pas les thèmes existants', () => {
+  // « sevrage » vit dans conso ET dans soin ; c'est le SECOND mot qui tranche
+  assert.equal(themeDe('arrêt des benzos'), 'soin');
+  assert.equal(themeDe('reprise de la thérapie'), 'soin');
+  assert.equal(themeDe('sortie du jeu'), 'creation');
+  // « crise » seul n'est pas un fait : c'est un jugement sur une journée
+  assert.equal(themeDe('crise'), DEFAUT);
+});
+
+test('« pensée » a une icône sans être un thème de repère', () => {
+  // Elle sert aux objectifs, pas à la frise : themeDe ne doit jamais la rendre.
+  assert.ok(ICONES.pensee && NOMS.pensee);
+  assert.ok(!THEMES.some(([n]) => n === 'pensee'));
+});
