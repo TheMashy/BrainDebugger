@@ -324,7 +324,19 @@ refus serait pire.
 - **Réglages** — compagnon, timbre des bips, backend, plancher, tenue du retour, import/export.
 
 Il n'y a pas de vue « Recherche ». Ouvrir un champ de recherche demande de savoir quoi
-chercher ; le passé remonte tout seul pendant qu'on écrit, en marge de la conversation.
+chercher ; le passé remonte tout seul.
+
+**Mais plus sous le composeur.** Un panneau y cherchait dans le corpus pendant la frappe et
+posait les journées ressemblantes juste en dessous, sous le titre « tu as déjà écrit ça ».
+La recherche était juste, et l'endroit était faux : on raconte sa soirée à quelqu'un, et
+l'application répond par-dessous avec les dates. La remarque est vraie, et personne ne l'a
+demandée.
+
+La même recherche, au même seuil, part maintenant vers le **compagnon**. C'est lui qui
+décide s'il la rend — quand quelqu'un dit que ça n'arrive jamais, quand il croit que c'est
+la première fois, quand il cherche ce qui avait marché la dernière fois. Le reste du temps,
+l'avoir en tête lui suffit pour ne pas faire raconter deux fois la même chose comme s'il la
+découvrait. Le Miroir, lui, garde son « tu as déjà écrit ça » : on y va pour ça.
 
 La conversation est **continue** : on rouvre le fil là où on l'a laissé, avec les jours
 précédents visibles au-dessus, séparés par leur date. C'est un confident qu'on va voir

@@ -155,7 +155,6 @@ async function saveSettings(patch) {
    ses mots ne l'est pas. -- SPEC 2.2
                                                                             */
 
-let ECHOES = { items: [], textCount: 0 };
 
 async function renderTonight() {
   const t = S.today;
@@ -190,8 +189,6 @@ async function renderTonight() {
         </button>
       </div>
 
-      <div id="echoes"></div>
-
       <div class="notecard">
         <div class="noteline">
           <span class="k">Note avant de te coucher</span>
@@ -219,7 +216,6 @@ async function renderTonight() {
     </div>`;
 
   drawThread();
-  drawEchoes();
 
   $('#newChat')?.addEventListener('click', async e => {
     const b = e.currentTarget;
@@ -235,7 +231,6 @@ async function renderTonight() {
       S.messages = r.messages;
       S.settings.chatSince = r.chatSince;
       drawThread();
-      $('#echoes').innerHTML = '';
       toast('Nouveau fil. Tes journées sont intactes.');
     } catch (err) {
       toast(err.message);
@@ -272,7 +267,6 @@ async function renderTonight() {
   input.oninput = () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
-    scheduleEchoes(input.value);
   };
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
@@ -624,7 +618,6 @@ async function send() {
   // affichage optimiste : ce que tu écris apparaît tout de suite
   S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user', text });
   drawThread();
-  refreshEchoes(text);
 
   let typing = null;
 
@@ -715,41 +708,24 @@ function showHelpline() {
   $('#thread')?.after(el);
 }
 
-/* --------- echos : tes mots d'avant, sans avoir rien demande --------- */
-
-let _echoTimer = null;
-function scheduleEchoes(text) {
-  clearTimeout(_echoTimer);
-  _echoTimer = setTimeout(() => refreshEchoes(text), 700);
-}
-
-async function refreshEchoes(text) {
-  const t = String(text ?? '').trim();
-  if (t.length < 12) { ECHOES = { ...ECHOES, items: [] }; return drawEchoes(); }
-  try {
-    ECHOES = await api('/api/echoes', { text: t, date: S.today, limit: 3 });
-    drawEchoes();
-  } catch { /* les echos ne doivent jamais casser la saisie */ }
-}
-
-function drawEchoes() {
-  const el = $('#echoes');
-  if (!el) return;
-  if (!ECHOES.items?.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="card echoes">
-    <h2>Tu as déjà écrit ça</h2>
-
-    ${ECHOES.items.map(it => `<div class="simitem">
-      <div class="hd">
-        <span class="d">${fmtDay(it.date)}</span>
-        <span class="pill" style="background:rgba(${noteScaleRGB(it.note ?? 5)},.2);color:rgb(${noteScaleRGB(it.note ?? 5)});border-color:transparent">${it.note ?? '—'}/10</span>
-        <span class="faint" style="font-size:11.5px">${termesMarkup(it)}</span>
-      </div>
-      <p class="q">${highlight(it.text.slice(0, 240), it.terms, it.forts)}${it.text.length > 240 ? '…' : ''}</p>
-      ${bandMarkup(it.band)}
-    </div>`).join('')}
-  </div>`;
-}
+/* ---------------------------------------------------------------------
+ * IL N'Y A PLUS DE PANNEAU « TU AS DEJA ECRIT CA » DANS « PARLER ».
+ *
+ * Il cherchait dans le corpus pendant la frappe et posait sous le composeur les
+ * journees qui ressemblaient a ce qu'on etait en train d'ecrire. C'etait juste,
+ * et c'etait au mauvais endroit : on raconte sa soiree a quelqu'un, et
+ * l'application affiche par-dessous « tu as deja ecrit ca » avec les dates. La
+ * remarque est vraie et personne ne l'a demandee — c'est le ton d'une machine
+ * qui coche, pas de quelqu'un en face.
+ *
+ * La recherche existe toujours, a l'identique. Elle part maintenant vers le
+ * COMPAGNON, dans son contexte, et c'est lui qui decide s'il la rend — quand
+ * quelqu'un dit que ca n'arrive jamais, quand il croit que c'est la premiere
+ * fois, quand il cherche ce qui avait marche. Voir echoBlock() dans chat.js.
+ *
+ * Le Miroir garde son « tu as deja ecrit ca » : c'est une surface de
+ * restitution, on y va pour ca.
+ * ------------------------------------------------------------------- */
 
 /**
  * Premier lancement : aucune donnée. On ne montre pas une page vide avec des
@@ -2643,7 +2619,7 @@ async function renderSettings() {
       try {
         const r = await api('/api/wipe', { portee, confirm: mot.value.trim() });
         S = await api('/api/state');
-        SERIES = null; ECHOES = { items: [], textCount: 0 };
+        SERIES = null;
         syncHeader();
         renderSettings();
         const n = Object.values(r.compte).reduce((a, b) => a + b, 0);
