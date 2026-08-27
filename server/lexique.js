@@ -44,6 +44,9 @@ const FAMILLES = [
     hypervigilan catastrophis dramatis culpabilis autocritique
     dissociation depersonnalis derealis refoulement projection
     deni denier autosuffis effondrement decompensation
+    scarification scarifi automutil autolyse ideation suicidaire suicide
+    purge purger restriction hyperphagie binge craving
+    abstinen sobriete desintox
   `],
   [2.6, `
     anxio anxiete anxieux angoiss panique attaque phobie agoraphob
@@ -52,6 +55,9 @@ const FAMILLES = [
     crise trouble symptome diagnostic
     psy psychiatre psychologue psychiatrie psychotherap therapeute
     therapie seance consultation hospitalis
+    cauchemar hypersomni apnee narcolep
+    anorexi boulimi tca dysmorph
+    borderline cyclothym spasmophil claustrophob
   `],
   [2.2, `
     peur terreur effroi honte humiliation culpabilite remords
@@ -69,7 +75,7 @@ const FAMILLES = [
     nausee vomi migraine cephalee vertige acouphene
     poitrine gorge ventre machoire nuque crispation tension contracture
     sommeil dormi endormi reveil cauchemar somnol
-    appetit anorexie boulimie grignot
+    appetit grignot
     douleur souffrance courbature
     alcool cannabis weed cocaine benzodiazepine antidepresseur
     lithium neuroleptique somnifere dosage posologie
@@ -138,9 +144,26 @@ const EXPRESSIONS_BRUTES = `
   peur du vide | peur de rater | peur de decevoir | peur d etre seul
   besoin d aide | demander de l aide | parler a quelqu un
   je me deteste | je me degoute | je suis nul | je sers a rien
+  tentative de suicide | idees noires | idees suicidaires | passage a l acte
+  me scarifier | me couper | me faire vomir
+  crise de boulimie | crise de larmes
+  arreter de boire | arreter de fumer | tenir le coup | tenu bon
+  j ai rechute | j ai craque | je tiens toujours | ca fait une semaine
+  ca fait un mois | depuis que j ai arrete | premier jour sans
 `;
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * Les abreviations. Elles ne sont pas des racines : « ts » ne prefixe rien, et
+ * une racine de deux lettres attraperait la moitie du corpus si on la laissait
+ * prefixer. Table exacte, poids de mecanisme -- ce sont les mots les plus
+ * lourds qu'on puisse ecrire dans un journal, et ils ne ressortaient pas.
+ */
+const ABREGES = new Map([
+  ['ts', 3.0], ['hp', 2.6], ['tca', 3.0], ['tag', 2.2],
+  ['tdah', 2.6], ['tspt', 2.6], ['toc', 3.0], ['od', 3.0]
+]);
 
 const POIDS = new Map();
 for (const [poids, liste] of FAMILLES) {
@@ -177,6 +200,8 @@ export function poids(token) {
   const t = String(token ?? '');
   if (!t) return 1;
   if (estExpression(t)) return 3.2;          // une expression a ete choisie, pas subie
+  const abrege = ABREGES.get(t);
+  if (abrege !== undefined) return abrege;
   if (CREUX.has(t)) return 0.15;
   if (VAGUES.has(t)) return 0.55;
   const exact = POIDS.get(t);
@@ -191,16 +216,31 @@ export const saillant = t => poids(t) >= SEUIL_SAILLANT;
 
 /* --- reconnaissance des expressions dans un flux de mots bruts --- */
 
-const EXPRESSIONS = EXPRESSIONS_BRUTES.split('|')
+/*
+ * Coupe sur « | » ET sur le retour a la ligne.
+ *
+ * split('|') seul recollait la derniere expression d'une ligne avec la premiere
+ * de la suivante : « je sers a rien » + « tentative de suicide » devenait une
+ * entree de huit mots qui ne pouvait plus jamais matcher. Une par frontiere de
+ * ligne, dans les deux sens -- la moitie de la table etait morte, en silence, et
+ * rien ne pouvait le signaler : une expression qui ne matche pas se comporte
+ * exactement comme une expression absente.
+ */
+const EXPRESSIONS = EXPRESSIONS_BRUTES.split(/[|\n]/)
   .map(e => e.trim().split(/\s+/).filter(Boolean))
   .filter(e => e.length >= 2);
 
-/** Indexees par premier mot : le balayage ne coute rien sur les 99 % de mots. */
+/**
+ * Indexees par premier mot : le balayage ne coute rien sur les 99 % de mots.
+ * La plus longue d'abord, dans chaque seau -- « me faire du mal » doit gagner
+ * contre « faire du mal », et pas dependre de l'ordre ou on les a ecrites.
+ */
 const PAR_TETE = new Map();
 for (const e of EXPRESSIONS) {
   if (!PAR_TETE.has(e[0])) PAR_TETE.set(e[0], []);
   PAR_TETE.get(e[0]).push(e);
 }
+for (const l of PAR_TETE.values()) l.sort((a, b) => b.length - a.length);
 
 /**
  * @param {string[]} bruts  tous les mots du texte, stopwords compris
@@ -215,7 +255,10 @@ export function expressions(bruts) {
       if (i + e.length > bruts.length) continue;
       let ok = true;
       for (let k = 1; k < e.length; k++) if (bruts[i + k] !== e[k]) { ok = false; break; }
-      if (ok) { trouves.push(e.join('_')); break; }   // la premiere qui matche suffit
+      // La plus longue qui matche gagne, et on saute par-dessus : sinon
+      // « me faire du mal » rend AUSSI « faire du mal » un mot plus loin, et
+      // le meme bout de phrase compte deux fois dans l'index.
+      if (ok) { trouves.push(e.join('_')); i += e.length - 1; break; }
     }
   }
   return trouves;

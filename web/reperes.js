@@ -34,6 +34,15 @@ const norm = s => String(s ?? '').normalize('NFD')
  * « sante », sans quoi une separation devient un coeur.
  */
 export const THEMES = [
+  // Le jargon clinique passe en premier : il est plus specifique que tout le
+  // reste, et c'est exactement ce qu'on ne veut pas voir tomber dans « jalon ».
+  // « TS » est une abreviation, pas un mot -- elle n'a de sens qu'ici, et sans
+  // elle le fait le plus lourd qu'on puisse poser sur une frise arrive sans
+  // icone. Ces themes ne QUALIFIENT personne : ils choisissent un dessin.
+  ['crise',   'ts tentative autolyse suicide suicidaire scarification scarifie scarifier automutilation mutilation ideation overdose decompensation internement hp psychiatrie angoisse panique effondrement burnout craquage craque 3114'],
+  ['conso',   'alcool alcoolisme abstinence sobriete sobre sevrage rechute cure desintox desintoxication addiction dependance cannabis weed shit beuh cocaine coke heroine opiace mdma tabac clope cigarette vape casino poker paris binge picole'],
+  ['manger',  'anorexie boulimie hyperphagie tca purge vomissement restriction jeune regime poids kilos'],
+  ['dormir',  'insomnie apnee cauchemar cauchemars somnambulisme narcolepsie melatonine hypersomnie'],
   ['deuil',   'deces mort morte morts enterrement funerailles cimetiere disparu disparue perdu perte deuil veuve veuf'],
   ['rupture', 'rupture rompu separation separe separee divorce divorcee quitte quittee largue plaque'],
   ['soin',    'traitement medicament medicaments antidepresseur antidepresseurs anxiolytique anxiolytiques anxio anxios benzo benzos cachet cachets comprime comprimes ordonnance dose dosage posologie sevrage therapie psy psychiatre psychologue psychotherapie suivi seance hospitalisation lithium somnifere'],
@@ -86,6 +95,13 @@ export function themeDe(label) {
  * la meme echelle qu'ailleurs.
  */
 export const ICONES = {
+  crise:    '<path d="M13.6 2.8 5.9 13.6h4.8L9.9 21.2l7.7-10.8h-4.9z"/>',
+  conso:    '<path d="M20.4 12a8.4 8.4 0 1 1-3.2-6.6"/><path d="M20.4 4.2v4.6h-4.6"/><circle cx="12" cy="12" r="2.1"/>',
+  manger:   '<path d="M3.4 11.2h17.2a8.6 8.6 0 0 1-17.2 0z"/><path d="M2.2 20.4h19.6"/><path d="M8.6 7.6c0-1.4 1.2-1.9 1.2-3.2M12 7.6c0-1.4 1.2-1.9 1.2-3.2M15.4 7.6c0-1.4 1.2-1.9 1.2-3.2" opacity=".55"/>',
+  dormir:   '<path d="M20.6 14.8A8.8 8.8 0 0 1 9.2 3.4a8.8 8.8 0 1 0 11.4 11.4z"/>',
+  // Hors THEMES : themeDe ne la rend jamais. Elle sert aux objectifs, dont un
+  // type est « une pensee » -- ce qu'aucun fait date ne peut etre.
+  pensee:   '<path d="M12 3.2a5.4 5.4 0 0 0-4.3 8.7c.7.9 1.1 1.6 1.1 2.6v1.3h6.4v-1.3c0-1 .4-1.7 1.1-2.6A5.4 5.4 0 0 0 12 3.2z"/><path d="M9.6 19h4.8"/><path d="M10.4 21.4h3.2"/>',
   jalon:    '<path d="M12 3.5 20.5 12 12 20.5 3.5 12z"/>',
   deuil:    '<path d="M12 3c1.8 2 2.6 3.4 2.6 4.7A2.6 2.6 0 0 1 12 10.3a2.6 2.6 0 0 1-2.6-2.6C9.4 6.4 10.2 5 12 3z"/><path d="M12 10.5V14"/><path d="M7 21v-3.4a5 5 0 0 1 10 0V21z"/>',
   rupture:  '<path d="M12 20.3 4.8 13a4.4 4.4 0 0 1 6.2-6.2l.4.4"/><path d="M12.6 7.2l.4-.4A4.4 4.4 0 0 1 19.2 13L12 20.3"/><path d="M13.4 8.6 10.6 11l3.2 2.2-2.6 2.6"/>',
@@ -128,7 +144,8 @@ export const TEINTES_DECLAREES = [232, 258, 284, 310, 336];
 
 /** Les noms lisibles, pour les infobulles et le champ de saisie. */
 export const NOMS = {
-  jalon: 'jalon', deuil: 'deuil', rupture: 'rupture', soin: 'traitement',
+  jalon: 'jalon', crise: 'crise', conso: 'consommation', manger: 'alimentation',
+  dormir: 'sommeil', pensee: 'pensée', deuil: 'deuil', rupture: 'rupture', soin: 'traitement',
   sante: 'santé', travail: 'travail', etudes: 'études', maison: 'logement',
   voyage: 'voyage', famille: 'famille', amour: 'rencontre', ami: 'amis',
   argent: 'argent', sport: 'sport', creation: 'création'

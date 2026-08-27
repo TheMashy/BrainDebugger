@@ -98,3 +98,45 @@ test('les termes montres sont plafonnes', () => {
   const idx = buildIndex(CORPUS);
   for (const h of search(idx, CORPUS[2].text)) assert.ok(h.terms.length <= 4);
 });
+
+test('le jargon clinique pèse plus que le vocabulaire courant', () => {
+  // Le cas qui a motivé tout ce fichier, poussé jusqu'aux abréviations : « TS »
+  // fait deux caractères, aucune racine-préfixe ne peut l'attraper.
+  for (const mot of ['ts', 'toc', 'tca', 'scarification', 'suicidaire', 'purge',
+                     'insomnie', 'boulimie', 'anorexie', 'abstinence']) {
+    assert.ok(saillant(mot), `${mot} = ${poids(mot)}`);
+    assert.ok(poids(mot) > poids('envie'), mot);
+  }
+});
+
+test('une racine longue ne masque plus une racine courte plus lourde', () => {
+  // « boulimie » vivait en clé exacte à 1.8 (corps) et en préfixe à 2.6 (états).
+  // La clé exacte gagne avant le préfixe : le mot restait au poids le plus bas.
+  assert.equal(poids('boulimie'), poids('boulimi' + 'e'));
+  assert.ok(poids('boulimie') > poids('appetit'));
+});
+
+test('les expressions de tenue et de rechute sont reconnues', () => {
+  const dit = t => expressions(t.split(/\s+/));
+  assert.ok(dit('tentative de suicide').includes('tentative_de_suicide'));
+  assert.ok(dit('j ai des idees noires').includes('idees_noires'));
+  assert.ok(dit('je veux arreter de fumer').includes('arreter_de_fumer'));
+  assert.ok(dit('j ai rechute hier').includes('j_ai_rechute'));
+});
+
+test('aucune expression ne chevauche deux lignes de la table', () => {
+  // split('|') seul recollait la fin d'une ligne au debut de la suivante.
+  // Cinq mots, c'est deja long pour une expression ; huit est le signe sur.
+  const dit = t => expressions(t.split(/\s+/));
+  assert.ok(dit('je sers a rien').includes('je_sers_a_rien'));
+  assert.ok(dit('envie d en finir').includes('envie_d_en_finir'));
+  assert.ok(dit('faire du mal').includes('faire_du_mal'));
+});
+
+test('la plus longue expression gagne, et le texte n\'est compté qu\'une fois', () => {
+  const dit = t => expressions(t.split(/\s+/));
+  assert.deepEqual(dit('me faire du mal'), ['me_faire_du_mal']);
+  assert.deepEqual(dit('faire du mal'), ['faire_du_mal']);
+  // deux occurrences distinctes restent deux tokens
+  assert.equal(dit('faire du mal et faire du mal').length, 2);
+});
