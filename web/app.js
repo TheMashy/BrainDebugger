@@ -163,7 +163,6 @@ async function renderTonight() {
 
       <div class="stack">
         <div class="card">
-          <h2>La conversation</h2>
           <div class="thread" id="thread"></div>
           <div class="composer">
             <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
@@ -174,12 +173,9 @@ async function renderTonight() {
         <div id="echoes"></div>
 
         <div class="card notecard">
-          <div class="head">
-            <h2>La note d'aujourd'hui</h2>
-            <span class="ritual">Note avant de te coucher.</span>
-          </div>
-          <p class="sub">C'est dans le lit qu'on voit le mieux la journée entière — et c'est toi qui notes,
-            jamais l'application.${S.stats.reference !== null ? ` Ta référence glissante est à <b class="mono">${S.stats.reference}</b>.` : ''}</p>
+          <h2>Note avant de te coucher</h2>
+          ${S.stats.reference !== null
+            ? `<p class="ref">référence glissante <b class="mono">${S.stats.reference}</b></p>` : ''}
 
           <div class="noteface">
             <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
@@ -196,15 +192,7 @@ async function renderTonight() {
                 data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
             }).join('')}
           </div>
-          <div class="scaleends"><span>0 · le pire</span><span>5 · moyen</span><span>10 · le meilleur</span></div>
 
-          ${S.anchors.length ? `<div class="anchors">
-            ${S.anchors.map(a => `<div class="anchor">
-              <span class="n" style="background:rgb(${noteScaleRGB(a.note)})">${a.note}</span>
-              <span class="l"><b>${esc(a.label)}</b> — ${esc(a.descr)}</span></div>`).join('')}
-            <p class="faint" style="font-size:11.5px;margin:8px 0 0">
-              Tes propres repères. Ils gardent l'échelle stable d'une année sur l'autre.</p>
-          </div>` : ''}
         </div>
       </div>
     </div>`;
@@ -262,11 +250,11 @@ async function renderTonight() {
 }
 
 const noteFaceStyle = n => n === null || n === undefined
-  ? 'background:var(--panel-3);color:var(--ink-faint)'
+  ? 'background:var(--surface);color:var(--ink-faint)'
   : `background:rgb(${noteScaleRGB(n)});color:#08110c`;
 
 function noteSay(n) {
-  if (n === null || n === undefined) return "Tu n'as pas encore noté cette journée.";
+  if (n === null || n === undefined) return '';
   const a = S.anchors.find(x => x.note === n);
   if (a) return `<b>${esc(a.label)}</b> — ${esc(a.descr)}`;
   const near = S.anchors.filter(x => x.note < n).sort((x, y) => y.note - x.note)[0];
@@ -282,7 +270,7 @@ function drawThread() {
   const th = $('#thread');
   if (!th) return;
   if (!S.messages.length) {
-    th.innerHTML = `<div class="empty">Écris quand tu veux.<br>Ce que tu dis reste, et la conversation reprend là où elle s'est arrêtée.</div>`;
+    th.innerHTML = `<div class="empty">Ce que tu dis reste.</div>`;
     return;
   }
   let last = null;
@@ -423,8 +411,7 @@ function drawEchoes() {
   if (!ECHOES.items?.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="card echoes">
     <h2>Tu as déjà écrit ça</h2>
-    <p class="sub">Remonté tout seul pendant que tu écris. La bande montre les 14 jours qui ont suivi,
-      tels qu'ils ont été. Le jour cerclé est le retour à la référence.</p>
+
     ${ECHOES.items.map(it => `<div class="simitem">
       <div class="hd">
         <span class="d">${fmtDay(it.date)}</span>
@@ -500,7 +487,7 @@ async function renderYear(year) {
           <span>pire</span>
           ${Array.from({ length: 17 }, (_, i) => `<i style="background:${deltaColor(-SATURATION + (i / 16) * 2 * SATURATION)}"></i>`).join('')}
           <span>meilleur</span>
-          <span style="margin-left:12px">écart à la référence glissante, saturé à ±${SATURATION}</span>
+          <span style="margin-left:12px">écart à la référence, ±${SATURATION}</span>
           <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
         </div>
       </div>
@@ -513,9 +500,7 @@ async function renderYear(year) {
             <button data-daily="all" aria-pressed="${DAILYALL}">tout</button>
           </div>
         </div>
-        <p class="sub">Ta formule <span class="mono">signe(n−5)·(n−5)²/2,5</span>, jour par jour.
-          Une journée à 6 pèse <span class="mono">0,4</span>, une journée à 9 pèse <span class="mono">6,4</span> :
-          l'expansion quadratique écrase le milieu et fait sortir les extrêmes. Pas de cumul ici.</p>
+        <p class="sub"><span class="mono">signe(n−5)·(n−5)²/2,5</span></p>
         ${(() => {
           const idx = DAILYALL
             ? SERIES.date.map((_, i) => i)
@@ -527,8 +512,7 @@ async function renderYear(year) {
 
       <div class="card">
         <h2>Cumul</h2>
-        <p class="sub">Somme courante de <span class="mono">note − étalon</span> — l'écart <b>linéaire</b>, pas le carré.
-          La pente se lit directement : elle monte quand la période est au-dessus de l'étalon.</p>
+        <p class="sub"><span class="mono">Σ (note − étalon)</span></p>
         <div class="centerpick">
           <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}">étalon fixe<span class="drift mono">${eta}</span></button>
           <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}">référence glissante<span class="drift">365 j</span></button>
@@ -550,8 +534,7 @@ async function renderYear(year) {
 
       <div class="card">
         <h2>Repères</h2>
-        <p class="sub">Déménagement, rupture, nouveau boulot, arrêt d'un traitement. Ils apparaissent en pointillés
-          sur les deux courbes. Sans eux, une inflexion n'est qu'une inflexion.</p>
+        <p class="sub">En pointillés sur les deux courbes.</p>
         <form id="evform" style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
           <label class="field" style="margin:0;flex:0 0 160px"><span>Date</span>
             <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.stats.lastDate}" value="${S.today}"></label>
@@ -677,7 +660,6 @@ async function renderMirror(date) {
       </div>` : ''}
       ${m.rawPast?.length ? `<div class="card">
         <h2>Ce que tu as écrit avant</h2>
-        <p class="sub">Sans commentaire, sans résumé.</p>
         ${m.rawPast.map(p => `<div class="simitem">
           <div class="hd"><span class="d">${fmtDay(p.date)}</span></div>
           <p class="q">${esc(p.text)}</p>
@@ -711,9 +693,8 @@ async function renderMirror(date) {
     epCard = `<div class="card">
       <h2>Preuve de résolution</h2>
       <p class="sub">
-        Les <b>${ep.comparableCount}</b> fois où tu es descendu à ${ep.note}/10 ou moins, voilà combien de temps
-        il a fallu pour remonter au-dessus de ta référence — et pour y rester ${ep.sustain} jours.
-        ${ep.censoredCount ? `<br><span class="faint">L'épisode en cours n'est pas compté : il n'a pas encore assez de recul pour être jugé.</span>` : ''}
+        <b>${ep.comparableCount}</b> épisodes à ${ep.note}/10 ou moins · retour au-dessus de la référence,
+        tenu ${ep.sustain} jour${ep.sustain > 1 ? 's' : ''}${ep.censoredCount ? ` · <span class="faint">épisode en cours non compté</span>` : ''}
       </p>
       <div class="statgrid">
         <div class="s"><div class="k">Médiane</div><div class="v">${ep.medianDays}<span class="u"> jours</span></div></div>
@@ -723,7 +704,6 @@ async function renderMirror(date) {
           <div class="v" style="color:${ep.unresolvedCount ? 'var(--warn)' : 'var(--accent)'}">${ep.unresolvedCount}</div></div>
       </div>
       <p class="sub" style="margin:16px 0 0;font-size:12px">
-        La dernière colonne est la moitié honnête du chiffre. Sans elle, on ne montrerait que les fois où ça s'est arrangé.
         ${ep.beyondHorizonDays?.length ? `Parmi elles, ${ep.beyondHorizonDays.length} sont finalement remontées, au bout de ${ep.beyondHorizonDays.join(', ')} jours.` : ''}
       </p>
     </div>`;
@@ -734,9 +714,7 @@ async function renderMirror(date) {
   if (sim?.items?.length) {
     simCard = `<div class="card">
       <h2>${sim.mode === 'text' ? 'Tu as déjà écrit ça' : 'Les autres fois à ' + m.note + '/10'}</h2>
-      <p class="sub">${sim.mode === 'text'
-        ? 'Recherche sur ton propre corpus. La bande montre les 14 jours qui ont suivi, tels qu\'ils ont été. Le jour cerclé est le retour à la référence.'
-        : 'Pas encore assez de texte écrit pour comparer les mots — je compare les chiffres. La bande montre les 14 jours qui ont suivi. Le jour cerclé est le retour à la référence.'}</p>
+      ${sim.mode === 'text' ? '' : `<p class="sub">Comparaison sur les notes, pas sur les mots.</p>`}
       ${sim.items.map(it => `<div class="simitem">
         <div class="hd">
           <span class="d">${fmtDay(it.date)}</span>
@@ -808,9 +786,7 @@ async function renderSettings() {
 
       <div class="card">
         <h2>La voix</h2>
-        <p class="sub">Un blip par syllabe, comme dans un RPG. Pas de synthèse vocale : une voix
-          qui lit « qu'est-ce qui s'est passé aujourd'hui ? » sonne comme un serveur vocal,
-          et on ne se confie pas à un serveur vocal.</p>
+        <p class="sub">Un blip par syllabe. Pas de synthèse vocale.</p>
         <label class="field"><span>
           <input type="checkbox" id="blipEnabled" ${s.blipEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
           Le compagnon fait du bruit quand il parle</span></label>
@@ -838,11 +814,6 @@ async function renderSettings() {
           <option value="ollama" ${s.chatBackend === 'ollama' ? 'selected' : ''}>Ollama local</option>
         </select></label>
       <div id="backendCfg"></div>
-      ${s.chatBackend === 'anthropic' ? `<p class="sub" style="margin:10px 0 0;font-size:12.5px;color:var(--warn)">
-        Dans ce mode, <b>le texte de tes conversations part chez Anthropic</b>. Tes notes, tes
-        statistiques et tes 1698 journées chiffrées ne bougent pas : le Miroir est du calcul et
-        de la recherche, il ne fait aucun appel réseau. Seul ce que tu écris dans le chat sort d'ici.
-      </p>` : ''}
     </div>
 
     <div class="row">
@@ -860,9 +831,7 @@ async function renderSettings() {
 
       <div class="card">
         <h2>Le retour à la référence</h2>
-        <p class="sub">Combien de jours consécutifs au-dessus de la référence comptent comme une vraie remontée.
-          À 1 jour, un simple rebond suffit : avec la majorité de tes journées au-dessus de la référence,
-          le chiffre devient flatteur et ne dit plus rien.</p>
+        <p class="sub">Combien de jours consécutifs au-dessus de la référence comptent comme une vraie remontée.</p>
         <label class="field"><span>Tenue exigée <b class="mono" id="sv">${s.sustain}</b> jour${s.sustain > 1 ? 's' : ''}</span>
           <input type="range" id="sustain" min="1" max="5" step="1" value="${s.sustain}"></label>
       </div>
@@ -879,9 +848,7 @@ async function renderSettings() {
 
       <div class="card">
         <h2>Coller des notes déjà écrites</h2>
-        <p class="sub">Le miroir ne peut rendre que ce qu'il a. Les notes du tableur lui donnent
-          des chiffres ; celles-ci lui donnent tes mots — et sans mots, la recherche par
-          similitude reste muette sur des années de journal.</p>
+        <p class="sub">Les notes du tableur donnent les chiffres ; celles-ci donnent les mots.</p>
         <p class="sub" style="font-size:12.5px">
           Chaque journée commence par une date sur sa propre ligne, puis le texte en dessous.
           <span class="mono">2024-03-12</span>, <span class="mono">12/03/2024</span> ou
@@ -940,9 +907,14 @@ async function renderSettings() {
   });
   $('#blipVolume')?.addEventListener('change', () => Blip.preview(S.settings.blipVoice, S.settings));
 
+  // Surtout PAS renderSettings() ici : il reconstruit l'innerHTML de la vue,
+  // donc détruit et recrée le <select> pendant que son menu natif est encore
+  // ouvert. Le navigateur rouvrait alors le popup sur l'élément neuf, la
+  // sélection repartait, et le menu clignotait sans fin. On ne redessine que
+  // le bloc qui dépend réellement du choix.
   $('#chatBackend').addEventListener('change', async e => {
     await saveSettings({ chatBackend: e.target.value });
-    renderSettings();
+    renderBackendCfg();
   });
 
   $('#spritepick').addEventListener('click', async e => {
@@ -1016,6 +988,15 @@ async function renderBackendCfg() {
   const el = $('#backendCfg');
   if (!el) return;
 
+  // Ce qui sort de la machine doit être relu à chaque changement de backend,
+  // pas une seule fois à la première lecture : il vit donc dans le bloc qui se
+  // redessine, pas dans le markup figé de la vue.
+  const SORTIE_ANTHROPIC = `<p class="sub" style="margin:12px 0 0;font-size:12.5px;color:var(--warn)">
+    Dans ce mode, <b>le texte de tes conversations part chez Anthropic</b>. Tes notes, tes
+    statistiques et tes journées chiffrées ne bougent pas : le Miroir est du calcul et
+    de la recherche, il ne fait aucun appel réseau. Seul ce que tu écris dans le chat sort d'ici.
+  </p>`;
+
   if (s.chatBackend === 'anthropic') {
     let info = { models: [], hasEnvKey: false };
     try { info = await api('/api/models'); } catch { /* ignoré */ }
@@ -1061,7 +1042,7 @@ async function renderBackendCfg() {
       Ce qui donne la continuité : sans mémoire, il repart de zéro chaque soir. Seul le
       <b>texte</b> de ces journées est transmis — jamais tes notes, jamais tes statistiques.
       À 0, il ne connaît que la conversation du jour.
-    </p>`;
+    </p>` + SORTIE_ANTHROPIC;
   } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
       <label class="field"><span>URL Ollama</span><input type="text" id="ollamaUrl" value="${esc(s.ollamaUrl)}"></label>

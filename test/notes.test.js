@@ -162,3 +162,64 @@ test('decoupage : une ligne qui commence par un nombre reste du texte', () => {
   assert.equal(entries.length, 1);
   assert.equal(entries[0].text, '12 heures de sommeil\n8 km courus');
 });
+
+/* ---------- formats etendus ---------- */
+
+test('dates : les enveloppes et prefixes courants sont retires', () => {
+  const cas = [
+    ['[2024-03-12]',      '2024-03-12'],
+    ['(12 mars 2024)',    '2024-03-12'],
+    ['Le 12 mars 2024',   '2024-03-12'],
+    ['2024-03-12.md',     '2024-03-12'],   // en-tete recopie depuis Obsidian
+    ['20240312',          '2024-03-12'],
+    ['March 12th, 2024',  '2024-03-12'],
+    ['12th March 2024',   '2024-03-12'],
+    ['1er avril 2024',    '2024-04-01']
+  ];
+  for (const [entree, attendu] of cas) {
+    const r = parseDateLine(entree);
+    assert.ok(r, `non reconnu : ${entree}`);
+    assert.equal(r.date, attendu, `${entree} mal interprete`);
+  }
+});
+
+test('dates : une heure accolee est coupee, pas versee dans le texte', () => {
+  // Sinon « 21:30 » devient la premiere ligne de la journee et pollue le corpus
+  // que le miroir fouille.
+  for (const l of ['2024-03-12 21:30', '12 mars 2024 à 21h30', '12/03/2024 21:30', 'le 3 avril 2024, 22h']) {
+    const r = parseDateLine(l);
+    assert.ok(r, `non reconnu : ${l}`);
+    assert.equal(r.reste, '', `heure laissee dans le texte : ${l}`);
+  }
+});
+
+test('dates : huit chiffres suivis de texte ne sont pas une date', () => {
+  // Un numero de dossier ouvrirait une journee fantome au milieu du journal.
+  assert.equal(parseDateLine('20240312 est mon code'), null);
+  assert.equal(parseDateLine('20240312').date, '2024-03-12');
+});
+
+test('dates : sans annee et sans contexte, on refuse plutot que deviner', () => {
+  // Une entree rangee sous une annee inventee serait introuvable pour toujours.
+  assert.equal(parseDateLine('12 mars'), null);
+  assert.equal(parseDateLine('12/03'), null);
+});
+
+test('decoupage : l\'annee est reportee sur les dates qui n\'en portent pas', () => {
+  // Un cahier tenu a la main porte l'annee une fois en tete, plus jamais ensuite.
+  const { entries } = parseNotes('2023\n\n12 mars\nune\n\n15 mars\ndeux\n\nmars 20\ntrois');
+  assert.deepEqual(entries.map(e => e.date), ['2023-03-12', '2023-03-15', '2023-03-20']);
+});
+
+test('decoupage : le passage de nouvel an avance l\'annee', () => {
+  // « 28 decembre » puis « 3 janvier » : le second est l'annee suivante, sinon
+  // il remonterait onze mois en arriere au milieu d'un journal qui avance.
+  const { entries } = parseNotes('2023-12-20\navant\n\n28/12\nreveillon\n\n3 janvier\napres');
+  assert.deepEqual(entries.map(e => e.date), ['2023-12-20', '2023-12-28', '2024-01-03']);
+});
+
+test('decoupage : une date sans annee avant tout repere reste du texte', () => {
+  const { entries, ignore } = parseNotes('12 mars\nrien ne dit quelle annee');
+  assert.equal(entries.length, 0);
+  assert.ok(ignore.includes('12 mars'));
+});
