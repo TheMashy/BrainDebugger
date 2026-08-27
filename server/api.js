@@ -10,7 +10,7 @@ import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search } from './search.js';
-import { reply, memoryBlock, anchorBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
+import { reply, memoryBlock, anchorBlock, gridBlock, ANTHROPIC_MODELS, testKey } from './chat.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -54,6 +54,14 @@ export function recentMemory(date, userId = OWNER) {
   // repartant de zero connait quand meme la personne en face.
   const ancres = anchorBlock(allAnchors(userId));
   if (ancres) morceaux.push(ancres);
+
+  // La grille entiere. Sans elle, a la question « sur l'annee, mes ecarts
+  // sont-ils inquietants ? », le compagnon repondait qu'il n'avait que des
+  // bouts -- vrai, et absurde quand l'application tient quatre ans de notes.
+  const { rows, series: ser } = series(userId);
+  const ref = ser.length ? ser[ser.length - 1].reference : null;
+  const grille = gridBlock(rows, { reference: ref });
+  if (grille) morceaux.push(grille);
 
   const note = presenceNote(presence(userId));
   if (note) morceaux.push(note);
@@ -335,9 +343,12 @@ export const routes = {
     const texte = String(body.text ?? '');
     if (!texte.trim()) return { error: 'rien à importer' };
 
-    const report = inspectNotes(texte, userId);
+    // `today` vient d'ici et non du fond du parseur : c'est lui qui sert de
+    // repere aux dates sans annee, et le fuseau du serveur n'est pas celui de
+    // la personne qui colle.
+    const report = inspectNotes(texte, userId, { today: today() });
     if (!report.total) {
-      return { error: "Aucune journée reconnue. Chaque journée doit commencer par une date sur sa propre ligne — 2024-03-12, 12/03/2024 ou 12 mars 2024 — suivie du texte." };
+      return { error: "Aucune date reconnue. Chaque journée commence par une date — 2024-03-12, 12/03/2024, 12 mars 2024, ou 17/08 sans l'année — soit sur sa propre ligne avec le texte en dessous, soit dans une colonne si tu colles un tableau." };
     }
     const { entries, ...preview } = report;
     if (!body.apply) return { preview };
