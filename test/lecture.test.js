@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { valider, corpusPour, choisirJours, HORIZONS } from '../server/lecture.js';
+import { valider, corpusPour, choisirJours, HORIZONS, GENRES } from '../server/lecture.js';
 
 const DATES = new Set(['2024-03-12', '2024-04-02', '2024-05-20']);
 
@@ -74,9 +74,40 @@ test('les intensités hors échelle sont ramenées dedans', () => {
 });
 
 test('rien d’exploitable rend une lecture vide, pas une exception', () => {
-  assert.deepEqual(valider(null, DATES), { synthese: '', themes: [] });
+  assert.deepEqual(valider(null, DATES),
+    { synthese: '', themes: [], carte: { noeuds: [], liens: [] } });
   assert.deepEqual(valider({ themes: 'pas un tableau' }, DATES).themes, []);
   assert.deepEqual(valider({ themes: [{}] }, DATES).themes, []);
+});
+
+/* -------------------------------- la carte -------------------------------- */
+
+test('la carte n’est faite que de ce qui se relie vraiment', () => {
+  const c = valider({ synthese: '', themes: [], carte: {
+    noeuds: [{ nom: 'Léa', genre: 'personne', poids: 3 },
+             { nom: 'les nuits courtes', genre: 'corps', poids: 2 },
+             { nom: 'flottant', genre: 'activite', poids: 1 },
+             { nom: 'Léa', genre: 'personne', poids: 1 }],
+    liens: [{ de: 'Léa', vers: 'les nuits courtes', quoi: 'précède', force: 2 },
+            { de: 'les nuits courtes', vers: 'Léa', quoi: 'doublon', force: 3 },
+            { de: 'Léa', vers: 'fantôme', quoi: 'x', force: 1 },
+            { de: 'Léa', vers: 'les nuits courtes', quoi: '', force: 1 },
+            { de: 'Léa', vers: 'Léa', quoi: 'boucle', force: 1 }]
+  } }, DATES).carte;
+  // un doublon de nom, un nœud sans lien, un lien vers un fantôme, un lien sans
+  // « comment », une boucle sur soi : rien de tout ça ne se dessine.
+  assert.deepEqual(c.noeuds.map(n => n.nom), ['Léa', 'les nuits courtes']);
+  assert.equal(c.liens.length, 1);
+  assert.equal(c.liens[0].quoi, 'précède');
+});
+
+test('un genre inconnu retombe sur « activite » au lieu de casser le rendu', () => {
+  const c = valider({ synthese: '', themes: [], carte: {
+    noeuds: [{ nom: 'a', genre: 'nimportequoi', poids: 9 }, { nom: 'b', genre: 'lieu', poids: -3 }],
+    liens: [{ de: 'a', vers: 'b', quoi: 'suit', force: 12 }]
+  } }, DATES).carte;
+  assert.deepEqual(c.noeuds.map(n => [n.genre, n.poids]), [['activite', 3], ['lieu', 0]]);
+  assert.equal(c.liens[0].force, 3);
 });
 
 /* ------------------------------- le corpus ------------------------------- */
@@ -145,7 +176,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-lect-')), 'test.db');
 
-const { setLecture, addMessage, OWNER } = await import('../server/db.js');
+const { setLecture, addMessage, addCarnet, OWNER } = await import('../server/db.js');
 const api = await import('../server/api.js');
 
 // invalidate() comme le fait streamMessage : la série est mémoïsée, et sans ça
@@ -196,4 +227,28 @@ test('le seuil suit la fenêtre : trois journées suffisent sur trente jours', (
 
 test('un horizon inconnu retombe sur « moyen » plutôt que d’échouer', () => {
   assert.equal(etat('nimportequoi').horizon, 'moyen');
+});
+
+test('les notes apportées font vieillir la carte, pas seulement les journées', () => {
+  // Coller trois ans de carnet est l'événement qui change le plus une carte, et
+  // c'était exactement celui qui ne comptait pas : une note n'est pas une
+  // journée, donc elle ne bougeait pas le retard.
+  setLecture({ horizon: 'long', contenu: { synthese: 'x', themes: [] },
+               jusqu_au: '2026-02-14', jours: 40, modele: 'm', userId: OWNER });
+  const avant = etat('long');
+  assert.equal(avant.notes, 0);
+  for (let i = 0; i < 30; i++) {
+    addCarnet({ texte: `vieille note ${i}`, jour: null, userId: OWNER,
+                quandCree: new Date(Date.now() + 1000 + i).toISOString() });
+  }
+  api.invalidate(OWNER);
+  const apres = etat('long');
+  assert.equal(apres.notes, 30);
+  assert.ok(apres.retard >= 30);
+  assert.equal(apres.arelire, true, 'trente notes collées n’ont pas rafraîchi la carte');
+});
+
+test('chaque genre déclaré est utilisable', () => {
+  assert.ok(GENRES.includes('personne') && GENRES.includes('mecanisme'));
+  assert.equal(new Set(GENRES).size, GENRES.length);
 });

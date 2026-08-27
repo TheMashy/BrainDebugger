@@ -152,8 +152,8 @@ des questions courtes, il ne commente pas, il ne qualifie pas, il ne console pas
 Le miroir est la couche de **restitution** : il affiche des dates, des chiffres et des
 phrases déjà écrites. Le pouvoir vient de reconnaître sa propre écriture, pas d'un résumé.
 
-**Une exception, et elle est nommée : la lecture.** Le Miroir s'ouvre sur ce que le
-compagnon comprend du fonctionnement — trois à six thèmes, sur trois fenêtres. C'est du
+**Une exception, et elle est nommée : la lecture.** « Ma carte » s'ouvre sur ce que le
+compagnon comprend du fonctionnement — une carte, trois à six thèmes, sur trois fenêtres. C'est du
 texte généré, et c'est assumé : ce qu'on cherche là est ce qu'un compteur ne peut pas
 voir. Un mécanisme comme « les remontées ne tiennent pas trois jours » n'a aucun mot en
 commun d'une occurrence à l'autre, et aucune statistique de co-occurrence ne le trouvera
@@ -246,10 +246,11 @@ server/
   stats.js       référence, delta, contraste, cumul, épisodes
   search.js      BM25 (k1=1.5, b=0.75), stopwords FR/EN, NFD
   chat.js        3 backends : scripted (hors-ligne) | anthropic | ollama, et les outils
-  lecture.js     la lecture du Miroir : corpus, consigne, validation des dates
+  lecture.js     la lecture : corpus, consigne, validation des dates et de la carte
   import-csv.js  import de la grille annuelle
 web/
-  app.js         5 vues : Parler, Année, Miroir, Je remarque, Réglages
+  app.js         4 vues : Parler, Année, Ma carte, Réglages
+  relations.js   la carte organique : genres, verbes des liens, cadrage
   calendrier.js  un calendrier, une fois : jour/mois/année, plage, partagé
   chaton.js      le compagnon au trait, 21 expressions composables
   frise.js       la frise de vie : voies, domaines, dégradés (partagée serveur)
@@ -284,7 +285,7 @@ même chose.
 repères, les motifs suivis, les objectifs, et les notes rangées (décochable). Ce qui sort,
 c'est ce qu'on vient d'écrire plus de quoi ne pas repartir de zéro chaque soir.
 
-*La lecture du Miroir* envoie **beaucoup plus** : jusqu'à 45 000 signes de journées
+*La lecture de « Ma carte »* envoie **beaucoup plus** : jusqu'à 45 000 signes de journées
 écrites, choisies parmi les plus fournies de la fenêtre, plus le résumé mensuel des notes
 avec leur écart-type, les repères, les notes rangées. Un appel par fenêtre, relancé
 seulement quand assez de journées se sont accumulées depuis le précédent. C'est l'endroit
@@ -292,8 +293,8 @@ de l'application où le plus de choses quittent la machine, et c'est pourquoi il
 déclenche jamais sans clé et se voit à l'écran pendant qu'il tourne.
 
 Sans clé, il ne se passe rien de tout ça : les relances sont scriptées et la lecture
-affiche qu'elle a besoin d'une clé. Le reste du Miroir — la journée, le calendrier, les
-similitudes, les épisodes — est du calcul local et ne fait aucun appel réseau.
+affiche qu'elle a besoin d'une clé. Le reste — la journée, le calendrier, les similitudes,
+les épisodes — est du calcul local et ne fait aucun appel réseau.
 
 Requête : `claude-opus-5`, réflexion adaptative, effort réglable (bas par défaut — la
 latence compte plus que la profondeur quand quelqu'un attend une réponse le soir), et le
@@ -317,11 +318,37 @@ refus serait pire.
 - **Parler** — le fil continu, le compagnon, la note du jour avec les ancres sous les yeux.
 - **Année** — la grille mois × jours, le cumul commutable entre les trois centres, et les
   repères de vie (saisie et affichage en pointillés sur la courbe).
-- **Miroir** — la lecture : ce que le compagnon comprend du fonctionnement, à trois
-  distances, avec la carte des thèmes. Une journée s'ouvre derrière une preuve, un repère
-  ou le calendrier, et garde les trois mécanismes.
-- **Je remarque** — la carte des mots : ce que compte l'application elle-même, sans modèle.
+- **Ma carte** — la lecture : la carte organique de ce qui revient, la synthèse, et les
+  thèmes avec leur évolution, à trois distances. Une journée s'ouvre derrière une preuve,
+  un repère ou le calendrier, et garde les trois mécanismes.
 - **Réglages** — compagnon, timbre des bips, backend, plancher, tenue du retour, import/export.
+
+### La carte
+
+Il y avait deux vues : l'une comprenait quelque chose, l'autre comptait des mots. Il fallait
+choisir un onglet sans savoir lequel répondait. Il n'en reste qu'un.
+
+La carte des **mots** comptait des co-occurrences : un trait quand deux mots tombent la même
+journée. Elle savait dire que « fatigue » et « boulot » vont ensemble, et rien de plus — un
+trait sans verbe ne dit pas ce qui se passe entre deux choses.
+
+La carte **organique** est écrite par le compagnon à partir de tout ce qu'il a : les
+journées, les repères, les notes rangées, les motifs, les objectifs. Ses nœuds sont des
+choses — quelqu'un, un lieu, un moment, une sensation, un mécanisme — et **chaque trait
+porte un verbe** : « précède », « fait retomber », « le seul moment où ça tient ». C'est le
+verbe qui fait la carte ; un lien qui dirait seulement « lié à » est jeté côté serveur.
+
+Elle se refait quand assez de choses ont bougé — des journées écrites, **ou des notes
+apportées**. Coller trois ans de carnet est l'événement qui change le plus une carte, et
+c'était exactement celui qui ne comptait pas : une note n'est pas une journée, donc elle
+ne faisait pas vieillir la lecture.
+
+Les nœuds sont des **anneaux**, jamais des disques. « Ce qui est rempli est mesuré, ce qui
+est contouré est déclaré » : cette carte est une lecture, pas un calcul, et elle le dit
+dans sa forme.
+
+Le calcul des mots n'est pas supprimé — `server/graph.js` et ses routes vivent toujours,
+testés, avec l'invariant du carnet qu'ils portent. Ce qui a disparu est l'onglet.
 
 Il n'y a pas de vue « Recherche ». Ouvrir un champ de recherche demande de savoir quoi
 chercher ; le passé remonte tout seul.
@@ -336,7 +363,7 @@ La même recherche, au même seuil, part maintenant vers le **compagnon**. C'est
 décide s'il la rend — quand quelqu'un dit que ça n'arrive jamais, quand il croit que c'est
 la première fois, quand il cherche ce qui avait marché la dernière fois. Le reste du temps,
 l'avoir en tête lui suffit pour ne pas faire raconter deux fois la même chose comme s'il la
-découvrait. Le Miroir, lui, garde son « tu as déjà écrit ça » : on y va pour ça.
+découvrait. La journée, elle, garde son « tu as déjà écrit ça » : on y va pour ça.
 
 La conversation est **continue** : on rouvre le fil là où on l'a laissé, avec les jours
 précédents visibles au-dessus, séparés par leur date. C'est un confident qu'on va voir

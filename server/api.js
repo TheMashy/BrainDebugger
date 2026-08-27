@@ -861,9 +861,21 @@ export const routes = {
      * Le seuil suit la fenetre : sur trente jours, une semaine de plus est un
      * quart du corpus ; sur quatre ans, elle ne change rien.
      */
-    const retard = l?.jusqu_au
+    /*
+     * Le retard compte les journees ecrites ET les notes apportees depuis.
+     *
+     * Coller trois ans de carnet est l'evenement qui change le plus une carte,
+     * et c'est exactement celui qui ne comptait pas : une note rangee n'est pas
+     * une journee (c'est tout l'invariant du carnet), donc elle ne bougeait pas
+     * le retard, donc la carte restait celle d'avant.
+     *
+     * Elles se comptent par leur date d'APPORT, pas par le jour dont elles
+     * parlent : un souvenir de 1998 apporte ce soir est nouveau ce soir.
+     */
+    const notes = carnetRecent(l?.fait_le, userId);
+    const retard = (l?.jusqu_au
       ? ecrites.filter(r => r.date > l.jusqu_au).length
-      : ecrites.length;
+      : ecrites.length) + notes;
     const SEUIL = { court: 3, moyen: 14, long: 30 }[horizon] ?? 14;
     return {
       horizon,
@@ -876,6 +888,7 @@ export const routes = {
       minimum: LECTURE_MIN,
       ecrites: ecrites.length,
       retard,
+      notes,
       perime: !!l && retard > 0,
       // Ce qui declenche une relecture sans qu'on la demande.
       arelire: !l || retard >= SEUIL,
@@ -1067,6 +1080,10 @@ function deplacements(rows, anchors, carnet, t) {
  * vieille journee : « j'en etais ou, a ce moment-la ? »
  */
 const ISO_JOUR = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Les notes apportees depuis un instant donne, par leur date d'apport. */
+const carnetRecent = (depuis, userId) =>
+  depuis ? allCarnet(userId).filter(c => c.cree_le > depuis).length : allCarnet(userId).length;
 
 /**
  * Les reperes, decores de leur theme.
