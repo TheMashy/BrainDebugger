@@ -14,21 +14,36 @@ import { join } from 'node:path';
 
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-outils-')), 'test.db');
 
-const { addMessage, allEvents, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
-        TEINTES, OWNER } = await import('../server/db.js');
+const { addMessage, recentMessages, allEvents, allMotifs, addMotif, marquerMotif, motifsDesMessages,
+        deleteMotif, TEINTES, OWNER } = await import('../server/db.js');
 const { outilsPour } = await import('../server/api.js');
 const { OUTILS } = await import('../server/chat.js');
 const { deltaColor } = await import('../web/charts.js');
 
 /* --------------------------- le catalogue --------------------------- */
 
+/*
+ * `ranger_notes` est le seul outil sans champ requis, et c'est le point : son
+ * entrée n'est pas dans ses arguments, c'est le message que la personne vient
+ * d'envoyer. Le modèle déclenche le rangement ; il ne dicte jamais le texte
+ * rangé — sinon de la prose générée reviendrait plus tard dans « explorer un
+ * thème » comme si elle l'avait écrite.
+ */
+const SANS_ARGUMENT = new Set(['ranger_notes']);
+
 test("chaque outil déclare un schéma exploitable", () => {
   for (const [nom, def] of Object.entries(OUTILS)) {
     assert.ok(def.description.length > 40, `${nom} : description trop maigre`);
     assert.equal(def.input_schema.type, 'object');
-    assert.ok(def.input_schema.required?.length, `${nom} : aucun champ requis`);
-    for (const champ of def.input_schema.required) {
+    if (!SANS_ARGUMENT.has(nom)) {
+      assert.ok(def.input_schema.required?.length, `${nom} : aucun champ requis`);
+    }
+    for (const champ of def.input_schema.required ?? []) {
       assert.ok(def.input_schema.properties[champ], `${nom} : ${champ} requis mais non décrit`);
+    }
+    // Un champ sans description est un champ que le modèle remplira au hasard.
+    for (const [c, d] of Object.entries(def.input_schema.properties ?? {})) {
+      assert.ok(d.description?.length > 10, `${nom}.${c} : description manquante`);
     }
   }
 });
@@ -176,4 +191,84 @@ test('le nombre de motifs suivis est borné', () => {
   }
   assert.match(dernier.erreur, /maximum/i);
   assert.ok(allMotifs().length <= 12, `${allMotifs().length} motifs suivis`);
+});
+
+/* ------------------------ ranger des notes ------------------------ */
+
+/*
+ * Le garde-fou central de cet outil n'est pas dans sa validation : c'est qu'il
+ * ne prend PAS de texte. Le texte vient de la ligne `messages`, telle qu'elle a
+ * été écrite. Un outil qui accepterait du texte laisserait de la prose générée
+ * entrer dans le corpus, d'où elle reviendrait plus tard — dans « explorer un
+ * thème », dans « tu as déjà écrit ça » — comme si la personne l'avait écrite.
+ */
+const { getEntry, allCarnet, rebuildEntryText } = await import('../server/db.js');
+
+test('ranger_notes ne prend aucun texte en argument', () => {
+  assert.deepEqual(Object.keys(OUTILS.ranger_notes.input_schema.properties).sort(), ['jour', 'quand']);
+});
+
+test('un message rangé quitte la journée sans quitter le fil', () => {
+  const jour = '2031-03-04';
+  const vecu = addMessage({ ts: `${jour}T20:00:00Z`, date: jour, role: 'user', text: 'journée courte, rien de spécial' });
+  const colle = addMessage({ ts: `${jour}T20:05:00Z`, date: jour, role: 'user', text: 'mes notes de 2019 : le sevrage, les nuits blanches' });
+  assert.match(getEntry(jour).text, /notes de 2019/);
+
+  const r = outilsPour(OWNER, colle).ranger_notes({ jour: '2019-06-01' });
+  assert.ok(!r.erreur, r.erreur);
+
+  // Sorti de la journée : sinon le soir où on colle trois ans de notes devient
+  // la journée la plus dense de tout le journal.
+  assert.equal(getEntry(jour).text, 'journée courte, rien de spécial');
+  // Mais toujours dans le fil : la personne l'a bien envoyé.
+  assert.ok(recentMessages(20, OWNER).some(m => m.id === colle));
+  // Et stocké mot pour mot.
+  const n = allCarnet(OWNER).at(-1);
+  assert.equal(n.texte, 'mes notes de 2019 : le sevrage, les nuits blanches');
+  assert.equal(n.jour, '2019-06-01');
+  assert.equal(n.source, 'conversation');
+  assert.ok(vecu);
+});
+
+test('un message déjà rangé ne se range pas deux fois', () => {
+  const jour = '2031-03-05';
+  const id = addMessage({ ts: `${jour}T20:00:00Z`, date: jour, role: 'user', text: 'un carnet recopié' });
+  assert.ok(!outilsPour(OWNER, id).ranger_notes({}).erreur);
+  const avant = allCarnet(OWNER).length;
+  assert.ok(outilsPour(OWNER, id).ranger_notes({}).erreur);
+  assert.equal(allCarnet(OWNER).length, avant, 'un doublon a été créé');
+});
+
+test('une date inventée est refusée, une date absente est acceptée', () => {
+  const jour = '2031-03-06';
+  const mk = t => addMessage({ ts: `${jour}T20:00:00Z`, date: jour, role: 'user', text: t });
+  assert.ok(outilsPour(OWNER, mk('a')).ranger_notes({ jour: 'vers 2019' }).erreur);
+  assert.ok(outilsPour(OWNER, mk('b')).ranger_notes({ jour: '2099-01-01' }).erreur);
+  // Sans date : « quand » recopie SES mots, et n'est jamais analysé ni trié.
+  const r = outilsPour(OWNER, mk('c')).ranger_notes({ quand: 'je sais plus, vers 2019' });
+  assert.ok(!r.erreur);
+  const n = allCarnet(OWNER).at(-1);
+  assert.deepEqual([n.jour, n.quand], [null, 'je sais plus, vers 2019']);
+});
+
+test('rebuildEntryText continue d’ignorer les messages rangés', () => {
+  // Le filtre vit dans rebuildEntryText, pas dans l'outil : n'importe quel
+  // message ultérieur du même jour le rappelle, et il doit rester exclu.
+  const jour = '2031-03-07';
+  const id = addMessage({ ts: `${jour}T20:00:00Z`, date: jour, role: 'user', text: 'vieux carnet' });
+  outilsPour(OWNER, id).ranger_notes({});
+  addMessage({ ts: `${jour}T21:00:00Z`, date: jour, role: 'user', text: 'et là, ma vraie journée' });
+  assert.equal(rebuildEntryText(jour, OWNER), 'et là, ma vraie journée');
+});
+
+/* ---------------------- chercher un repère ---------------------- */
+
+test('chercher_repere trouve un fait déjà posé sous d’autres mots', () => {
+  outilsPour(OWNER, null).poser_repere({ date: '2021-03-02', label: 'installation à Lyon' });
+  const r = outilsPour(OWNER, null).chercher_repere({ mot: 'lyon' });
+  assert.match(r.message, /installation à Lyon/);
+  assert.match(r.message, /2021-03-02/);
+  // Insensible aux accents : « déménagement » ne doit pas rater « demenagement ».
+  assert.match(outilsPour(OWNER, null).chercher_repere({ mot: 'LYON' }).message, /installation/);
+  assert.match(outilsPour(OWNER, null).chercher_repere({ mot: 'zzzz' }).message, /Aucun repère/);
 });

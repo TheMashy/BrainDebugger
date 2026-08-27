@@ -4,7 +4,7 @@ import {
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
-  updateEvent, TEINTES
+  updateEvent, rangerMessage, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -756,6 +756,36 @@ export const routes = {
   'GET /api/carnet': ({ userId }) => ({ notes: allCarnet(userId), compte: countCarnet(userId) }),
 
   /**
+   * CE QUE LE COMPAGNON A LU.
+   *
+   * Une seule question : « qu'est-ce qu'il sait de moi ? ». Elle se pose, et
+   * jusqu'ici rien n'y repondait -- les notes rangees depuis la conversation
+   * disparaissaient dans une table que rien n'affichait en entier.
+   *
+   * Trois populations, jamais melangees, parce qu'elles ne veulent pas dire la
+   * meme chose : les JOURNEES ecrites (ce qu'il a vecu et note), les MESSAGES
+   * du fil (ce qu'ils se sont dit), les NOTES rangees (ce qu'il a apporte
+   * d'ailleurs). Une seule addition des trois et le compte de journees, qui
+   * sert de denominateur a toute la carte, cesserait de vouloir dire quelque
+   * chose.
+   */
+  'GET /api/contexte': ({ userId }) => {
+    const { rows, carnet } = series(userId);
+    const msg = db.prepare(
+      "SELECT COUNT(*) t, COUNT(DISTINCT date) j FROM messages WHERE user_id = ? AND role = 'user'"
+    ).get(userId);
+    const ecrites = rows.filter(r => r.text && r.text.trim()).length;
+    return {
+      notes: carnet,
+      compte: countCarnet(userId),
+      journal: { jours: rows.length, ecrites,
+                 premier: rows[0]?.date ?? null, dernier: rows.at(-1)?.date ?? null },
+      fil: { messages: msg.t, jours: msg.j },
+      memoire: getSettings(userId).memoryDays
+    };
+  },
+
+  /**
    * Ecrire dans le carnet. La validation est ICI et pas dans une consigne.
    *
    * `jour` et `quand` s'excluent : une date connue OU les mots de la personne
@@ -1042,11 +1072,47 @@ export function outilsPour(userId, messageId, send = () => {}) {
     },
 
     /*
-     * Lecture seule, et c'est tout le point. Le carnet est l'endroit ou la
-     * personne apporte SES mots ; un outil d'ecriture y glisserait du texte
-     * genere qui lui reviendrait ensuite, dans « explorer un theme », comme si
-     * elle l'avait ecrit.
+     * Ranger : le seul chemin d'ecriture vers le carnet, et il ne prend PAS de
+     * texte. Le texte vient de la ligne `messages`, telle qu'elle a ete ecrite.
+     * Le compagnon declenche le rangement ; il ne dicte jamais ce qui est
+     * range. Du texte genere qui se glisserait ici lui reviendrait ensuite,
+     * dans « explorer un theme », comme si la personne l'avait ecrit.
      */
+    ranger_notes: ({ jour, quand }) => {
+      if (!messageId) return { erreur: "Rien a ranger : aucun message en cours." };
+      const j = jour == null ? null : String(jour).trim();
+      if (j !== null && !ISO_JOUR.test(j)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+      if (j !== null && j > today()) return { erreur: 'Cette date est dans le futur.' };
+      // « quand » est recopie tel quel et n'est JAMAIS analyse ni trie : ce sont
+      // les mots de la personne pour dire qu'elle ne sait plus.
+      const q = quand == null ? null : String(quand).trim().slice(0, 60) || null;
+      const r = rangerMessage(messageId, { jour: j, quand: q }, userId);
+      if (r.erreur) return { erreur: r.erreur };
+      invalidate(userId);
+      const fait = { type: 'note', id: r.note.id, jour: j, quand: q,
+                     taille: r.note.texte.length };
+      send('geste', fait);
+      return { message: `Rangé dans ses notes${j ? ` (le ${j})` : q ? ` (« ${q} »)` : ''}. `
+                      + `Ce texte ne compte plus comme sa journée.`, fait };
+    },
+
+    /*
+     * Sur une frise de quarante reperes, la liste transmise ne suffit plus a
+     * voir si celui qu'on allait poser existe deja sous d'autres mots.
+     */
+    chercher_repere: ({ mot }) => {
+      const m = String(mot ?? '').trim();
+      if (m.length < 2 || m.length > 40) return { erreur: 'Donne un ou deux mots, entre 2 et 40 caractères.' };
+      const mots = m.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/);
+      const norm = t => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const hits = allEvents(userId)
+        .filter(e => mots.some(w => norm(e.label).includes(w)))
+        .slice(0, 6);
+      if (!hits.length) return { message: `Aucun repère sur « ${m} ».` };
+      return { message: `${hits.length} repère(s) sur « ${m} » :\n`
+        + hits.map(e => `#${e.id} ${e.date}${e.fin ? ` → ${e.fin}` : ''} · ${e.label}`).join('\n') };
+    },
+
     lire_carnet: ({ mot }) => {
       const m = String(mot ?? '').trim();
       if (m.length < 2 || m.length > 40) return { erreur: 'Donne un seul mot, entre 2 et 40 caractères.' };

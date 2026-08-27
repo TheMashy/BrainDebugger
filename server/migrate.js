@@ -142,7 +142,18 @@ const AJOUTS = [
   ['events', 'ouvert', 'INTEGER'],  // 1 = periode en cours. INVARIANT : ouvert=1 => fin IS NULL
   ['events', 'theme',  'TEXT'],     // NULL = deduit du libelle
   ['events', 'teinte', 'INTEGER'],  // degres HSL, uniquement dans TEINTES_DECLAREES
-  ['events', 'fort',   'INTEGER']   // 1 = mis en avant. De la taille, jamais de la couleur.
+  ['events', 'fort',   'INTEGER'],  // 1 = mis en avant. De la taille, jamais de la couleur.
+  /*
+   * 1 = ce message a ete RANGE : ce n'etait pas la journee de la personne,
+   * c'etaient des notes prises ailleurs qu'elle a collees ici. Il reste dans le
+   * fil -- elle l'a bien ecrit -- mais il sort du texte de la journee.
+   *
+   * Sans cette colonne, coller trois ans de notes un mardi soir ferait de ce
+   * mardi la journee la plus dense du journal : le mot le plus courant de ces
+   * notes deviendrait un mot du 26 aout, la carte le relierait a ce jour-la, et
+   * « tu as deja ecrit ca » renverrait le mardi ou on a colle.
+   */
+  ['messages', 'rangee', 'INTEGER']
 ];
 
 /**

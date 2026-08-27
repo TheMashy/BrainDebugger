@@ -290,8 +290,12 @@ export function setNote(date, note, userId = OWNER) {
  * dans le corpus qui sera rendu a l'utilisateur.
  */
 export function rebuildEntryText(date, userId = OWNER) {
+  // `range = 1` : des notes prises ailleurs, collees ici. Elles ne sont pas la
+  // journee de la personne et n'entrent donc pas dans son texte -- sinon le
+  // soir ou elle colle trois ans de notes devient la journee la plus dense de
+  // tout le journal, et la carte relie tout ce vocabulaire a ce mardi-la.
   const rows = db.prepare(
-    "SELECT text FROM messages WHERE user_id = ? AND date = ? AND role = 'user' ORDER BY ts ASC"
+    "SELECT text FROM messages WHERE user_id = ? AND date = ? AND role = 'user' AND COALESCE(rangee, 0) = 0 ORDER BY ts ASC"
   ).all(userId, date);
   const text = rows.map(r => r.text).join('\n');
   db.prepare(`
@@ -496,6 +500,36 @@ export function updateCarnet(id, { texte, jour, quand }, userId = OWNER) {
 
 export function deleteCarnet(id, userId = OWNER) {
   return db.prepare('DELETE FROM carnet WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+}
+
+/**
+ * Ranger un message de la personne : il quitte sa journee et devient une note.
+ *
+ * C'EST LE SEUL CHEMIN D'ECRITURE VERS LE CARNET DEPUIS LA CONVERSATION, et il
+ * ne prend PAS de texte. Le texte vient de la ligne `messages`, telle qu'elle a
+ * ete ecrite. Le compagnon peut declencher le rangement, jamais dicter ce qui
+ * est range : du texte genere qui se glisserait ici lui reviendrait ensuite,
+ * dans « explorer un theme », comme si elle l'avait ecrit elle-meme.
+ *
+ * Le message reste dans le fil. Il a bien ete envoye ; c'est seulement qu'il ne
+ * raconte pas ce jour-la.
+ */
+export function rangerMessage(id, { jour = null, quand = null } = {}, userId = OWNER) {
+  const m = db.prepare(
+    "SELECT id, date, role, text, COALESCE(rangee,0) rangee FROM messages WHERE id = ? AND user_id = ?"
+  ).get(id, userId);
+  if (!m) return { erreur: 'Message introuvable.' };
+  if (m.role !== 'user') return { erreur: "On ne range que les mots de la personne." };
+  if (m.rangee) return { erreur: 'Ce message est déjà rangé.' };
+
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE messages SET rangee = 1 WHERE id = ?').run(id);
+    const note = addCarnet({ texte: m.text, jour, quand, source: 'conversation', userId });
+    db.exec('COMMIT');
+    rebuildEntryText(m.date, userId);      // hors transaction : il relit la table
+    return { note };
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
 }
 
 export function countCarnet(userId = OWNER) {

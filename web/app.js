@@ -396,7 +396,19 @@ let GESTES = [];
 
 function gestesMarkup() {
   if (!GESTES.length) return '';
-  return `<div class="gestes">${GESTES.map(g => g.type === 'repere'
+  return `<div class="gestes">${GESTES.map(g => g.type === 'note'
+    ? `<div class="geste note">
+         <span class="gicone">${icone('pensee', 20)}</span>
+         <div class="gtxt">
+           <b>Rangé dans tes notes</b>
+           ${/* Le compte de signes, parce que c'est la seule chose qui dit
+                 ce qui vient d'etre range sans le recopier dans le fil. */''}
+           <span>${g.taille} signes${g.jour ? ` · ${fmtDay(g.jour)}` : g.quand ? ` · ${esc(g.quand)}` : ' · sans date'}
+             — ne compte pas comme une journée écrite</span>
+         </div>
+         ${g.jour ? `<button class="gbtn" data-voir="${g.jour}">voir</button>` : ''}
+       </div>`
+    : g.type === 'repere'
     ? `<div class="geste repere">
          <span class="gicone">${icone(g.theme, 20)}</span>
          <div class="gtxt">
@@ -814,12 +826,6 @@ async function renderYear(year) {
         })()}
       </div>
 
-      ${carnetCardMarkup({
-        notes: CARNET.notes ?? [],
-        titre: 'Ton carnet',
-        vide: "Rien encore. Tu peux déposer ici des notes prises ailleurs — datées ou non."
-      })}
-
       <div class="card">
         <div class="cardhead">
           <h2>Repères</h2>
@@ -860,7 +866,6 @@ async function renderYear(year) {
     if (gto) { view = 'mirror'; syncNav(); return renderMirror(gto.dataset.goto); }
   };
 
-  wireCarnet(async () => { CARNET = await api('/api/carnet'); renderYear(year); });
   wireFrise();
   wireReperes(year);
 
@@ -1230,51 +1235,36 @@ function gridMarkup(grid) {
   </table>`;
 }
 
-/* ========================= le carnet ==========================
+/* ==================== les notes, en lecture ====================
  *
- * Les notes prises ailleurs et apportees ici. Un seul composeur, rendu a
- * plusieurs endroits : le Miroir sur une journee ouverte, l'Annee sur
- * l'ensemble. Jamais duplique -- deux formulaires aux memes identifiants se
- * branchent l'un sur l'autre sans qu'aucune erreur ne le signale.
+ * IL N'Y A PLUS DE FORMULAIRE.
  *
- * Le mot « note » n'apparait sur aucun bouton : dans cette application, une
- * note est le chiffre de 0 a 10. Ici on dit « note apportee ».
+ * Il y en avait un, replie, dans trois vues : « + une note apportee », une
+ * zone de texte, trois boutons radio pour dire de quand ca parle. Personne
+ * n'ouvre un formulaire pour deposer un souvenir. On le raconte.
+ *
+ * Les notes arrivent donc par la conversation : on colle son texte, le
+ * compagnon reconnait que ce n'est pas la journee du jour et le range avec
+ * ranger_notes. Ce qui est stocke reste le texte de la personne, mot pour mot
+ * -- le compagnon declenche le rangement, il ne dicte jamais ce qui est range.
+ *
+ * Ce qui reste ici : de quoi RELIRE ce qu'il a rangé, et le retirer.
  */
 
-let CARNET_OUVERT = false;      // le formulaire est replie par defaut
-
-function carnetCardMarkup({ notes = [], jour = null, titre = 'Notes apportées', vide = null } = {}) {
-  const liste = notes.length
-    ? `<div class="cnliste">${notes.map(n => carnetItemMarkup(n)).join('')}</div>`
-    : `<p class="sub" style="margin:0">${esc(vide ?? "Rien d'ajouté ici.")}</p>`;
-
+/**
+ * Les notes rattachées à la journée ouverte, en lecture.
+ *
+ * Rien si elle n'en porte aucune — une carte vide qui dit « rien ici » sur
+ * quatre vues sur cinq apprend seulement qu'il existe un endroit où il ne se
+ * passe rien.
+ */
+function notesDuJourMarkup(notes) {
+  if (!notes?.length) return '';
   return `<div class="card carnetcard">
     <div class="cardhead">
-      <h2 title="Des notes prises ailleurs. Elles nourrissent le compagnon et les thèmes, et ne comptent jamais comme des journées écrites.">${esc(titre)}</h2>
-      <button class="btn ghost cnadd" id="cnOuvrir" style="margin-left:auto">+ une note apportée</button>
+      <h2 title="Des notes prises ailleurs, rangées depuis la conversation. Elles ne comptent jamais comme des journées écrites.">Notes rangées ici</h2>
     </div>
-
-    <form id="cnForm" class="carnetform" ${CARNET_OUVERT ? '' : 'hidden'}>
-      <textarea id="cnTexte" required rows="4" maxlength="4000"
-                placeholder="tes mots, tels quels"></textarea>
-      <div class="cnrow" id="cnRow">
-        ${jour ? `<label><input type="radio" name="cnq" value="jour" checked>
-          <span>le ${fmtDay(jour)}</span></label>` : ''}
-        <label><input type="radio" name="cnq" value="autre" ${jour ? '' : 'checked'}>
-          <span>une autre date</span>
-          <input type="date" id="cnJour" min="1900-01-01" max="${S.today}" value="${jour ?? S.today}"></label>
-        <label><input type="radio" name="cnq" value="libre">
-          <span>je ne sais pas</span>
-          <input type="text" id="cnQuand" maxlength="60" placeholder="vers 2019…"></label>
-      </div>
-      <p class="sub cnhint" id="cnHint"></p>
-      <div class="cnactions">
-        <button class="btn primary" type="submit">Ajouter</button>
-        <button class="btn" type="button" id="cnCancel">Annuler</button>
-      </div>
-    </form>
-
-    ${liste}
+    <div class="cnliste">${notes.map(carnetItemMarkup).join('')}</div>
   </div>`;
 }
 
@@ -1301,64 +1291,6 @@ function carnetItemMarkup(n) {
     </div>
     <p class="cntexte">${esc(n.texte)}</p>
   </div>`;
-}
-
-/**
- * Branche le composeur. `apres` est rappele apres chaque ecriture -- c'est la
- * vue qui decide quoi redessiner, pas le carnet.
- */
-function wireCarnet(apres) {
-  const form = $('#cnForm');
-  if (!form) return;
-  const ouvrir = $('#cnOuvrir');
-  const texte = $('#cnTexte');
-
-  const choix = () => document.querySelector('input[name="cnq"]:checked')?.value ?? 'autre';
-
-  // L'indice porte la regle du produit a l'endroit exact ou le choix se fait.
-  // La phrase « ne compte pas comme une journée écrite » n'est pas décorative :
-  // c'est la seule façon de comprendre pourquoi le compte de journées n'a pas
-  // bougé après avoir collé quinze notes.
-  const indice = () => {
-    const h = $('#cnHint');
-    if (!h) return;
-    const c = choix();
-    if (c === 'libre') {
-      h.textContent = "Sans date. Elle n'entre dans aucun compte de journées.";
-    } else {
-      const d = c === 'jour' ? (form.dataset.jour || S.today) : ($('#cnJour')?.value || S.today);
-      h.textContent = `Sur le ${fmtDay(d)}. Elle ne compte pas comme une journée écrite.`;
-    }
-  };
-
-  ouvrir.onclick = () => {
-    CARNET_OUVERT = !CARNET_OUVERT;
-    form.hidden = !CARNET_OUVERT;
-    if (CARNET_OUVERT) { texte.focus(); indice(); }
-  };
-  $('#cnCancel').onclick = () => { CARNET_OUVERT = false; form.hidden = true; };
-  form.querySelectorAll('input[name="cnq"]').forEach(r => { r.onchange = indice; });
-  $('#cnJour')?.addEventListener('change', indice);
-  indice();
-
-  form.onsubmit = async e => {
-    e.preventDefault();
-    const t = texte.value.trim();
-    if (!t) return;
-    const c = choix();
-    const corps = { texte: t };
-    if (c === 'jour') corps.jour = form.dataset.jour || S.today;
-    else if (c === 'autre') corps.jour = $('#cnJour').value;
-    else corps.quand = $('#cnQuand').value.trim();
-
-    try {
-      await api('/api/carnet', corps);
-      texte.value = '';
-      CARNET_OUVERT = false;
-      toast('Note ajoutée à ton carnet');
-      await apres?.();
-    } catch (err) { toast(err.message); }
-  };
 }
 
 /* ============================= vue : miroir ============================= */
@@ -1471,8 +1403,7 @@ async function renderMirror(date) {
             l'affichait jamais : le champ était reçu et jeté. Le plancher retire
             des chiffres, pas des faits qu'on a soi-même posés. */''}
       ${reperesMarkup(m.reperes, date)}
-      ${carnetCardMarkup({ notes: m.carnet ?? [], jour: date,
-          vide: "Rien d'ajouté sur cette journée." })}
+      ${notesDuJourMarkup(m.carnet)}
 
       ${m.yesterday.text ? `<div class="card">
         <h2>Hier</h2>
@@ -1494,7 +1425,6 @@ async function renderMirror(date) {
         </div>
       </div>` : ''}`;
     const f = $('#cnForm'); if (f) f.dataset.jour = date;
-    wireCarnet(() => renderMirror(date));
     wireMirror();
     return;
   }
@@ -1586,8 +1516,7 @@ async function renderMirror(date) {
             : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
         </div>
 
-        ${carnetCardMarkup({ notes: m.carnet ?? [], jour: date,
-            vide: "Rien d'ajouté sur cette journée." })}
+      ${notesDuJourMarkup(m.carnet)}
 
         ${epCard}
       </div>
@@ -1599,7 +1528,6 @@ async function renderMirror(date) {
       </div>
     </div>`;
   const form = $('#cnForm'); if (form) form.dataset.jour = date;
-  wireCarnet(() => renderMirror(date));
   wireMirror();
 }
 
@@ -1829,16 +1757,9 @@ async function renderCarte() {
     ${tableauPaires(G)}
     ${tableauBouge(G)}
 
-    ${carnetCardMarkup({
-      notes: G.carnetNotes ?? [],
-      titre: 'Ton carnet',
-      vide: "Rien encore. Tu peux déposer ici des notes prises ailleurs — datées ou non."
-    })}
-
 `;
 
   monterCarte();
-  wireCarnet(() => renderCarte());
 }
 
 /*
@@ -2149,12 +2070,45 @@ function motifsMarkup() {
   </div>`;
 }
 
+/**
+ * Ce que le compagnon a lu.
+ *
+ * La question « qu'est-ce qu'il sait de moi ? » se pose, et rien n'y répondait :
+ * les notes rangées depuis la conversation disparaissaient dans une table que
+ * rien n'affichait en entier.
+ *
+ * Trois nombres, jamais additionnés. Une journée écrite, un message du fil et
+ * une note apportée ne veulent pas dire la même chose, et le compte de journées
+ * sert de dénominateur à toute la carte : les mélanger le viderait de son sens.
+ */
+function contexteMarkup(C) {
+  if (!C) return '';
+  const n = (v, u) => `<div class="s"><div class="k">${u}</div><div class="v">${v}</div></div>`;
+  return `<div class="card">
+    <h2>Ce qu'il a lu</h2>
+    ${/* pas `.tight` : cette variante vaut `display: contents`, faite pour se
+          fondre dans l'en-tête du Miroir. Ici elle empilerait les trois. */''}
+    <div class="statgrid" style="margin-bottom:16px;max-width:440px">
+      ${n(C.journal.ecrites, 'journées écrites')}
+      ${n(C.fil.messages, 'messages')}
+      ${n(C.compte.total, 'notes rangées')}
+    </div>
+    ${C.notes.length ? `<div class="cnliste">${C.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>`
+      : `<p class="sub" style="margin:0">Colle-lui tes notes dans la conversation — de vieux carnets,
+         un journal tenu ailleurs. Il les range ici, elles ne comptent jamais comme des journées écrites,
+         et il s'en sert ensuite.</p>`}
+  </div>`;
+}
+
 async function renderSettings() {
   const s = S.settings;
-  try { CARNET = await api('/api/carnet'); } catch { /* le carnet ne doit pas casser les réglages */ }
+  let CTX = null;
+  try { CTX = await api('/api/contexte'); CARNET = { notes: CTX.notes, compte: CTX.compte }; }
+  catch { /* le contexte ne doit pas casser les réglages */ }
 
   $('#view').innerHTML = `
     ${motifsMarkup()}
+    ${contexteMarkup(CTX)}
     <div class="row">
       <div class="card">
         <h2>Le compagnon</h2>
@@ -2289,6 +2243,19 @@ async function renderSettings() {
   bind('floor', 'floor', 'change', el => Number(el.value));
   bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
   $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
+
+  // Retirer une note, ou ouvrir la journée dont elle parle. Réglages n'a pas de
+  // délégué global : chaque bloc branche ce qui le concerne.
+  $('#view').querySelector('.cnliste')?.addEventListener('click', async e => {
+    const d = e.target.closest('[data-delcn]');
+    if (d) {
+      await api('/api/carnet', { delete: Number(d.dataset.delcn) });
+      toast('Note retirée');
+      return renderSettings();
+    }
+    const g = e.target.closest('.cndate[data-goto]');
+    if (g) { view = 'mirror'; syncNav(); return renderMirror(g.dataset.goto); }
+  });
 
   $('.motiflist')?.addEventListener('click', async e => {
     const b = e.target.closest('[data-delmotif]');
@@ -2495,14 +2462,14 @@ async function renderBackendCfg() {
     <label class="field" style="margin-top:14px"><span>
       <input type="checkbox" id="carnetMemoire" ${s.carnetMemoire !== false ? 'checked' : ''}
              style="width:auto;margin-right:7px">
-      Lui transmettre ton carnet</span></label>
+      Lui transmettre les notes que tu lui as données</span></label>
     <p class="sub" style="margin:0;font-size:12px">
       ${CARNET.compte?.total
-        ? `Les ${Math.min(12, CARNET.compte.total)} dernières des ${CARNET.compte.total} notes de ton carnet sont transmises, tronquées.`
-        : "Ton carnet est vide pour l'instant."}
+        ? `Les ${Math.min(12, CARNET.compte.total)} dernières des ${CARNET.compte.total} notes rangées sont transmises, tronquées.`
+        : "Tu ne lui as encore rien donné à ranger."}
       Il peut aller chercher les autres lui-même quand la conversation y touche.
       Décocher les retire du contexte sans rien effacer.
-      <br>Hors ligne, le compagnon n'a ni tes journées ni ton carnet.
+      <br>Hors ligne, le compagnon n'a ni tes journées ni tes notes.
     </p>` + SORTIE_ANTHROPIC;
   } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
