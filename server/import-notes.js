@@ -27,17 +27,17 @@ import { db, rebuildEntryText, OWNER } from './db.js';
 
 const MOIS = {
   janvier: 1, janv: 1, jan: 1, january: 1,
-  fevrier: 2, fevr: 2, fev: 2, feb: 2, february: 2,
+  fevrier: 2, fevrier_: 2, fevr: 2, fev: 2, feb: 2, february: 2,
   mars: 3, mar: 3, march: 3,
-  avril: 4, avr: 4, apr: 4, april: 4,
+  avril: 4, avri: 4, avr: 4, apr: 4, april: 4,
   mai: 5, may: 5,
-  juin: 6, jun: 6, june: 6,
-  juillet: 7, juil: 7, jul: 7, july: 7,
+  juin: 6, jui: 6, jun: 6, june: 6,
+  juillet: 7, juill: 7, juil: 7, jul: 7, july: 7,
   aout: 8, aou: 8, aug: 8, august: 8,
-  septembre: 9, sept: 9, sep: 9, september: 9,
-  octobre: 10, oct: 10, october: 10,
-  novembre: 11, nov: 11, november: 11,
-  decembre: 12, dec: 12, december: 12
+  septembre: 9, septe: 9, sept: 9, sep: 9, september: 9,
+  octobre: 10, octo: 10, oct: 10, october: 10,
+  novembre: 11, nove: 11, nov: 11, november: 11,
+  decembre: 12, dece: 12, dec: 12, december: 12
 };
 
 /** Sans accents ni casse : « Février », « fevrier » et « FÉVRIER » sont le meme mot. */
@@ -71,29 +71,69 @@ function iso(y, m, d) {
  * clair, ce qui est la seule facon honnete de lever l'ambiguite -- une note en
  * bas de page ne serait jamais lue.
  */
-export function parseDateLine(line) {
-  const s = String(line).trim().replace(/^[-–—*•>#\s]+/, '');
+/**
+ * @param {string} line
+ * @param {{annee?: number|null, precedente?: string|null}} [ctx]
+ *   Contexte de lecture, pour les dates sans annee. Voir `anneeProbable`.
+ */
+export function parseDateLine(line, ctx = {}) {
+  let s = String(line).trim()
+    .replace(/^[-–—*•>#\s]+/, '')          // puces et titres Markdown
+    .replace(/^[[({<]\s*/, '')             // [2024-03-12]  (12 mars 2024)
+    .replace(/\s*[\])}>]\s*$/, '')
+    .replace(/^le\s+/i, '')                // « Le 12 mars 2024 »
+    .replace(/\.md$/i, '');                // en-tete recopie d'un fichier Obsidian
   if (!s) return null;
 
   // On tente d'abord la chaine telle quelle. Retirer un jour de semaine en
   // premier ferait lire « mars 12, 2024 » comme « mardi » suivi de « 12, 2024 »,
   // et le nom du mois serait perdu. L'ordre est ce qui leve l'ambiguite, pas la
   // regex.
-  const direct = formats(s);
+  const direct = formats(s, ctx);
   if (direct) return direct;
 
   const sansJour = s.replace(JOURS, '');
-  return sansJour === s ? null : formats(sansJour);
+  return sansJour === s ? null : formats(sansJour, ctx);
 }
 
-function formats(s) {
+/**
+ * Annee d'une date qui n'en porte pas — « 12 mars », « 12/03 ».
+ *
+ * Tres frequent dans un journal tenu a la main : on ecrit l'annee une fois en
+ * tete de cahier, plus jamais ensuite. Refuser ces lignes reviendrait a jeter
+ * l'essentiel du texte de quelqu'un qui ecrit comme ca.
+ *
+ * On reporte donc la derniere annee vue. Et si la date obtenue tombe plus de
+ * six mois AVANT l'entree precedente, c'est un passage de nouvel an (« 31
+ * decembre » puis « 2 janvier ») : on avance d'un an. Sans rien de connu, on
+ * refuse plutot que de deviner — une entree rangee sous une annee inventee
+ * serait introuvable pour toujours.
+ */
+function anneeProbable(mois, jour, ctx) {
+  const base = ctx?.annee;
+  if (!base) return null;
+  const candidat = iso(base, mois, jour);
+  if (!candidat) return null;
+  const prec = ctx?.precedente;
+  if (prec && candidat < prec) {
+    const ecartJours = (Date.parse(prec) - Date.parse(candidat)) / 86400000;
+    if (ecartJours > 182) return base + 1;
+  }
+  return base;
+}
+
+function formats(s, ctx = {}) {
   const suite = rest => rest.replace(/^\s*[-–—:,.]+\s*/, '').trim();
+  // Une heure accrochee a la date n'est pas du texte de journal : on la coupe
+  // pour qu'elle ne se retrouve pas en premiere ligne de la journee.
+  const sansHeure = rest => suite(rest)
+    .replace(/^(?:[àa]\s+)?\d{1,2}\s*[h:]\s*\d{0,2}\s*(?:am|pm)?[\s,:—–-]*/i, '');
 
   // 2024-03-12  |  2024/03/12
   let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b(.*)$/);
   if (m) {
     const d = iso(+m[1], +m[2], +m[3]);
-    if (d) return { date: d, reste: suite(m[4]) };
+    if (d) return { date: d, reste: sansHeure(m[4]) };
   }
 
   // 12/03/2024  |  12-03-2024  |  12.03.2024  |  12/03/24
@@ -102,27 +142,69 @@ function formats(s) {
     let y = +m[3];
     if (m[3].length === 2) y += y <= 68 ? 2000 : 1900;   // pivot POSIX
     const d = iso(y, +m[2], +m[1]);
-    if (d) return { date: d, reste: suite(m[4]) };
+    if (d) return { date: d, reste: sansHeure(m[4]) };
   }
 
-  // 12 mars 2024  |  12 mars 2024 :
-  m = s.match(/^(\d{1,2})(?:er)?\s+([A-Za-zÀ-ÿ]+)\.?\s+(\d{4})\b(.*)$/);
+  // 20240312 — export compact, ou nom de fichier recopie.
+  // Seul sur sa ligne, et rien d'autre : huit chiffres suivis de texte, c'est
+  // un numero de dossier ou un code, pas l'ouverture d'une journee.
+  m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) {
+    const d = iso(+m[1], +m[2], +m[3]);
+    if (d) return { date: d, reste: '' };
+  }
+
+  // 12 mars 2024  |  1er mars 2024  |  12th March 2024
+  m = s.match(/^(\d{1,2})(?:er|ère|e|st|nd|rd|th)?\s+([A-Za-zÀ-ÿ]+)\.?,?\s+(\d{4})\b(.*)$/);
   if (m) {
     const mo = MOIS[norm(m[2])];
     if (mo) {
       const d = iso(+m[3], mo, +m[1]);
-      if (d) return { date: d, reste: suite(m[4]) };
+      if (d) return { date: d, reste: sansHeure(m[4]) };
     }
   }
 
-  // mars 12, 2024  |  March 12 2024
-  m = s.match(/^([A-Za-zÀ-ÿ]+)\.?\s+(\d{1,2}),?\s+(\d{4})\b(.*)$/);
+  // mars 12, 2024  |  March 12th 2024
+  m = s.match(/^([A-Za-zÀ-ÿ]+)\.?\s+(\d{1,2})(?:er|ère|e|st|nd|rd|th)?,?\s+(\d{4})\b(.*)$/);
   if (m) {
     const mo = MOIS[norm(m[1])];
     if (mo) {
       const d = iso(+m[3], mo, +m[2]);
-      if (d) return { date: d, reste: suite(m[4]) };
+      if (d) return { date: d, reste: sansHeure(m[4]) };
     }
+  }
+
+  /* ----- sans annee : reportee du contexte (voir anneeProbable) ----- */
+
+  // 12 mars  |  1er mars  |  12 March
+  m = s.match(/^(\d{1,2})(?:er|ère|e|st|nd|rd|th)?\s+([A-Za-zÀ-ÿ]+)\.?\s*(.*)$/);
+  if (m) {
+    const mo = MOIS[norm(m[2])];
+    if (mo) {
+      const y = anneeProbable(mo, +m[1], ctx);
+      const d = y && iso(y, mo, +m[1]);
+      if (d) return { date: d, reste: sansHeure(m[3]) };
+    }
+  }
+
+  // mars 12  |  March 12
+  m = s.match(/^([A-Za-zÀ-ÿ]+)\.?\s+(\d{1,2})(?:er|ère|e|st|nd|rd|th)?\s*(.*)$/);
+  if (m) {
+    const mo = MOIS[norm(m[1])];
+    if (mo) {
+      const y = anneeProbable(mo, +m[2], ctx);
+      const d = y && iso(y, mo, +m[2]);
+      if (d) return { date: d, reste: sansHeure(m[3]) };
+    }
+  }
+
+  // 12/03  |  12-03 — jour/mois, l'annee vient du contexte
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})\b(.*)$/);
+  if (m) {
+    const mo = +m[2];
+    const y = anneeProbable(mo, +m[1], ctx);
+    const d = y && iso(y, mo, +m[1]);
+    if (d) return { date: d, reste: sansHeure(m[3]) };
   }
 
   return null;
@@ -146,10 +228,20 @@ export function parseNotes(text) {
   const avant = [];
   let courant = null;
 
+  // Contexte de lecture, pour les dates sans annee. Il avance ligne a ligne :
+  // une annee explicite le recale, une ligne isolee « 2024 » aussi -- c'est
+  // ainsi qu'un cahier est ecrit, l'annee en tete puis plus jamais.
+  const ctx = { annee: null, precedente: null };
+
   for (const ligne of lignes) {
-    const hit = parseDateLine(ligne);
+    const seule = ligne.trim().match(/^(19|20)(\d{2})$/);
+    if (seule && courant === null) { ctx.annee = Number(seule[0]); continue; }
+
+    const hit = parseDateLine(ligne, ctx);
     if (hit) {
       courant = hit.date;
+      ctx.annee = Number(hit.date.slice(0, 4));
+      ctx.precedente = hit.date;
       if (!par.has(courant)) { par.set(courant, []); ordre.push(courant); }
       if (hit.reste) par.get(courant).push(hit.reste);
       continue;
