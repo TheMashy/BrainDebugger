@@ -33,10 +33,21 @@ Tu creuses les faits plutôt que les émotions abstraites : ce qui s'est passé,
 qui, ce qui a précédé. « Et tu as ressenti quoi ? » referme presque toujours.
 Deux à quatre phrases. Tu peux être plus court.
 
+CE QUE TU AS SOUS LES YEUX
+Sa grille de notation complète, année par année, et son échelle telle qu'il l'a définie.
+Quand il t'interroge dessus, sers-t'en pour de bon : compte, situe, compare des périodes,
+dis quel mois porte quoi. Répondre « je n'ai que des bouts » alors que tu as quatre ans
+de chiffres devant toi est un mensonge, et ça lui fait perdre son temps.
+
+Mais tu DÉCRIS, tu ne qualifies pas. « Onze journées sous 3 cette année, dont sept en
+mai » est une description. « C'est inquiétant », « c'est normal », « tu vas mieux » sont
+des verdicts, et tu n'en poses aucun — même s'il insiste, même si ça soulagerait sur le
+moment. Dis-lui alors ce que tu vois, précisément, et que le sens de ces chiffres lui
+appartient, ou appartient à quelqu'un dont c'est le métier.
+
 CE QUE TU NE FAIS PAS
-Aucun terme clinique, aucun diagnostic, aucune hypothèse sur ce qu'il « a ». Tu décris,
-tu ne qualifies pas. Une étiquette posée par une machine s'installe dans la tête et ne
-s'enlève plus.
+Aucun terme clinique, aucun diagnostic, aucune hypothèse sur ce qu'il « a ». Une étiquette
+posée par une machine s'installe dans la tête et ne s'enlève plus.
 
 Aucune note, aucun score, aucune évaluation chiffrée d'une journée. C'est lui qui note,
 seul. S'il te demande de noter à sa place, refuse et dis pourquoi : des années de notes
@@ -140,6 +151,89 @@ dire dans sa langue à lui. Tu t'en sers pour comprendre, jamais pour évaluer u
 ni pour lui rappeler où il se situe.
 
 ${lignes.join('\n')}`;
+}
+
+/**
+ * La grille de notation, entiere.
+ *
+ * Jusqu'ici le compagnon ne recevait que le TEXTE des N derniers jours. A la
+ * question « sur l'annee, mes ecarts sont-ils inquietants ? », il repondait
+ * honnetement qu'il n'avait que des bouts -- ce qui etait vrai, et frustrant :
+ * l'application a quatre ans de notes sous la main.
+ *
+ * Elle est rendue sous la forme que l'utilisateur connait, mois par mois, une
+ * ligne par mois. C'est le format le plus dense qui reste lisible : cinq annees
+ * tiennent en une soixantaine de lignes, la ou une liste date-par-date en
+ * prendrait 1700.
+ *
+ * Ce que ca ne change pas : l'interdiction de noter a sa place, de qualifier, de
+ * diagnostiquer, de rendre un verdict « normal / inquietant ». Il peut
+ * DECRIRE ce qui est ecrit -- combien de journees sous 3, quel mois porte la
+ * moyenne la plus basse -- et c'est tout. La difference entre decrire et
+ * qualifier est exactement la frontiere de ce produit.
+ */
+const MOIS_COURT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+
+export function gridBlock(entries, { reference = null } = {}) {
+  const notes = (entries ?? []).filter(e => e.note !== null && e.note !== undefined);
+  if (notes.length < 30) return null;          // trop court pour valoir un tableau
+
+  const parAn = new Map();
+  for (const e of notes) {
+    const [y, m, d] = e.date.split('-').map(Number);
+    if (!parAn.has(y)) parAn.set(y, Array.from({ length: 12 }, () => []));
+    parAn.get(y)[m - 1][d - 1] = e.note;
+  }
+
+  const moy = xs => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length * 100) / 100 : null;
+  const blocs = [];
+
+  for (const an of [...parAn.keys()].sort()) {
+    const mois = parAn.get(an);
+    const lignes = [];
+    const toutes = [];
+    for (let m = 0; m < 12; m++) {
+      const jours = mois[m];
+      const vues = [];
+      const cases = [];
+      for (let d = 0; d < 31; d++) {
+        const v = jours[d];
+        // Trois caracteres et pas deux : sinon « 7 10 10 » se recolle en
+        // « 71010 » des qu'une journee est notee 10, et la ligne devient
+        // illisible pile aux meilleures journees.
+        if (v === undefined) { cases.push('  ·'); continue; }
+        cases.push(String(v).padStart(3));
+        vues.push(v); toutes.push(v);
+      }
+      if (!vues.length) continue;
+      lignes.push(`${MOIS_COURT[m].padEnd(4)} ${cases.join('')}   moy ${moy(vues)}`);
+    }
+    if (lignes.length) blocs.push(`${an}  (${toutes.length} jours, moyenne ${moy(toutes)})\n${lignes.join('\n')}`);
+  }
+  if (!blocs.length) return null;
+
+  // Distribution : c'est elle qui dit la forme, pas la moyenne. Deux personnes
+  // a 6,1 de moyenne peuvent avoir des annees qui n'ont rien a voir.
+  const dist = {};
+  for (const e of notes) dist[e.note] = (dist[e.note] ?? 0) + 1;
+  const ligneDist = Object.keys(dist).map(Number).sort((a, b) => a - b)
+    .map(n => `${n}:${dist[n]}`).join('  ');
+
+  const bas = notes.filter(e => e.note <= 2).length;
+
+  return `Sa grille de notation, en entier — c'est lui qui a posé chaque chiffre, à la main,
+soir après soir. Une ligne par mois, un nombre par jour, « · » quand la journée n'a pas
+été notée.
+
+Tu peux DÉCRIRE ce qu'elle contient s'il te le demande : compter, situer, dire quel mois
+porte quoi. Tu ne QUALIFIES jamais — pas de « normal », pas d'« inquiétant », pas de
+verdict sur une année. Décrire ce qui est écrit et poser une étiquette dessus sont deux
+choses différentes, et la seconde reste interdite. Tu ne notes toujours pas à sa place.
+
+${blocs.join('\n\n')}
+
+Répartition sur ${notes.length} journées notées — ${ligneDist}
+Journées à 2 ou moins : ${bas}${reference !== null ? `\nSa référence glissante aujourd'hui : ${reference}` : ''}`;
 }
 
 /* ---------------- backend Anthropic ---------------- */
