@@ -357,7 +357,13 @@ select {
 .daynav button:disabled { opacity: .3; cursor: not-allowed; }
 .daynav button.wide { width: auto; height: auto; padding: 5px 11px; font-size: 12px; }
 
-mark { background: #2c4a34; color: #d6f5e0; padding: 0 2px; border-radius: 2px; }
+mark { background: #22321f; color: #a9c9ac; padding: 0 2px; border-radius: 2px; }
+/* Deux niveaux de surlignage. Les mots qui nomment un etat ou un mecanisme
+   ressortent ; ceux qui ne font que coincider restent lisibles mais discrets.
+   Tout surligner de la meme facon revient a ne rien designer. */
+mark.fort { background: #2f5c3d; color: #e2ffe9; font-weight: 500;
+            box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+.tfort { color: var(--accent); font-weight: 500; }
 
 /* ---------- mobile : le rituel du soir se fait au lit, pas au bureau ---------- */
 @media (max-width: 820px) {
@@ -601,7 +607,14 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .calhead button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
 .calhead button:disabled { opacity: .25; }
 .calmois { font-size: 13px; color: var(--ink-dim); text-transform: capitalize; min-width: 7.5em; }
-.calnow { font-size: 11.5px !important; }
+/* Le retour a aujourd'hui est le seul geste qu'on refait sans arret dans le
+   Miroir : il reste a sa place, meme quand on y est deja. Le faire disparaitre
+   une case sur deux deplacait les fleches sous le curseur. */
+.calnow {
+  font-size: 11.5px !important; margin-left: auto;
+  border: 1px solid var(--line) !important; color: var(--ink-dim) !important;
+}
+.calnow:disabled { opacity: 1 !important; border-color: var(--accent) !important; color: var(--accent) !important; }
 .calhead { max-width: 320px; }
 
 /* Largeur bornée : sans ça, chaque case fait cent pixels dans une colonne
@@ -629,6 +642,13 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .calcase.vide { background: var(--line-soft); color: var(--ink-faint); font-weight: 400; }
 .calcase:disabled { opacity: .2; }
 .calcase.on { outline-color: var(--ink); }
+/* Aujourd'hui, en permanence. Deux marques differentes plutot qu'une seule
+   partagee : le contour blanc suit le regard, l'anneau vert reste sur la date
+   du jour meme quand on est parti trois mois en arriere. */
+.calcase.auj {
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--accent), 0 0 10px -1px var(--accent);
+}
+.calcase.auj.vide { color: var(--accent); }
 /* Un point sous la case : cette journée porte du texte. C'est ce qu'on cherche
    quand on remonte — les jours écrits, pas les jours notés. */
 .calcase.texte::after {
@@ -639,6 +659,13 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .dayhead { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; }
 .dayhead .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .dayhead .bignum .sl { font-size: 16px; color: var(--ink-faint); }
+/* La note du jour ouvert est l'information la plus consultee de l'ecran, et
+   elle etait un chiffre gris parmi d'autres chiffres gris. Meme couleur que sa
+   case dans le calendrier : on retrouve la journee d'un coup d'oeil. */
+.dayhead .bignum.noted {
+  font-size: 46px; font-weight: 400;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--halo) 45%, transparent);
+}
 .statgrid.tight { flex: 1; min-width: 150px; gap: 10px 18px; }
 .daydrop {
   background: none; border: 0; color: var(--ink-faint);
@@ -663,3 +690,39 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 }
 /* Le fond peint déjà le noir. Laisser body opaque par-dessus le masquerait. */
 body:has(#ambiance) { background: transparent; }
+
+/* ---------- la carte ----------
+   Le canvas prend la place qu'il peut : une carte de mots serrée dans un
+   petit cadre ne montre plus la forme, qui est justement tout l'intérêt. */
+
+.carte { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 30px; }
+@media (max-width: 1000px) { .carte { grid-template-columns: 1fr; } }
+
+.cartewrap { position: relative; width: 100%; height: min(62vh, 620px); min-height: 340px; }
+.cartewrap canvas { display: block; width: 100%; height: 100%; }
+.cartelegende { margin: 12px 0 0 !important; font-size: 12px; max-width: 68ch; }
+
+.cartetip {
+  position: absolute; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 11px;
+  font-size: 12.5px; line-height: 1.5; max-width: 190px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.55);
+  z-index: 3;
+}
+
+.fait {
+  margin: 0 0 10px; font-size: 13.5px; line-height: 1.55;
+  padding-left: 11px; border-left: 2px solid var(--line);
+}
+.fait:last-of-type { margin-bottom: 0; }
+
+.amaslist { display: flex; flex-direction: column; gap: 1px; }
+.amasrow {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 0; border-top: 1px solid var(--line-soft);
+  font-size: 13px;
+}
+.amasrow:first-child { border-top: 0; }
+.amasrow b { font-weight: 600; }
+.pastille { width: 9px; height: 9px; border-radius: 50%; flex: none; }
