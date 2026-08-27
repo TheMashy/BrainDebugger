@@ -4,6 +4,7 @@ import { disposer, dessiner, auPoint } from './carte.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
+import { icone, iconeDe, themeDe, NOMS } from './reperes.js';
 
 /* ============================= socle ============================= */
 
@@ -303,6 +304,7 @@ function drawThread() {
     return;
   }
   let last = null;
+  const parMsg = S.motifs?.parMessage ?? {};
   th.innerHTML = S.messages.map(m => {
     const day = m.date ?? m.ts.slice(0, 10);
     const sep = day !== last
@@ -311,11 +313,98 @@ function drawThread() {
     last = day;
     // Ce qui n'est pas d'aujourd'hui est du passé : présent, mais en retrait.
     const passe = day !== S.today ? ' past' : '';
-    return sep + `<div class="msg ${m.role}${passe}"><span class="tx">${esc(m.text)}</span><span class="t">${fmtTime(m.ts)}</span></div>`;
-  }).join('');
+    // Les motifs reconnus dans CE message le teintent, lui et pas la
+    // conversation : c'est la phrase qui porte le mécanisme, pas la soirée.
+    const mots = parMsg[m.id] ?? [];
+    const teinte = mots.length
+      ? ` style="--motif:${mots[0].teinte};--motif2:${(mots[1] ?? mots[0]).teinte}"` : '';
+    const marque = mots.length
+      ? `<span class="motifs">${mots.map(x =>
+          `<button class="motifchip" data-motif="${x.id}" style="--motif:${x.teinte}"
+            title="Motif suivi par le compagnon">${esc(x.nom)}</button>`).join('')}</span>`
+      : '';
+    return sep + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte}
+      ><span class="tx">${esc(m.text)}</span>${marque}<span class="t">${fmtTime(m.ts)}</span></div>`;
+  }).join('') + gestesMarkup();
   th.scrollTop = th.scrollHeight;
   th.classList.remove('reading');
   bindThreadReveal(th);
+  bindGestes(th);
+}
+
+/* ---------- ce que le compagnon a posé pendant qu'il parlait ---------- */
+
+/*
+ * Les gestes du tour en cours.
+ *
+ * Ils ne vivent pas dans le fil : un repère n'est pas une phrase, et l'écrire
+ * comme un message ferait croire que le compagnon commente. C'est une carte
+ * posée au pied de la conversation, qui dit ce qui a changé dans
+ * l'application et donne le moyen d'aller le voir. Elle disparaît au prochain
+ * message -- l'endroit où un repère vit pour de bon, c'est la frise.
+ */
+let GESTES = [];
+
+function gestesMarkup() {
+  if (!GESTES.length) return '';
+  return `<div class="gestes">${GESTES.map(g => g.type === 'repere'
+    ? `<div class="geste repere">
+         <span class="gicone">${icone(g.theme, 20)}</span>
+         <div class="gtxt">
+           <b>Repère posé</b>
+           <span>${esc(g.label)} · ${fmtDay(g.date)}</span>
+         </div>
+         <button class="gbtn" data-voir="${g.date}">voir</button>
+       </div>`
+    : `<div class="geste motif" style="--motif:${g.teinte}">
+         <span class="gpuce"></span>
+         <div class="gtxt">
+           <b>${g.nouveau ? 'Nouveau motif suivi' : 'Motif reconnu'}</b>
+           <span>${esc(g.nom)}${g.nouveau ? ` — ${esc(g.mecanisme)}` : ` · ${g.vues} fois`}</span>
+         </div>
+         ${g.nouveau ? '<button class="gbtn" data-motifs="1">les voir</button>' : ''}
+       </div>`).join('')}</div>`;
+}
+
+/**
+ * Aller voir le repère qu'on vient de poser.
+ *
+ * La date passe par sessionStorage et pas par une variable : le Miroir se rend
+ * de façon asynchrone, et surtout la demande doit survivre à un rechargement.
+ * Elle est consommée à la lecture -- le halo ne se déclenche qu'une fois, sinon
+ * ce n'est plus un signal, c'est une décoration permanente.
+ */
+/**
+ * Poser les gestes sans redessiner le fil.
+ *
+ * drawThread() reconstruit tout le fil et remet le défilement en bas ; l'appeler
+ * pendant que le compagnon écrit couperait sa phrase en cours de frappe.
+ */
+function dessinerGestes() {
+  const th = $('#thread');
+  if (!th) return;
+  th.querySelector('.gestes')?.remove();
+  th.insertAdjacentHTML('beforeend', gestesMarkup());
+  th.scrollTop = th.scrollHeight;
+}
+
+const AURA_CLE = 'bd.aura';
+function demanderAura(date) { try { sessionStorage.setItem(AURA_CLE, date); } catch { /* mode privé */ } }
+
+/**
+ * La demande n'est consommée QUE si c'est la bonne journée qui s'affiche.
+ *
+ * Consommer à chaque rendu paraissait plus simple et perdait le halo : le
+ * Miroir se rend d'abord sur aujourd'hui, puis sur la date demandée, et le
+ * premier rendu mangeait la clé du second. Le halo ne se déclenchait donc
+ * jamais — sans erreur, sans trace, juste rien.
+ */
+function prendreAura(date) {
+  try {
+    if (sessionStorage.getItem(AURA_CLE) !== date) return false;
+    sessionStorage.removeItem(AURA_CLE);
+    return true;
+  } catch { return false; }
 }
 
 /**
@@ -328,6 +417,25 @@ function drawThread() {
  * Le seuil est bas — quelques pixels suffisent : le geste de remonter est
  * l'intention, il n'y a pas à la mériter.
  */
+/**
+ * Les boutons des gestes. Un seul écouteur sur le fil, posé une fois : les
+ * cartes vont et viennent à chaque tour, un écouteur par carte fuirait.
+ */
+function bindGestes(th) {
+  if (th.dataset.gestes) return;
+  th.dataset.gestes = '1';
+  th.addEventListener('click', e => {
+    const v = e.target.closest('[data-voir]');
+    if (v) {
+      demanderAura(v.dataset.voir);
+      view = 'mirror'; syncNav();
+      return renderMirror(v.dataset.voir);
+    }
+    const m = e.target.closest('[data-motifs]') || e.target.closest('[data-motif]');
+    if (m) { view = 'settings'; syncNav(); return renderSettings(); }
+  });
+}
+
 function bindThreadReveal(th) {
   if (th.dataset.reveal) return;      // un seul écouteur, pas un par rendu
   th.dataset.reveal = '1';
@@ -365,6 +473,7 @@ async function send() {
   $('#send').disabled = true;
   PetTalk.stop();
 
+  GESTES = [];                        // les gestes du tour précédent ont fait leur temps
   // affichage optimiste : ce que tu écris apparaît tout de suite
   S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user', text });
   drawThread();
@@ -398,6 +507,11 @@ async function send() {
         return;
       }
 
+      // Un geste arrive pendant que le compagnon parle : la marque apparaît
+      // en même temps que la phrase qui la mentionne, pas plusieurs secondes
+      // après, où elle aurait l'air d'être tombée toute seule.
+      if (ev === 'geste') { GESTES.push(data); dessinerGestes(); return; }
+
       if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
 
       if (ev === 'done') {
@@ -405,6 +519,7 @@ async function send() {
         if (data.usage) { S.usage = data.usage; syncGauge(); }
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
+        if (data.motifs) S.motifs = data.motifs;
 
         if (data.refused) {
           toast('Le modèle a décliné — le compagnon hors-ligne a pris la main.');
@@ -587,22 +702,17 @@ async function renderYear(year) {
       <div class="card">
         <h2>Repères</h2>
         <p class="sub">En pointillés sur les deux courbes.</p>
-        <form id="evform" style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
-          <label class="field" style="margin:0;flex:0 0 160px"><span>Date</span>
-            <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.stats.lastDate}" value="${S.today}"></label>
-          <label class="field" style="margin:0;flex:1 1 240px"><span>Quoi</span>
-            <input type="text" id="evlabel" required maxlength="120" placeholder="ex. changement de boulot"></label>
-          <button class="btn" type="submit">Ajouter</button>
+        <form id="evform" class="repform">
+          <span class="repapercu" id="evicone">${icone('jalon', 22)}</span>
+          <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
+                 placeholder="changement de boulot, déménagement, début d'un traitement…">
+          <input type="date" id="evdate" required min="${S.stats.firstDate}" max="${S.today}" value="${S.today}">
+          <button class="btn primary" type="submit">Poser</button>
         </form>
         ${SERIES.events.length
-          ? `<div style="display:flex;flex-direction:column;gap:1px">
-              ${SERIES.events.map(ev => `<div style="display:flex;align-items:baseline;gap:11px;padding:7px 0;border-top:1px solid var(--line-soft)">
-                <span class="mono faint" style="font-size:12px;flex:0 0 92px">${esc(ev.date)}</span>
-                <span style="flex:1">${esc(ev.label)}</span>
-                <button class="btn" data-delev="${ev.id}" style="padding:3px 9px;font-size:11.5px">retirer</button>
-              </div>`).join('')}
-            </div>`
-          : `<p class="sub" style="margin:0">Aucun repère pour l'instant.</p>`}
+          ? `<div class="frise">${friseMarkup(SERIES.events)}</div>`
+          : `<p class="sub" style="margin:0">Aucun repère pour l'instant. Le compagnon en pose
+             aussi de lui-même, quand tu lui racontes quelque chose qui change le sol sous tes journées.</p>`}
       </div>
     </div>`;
 
@@ -632,18 +742,59 @@ async function renderYear(year) {
     renderYear(year);
   };
 
+  // L'icône se décide pendant la frappe. C'est la raison d'être du module
+  // partagé : le classement tourne dans le navigateur, sans aller-retour, et
+  // c'est exactement celui que le serveur appliquera.
+  const champ = $('#evlabel');
+  champ.oninput = () => {
+    const t = themeDe(champ.value);
+    $('#evicone').innerHTML = icone(t, 22);
+    $('#evicone').dataset.theme = t;
+    $('#evicone').title = NOMS[t] ?? 'jalon';
+  };
+
   $('#evform').onsubmit = async e => {
     e.preventDefault();
-    const date = $('#evdate').value, label = $('#evlabel').value.trim();
+    const date = $('#evdate').value, label = champ.value.trim();
     if (!date || !label) return;
     try {
       const { events } = await api('/api/events', { date, label });
       SERIES.events = events;
-      $('#evlabel').value = '';
+      champ.value = '';
       await renderYear(year);
-      toast('Repère ajouté');
+      toast('Repère posé');
     } catch (err) { toast(err.message); }
   };
+}
+
+/**
+ * La frise, groupée par année.
+ *
+ * Une liste plate de quarante repères sur quatre ans ne se lit pas : on n'y
+ * trouve rien et on n'y voit aucun rythme. Groupée, elle montre d'un coup
+ * d'œil l'année où tout a bougé et celle où rien n'a bougé — ce qui est
+ * précisément l'information qu'une frise doit porter.
+ */
+function friseMarkup(events) {
+  const parAn = new Map();
+  for (const ev of events.slice().sort((a, b) => b.date.localeCompare(a.date))) {
+    const an = ev.date.slice(0, 4);
+    if (!parAn.has(an)) parAn.set(an, []);
+    parAn.get(an).push(ev);
+  }
+  return [...parAn].map(([an, liste]) => `
+    <div class="frisean">
+      <div class="frisetitre"><span class="mono">${an}</span><i></i><span class="faint">${liste.length}</span></div>
+      ${liste.map(ev => {
+        const t = ev.theme ?? themeDe(ev.label);
+        return `<div class="repligne" data-theme="${t}">
+          <span class="ricone-box">${icone(t, 18)}</span>
+          <span class="repdate mono faint">${Number(ev.date.slice(8))} ${MONTHS_FR[Number(ev.date.slice(5, 7)) - 1].toLowerCase()}</span>
+          <span class="replabel">${esc(ev.label)}</span>
+          <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">×</button>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
 }
 
 function gridMarkup(grid) {
@@ -855,6 +1006,8 @@ async function renderMirror(date) {
       <div class="mcol">
         ${calendarMarkup(m, date)}
 
+        ${reperesMarkup(m.reperes, date)}
+
         <div class="card dayread">
           <div class="dayhead">
             <div>
@@ -898,6 +1051,42 @@ async function renderMirror(date) {
  * est une information -- pas une case a masquer.
  */
 const JOURS_COURT = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+
+/**
+ * Les repères de la journée ouverte.
+ *
+ * Deux choses distinctes, et le bloc les sépare parce qu'elles ne répondent pas
+ * à la même question. Ce qui est POSÉ CE JOUR-LÀ dit « voilà ce qui s'est passé ».
+ * Le dernier repère AVANT dit « voilà où tu en étais » — c'est celui qu'on
+ * cherche vraiment en rouvrant une journée d'il y a deux ans, et il n'apparaît
+ * nulle part ailleurs dans l'application.
+ */
+function reperesMarkup(rep, date) {
+  const jour = rep?.jour ?? [];
+  const avant = rep?.avant ?? null;
+  if (!jour.length && !avant) return '';
+  const aura = prendreAura(date);
+
+  return `<div class="card reperes${aura ? ' aura' : ''}">
+    <div class="k faint repk">Repères</div>
+    ${jour.length ? `<div class="repliste">
+      ${jour.map(r => `<div class="rep pose">
+        <span class="ricone-box">${icone(r.theme, 22)}</span>
+        <div class="reptxt"><b>${esc(r.label)}</b><span class="faint">${esc(NOMS[r.theme] ?? 'jalon')}</span></div>
+      </div>`).join('')}
+    </div>` : ''}
+    ${avant ? `<button class="rep avant" data-goto="${avant.date}">
+      <span class="ricone-box">${icone(avant.theme, 18)}</span>
+      <div class="reptxt">
+        <b>${esc(avant.label)}</b>
+        <span class="faint">${avant.jours === 0 ? 'le jour même'
+          : avant.jours === 1 ? 'la veille'
+          : avant.jours < 62 ? `${avant.jours} jours plus tôt`
+          : `${Math.round(avant.jours / 30.4)} mois plus tôt`}</span>
+      </div>
+    </button>` : ''}
+  </div>`;
+}
 
 function calendarMarkup(m, date) {
   const cases = m.calendrier ?? [];
@@ -1122,10 +1311,45 @@ function monterCarte() {
 
 /* ============================= vue : réglages ============================= */
 
+/**
+ * Les motifs, tels que le compagnon les a nommés.
+ *
+ * Ce panneau ne dit pas ce qu'ils veulent dire — c'est la même règle que
+ * partout : on montre, on ne qualifie pas. Il montre le nom que le compagnon a
+ * choisi, ce à quoi il dit le reconnaître, et combien de fois. Le compte est la
+ * seule mesure honnête d'un motif : dix fois en un an et dix fois en un mois ne
+ * sont pas la même chose, et c'est à la personne d'en faire quelque chose.
+ *
+ * Le bouton « retirer » n'est pas une politesse. Un mécanisme mal nommé, posé
+ * sur quelqu'un par une machine, doit pouvoir disparaître d'un clic — sinon
+ * c'est une étiquette, et ce produit n'en pose pas.
+ */
+function motifsMarkup() {
+  const liste = S.motifs?.liste ?? [];
+  if (!liste.length) return '';
+  return `<div class="card motifcard">
+    <h2>Ce qui revient</h2>
+    <p class="sub">Des mécanismes que le compagnon a repérés tout seul et suit dans la durée.
+    Ce sont ses mots, pas un diagnostic — et tu peux en retirer un à tout moment.</p>
+    <div class="motiflist">
+      ${liste.map(m => `<div class="motifitem" style="--motif:${m.teinte}">
+        <span class="motifpuce"></span>
+        <div class="motiftxt">
+          <b>${esc(m.nom)}</b>
+          <span class="faint">${esc(m.mecanisme)}</span>
+        </div>
+        <span class="motifn mono">${m.vues}<small>×</small></span>
+        <button class="repdel" data-delmotif="${m.id}" title="Ne plus suivre" aria-label="Ne plus suivre ${esc(m.nom)}">×</button>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
 async function renderSettings() {
   const s = S.settings;
 
   $('#view').innerHTML = `
+    ${motifsMarkup()}
     <div class="row">
       <div class="card">
         <h2>Le compagnon</h2>
@@ -1260,6 +1484,14 @@ async function renderSettings() {
   bind('floor', 'floor', 'change', el => Number(el.value));
   bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
   $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
+
+  $('.motiflist')?.addEventListener('click', async e => {
+    const b = e.target.closest('[data-delmotif]');
+    if (!b) return;
+    S.motifs = await api('/api/motifs', { delete: Number(b.dataset.delmotif) });
+    drawThread();                       // le fil perd la teinte du motif retiré
+    renderSettings();
+  });
 
   $('#voicepick')?.addEventListener('click', async e => {
     const b = e.target.closest('[data-voice]');
