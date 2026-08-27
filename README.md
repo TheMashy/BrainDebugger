@@ -141,17 +141,30 @@ C'est la règle de conception centrale du produit. La confondre le transforme en
 | | **Le compagnon** | **Le miroir** |
 |---|---|---|
 | Rôle | te faire parler | te rendre tes mots |
-| Parle ? | oui | **jamais** |
+| Parle ? | oui | seulement dans la lecture, voir plus bas |
 | Voit tes stats ? | non | oui |
-| Note tes journées ? | **jamais** | non |
+| Note tes journées ? | **jamais** | **jamais** |
 
 Le compagnon est la couche de **saisie** : parler coûte moins cher qu'écrire, et
 c'est la seule raison pour laquelle un journal quotidien tient quatre ans. Il pose
 des questions courtes, il ne commente pas, il ne qualifie pas, il ne console pas à vide.
 
-Le miroir est la couche de **restitution** : il n'affiche que des dates, des chiffres
-et des phrases déjà écrites. Il ne génère rien. Le pouvoir vient de reconnaître sa
-propre écriture, pas d'un résumé.
+Le miroir est la couche de **restitution** : il affiche des dates, des chiffres et des
+phrases déjà écrites. Le pouvoir vient de reconnaître sa propre écriture, pas d'un résumé.
+
+**Une exception, et elle est nommée : la lecture.** Le Miroir s'ouvre sur ce que le
+compagnon comprend du fonctionnement — trois à six thèmes, sur trois fenêtres. C'est du
+texte généré, et c'est assumé : ce qu'on cherche là est ce qu'un compteur ne peut pas
+voir. Un mécanisme comme « les remontées ne tiennent pas trois jours » n'a aucun mot en
+commun d'une occurrence à l'autre, et aucune statistique de co-occurrence ne le trouvera
+jamais.
+
+Ce qui tient la règle malgré ça : **chaque thème porte les journées exactes sur
+lesquelles il repose**, et une date qui n'est pas dans le corpus est retirée par le
+serveur, en silence. Un thème qui n'en garde aucune disparaît. La lecture reste donc
+vérifiable et contredisable — c'est ce qui la sépare d'une étiquette. Elle décrit des
+motifs, jamais une personne, et ne pose aucun nom clinique : ce n'est pas un diagnostic
+et le mot n'apparaît nulle part dans l'interface.
 
 **La note reste toujours saisie à la main.** Un modèle qui scorerait les journées
 casserait la comparabilité avec tout l'historique : la valeur d'une série de plusieurs
@@ -232,10 +245,15 @@ server/
   usage.js       comptage des jetons, enveloppe mensuelle, niveau de la jauge
   stats.js       référence, delta, contraste, cumul, épisodes
   search.js      BM25 (k1=1.5, b=0.75), stopwords FR/EN, NFD
-  chat.js        3 backends : scripted (hors-ligne) | anthropic | ollama
+  chat.js        3 backends : scripted (hors-ligne) | anthropic | ollama, et les outils
+  lecture.js     la lecture du Miroir : corpus, consigne, validation des dates
   import-csv.js  import de la grille annuelle
 web/
-  app.js         4 vues : Parler, Année, Miroir, Réglages
+  app.js         5 vues : Parler, Année, Miroir, Je remarque, Réglages
+  calendrier.js  un calendrier, une fois : jour/mois/année, plage, partagé
+  chaton.js      le compagnon au trait, 21 expressions composables
+  frise.js       la frise de vie : voies, domaines, dégradés (partagée serveur)
+  reperes.js     thèmes et icônes des repères (partagée serveur)
   charts.js      échelle de couleur divergente, courbes SVG
   pets.js        compagnons intégrés (+ PNG personnalisé)
   pet.js         conversion en PNG, animation du sprite pendant la frappe
@@ -258,12 +276,24 @@ Par défaut : **aucun**. Les relances sont scriptées, rien ne quitte la machine
 | `anthropic` | le texte du chat | `npm install @anthropic-ai/sdk` + une clé |
 | `ollama` | rien | Ollama + un modèle |
 
-**Ce que le mode Claude envoie, exactement :** la conversation du jour, plus le *texte*
-des N dernières journées écrites (réglable, 14 par défaut, 0 pour rien). Jamais les notes,
-jamais les statistiques, jamais les épisodes. Le Miroir n'est que du calcul et de la
-recherche locale — il ne fait aucun appel réseau, quel que soit le backend. C'est la
-frontière qui rend le compromis acceptable : ce qui sort, c'est ce qu'on vient d'écrire,
-pas quatre ans d'historique chiffré.
+**Ce que le mode Claude envoie, exactement.** Deux flux, et ils ne transportent pas la
+même chose.
+
+*La conversation* envoie la conversation du jour, le *texte* des N dernières journées
+écrites (réglable, 14 par défaut, 0 pour rien), la grille des notes mois par mois, les
+repères, les motifs suivis, les objectifs, et les notes rangées (décochable). Ce qui sort,
+c'est ce qu'on vient d'écrire plus de quoi ne pas repartir de zéro chaque soir.
+
+*La lecture du Miroir* envoie **beaucoup plus** : jusqu'à 45 000 signes de journées
+écrites, choisies parmi les plus fournies de la fenêtre, plus le résumé mensuel des notes
+avec leur écart-type, les repères, les notes rangées. Un appel par fenêtre, relancé
+seulement quand assez de journées se sont accumulées depuis le précédent. C'est l'endroit
+de l'application où le plus de choses quittent la machine, et c'est pourquoi il ne se
+déclenche jamais sans clé et se voit à l'écran pendant qu'il tourne.
+
+Sans clé, il ne se passe rien de tout ça : les relances sont scriptées et la lecture
+affiche qu'elle a besoin d'une clé. Le reste du Miroir — la journée, le calendrier, les
+similitudes, les épisodes — est du calcul local et ne fait aucun appel réseau.
 
 Requête : `claude-opus-5`, réflexion adaptative, effort réglable (bas par défaut — la
 latence compte plus que la profondeur quand quelqu'un attend une réponse le soir), et le
@@ -287,7 +317,10 @@ refus serait pire.
 - **Parler** — le fil continu, le compagnon, la note du jour avec les ancres sous les yeux.
 - **Année** — la grille mois × jours, le cumul commutable entre les trois centres, et les
   repères de vie (saisie et affichage en pointillés sur la courbe).
-- **Miroir** — les trois mécanismes, avec navigation jour par jour dans tout l'historique.
+- **Miroir** — la lecture : ce que le compagnon comprend du fonctionnement, à trois
+  distances, avec la carte des thèmes. Une journée s'ouvre derrière une preuve, un repère
+  ou le calendrier, et garde les trois mécanismes.
+- **Je remarque** — la carte des mots : ce que compte l'application elle-même, sans modèle.
 - **Réglages** — compagnon, timbre des bips, backend, plancher, tenue du retour, import/export.
 
 Il n'y a pas de vue « Recherche ». Ouvrir un champ de recherche demande de savoir quoi
