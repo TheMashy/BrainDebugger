@@ -163,6 +163,9 @@ async function renderTonight() {
 
       <div class="stack">
         <div class="card">
+          <div class="threadhead">
+            <button class="newchat" id="newChat" title="Repartir sur un fil vide. Rien n'est effacé : tes journées restent dans le journal.">Nouveau&nbsp;fil</button>
+          </div>
           <div class="thread" id="thread"></div>
           <div class="composer">
             <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
@@ -199,6 +202,30 @@ async function renderTonight() {
 
   drawThread();
   drawEchoes();
+
+  $('#newChat')?.addEventListener('click', async e => {
+    const b = e.currentTarget;
+    const th = $('#thread');
+    if (!S.messages.length) { toast('Le fil est déjà vide.'); return; }
+    b.disabled = true;
+    // Le fil s'efface avant que le serveur réponde : c'est le geste qu'on veut
+    // sentir, pas l'aller-retour réseau.
+    th?.classList.add('wiping');
+    await new Promise(r => setTimeout(r, 380));
+    try {
+      const r = await api('/api/chat/new', {});
+      S.messages = r.messages;
+      S.settings.chatSince = r.chatSince;
+      drawThread();
+      $('#echoes').innerHTML = '';
+      toast('Nouveau fil. Tes journées sont intactes.');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      th?.classList.remove('wiping');
+      b.disabled = false;
+    }
+  });
 
   $('#notestrip').onclick = async e => {
     const b = e.target.closest('button[data-n]');
@@ -280,9 +307,32 @@ function drawThread() {
       ? `<div class="daysep"><span>${day === S.today ? "aujourd'hui" : fmtDay(day)}</span></div>`
       : '';
     last = day;
-    return sep + `<div class="msg ${m.role}"><span class="tx">${esc(m.text)}</span><span class="t">${fmtTime(m.ts)}</span></div>`;
+    // Ce qui n'est pas d'aujourd'hui est du passé : présent, mais en retrait.
+    const passe = day !== S.today ? ' past' : '';
+    return sep + `<div class="msg ${m.role}${passe}"><span class="tx">${esc(m.text)}</span><span class="t">${fmtTime(m.ts)}</span></div>`;
   }).join('');
   th.scrollTop = th.scrollHeight;
+  th.classList.remove('reading');
+  bindThreadReveal(th);
+}
+
+/**
+ * L'historique est atténué à l'ouverture, et redevient net dès qu'on remonte.
+ *
+ * C'est ce que fait l'œil de toute façon : en arrivant on regarde le bas, pas
+ * le mois dernier. Garder le passé lisible à pleine intensité met la journée en
+ * concurrence avec elle-même. Il est là, on le voit, il n'appelle pas.
+ *
+ * Le seuil est bas — quelques pixels suffisent : le geste de remonter est
+ * l'intention, il n'y a pas à la mériter.
+ */
+function bindThreadReveal(th) {
+  if (th.dataset.reveal) return;      // un seul écouteur, pas un par rendu
+  th.dataset.reveal = '1';
+  th.addEventListener('scroll', () => {
+    const enBas = th.scrollHeight - th.scrollTop - th.clientHeight < 24;
+    th.classList.toggle('reading', !enBas);
+  }, { passive: true });
 }
 
 /** Lit un flux SSE renvoyé par fetch et appelle `on(event, data)` par trame. */
@@ -500,7 +550,7 @@ async function renderYear(year) {
             <button data-daily="all" aria-pressed="${DAILYALL}">tout</button>
           </div>
         </div>
-        <p class="sub"><span class="mono">signe(n−5)·(n−5)²/2,5</span></p>
+        <p class="sub">Les écarts d'humeur, jour par jour.</p>
         ${(() => {
           const idx = DAILYALL
             ? SERIES.date.map((_, i) => i)
@@ -1241,8 +1291,34 @@ async function go(v) {
   catch (err) { $('#view').innerHTML = `<div class="card"><h2>Erreur</h2><p class="sub">${esc(err.message)}</p></div>`; }
 }
 
+/**
+ * Ouverture et fermeture de la fenêtre, signalées au serveur.
+ *
+ * Sans ça, le compagnon traite pareil quelqu'un qui ferme et rouvre deux
+ * minutes plus tard et quelqu'un qui revient après trois semaines : dans un cas
+ * il redit bonjour au milieu d'une phrase, dans l'autre il enchaîne comme si de
+ * rien n'était.
+ *
+ * La fermeture part par sendBeacon : un fetch classique est annulé quand la
+ * page meurt, c'est exactement le moment où on veut l'envoyer. Et sur
+ * `pagehide` plutôt que `beforeunload`, seul événement fiable sur mobile — un
+ * onglet mis en arrière-plan puis tué ne déclenche jamais `beforeunload`.
+ */
+function suivreSession() {
+  api('/api/session', {}).catch(() => { /* sans effet sur l'usage */ });
+  const fermer = () => {
+    try {
+      navigator.sendBeacon?.('/api/session',
+        new Blob([JSON.stringify({ close: true })], { type: 'application/json' }));
+    } catch { /* le navigateur part, tant pis */ }
+  };
+  addEventListener('pagehide', fermer);
+  addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') fermer(); });
+}
+
 async function boot() {
   S = await api('/api/state');
+  suivreSession();
   document.querySelector('nav').addEventListener('click', e => {
     const b = e.target.closest('button[data-view]');
     if (b) go(b.dataset.view);

@@ -121,6 +121,27 @@ rendra, telles quelles.
 ${lines.join('\n\n')}`;
 }
 
+/**
+ * Les reperes d'etalonnage : l'echelle dans les mots de l'utilisateur.
+ *
+ * « 8 Good — Chill, Happy of myself » n'est pas une statistique, c'est une
+ * definition. Sans elle, une note de 8 dans la memoire ne veut rien dire pour
+ * qui la lit : elle situe le chiffre dans SA langue a lui, pas dans une echelle
+ * generique. Le compagnon peut donc comprendre ce qu'une journee a 4 signifie
+ * pour cette personne-la -- ce qui reste tres loin de la commenter.
+ */
+export function anchorBlock(anchors) {
+  if (!anchors?.length) return null;
+  const lignes = anchors
+    .slice().sort((a, b) => b.note - a.note)
+    .map(a => `${a.note}/10 — ${a.label}${a.descr ? ` : ${a.descr}` : ''}`);
+  return `Son échelle, telle qu'il l'a définie lui-même. C'est ce que ses notes veulent
+dire dans sa langue à lui. Tu t'en sers pour comprendre, jamais pour évaluer une journée
+ni pour lui rappeler où il se situe.
+
+${lignes.join('\n')}`;
+}
+
 /* ---------------- backend Anthropic ---------------- */
 
 let _sdk = null;
