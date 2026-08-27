@@ -34,18 +34,20 @@ vec3 eclipse_light() {
     return vec3(0.255, 0.243, 0.216);
 }
 
-// les eclats sur l'eau. Une phase de houle deformee par le bruit : les
-// cretes restent des lignes au lieu de se dissoudre en taches, et un
-// second bruit les casse en tirets - rien n'est continu sur l'eau.
-// det coupe le detail au loin pour que l'horizon ne scintille pas.
+// les eclats sur l'eau : une phase de houle deformee par le bruit, si
+// bien que les cretes restent des lignes au lieu de se dissoudre en
+// taches, et un second bruit qui les casse en tirets - rien n'est
+// continu sur l'eau. det coupe le detail au loin pour que l'horizon ne
+// scintille pas ; le temps recu ici est deja ralenti par e, a e = 0 la
+// mer est presque figee.
 float eclipse_glint(vec2 w, float t, float det, float e) {
     float warp = fbm(vec2(w.x * 0.30, w.y * 0.28 - t * 0.030), 3);
-    float c = max(sin(w.y * 3.50 + warp * 3.0 - t * 0.090), 0.0);
+    float c = max(sin(w.y * 4.20 + warp * 3.0 - t * 0.090), 0.0);
     float c2 = c * c;
-    float crest = c2 * c2;
+    float crest = c2 * c;
     float lo = 0.40 + 0.12 * (1.0 - e);
     float dash = smoothstep(lo, lo + 0.32,
-                 fbm(vec2(w.x * 1.10, w.y * 0.30 - t * 0.045), 2));
+                 fbm(vec2(w.x * 2.00, w.y * 0.34 - t * 0.045), 2));
     return crest * dash * det;
 }
 
@@ -69,7 +71,8 @@ vec3 scene_eclipse(vec2 uv, float t, float e) {
     // irregularite de l'anneau : la couronne n'est pas egale, elle
     // derive d'un tour de disque en une poignee de minutes
     float bead = smoothstep(0.20, 0.78,
-                 fbm(vec2(cos(a), sin(a)) * 2.10 + t * 0.017, 3));
+                 fbm(vec2(cos(a), sin(a)) * 2.10
+                     + t * (0.006 + 0.014 * e), 3));
 
     // couronne : une respiration de lumiere, jamais un halo franc,
     // et rien ne deborde a l'interieur du disque
@@ -95,20 +98,24 @@ vec3 scene_eclipse(vec2 uv, float t, float e) {
     float zz    = pow(depth, 0.55) * 10.0;
     float det   = 1.0 / (1.0 + depth * depth * 0.55);
     float att   = eclipse_fog(depth * 0.42);
-    vec2  wp    = vec2(uv.x * zz * 1.60, zz);
+    vec2  wp    = vec2(uv.x * zz * 4.20, zz);
+
+    // temps de la mer : e est l'amplitude du mouvement, pas la
+    // luminosite. A e = 0 l'eau bouge a peine.
+    float tw = t * (0.15 + 0.85 * e);
 
     // la colonne de reflets sous le disque : etroite a l'horizon,
     // largement etalee en bas d'ecran. e la fait deriver.
-    float sig  = 0.045 + 0.70 * dy;
-    float wob  = (fbm(vec2(uv.y * 2.60, t * 0.050), 2) - 0.5)
+    float sig  = 0.045 + 0.42 * dy;
+    float wob  = (fbm(vec2(uv.y * 2.60, tw * 0.050), 2) - 0.5)
                * (0.05 + 0.35 * e) * dy;
     float px   = (uv.x - c.x + wob) / sig;
     float path = exp(-px * px);
 
-    float glint = eclipse_glint(wp, t, det, e) * path * att;
+    float glint = eclipse_glint(wp, tw, det, e) * path * att;
 
     vec3 water = vec3(0.006, 0.007, 0.010) * (0.30 + 0.70 * att);
-    water += eclipse_light() * (glint * (0.34 + 0.46 * e) + path * att * 0.030);
+    water += eclipse_light() * (glint * (0.20 + 0.30 * e) + path * att * 0.030);
 
     float sea = smoothstep(hz + 0.004, hz - 0.004, uv.y);
     col = mix(col, water, sea);
@@ -120,7 +127,7 @@ vec3 scene_eclipse(vec2 uv, float t, float e) {
          * exp(-abs(uv.y - hz) * 26.0) * (0.28 + 0.72 * colonne);
 
     // vignettage : la meme brume, appliquee a la distance au centre
-    col *= eclipse_fog(max(length(uv) - 0.55, 0.0) * 0.55);
+    col *= eclipse_fog(max(length(uv) - 0.45, 0.0) * 0.85);
 
     return min(max(col, 0.0), vec3(0.26));
 }

@@ -185,13 +185,18 @@ vec3 monolith_air(vec2 p, float t, float e) {
 vec3 scene_monolith(vec2 uv, float t, float e) {
     vec3 col = monolith_air(uv, t, e);
 
-    // Le sol : plan sombre que la lumiere frole sans l eclairer.
+    // Le sol : plan sombre que la lumiere frole sans l eclairer. Le
+    // bord est large, et une veine de contact l adoucit encore : c est
+    // le meme geste que le voile pose sur l horizon d abyss.
     float depth = max(monolith_G - uv.y, 0.0);
-    vec3  grnd  = vec3(0.009, 0.011, 0.015) * exp(-depth * 0.7);
+    vec3  grnd  = vec3(0.014, 0.017, 0.023) * exp(-depth * 0.9);
     float smear = exp(-abs(uv.x - monolith_LX) * 1.1) * exp(-depth * 2.6);
     grnd += vec3(0.26, 0.30, 0.38) * smear * (0.030 + 0.022 * e);
-    float gm = 1.0 - smoothstep(-0.006, 0.006, uv.y - monolith_G);
+    float gm = 1.0 - smoothstep(-0.022, 0.012, uv.y - monolith_G);
     col = mix(col, grnd, gm);
+    float gline = exp(-abs(uv.y - monolith_G) * 22.0)
+                * exp(-abs(uv.x - monolith_LX) * 0.9);
+    col += vec3(0.22, 0.26, 0.33) * gline * (0.030 + 0.020 * e);
 
     // La dalle. Sa face reste noire ; seule l arete cote source la
     // detache du fond, et plus fort en bas qu en haut.
@@ -199,8 +204,11 @@ vec3 scene_monolith(vec2 uv, float t, float e) {
     float sm = 1.0 - smoothstep(-0.004, 0.004, d);
     float lean  = smoothstep(-monolith_HW, monolith_HW, uv.x - monolith_CX);
     float rfall = exp(-max(uv.y - monolith_G, 0.0) * 0.95);
-    vec3  slab  = vec3(0.008, 0.010, 0.014) * mix(1.35, 0.75, lean)
-                * (0.08 + 0.92 * rfall);
+    // la pierre suit exactement la decroissance de l air, deux a quatre
+    // fois plus sombre : jamais plus claire que le fond, et le haut de
+    // la dalle se dissout dans le noir sans qu on voie de bord
+    float sband = exp(-max(uv.y - monolith_G, 0.0) * 3.0);
+    vec3  slab  = vec3(0.024, 0.030, 0.042) * sband * mix(0.42, 0.22, lean);
 
     float rim   = exp(-abs(d) * 150.0);
     float rside = 1.0 - smoothstep(-0.020, 0.000, uv.x - monolith_CX);
@@ -240,7 +248,9 @@ vec3 scene_monolith(vec2 uv, float t, float e) {
     vec3  fogc = vec3(0.042, 0.050, 0.064) * (0.30 + 1.20 * lit);
     col = mix(col, fogc, clamp(dens * (0.42 + 0.30 * e), 0.0, 0.80));
 
-    // Meme finition que abyss, au coefficient pres.
+    // Meme finition que abyss, au coefficient pres. Le sol s eteint en
+    // revenant vers nous, comme l eau s eteint en approchant.
+    col *= 1.0 - 0.26 * (1.0 - smoothstep(-1.05, -0.70, uv.y));
     col *= 1.0 - 0.45 * smoothstep(0.10, 1.00, uv.y);
     col *= 1.0 - 0.28 * smoothstep(0.60, 1.70, length(vec2(uv.x * 0.70, uv.y * 0.60)));
 
