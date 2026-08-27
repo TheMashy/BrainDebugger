@@ -130,9 +130,11 @@ function toggleGauge(force) {
 }
 
 function syncHeader() {
-  $('#dayline').textContent = S.stats.days
-    ? `${S.stats.days} jours · ${S.stats.firstDate} → ${S.stats.lastDate}`
-    : 'aucune journée enregistrée';
+  // Le compte seul. L'étendue tenait sur deux lignes dans le rail, pour une
+  // information qu'on lit une fois : elle passe en infobulle.
+  const d = $('#dayline');
+  d.textContent = S.stats.days ? `${S.stats.days} jours` : 'aucune journée';
+  d.title = S.stats.days ? `${S.stats.firstDate} → ${S.stats.lastDate}` : '';
 }
 
 async function saveSettings(patch) {
@@ -158,47 +160,42 @@ async function renderTonight() {
 
   $('#view').innerHTML = `
     <div class="tonight">
-      <div class="petcard">
-        <div class="art" id="art" tabindex="0" role="button"
-             aria-label="Changer l'image du compagnon">${petMarkup(s)}</div>
-        <input type="file" id="petPick" accept="image/*" hidden>
+      <div class="thread" id="thread"></div>
+
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
+        <button class="sendarrow" id="send" aria-label="Envoyer" title="Envoyer">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 12h15"/><path d="M13 6l6 6-6 6"/>
+          </svg>
+        </button>
       </div>
 
-      <div class="stack">
-        <div class="card">
-          <div class="threadhead">
-            <button class="newchat" id="newChat" title="Repartir sur un fil vide. Rien n'est effacé : tes journées restent dans le journal.">Nouveau&nbsp;fil</button>
-          </div>
-          <div class="thread" id="thread"></div>
-          <div class="composer">
-            <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
-            <button class="btn primary" id="send">Envoyer</button>
-          </div>
+      <div id="echoes"></div>
+
+      <div class="notecard">
+        <div class="noteline">
+          <span class="k">Note avant de te coucher</span>
+          ${S.stats.reference !== null
+            ? `<span class="ref">référence <b class="mono">${S.stats.reference}</b></span>` : ''}
+          <button class="newchat" id="newChat" title="Repartir sur un fil vide. Rien n'est effacé : tes journées restent dans le journal.">Nouveau&nbsp;fil</button>
         </div>
 
-        <div id="echoes"></div>
-
-        <div class="card notecard">
-          <h2>Note avant de te coucher</h2>
-          ${S.stats.reference !== null
-            ? `<p class="ref">référence glissante <b class="mono">${S.stats.reference}</b></p>` : ''}
-
-          <div class="noteface">
-            <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
-              ${note ?? '—'}<span class="sl">/10</span>
-            </div>
-            <div class="say" id="noteSay">${noteSay(note)}</div>
+        <div class="noteface">
+          <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
+            ${note ?? '—'}<span class="sl">/10</span>
           </div>
+          <div class="say" id="noteSay">${noteSay(note)}</div>
+        </div>
 
-          <div class="notestrip" id="notestrip">
-            ${Array.from({ length: 11 }, (_, n) => {
-              const c = noteScaleRGB(n);
-              const on = note === n;
-              return `<button data-n="${n}" aria-pressed="${on}" style="background:rgb(${c})"
-                data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
-            }).join('')}
-          </div>
-
+        <div class="notestrip" id="notestrip">
+          ${Array.from({ length: 11 }, (_, n) => {
+            const c = noteScaleRGB(n);
+            const on = note === n;
+            return `<button data-n="${n}" aria-pressed="${on}" style="background:rgb(${c})"
+              data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
+          }).join('')}
         </div>
       </div>
     </div>`;
@@ -253,21 +250,6 @@ async function renderTonight() {
     if (on) Blip.preview(S.settings.blipVoice, S.settings);   // le clic autorise l'audio
   });
 
-  // n'importe quelle image -> PNG carre normalise
-  $('#art').onclick = () => $('#petPick').click();
-  $('#art').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#petPick').click(); } };
-  $('#petPick').onchange = async e => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (f.size > 12 * 1024 * 1024) return toast('Fichier trop lourd (max 12 Mo)');
-    try {
-      const png = await toPNG(f, 256);
-      await saveSettings({ petImage: png, petSprite: 'custom' });
-      renderTonight();
-      toast('Nouveau compagnon');
-    } catch (err) { toast(err.message); }
-  };
-
   const input = $('#input');
   input.oninput = () => {
     input.style.height = 'auto';
@@ -279,9 +261,57 @@ async function renderTonight() {
   input.focus();
 }
 
+/**
+ * Le compagnon vit dans le rail, pas dans la vue.
+ *
+ * Il y était rendu à chaque `renderTonight()`, donc remplacé à chaque note
+ * posée et à chaque changement de vue : l'animation de respiration repartait de
+ * zéro et la bestiole tressautait. Monté une fois, il respire en continu, et
+ * il reste là quand on va regarder l'Année -- ce qui est aussi ce que dit la
+ * maquette : le rail ne change pas, c'est le panneau qui change.
+ */
+function monterPet() {
+  const art = $('#art');
+  if (!art) return;
+  art.innerHTML = petMarkup(S.settings);
+  if (art.dataset.lie) return;
+  art.dataset.lie = '1';
+  art.onclick = () => $('#petPick').click();
+  art.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#petPick').click(); } };
+  $('#petPick').onchange = async e => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 12 * 1024 * 1024) return toast('Fichier trop lourd (max 12 Mo)');
+    try {
+      const png = await toPNG(f, 256);
+      await saveSettings({ petImage: png, petSprite: 'custom' });
+      monterPet();
+      toast('Nouveau compagnon');
+    } catch (err) { toast(err.message); }
+  };
+}
+
+/**
+ * La dernière phrase du compagnon, sous son portrait.
+ *
+ * Elle est déjà dans le fil ; elle est ici parce que le regard va d'abord à la
+ * bestiole, et qu'une bestiole muette à côté d'une conversation est une image
+ * décorative. C'est la seule chose du rail qui bouge.
+ */
+function syncPetSay() {
+  const el = $('#petSay');
+  if (!el) return;
+  const dernier = [...(S.messages ?? [])].reverse().find(m => m.role === 'pet');
+  el.textContent = dernier ? dernier.text : '';
+  el.hidden = !dernier;
+}
+
+/* Le chiffre porte la couleur, plus le pavé derrière lui. Un bloc vert de
+   quatre-vingt-dix pixels était la chose la plus lumineuse de la page, pour
+   afficher un nombre à un chiffre. */
 const noteFaceStyle = n => n === null || n === undefined
-  ? 'background:var(--surface);color:var(--ink-faint)'
-  : `background:rgb(${noteScaleRGB(n)});color:#08110c`;
+  ? 'color:var(--ink-faint)'
+  : `color:rgb(${noteScaleRGB(n)})`;
 
 function noteSay(n) {
   if (n === null || n === undefined) return '';
@@ -296,16 +326,21 @@ function noteSay(n) {
  * coupure. On revient vers quelqu'un qu'on connaît, on ne remplit pas un
  * formulaire quotidien.
  */
+/** Au-delà, on a quitté la conversation et on y est revenu : l'heure compte. */
+const PAUSE_MS = 12 * 60 * 1000;
+
 function drawThread() {
   const th = $('#thread');
   if (!th) return;
   if (!S.messages.length) {
     th.innerHTML = `<div class="empty">Ce que tu dis reste.</div>`;
+    syncPetSay();
     return;
   }
   let last = null;
+  let dernierTs = 0;
   const parMsg = S.motifs?.parMessage ?? {};
-  th.innerHTML = S.messages.map(m => {
+  th.innerHTML = S.messages.map((m, i) => {
     const day = m.date ?? m.ts.slice(0, 10);
     const sep = day !== last
       ? `<div class="daysep"><span>${day === S.today ? "aujourd'hui" : fmtDay(day)}</span></div>`
@@ -313,23 +348,33 @@ function drawThread() {
     last = day;
     // Ce qui n'est pas d'aujourd'hui est du passé : présent, mais en retrait.
     const passe = day !== S.today ? ' past' : '';
+
+    // L'heure ne s'affiche qu'après une vraie pause. Une horloge sous chaque
+    // phrase ne dit rien -- deux messages à la même minute portaient deux fois
+    // le même chiffre -- alors qu'un trou de vingt minutes en dit long, et c'est
+    // exactement ce qu'on veut voir en relisant une soirée six mois plus tard.
+    const ts = Date.parse(m.ts) || 0;
+    const pause = i === 0 || sep || (ts - dernierTs) >= PAUSE_MS;
+    dernierTs = ts;
+
     // Les motifs reconnus dans CE message le teintent, lui et pas la
     // conversation : c'est la phrase qui porte le mécanisme, pas la soirée.
     const mots = parMsg[m.id] ?? [];
-    const teinte = mots.length
-      ? ` style="--motif:${mots[0].teinte};--motif2:${(mots[1] ?? mots[0]).teinte}"` : '';
+    const teinte = mots.length ? ` style="--motif:${mots[0].teinte}"` : '';
     const marque = mots.length
       ? `<span class="motifs">${mots.map(x =>
           `<button class="motifchip" data-motif="${x.id}" style="--motif:${x.teinte}"
             title="Motif suivi par le compagnon">${esc(x.nom)}</button>`).join('')}</span>`
       : '';
     return sep + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte}
-      ><span class="tx">${esc(m.text)}</span>${marque}<span class="t">${fmtTime(m.ts)}</span></div>`;
+      >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
+      }<span class="tx">${esc(m.text)}</span>${marque}</div>`;
   }).join('') + gestesMarkup();
   th.scrollTop = th.scrollHeight;
   th.classList.remove('reading');
   bindThreadReveal(th);
   bindGestes(th);
+  syncPetSay();
 }
 
 /* ---------- ce que le compagnon a posé pendant qu'il parlait ---------- */
@@ -1564,6 +1609,7 @@ async function renderSettings() {
     const b = e.target.closest('[data-sprite]');
     if (!b) return;
     await saveSettings({ petSprite: b.dataset.sprite });
+    monterPet();                        // le compagnon vit dans le rail, pas dans la vue
     renderSettings();
   });
 
@@ -1871,10 +1917,60 @@ const VIEWS = {
   settings: renderSettings
 };
 
+const NOM_VUE = { tonight: 'Parler', year: 'Année', mirror: 'Miroir', carte: 'Carte', settings: 'Réglages' };
+
 function syncNav() {
   for (const b of document.querySelectorAll('nav button')) {
     b.setAttribute('aria-current', String(b.dataset.view === view));
   }
+  const t = $('#viewName');
+  if (t) t.innerHTML = `${esc(NOM_VUE[view] ?? '')}<span class="glyphe" id="viewGlyphe"></span>`;
+  syncAmbianceRail();
+}
+
+/*
+ * Le décor, nommé.
+ *
+ * Il porte le nom du DÉCOR, pas celui d'une humeur. « Brume » décrit la pièce ;
+ * « mélancolique » décrirait la personne, et l'application ne qualifie jamais
+ * personne -- c'est la règle qui tient depuis le premier jour. La différence
+ * n'est pas cosmétique : un décor, on le regarde ; une étiquette, on la porte.
+ */
+const NOM_SCENE = {
+  drift: 'Neutre', brume: 'Brume', abyss: 'Abysse', eclipse: 'Éclipse',
+  voidwell: 'Vide', monolith: 'Monolithe', grain: 'Grain', mandel: 'Récursif'
+};
+
+/* Un glyphe par scène. Dessiné au trait, jamais rempli : c'est une marque, pas
+   une icône de statut. */
+const GLYPHE_SCENE = {
+  drift:    '<circle cx="9" cy="9" r="6"/>',
+  brume:    '<path d="M2.5 7.5h13"/><path d="M4 11h10"/>',
+  abyss:    '<path d="M9 3 16 15H2z"/>',
+  eclipse:  '<circle cx="9" cy="9" r="6"/><path d="M12 4a6 6 0 0 0 0 10" fill="currentColor" stroke="none" opacity=".55"/>',
+  voidwell: '<circle cx="9" cy="9" r="6"/><circle cx="9" cy="9" r="1.6"/>',
+  monolith: '<rect x="6" y="2.5" width="6" height="13" rx="1"/>',
+  grain:    '<path d="M2.5 9h2l1.5-4 2 8 2-6 1.5 3h4"/>',
+  mandel:   '<circle cx="7.5" cy="9" r="4.6"/><circle cx="12.6" cy="9" r="2.3"/><circle cx="15.6" cy="9" r="1.1"/>'
+};
+
+function glypheMarkup(scene) {
+  const d = GLYPHE_SCENE[scene] ?? GLYPHE_SCENE.drift;
+  return `<svg viewBox="0 0 18 18" width="12" height="12" fill="none" stroke="currentColor"
+    stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+
+function syncAmbianceRail() {
+  const scene = S?.ambiance?.scene ?? 'drift';
+  const g = $('#viewGlyphe');
+  if (g) g.innerHTML = glypheMarkup(scene);
+
+  const el = $('#ambianceRead');
+  if (!el) return;
+  el.hidden = false;
+  el.innerHTML = `<span class="k">Ambiance</span>
+    <span class="v">${esc(NOM_SCENE[scene] ?? 'Neutre')}${glypheMarkup(scene)}</span>`;
+  el.title = "Le décor du fond, pas une lecture de ta journée : l'application ne qualifie jamais une journée.";
 }
 
 async function go(v) {
@@ -1916,6 +2012,7 @@ function suivreSession() {
 function syncAmbiance() {
   const a = S.ambiance;
   if (a) Ambiance.set(a.scene, a.energie);
+  syncAmbianceRail();
 }
 
 async function boot() {
@@ -1923,7 +2020,9 @@ async function boot() {
   suivreSession();
   // Le fond démarre après l'état : il doit savoir quelle scène poser d'entrée,
   // sinon on voit la scène par défaut céder la place trois secondes plus tard.
+  monterPet();
   if (Ambiance.start()) syncAmbiance();
+  else syncAmbianceRail();
   document.querySelector('nav').addEventListener('click', e => {
     const b = e.target.closest('button[data-view]');
     if (b) go(b.dataset.view);

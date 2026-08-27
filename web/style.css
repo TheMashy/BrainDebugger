@@ -47,32 +47,93 @@ a { color: var(--accent); }
    sur un journal, chercher la barre de saisie est le meilleur moyen de ne
    pas écrire. Les vues qui débordent vraiment (Année, Réglages) défilent
    dans leur propre zone. */
+/* Le rail et le panneau.
+ *
+ * Deux colonnes separees par un seul filet, et rien d'autre : pas de cartes,
+ * pas de fonds empiles, pas de coins arrondis sur des boites qui contiennent
+ * des boites. Ce qui structure la page, ce sont des lignes de un pixel et du
+ * vide -- le decor du fond passe entre les deux, ce qui serait impossible si
+ * chaque zone posait sa propre surface opaque.
+ *
+ * Le rail est CONSTANT. Il porte l'identite, le compagnon et le nom du decor,
+ * et ne change pas quand on navigue : c'est le panneau de droite qui change.
+ * Une navigation ou tout bouge donne l'impression de changer d'application.
+ */
 .shell {
-  max-width: 1120px; margin: 0 auto; padding: 0 20px;
-  height: 100dvh; display: flex; flex-direction: column;
+  max-width: 1180px; margin: 0 auto;
+  height: 100dvh; display: grid; grid-template-columns: 218px minmax(0, 1fr);
 }
+
+.rail {
+  display: flex; flex-direction: column;
+  padding: 22px 22px 20px 20px;
+  border-right: 1px solid var(--line-soft);
+  min-width: 0;
+}
+.brand { display: flex; flex-direction: column; gap: 1px; }
+.brand b { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+.brand span { font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+/* Le compagnon se pose au tiers haut, pas au milieu : centre verticalement
+   dans un rail de huit cents pixels, il flotte seul au milieu de rien. */
+.railmid {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-start; gap: 16px; padding: 64px 0 24px; min-height: 0;
+}
+/* La derniere phrase du compagnon, sous lui. Bornee a quatre lignes : au-dela
+   ce n'est plus une legende, c'est un deuxieme fil de conversation. */
+.petsay {
+  margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-faint);
+  text-align: center; max-width: 165px;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.railfoot { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+
+/* Le nom du decor. Le plus petit texte de la page, en bas a gauche : on ne le
+   lit pas, on le remarque -- ce qui est exactement le statut qu'on veut lui
+   donner. */
+.ambianceread { display: flex; flex-direction: column; gap: 3px; }
+.ambianceread .k {
+  font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-faint);
+}
+.ambianceread .v {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--ink-dim);
+}
+.ambianceread .v svg { opacity: .8; }
+
+.panel { display: flex; flex-direction: column; min-width: 0; padding: 0 24px 0 26px; }
 
 header.top {
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 20px;
-  padding: 18px 0 16px;
+  padding: 22px 0 18px;
   border-bottom: 1px solid var(--line-soft);
-  margin-bottom: 26px;
-  position: sticky; top: 0; z-index: 20;
-  background: linear-gradient(var(--bg) 78%, transparent);
+  margin-bottom: 24px;
 }
-.brand { display: flex; align-items: baseline; gap: 9px; margin-right: auto; }
-.brand b { font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
-.brand span { font-size: 12px; color: var(--ink-faint); }
 
-nav { display: flex; gap: 2px; }
-nav button {
-  background: none; border: 0; padding: 7px 13px; border-radius: 7px;
-  color: var(--ink-dim); font-size: 13.5px; font-weight: 500;
-  transition: background .12s, color .12s;
+/* Le nom de la vue courante, en toutes lettres a gauche des onglets. La
+   navigation devient alors une liste de destinations et non une liste
+   d'etats : on n'a plus besoin de colorier l'onglet actif comme un bouton. */
+.viewname {
+  display: inline-flex; align-items: center; gap: 9px; margin-right: auto;
+  font-size: 12px; letter-spacing: .19em; text-transform: uppercase;
+  color: var(--ink); font-weight: 500;
 }
-nav button:hover { color: var(--ink); background: var(--panel); }
-nav button[aria-current="true"] { color: var(--bg); background: var(--accent); font-weight: 600; }
+.viewname .glyphe { display: inline-flex; color: var(--ink-dim); }
+
+nav { display: flex; gap: 20px; }
+nav button {
+  background: none; border: 0; padding: 3px 0; border-radius: 0;
+  color: var(--ink-faint); font-size: 10.5px; font-weight: 500;
+  letter-spacing: .16em; text-transform: uppercase;
+  transition: color .14s;
+}
+nav button:hover { color: var(--ink-dim); background: none; }
+/* L'onglet courant est deja nomme a gauche : ici il s'efface, il ne se pave
+   pas de vert. */
+nav button[aria-current="true"] { color: var(--ink); background: none; }
 
 /* ---------- primitives ---------- */
 
@@ -152,35 +213,30 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
 
 /* ---------- vue : ce soir ---------- */
 
-.tonight { display: grid; grid-template-columns: 132px 1fr; gap: 16px; align-items: start; }
-/* Un enfant de grille a min-width:auto : il refuse de descendre sous la largeur
-   de son contenu, et la colonne 1fr déborde au lieu de rétrécir. */
+/* Le compagnon est parti dans le rail : la vue n'est plus qu'une colonne. */
+.tonight { display: flex; flex-direction: column; min-width: 0; height: 100%; }
 .tonight > * { min-width: 0; }
-@media (max-width: 780px) { .tonight { grid-template-columns: 1fr; } }
 
 /* Plus de carte, plus de nom, plus de badges : juste la bestiole à côté de la
    conversation. Tout ce qui l'entourait volait la place du texte, qui est la
    seule chose qui compte sur cette page. */
-.petcard { text-align: center; position: sticky; top: 84px; }
-.petcard .art { width: 108px; height: 108px; margin: 4px auto 0; }
+.petcard { text-align: center; }
+.petcard .art { width: 82px; height: 82px; margin: 0 auto; }
 .petcard .art svg, .petcard .art img {
   width: 100%; height: 100%; object-fit: contain;
   animation: breathe 4.6s ease-in-out infinite;
 }
 @keyframes breathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.015); } }
 @media (prefers-reduced-motion: reduce) { .petcard .art svg, .petcard .art img { animation: none; } }
-.petcard .name { font-weight: 620; font-size: 15px; }
-.petcard .role { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
 
 /* ---------- le fil ---------- */
 
-.threadhead { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .newchat {
-  background: none; border: 0; padding: 4px 9px; border-radius: 6px;
-  font-size: 11.5px; color: var(--ink-faint);
-  transition: color .14s, background .14s;
+  background: none; border: 0; padding: 0; margin-left: auto;
+  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+  transition: color .14s;
 }
-.newchat:hover:not(:disabled) { color: var(--ink-dim); background: var(--surface); }
+.newchat:hover:not(:disabled) { color: var(--ink-dim); background: none; }
 .newchat:disabled { opacity: .4; }
 
 /* Le passé est là, on le voit, il n'appelle pas. En arrivant, l'œil regarde le
@@ -204,17 +260,64 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
   .thread.wiping { transition: opacity .12s linear; transform: none; }
 }
 
+/* Le fil.
+ *
+ * Des bulles, mais aussi discretes que possible : meme gris des deux cotes,
+ * quatre pixels de rayon, aucun accent. Ce qui separe les deux voix, c'est
+ * l'alignement -- rien d'autre. Une bulle verte a droite fait une messagerie ;
+ * deux gris identiques font une transcription, et la couleur reste alors
+ * disponible pour ce qui la merite : la note du jour et les motifs.
+ *
+ * Le texte est petit et l'interligne large. Sur cette page on relit autant
+ * qu'on ecrit, et un fil dense se parcourt mieux qu'un fil qui crie.
+ */
 .thread {
-  min-height: 120px; max-height: 52vh; overflow-y: auto; overscroll-behavior: contain;
-  display: flex; flex-direction: column; gap: 11px; padding-right: 5px;
+  min-height: 120px; flex: 1; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 9px; padding-right: 4px;
+  scrollbar-width: none;                  /* le fil se fait oublier */
 }
-.msg { max-width: 78%; padding: 9px 13px; border-radius: 13px; font-size: 14.5px; line-height: 1.5; }
-.msg.pet  { background: var(--surface); border-bottom-left-radius: 4px; align-self: flex-start; }
-.msg.user { background: #1d3d29; border-bottom-right-radius: 4px; align-self: flex-end; color: #dff3e6; }
-.msg .t { display: block; font-size: 10.5px; color: var(--ink-faint); margin-top: 4px; font-family: var(--mono); }
+.thread::-webkit-scrollbar { display: none; }
 
-.composer { display: flex; gap: 9px; margin-top: 14px; }
-.composer textarea { resize: none; min-height: 46px; max-height: 160px; font-size: 14.5px; }
+.msg {
+  max-width: min(42ch, 50%); padding: 8px 11px; border-radius: 5px;
+  font-size: 12.5px; line-height: 1.6;
+  background: var(--panel); color: var(--ink-dim);
+  border: 1px solid transparent;
+}
+.msg.pet  { align-self: flex-start; }
+.msg.user { align-self: flex-end; color: var(--ink); }
+.msg .tx { display: block; white-space: pre-wrap; }
+.msg .t {
+  display: block; font-size: 9.5px; color: var(--ink-faint);
+  font-family: var(--mono); letter-spacing: .05em; margin-bottom: 6px;
+}
+
+/* Le composeur : un cadre, un texte, une fleche. La fleche ne s'allume que
+   quand il y a quelque chose a envoyer -- un bouton toujours vif dans une page
+   calme est le seul element qui reclame, et cette application ne reclame pas. */
+.composer {
+  display: flex; gap: 8px; align-items: flex-end; margin-top: 18px;
+  border: 1px solid var(--line); border-radius: 7px;
+  padding: 6px 6px 6px 13px;
+  transition: border-color .16s;
+}
+.composer:focus-within { border-color: var(--line); }
+.composer textarea {
+  flex: 1; resize: none; min-height: 26px; max-height: 150px;
+  font-size: 13.5px; line-height: 1.6;
+  background: none; border: 0; border-radius: 0; padding: 5px 0;
+}
+.composer textarea:focus { border: 0; box-shadow: none; }
+.composer textarea::placeholder { color: var(--ink-faint); }
+.sendarrow {
+  flex: none; display: grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 5px;
+  background: none; border: 0; color: var(--ink-faint);
+  transition: color .14s, background .14s;
+}
+.sendarrow:hover:not(:disabled) { color: var(--ink); background: var(--panel); }
+.sendarrow:disabled { opacity: .35; }
+.composer:has(textarea:not(:placeholder-shown)) .sendarrow { color: var(--ink); }
 
 /* ---------- notation ---------- */
 
@@ -399,60 +502,93 @@ nav::-webkit-scrollbar { display: none; }
 nav button { white-space: nowrap; }
 .gridwrap { -webkit-overflow-scrolling: touch; }
 
+/* Sous 860 px il n'y a pas la place pour deux colonnes : le rail bascule en
+   bandeau. Il garde exactement ce qu'il portait -- identite, compagnon, jetons,
+   decor -- mais couche, et la legende du compagnon disparait : sur un telephone
+   elle repeterait le dernier message qui est deja a l'ecran, deux centimetres
+   plus bas. */
+@media (max-width: 860px) {
+  .shell { display: flex; flex-direction: column; max-width: 640px; }
+  .rail {
+    flex: 0 0 auto; flex-direction: row; align-items: center; gap: 14px;
+    border-right: 0; border-bottom: 1px solid var(--line-soft);
+    padding: 11px 14px;
+  }
+  .railmid { flex: 0 0 auto; flex-direction: row; padding: 0; gap: 10px; justify-content: flex-start; }
+  .petsay { display: none; }
+  .petcard .art { width: 34px; height: 34px; }
+  .railfoot { flex-direction: row; align-items: center; gap: 14px; margin-left: auto; }
+  .ambianceread { flex-direction: row; align-items: baseline; gap: 7px; }
+  .ambianceread .k { display: none; }
+  .panel { flex: 1; min-height: 0; padding: 0 14px; }
+}
+
 @media (max-width: 560px) {
-  .shell { padding: 0 13px 70px; }
   .card { padding: 15px 14px; }
-  .thread { max-height: 46vh; }
-  /* Le geste du soir. `aspect-ratio: 1` rendait des carrés de 24 px de côté sur
-     un écran de 390 : on vise le 7 et on pose un 8, et c'est la seule donnée
-     que cette application ne peut pas reconstruire. On passe donc sur deux
-     rangées, avec une hauteur de doigt. */
   .bignum { font-size: 30px; }
 
-  /* L'en-tête sur deux rangées : identité et jauge en haut, navigation en bas
-     sur toute la largeur. Les cinq onglets se partagent la ligne à parts
-     égales et tiennent alors sans défilement, jusqu'à 320 px. */
-  header.top { flex-wrap: wrap; gap: 10px 12px; padding: 12px 0 10px; margin-bottom: 18px; }
-  .brand { flex: 1 1 auto; margin-right: 0; min-width: 0; }
-  .brand span { display: none; }        /* « 726 jours · 2024-09-01 → … » : hors sujet ici */
-  nav { flex: 1 0 100%; order: 3; gap: 1px; }
-  nav button { flex: 1 1 0; min-width: 0; padding: 10px 4px; font-size: 13px; min-height: 40px; }
 
-  /* Tout ce qui se touche. */
-  .gauge { min-height: 34px; padding: 6px 12px 6px 10px; }
-  .newchat, .calnow { min-height: 34px; padding: 7px 12px; }
+  /* L'en-tête du panneau sur deux rangées : le nom de la vue en haut, les cinq
+     onglets sur toute la largeur en dessous. Alignés sur une seule rangée, les
+     trois derniers sortaient de l'écran -- Miroir, Carte et Réglages étaient
+     littéralement inatteignables, le défilement horizontal du nav n'ayant
+     aucune amorce visible. */
+  header.top { padding: 10px 0 8px; margin-bottom: 12px; }
+  /* Le nom de la vue disparaît : l'onglet actif le dit déjà, deux lignes plus
+     bas, et sur 844 px de haut chaque rangée d'en-tête est prise sur le fil. */
+  .viewname { display: none; }
+  nav { flex: 1 1 100%; gap: 0; justify-content: space-between; }
+  nav button { flex: 1 1 0; min-width: 0; padding: 10px 2px; font-size: 9.5px;
+               letter-spacing: .1em; min-height: 40px; }
+
+  /* Tout ce qui se touche. 40 px est le minimum recommandé par Apple ; sur
+     cette application un bouton raté efface des journées. */
+  .gauge { min-height: 30px; }
+  .newchat, .calnow { min-height: 32px; }
   .calhead button { min-width: 38px; min-height: 38px; }
   .calcase { max-height: none; }
   .repform .btn, .repform input { min-height: 44px; }
-  /* Les sélecteurs de période et de mode : toutes des bascules, toutes des
-     cibles. On les vise par leur attribut plutôt que par une classe, parce
-     qu'ils n'en portent pas — c'est l'attribut qui dit ce qu'ils font. */
   [data-fen], [data-cum], [data-daily], [data-year], .daynav button {
     min-height: 40px; padding-left: 12px; padding-right: 12px;
   }
-  .daydrop { min-height: 36px; padding: 8px 12px; }
+  .daydrop { min-height: 36px; }
+  .sendarrow { width: 40px; height: 40px; }
+  .composer textarea { min-height: 34px; font-size: 16px; }  /* 16px : iOS ne zoome pas */
 
-  /* Un curseur de 16 px de haut se manque au doigt ; c'est la piste qu'on
-     épaissit, pas la poignée, sinon le réglage saute au premier contact. */
-  input[type="range"] { min-height: 34px; }
-  input[type="checkbox"] { width: 20px !important; height: 20px; }
+  /* Le survol n'existe pas : ce qui ne se révélait qu'au survol devient visible. */
   .repdel { opacity: 1; min-width: 38px; min-height: 38px; }
   .geste .gbtn { min-height: 34px; padding: 7px 14px; }
-
-  /* Sans survol, une info d'infobulle n'existe pas : les cartes de repères et
-     de motifs passent sur deux lignes plutôt que de couper au milieu. */
   .repligne { flex-wrap: wrap; gap: 8px 10px; }
   .replabel { flex: 1 1 100%; white-space: normal; order: 3; }
   .repdate { flex: 0 0 auto; }
   .motifitem { flex-wrap: wrap; }
   .motiftxt { flex: 1 1 60%; }
   .frise, .repform, .motiflist { max-width: none; }
+
+  /* Une bulle bornée à la moitié de la largeur devient une colonne de deux mots
+     sur un écran de 390 px. */
+  .msg { max-width: 84%; font-size: 13.5px; }
+  .motifchip { min-height: 30px; padding: 7px 0; font-size: 10.5px; }
+  .gauge { min-height: 32px; padding: 6px 0; }
+
+  /* Un curseur de 16 px de haut se manque au doigt ; c'est la piste qu'on
+     épaissit, pas la poignée, sinon le réglage saute au premier contact. */
+  input[type="range"] { min-height: 34px; }
+  input[type="checkbox"] { width: 20px !important; height: 20px; }
+
+  /* La légende de la grille tient sur une ligne en 1120 px et sur quatre en
+     390 : elle passe en deux blocs empilés plutôt que de couper « moyenne » de
+     son chiffre. */
+  .legend { flex-wrap: wrap; gap: 5px 8px; }
+  .legend span[style*="margin-left:12px"],
+  .legend span[style*="margin-left:auto"] { margin-left: 0 !important; flex-basis: 100%; }
 }
 
 /* iPhone SE et plus étroit : la marque seule tient encore, le reste se serre. */
 @media (max-width: 380px) {
-  nav button { padding: 10px 2px; font-size: 12px; letter-spacing: -.01em; }
-  .brand b { font-size: 14px; }
+  nav button { font-size: 9px; letter-spacing: .05em; }
+  .brand b { font-size: 13px; }
+  .rail { gap: 10px; padding: 10px 12px; }
 }
 
 input[type=date] { color-scheme: dark; }
@@ -464,31 +600,46 @@ input[type=date] { color-scheme: dark; }
 .notecard .ritual { margin-left: auto; font-size: 12.5px; color: var(--ink-faint); }
 @media (max-width: 560px) { .notecard .ritual { margin-left: 0; flex-basis: 100%; } }
 
-.noteface { display: flex; align-items: center; gap: 18px; margin: 15px 0 14px; flex-wrap: wrap; }
+/* La note du soir, en bas du panneau. Une ligne de titres minuscules, un
+   chiffre, une bande. Plus de carte autour : le fil et la note vivent sur la
+   meme page, separes par un filet et pas par deux cadres. */
+.notecard { flex: 0 0 auto; padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--line-soft); }
+.noteline { display: flex; align-items: baseline; gap: 14px; }
+.noteline .k {
+  font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-faint);
+}
+.noteline .ref { font-size: 11px; color: var(--ink-faint); }
+.noteline .ref b { color: var(--ink-dim); font-weight: 500; }
+
+.noteface { display: flex; align-items: center; gap: 16px; margin: 12px 0 12px; flex-wrap: wrap; }
 .noteface .val {
   font-family: var(--mono); font-size: 50px; font-weight: 300; line-height: 1;
-  letter-spacing: -0.03em; min-width: 92px; text-align: center;
-  border-radius: 13px; padding: 12px 0;
-  transition: background .18s, color .18s;
+  letter-spacing: -0.03em; min-width: 0; text-align: left;
+  border-radius: 0; padding: 0; background: none !important;
+  transition: color .18s;
 }
 .noteface .val .sl { font-size: 17px; opacity: .55; }
 .noteface .say { font-size: 14px; color: var(--ink-dim); max-width: 34ch; }
 .noteface .say b { color: var(--ink); font-weight: 600; }
 
-.notestrip { display: flex; gap: 5px; }
+.notestrip { display: flex; gap: 4px; max-width: 620px; }
 .notestrip button {
-  flex: 1 1 0; min-width: 0; height: clamp(46px, 5.4vw, 60px); border-radius: 9px;
+  flex: 1 1 0; min-width: 0; height: clamp(34px, 3.4vw, 42px); border-radius: 4px;
   border: 1px solid transparent; font-family: var(--mono); font-size: 15px; font-weight: 600;
   color: rgba(255,255,255,.82);
   /* la couleur pleine est posee en style inline ; on l'assombrit ici pour que la
      bande se lise comme une rampe continue et que la selection ressorte seule. */
-  filter: brightness(.66) saturate(1.05);
+  /* La rampe reste lisible -- c'est la même échelle que la grille de l'année,
+     et la voir de gauche à droite est ce qui apprend à s'en servir. Mais onze
+     tuiles à pleine saturation dominaient une page dont le sujet est le texte
+     au-dessus. On les couche, et seule la note posée se relève. */
+  filter: brightness(.3) saturate(.5);
   transition: transform .12s ease-out, filter .12s, box-shadow .12s;
 }
-.notestrip button:hover { transform: translateY(-2px); filter: brightness(.92) saturate(1.05); }
+.notestrip button:hover { filter: brightness(.62) saturate(.85); }
 .notestrip button[aria-pressed="true"] {
-  transform: translateY(-4px); filter: none; font-weight: 700; color: #08110c;
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px rgba(255,255,255,.6), 0 6px 18px rgba(0,0,0,.55);
+  filter: none; font-weight: 700; color: #08110c;
+  box-shadow: 0 0 0 1px var(--bg), 0 0 0 2px rgba(255,255,255,.55);
 }
 
 .scaleends { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--ink-faint); }
@@ -558,29 +709,34 @@ input[type=date] { color-scheme: dark; }
 /* ---------- séparateur de jour dans le fil continu ---------- */
 .daysep {
   display: flex; align-items: center; gap: 11px;
-  margin: 6px 0 2px; color: var(--ink-faint);
-  font-size: 10.5px; font-family: var(--mono); letter-spacing: .06em;
+  margin: 12px 0 4px; color: var(--ink-faint);
+  font-size: 9.5px; font-family: var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  opacity: .7;
 }
 .daysep::before, .daysep::after { content: ''; flex: 1; height: 1px; background: var(--line-soft); }
 .daysep:first-child { margin-top: 0; }
 
-/* Le fil est devenu la surface principale de la page : il mérite la place. */
-.thread { min-height: 240px; max-height: 62vh; }
-@media (max-width: 560px) { .thread { max-height: 56vh; } }
+/* Le fil occupe tout ce que le panneau lui laisse, entre l'en-tête et le
+   composeur. Un `max-height` en vh laissait un vide sous le dernier message
+   sur les grands écrans et coupait le fil sur les petits. */
+.thread { min-height: 160px; }
 
 /* ---------- jauge de jetons ---------- */
 
+/* Dans le rail, la jauge n'est plus un badge : un point, un nom, rien autour.
+   Elle dit combien il reste de jetons, une information qu'on consulte une fois
+   par semaine -- elle n'a rien a faire dans le champ de vision permanent. */
 .gauge {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 4px 10px 4px 8px; border-radius: 999px;
-  background: var(--panel); border: 1px solid var(--line); color: var(--ink-dim);
-  font-size: 12px; transition: border-color .12s, background .12s;
+  padding: 0; border-radius: 0;
+  background: none; border: 0; color: var(--ink-faint);
+  font-size: 11.5px; transition: color .12s;
 }
-.gauge:hover { background: var(--surface); color: var(--ink); }
-.gauge img { width: 20px; height: 20px; border-radius: 50%; display: block; }
+.gauge:hover { background: none; color: var(--ink-dim); }
+.gauge img { width: 17px; height: 17px; border-radius: 50%; display: block; opacity: .85; }
 .gauge .who { font-family: var(--mono); font-size: 11.5px; }
-.gauge .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.gauge[data-level="green"]  .dot { background: #4ade80; box-shadow: 0 0 7px #4ade8099; }
+.gauge .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.gauge[data-level="green"]  .dot { background: #4ade80; box-shadow: none; opacity: .75; }
 .gauge[data-level="yellow"] .dot { background: #e8d13d; box-shadow: 0 0 7px #e8d13d99; }
 .gauge[data-level="orange"] .dot { background: #e8933d; box-shadow: 0 0 7px #e8933d99; }
 .gauge[data-level="red"]    .dot { background: #e0564a; box-shadow: 0 0 7px #e0564a99; }
@@ -678,7 +834,10 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   font-size: 11.5px !important; margin-left: auto;
   border: 1px solid var(--line) !important; color: var(--ink-dim) !important;
 }
-.calnow:disabled { opacity: 1 !important; border-color: var(--accent) !important; color: var(--accent) !important; }
+/* Quand on y est déjà, il s'éteint plutôt que de s'allumer en vert : la case du
+   jour porte déjà l'anneau, deux marques vertes pour la même information font
+   deux fois trop. */
+.calnow:disabled { opacity: 1 !important; border-color: var(--line-soft) !important; color: var(--ink-faint) !important; }
 .calhead { max-width: 320px; }
 
 /* Largeur bornée : sans ça, chaque case fait cent pixels dans une colonne
@@ -720,7 +879,17 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .55;
 }
 
-.dayhead { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; }
+/* La ligne d'en-tête d'une journée : la note, la référence, l'écart, puis
+   « effacer ». En flex avec wrap, la colonne du Miroir étant devenue plus
+   étroite, « Référence » et « Écart » se retrouvaient l'un sous l'autre avec
+   « effacer » flottant entre les deux. Une grille explicite tient la ligne, et
+   ne se casse qu'une fois — sous 420 px, où elle passe proprement à deux
+   colonnes. */
+.dayhead {
+  display: grid; grid-template-columns: auto auto auto 1fr;
+  align-items: end; gap: 8px 26px; margin-bottom: 14px;
+}
+@media (max-width: 420px) { .dayhead { grid-template-columns: auto 1fr; } }
 .dayhead .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .dayhead .bignum .sl { font-size: 16px; color: var(--ink-faint); }
 /* La note du jour ouvert est l'information la plus consultee de l'ecran, et
@@ -730,12 +899,13 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   font-size: 46px; font-weight: 400;
   text-shadow: 0 0 22px color-mix(in srgb, var(--halo) 45%, transparent);
 }
-.statgrid.tight { flex: 1; min-width: 150px; gap: 10px 18px; }
+.statgrid.tight { display: contents; }
 .daydrop {
-  background: none; border: 0; color: var(--ink-faint);
-  font-size: 11.5px; padding: 3px 7px; border-radius: 5px; align-self: center;
+  background: none; border: 0; color: var(--ink-faint); justify-self: end;
+  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+  padding: 3px 0; border-radius: 0; align-self: center;
 }
-.daydrop:hover { color: var(--danger); background: var(--surface); }
+.daydrop:hover { color: var(--danger); background: none; }
 
 .dayText {
   white-space: pre-wrap; font-size: 15.5px; line-height: 1.65; margin: 0;
@@ -839,20 +1009,28 @@ body:has(#ambiance) { background: transparent; }
 
 /* --- un message teinté par un motif --- */
 
-.msg.teinte {
-  box-shadow: inset 2px 0 0 hsl(var(--motif) 68% 58% / .85);
-  background: color-mix(in srgb, hsl(var(--motif) 55% 45%) 13%, var(--surface));
-}
-.msg.user.teinte { background: color-mix(in srgb, hsl(var(--motif) 55% 45%) 16%, #1d3d29); }
-.msg .motifs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+/* Un motif reconnu prend le filet du message : c'est déjà le trait qui dit qui
+   parle, et le teinter ne coûte donc aucun élément de plus. Aucun fond — le
+   fil n'en a plus, et en rajouter un ici recréerait la bulle qu'on vient
+   d'enlever. */
+.msg.teinte { border-left-color: hsl(var(--motif) 68% 58% / .9); }
+.msg.teinte .tx { color: var(--ink); }
+.msg .motifs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+/* Une puce de motif n'est pas un bouton d'action : c'est une note en marge.
+   Fond retire, point colore devant -- la couleur reste identifiable sans
+   poser une pastille lumineuse au milieu d'une page qui n'en a aucune. */
 .motifchip {
-  background: hsl(var(--motif) 45% 30% / .5);
-  border: 1px solid hsl(var(--motif) 45% 42% / .55);
-  color: hsl(var(--motif) 70% 78%);
-  border-radius: 999px; padding: 1px 9px; font-size: 10.5px; letter-spacing: .02em;
-  transition: background .12s;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: 0; padding: 0;
+  color: hsl(var(--motif) 45% 62%);
+  font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+  transition: color .12s;
 }
-.motifchip:hover { background: hsl(var(--motif) 50% 38% / .7); }
+.motifchip::before {
+  content: ''; width: 5px; height: 5px; border-radius: 50%;
+  background: hsl(var(--motif) 60% 55%);
+}
+.motifchip:hover { color: hsl(var(--motif) 60% 76%); background: none; }
 
 /* --- le bloc du Miroir --- */
 
@@ -959,10 +1137,15 @@ body:has(#ambiance) { background: transparent; }
 .motifn small { font-size: 10px; opacity: .6; margin-left: 1px; }
 
 
-/* ---- les composants de repères et de motifs, sur téléphone ----
-   Ce bloc vit après leurs règles de base : sans ça, l'ordre du fichier ferait
-   gagner le style de bureau à spécificité égale, et les puces resteraient
-   hautes de vingt pixels sur un écran tactile. */
+
+
+/* ---- téléphone, suite ----
+   Ce bloc ferme le fichier, et c'est volontaire : les composants ci-dessus
+   (barre de notes, repères, motifs) sont définis APRÈS le bloc mobile
+   principal, et à spécificité égale c'est l'ordre du fichier qui tranche.
+   Écrites plus haut, ces règles perdaient silencieusement — la barre de notes
+   restait en une rangée de cases de 22 px sur un iPhone, sans qu'aucune erreur
+   ne le signale. */
 @media (max-width: 560px) {
   /* Le geste du soir. En ligne, les onze cases faisaient 22 px de large sur un
      écran de 390 : on vise le 7, on pose le 8, et c'est la seule donnée que
@@ -970,19 +1153,14 @@ body:has(#ambiance) { background: transparent; }
      Six colonnes, et le 10 occupe les deux dernières cases — onze boutons
      remplissent alors exactement deux rangées, sans trou en bout de ligne. Et
      c'est le seul à deux chiffres, donc le seul qui gagne à être plus large. */
-  .notestrip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
-  .notestrip button { aspect-ratio: auto; min-height: 46px; font-size: 15px; }
+  .notestrip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; max-width: none; }
+  /* `aspect-ratio: 1` vient de la règle de base : sur deux colonnes le 10
+     devenait un carré de 117 px de côté au milieu d'une rangée de 55. */
+  .notestrip button { aspect-ratio: auto; height: auto; min-height: 46px; font-size: 14px; }
   .notestrip button:last-child { grid-column: span 2; }
 
-  /* La légende de la grille tient sur une ligne en 1120 px de large et sur
-     quatre en 390 : elle passe en deux blocs empilés, l'échelle puis le
-     décompte, plutôt que de couper « moyenne » de son chiffre. */
-  .legend { flex-wrap: wrap; gap: 5px 8px; }
-  .legend span[style*="margin-left:12px"],
-  .legend span[style*="margin-left:auto"] { margin-left: 0 !important; flex-basis: 100%; }
-
-  .motifchip { padding: 5px 12px; font-size: 11.5px; }
-  .msg .motifs { gap: 6px; margin-top: 8px; }
+  .motifchip { min-height: 30px; padding: 7px 0; font-size: 10.5px; }
+  .msg .motifs { gap: 14px; margin-top: 8px; }
   .repdel { opacity: 1; min-width: 38px; min-height: 38px; font-size: 20px; }
   .repligne { flex-wrap: wrap; gap: 8px 10px; padding: 9px 8px; }
   .replabel { flex: 1 1 100%; white-space: normal; order: 3; }

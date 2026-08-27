@@ -10,21 +10,42 @@
 </head>
 <body>
 <div class="shell">
-  <header class="top">
+  <!-- Le rail. Constant d'une vue à l'autre : c'est l'identité de l'application,
+       le compagnon, et le décor du moment. Rien qui change quand on navigue. -->
+  <aside class="rail">
     <div class="brand">
       <b>BrainDebugger</b>
       <span id="dayline"></span>
     </div>
-    <button class="gauge" id="gauge" aria-haspopup="dialog" aria-expanded="false" hidden></button>
-    <nav>
-      <button data-view="tonight">Parler</button>
-      <button data-view="year">Année</button>
-      <button data-view="mirror">Miroir</button>
-      <button data-view="carte">Carte</button>
-      <button data-view="settings">Réglages</button>
-    </nav>
-  </header>
-  <main id="view"></main>
+
+    <div class="railmid">
+      <div class="petcard">
+        <div class="art" id="art" tabindex="0" role="button"
+             aria-label="Changer l'image du compagnon"></div>
+        <input type="file" id="petPick" accept="image/*" hidden>
+      </div>
+      <p class="petsay" id="petSay"></p>
+    </div>
+
+    <div class="railfoot">
+      <button class="gauge" id="gauge" aria-haspopup="dialog" aria-expanded="false" hidden></button>
+      <div class="ambianceread" id="ambianceRead" hidden></div>
+    </div>
+  </aside>
+
+  <div class="panel">
+    <header class="top">
+      <div class="viewname" id="viewName"></div>
+      <nav>
+        <button data-view="tonight">Parler</button>
+        <button data-view="year">Année</button>
+        <button data-view="mirror">Miroir</button>
+        <button data-view="carte">Carte</button>
+        <button data-view="settings">Réglages</button>
+      </nav>
+    </header>
+    <main id="view"></main>
+  </div>
 </div>
 <div class="gaugepanel" id="gaugePanel" role="dialog" aria-label="Jetons restants" hidden></div>
 <div class="tip" id="tip"></div>
