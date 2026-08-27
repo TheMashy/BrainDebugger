@@ -674,7 +674,10 @@ function renderNoData(why) {
 let SERIES = null;
 let CARNET = { notes: [], compte: { total: 0, datees: 0, libres: 0 } };
 let FRISE = null;
-let FRISE_CADRE = 'vie';   // 'vie' | 'journal' — un cadre, jamais une échelle déformée
+// « journal » par defaut : c'est le cadre qui partage l'axe de la courbe, donc
+// celui ou un repere tombe sur l'inflexion qu'il explique. « vie » reste a un
+// clic pour aller voir l'avant-journal.
+let FRISE_CADRE = 'journal';
 let CUMMODE = 'etalon';
 let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 
@@ -718,7 +721,6 @@ async function renderYear(year) {
             <button data-daily="all" aria-pressed="${DAILYALL}">tout</button>
           </div>
         </div>
-        <p class="sub">Les écarts d'humeur, jour par jour.</p>
         ${(() => {
           const idx = DAILYALL
             ? SERIES.date.map((_, i) => i)
@@ -729,25 +731,37 @@ async function renderYear(year) {
       </div>
 
       <div class="card">
-        <h2>Cumul</h2>
-        <p class="sub"><span class="mono">Σ (note − étalon)</span></p>
+        <div class="cardhead">
+          <h2>Cumul</h2>
+          ${FRISE?.etendue?.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
+            ? `<div class="centerpick" style="margin-left:auto">
+                 <button data-cadre="journal" aria-pressed="${FRISE_CADRE === 'journal'}">journal</button>
+                 <button data-cadre="vie" aria-pressed="${FRISE_CADRE === 'vie'}">vie</button>
+               </div>` : ''}
+        </div>
         <div class="centerpick">
           <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}">étalon fixe<span class="drift mono">${eta}</span></button>
           <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}">référence glissante<span class="drift">365 j</span></button>
-          <label class="field" style="margin:0 0 0 auto;display:flex;align-items:center;gap:8px">
-            <span style="margin:0;font-size:12px">étalon</span>
-            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}" style="width:76px">
+          <label class="field etalonfield"
+                 title="Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}. Dérive de la courbe : ${drift > 0 ? '+' : ''}${drift.toFixed(3)}/jour.">
+            <span>étalon</span>
+            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}">
           </label>
         </div>
         ${lineChart(SERIES.date, SERIES[cumKey], { height: 250, events: SERIES.events, colore: true })}
-        <p class="sub" style="margin:13px 0 0">
-          ${CUMMODE === 'etalon'
-            ? `Ta moyenne réelle est à <b class="mono">${SERIES.mean}</b>, ta médiane à <b class="mono">${SERIES.globalMedian}</b>.
-               Avec un étalon à <b class="mono">${eta}</b>, la courbe dérive de <b class="mono">${drift > 0 ? '+' : ''}${drift.toFixed(3)}</b>/jour.
-               Plus l'étalon colle à ta moyenne, plus la pente ne dit que ce qui a vraiment changé.`
-            : `Ici l'étalon n'est pas figé : c'est la médiane de tes 365 derniers jours, recalculée chaque jour.
-               Dérive résiduelle <b class="mono">${drift > 0 ? '+' : ''}${drift.toFixed(3)}</b>/jour, sans rien avoir à régler à la main.`}
-        </p>
+
+        ${/* La frise se pose sous la courbe et partage EXACTEMENT son axe : les
+              marges de lineChart, à l'unité près. Un repère tombe alors sur
+              l'inflexion qu'il explique, ce qu'aucune légende n'aurait obtenu. */''}
+        ${FRISE && (FRISE.points.length || FRISE.periodes.length) ? `
+          <div class="frisewrap" id="frisewrap">
+            ${friseSVG(FRISE, icone, {
+              mg: 46, md: 12,
+              domaine: FRISE_CADRE === 'vie' ? FRISE.etendue
+                     : { debut: SERIES.date[0], fin: SERIES.date.at(-1) }
+            })}
+            <div class="frisetip" id="frisetip" hidden></div>
+          </div>` : ''}
       </div>
 
       ${carnetCardMarkup({
@@ -759,50 +773,33 @@ async function renderYear(year) {
       <div class="card">
         <div class="cardhead">
           <h2>Repères</h2>
-          <label class="naissance">
-            <span>née / né le</span>
+          <label class="naissance" title="Donne une origine à la frise. Aucun âge n'est calculé.">
+            <span>naissance</span>
             <input type="date" id="naissance" min="1900-01-01" max="${S.today}"
                    value="${S.settings.naissance ?? ''}">
           </label>
         </div>
-        <p class="sub">En pointillés sur les deux courbes, et posés sur la frise.
-          La naissance ne sert qu'à donner une origine à la frise — aucun âge n'est calculé.</p>
         <form id="evform" class="repform">
           <span class="repapercu" id="evicone">${icone('jalon', 22)}</span>
           <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
-                 placeholder="changement de boulot, déménagement, début d'un traitement…">
+                 placeholder="changement de boulot, déménagement…">
           <input type="date" id="evdate" required min="1900-01-01" max="${S.today}" value="${S.today}">
-          <label class="evduree"><input type="checkbox" id="evPeriode"> ça a duré</label>
+          <label class="evduree" title="Deux dates : une période — une addiction, un contrat, une relation.">
+            <input type="checkbox" id="evPeriode"> ça a duré</label>
           <input type="date" id="evfin" min="1900-01-01" max="${S.today}" hidden>
-          <span class="evteintes" id="evteintes" role="group" aria-label="Couleur du contour">
+          <span class="evteintes" id="evteintes" role="group"
+                title="La teinte ne touche que le contour : le remplissage vient de tes journées.">
             <button type="button" class="evt" data-teinte="" aria-pressed="true" title="sans couleur"></button>
             ${TEINTES_DECLAREES.map(t => `<button type="button" class="evt" data-teinte="${t}"
               aria-pressed="false" style="--t:${t}" title="teinte ${t}°"></button>`).join('')}
           </span>
           <button class="btn primary" type="submit">Poser</button>
         </form>
-        <p class="sub" style="margin:-6px 0 14px;font-size:11.5px">
-          Une date pour un instant, deux pour une période — une addiction, un contrat, une
-          relation. La couleur choisie ne touche que le contour : le remplissage vient de tes
-          journées, et il ne se choisit pas.
-        </p>
-        ${FRISE && (FRISE.points.length || FRISE.periodes.length)
-          ? `${FRISE.etendue.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
-              ? `<div class="centerpick frisecadre">
-                   <button data-cadre="vie" aria-pressed="${FRISE_CADRE === 'vie'}">toute la vie</button>
-                   <button data-cadre="journal" aria-pressed="${FRISE_CADRE === 'journal'}">ton journal</button>
-                 </div>` : ''}
-             <div class="frisewrap">${friseSVG(FRISE, icone, { cadre: FRISE_CADRE })}</div>
-             <p class="sub frisenote">
-               Le rempli est mesuré, le contour est déclaré : la couleur d'un repère est celle
-               des journées qu'il couvre, sur la même échelle que la grille. Là où tu n'as rien
-               écrit — l'enfance, tout ce qui précède ton journal — il n'y a pas de couleur.
-             </p>
-             <details class="friseliste"><summary>La liste, par année</summary>
+        ${SERIES.events.length
+          ? `<details class="friseliste"><summary>la liste</summary>
                <div class="frise">${friseMarkup(SERIES.events)}</div>
              </details>`
-          : `<p class="sub" style="margin:0">Aucun repère pour l'instant. Le compagnon en pose
-             aussi de lui-même, quand tu lui racontes quelque chose qui change le sol sous tes journées.</p>`}
+          : `<p class="sub" style="margin:0">Aucun repère. Le compagnon en pose aussi de lui-même.</p>`}
       </div>
     </div>`;
 
@@ -835,6 +832,7 @@ async function renderYear(year) {
   };
 
   wireCarnet(async () => { CARNET = await api('/api/carnet'); renderYear(year); });
+  wireFrise();
 
   $('#naissance')?.addEventListener('change', async e => {
     try {
@@ -927,6 +925,62 @@ function friseMarkup(events) {
     </div>`).join('');
 }
 
+/**
+ * Le survol de la frise, et le clic.
+ *
+ * L'infobulle native met une seconde et demie a apparaitre, se pose ou le
+ * navigateur veut et disparait au moindre mouvement : sur une bande ou les
+ * marques font deux pixels de haut, elle est inutilisable. Celle-ci suit le
+ * curseur, apparait immediatement, et donne ce qu'on cherche a ce moment-la --
+ * quoi, quand, et ce que valait la journee.
+ *
+ * Le clic ouvre le jour dans le Miroir. Pour une periode, son premier jour :
+ * c'est celui qu'on cherche quand on clique sur une barre, pas son milieu.
+ */
+function wireFrise() {
+  const wrap = $('#frisewrap');
+  const tip = $('#frisetip');
+  if (!wrap || !tip) return;
+
+  const montrer = (g, ev) => {
+    const d = g.dataset;
+    const th = d.theme || 'jalon';
+    const periode = d.fin && d.fin !== 'null';
+    const quand = periode
+      ? `${fmtDay(d.date)} → ${fmtDay(d.fin)}`
+      : fmtDay(d.date);
+    const dessous = periode
+      ? `${d.duree} journée${Number(d.duree) > 1 ? 's' : ''} écrite${Number(d.duree) > 1 ? 's' : ''}`
+      : (d.note ? `${d.note}/10` : 'pas de journée écrite');
+
+    tip.innerHTML = `<span class="ft-ico">${icone(th, 16)}</span>
+      <span class="ft-txt"><b>${esc(d.label)}</b><span>${quand} · ${dessous}</span></span>`;
+    tip.hidden = false;
+
+    const r = wrap.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    // Bornée à l'intérieur du cadre : une bulle qui déborde à droite force un
+    // défilement horizontal sur la page entière.
+    const x = Math.max(4, Math.min(r.width - w - 4, ev.clientX - r.left - w / 2));
+    tip.style.left = `${x}px`;
+    tip.style.top = `${Math.max(2, ev.clientY - r.top - tip.offsetHeight - 12)}px`;
+  };
+
+  wrap.addEventListener('mousemove', e => {
+    const g = e.target.closest('[data-ev]');
+    if (g) montrer(g, e); else tip.hidden = true;
+  }, { passive: true });
+  wrap.addEventListener('mouseleave', () => { tip.hidden = true; }, { passive: true });
+
+  wrap.addEventListener('click', e => {
+    const g = e.target.closest('[data-ev]');
+    if (!g) return;
+    view = 'mirror';
+    syncNav();
+    renderMirror(g.dataset.date);
+  });
+}
+
 function gridMarkup(grid) {
   const today = S.today;
   return `<table class="grid">
@@ -965,7 +1019,7 @@ function carnetCardMarkup({ notes = [], jour = null, titre = 'Notes apportées',
 
   return `<div class="card carnetcard">
     <div class="cardhead">
-      <h2>${esc(titre)}</h2>
+      <h2 title="Des notes prises ailleurs. Elles nourrissent le compagnon et les thèmes, et ne comptent jamais comme des journées écrites.">${esc(titre)}</h2>
       <button class="btn ghost cnadd" id="cnOuvrir" style="margin-left:auto">+ une note apportée</button>
     </div>
 
@@ -1039,12 +1093,10 @@ function wireCarnet(apres) {
     if (!h) return;
     const c = choix();
     if (c === 'libre') {
-      h.textContent = "Sans date. Elle nourrit le compagnon et apparaît dans les thèmes qui "
-        + "contiennent ses mots. Elle n'entre dans aucun compte de journées.";
+      h.textContent = "Sans date. Elle n'entre dans aucun compte de journées.";
     } else {
       const d = c === 'jour' ? (form.dataset.jour || S.today) : ($('#cnJour')?.value || S.today);
-      h.textContent = `Elle se posera sur le ${fmtDay(d)} : tu la retrouveras dans le Miroir ce `
-        + "jour-là. Elle ne porte pas de /10 et ne compte pas comme une journée écrite.";
+      h.textContent = `Sur le ${fmtDay(d)}. Elle ne compte pas comme une journée écrite.`;
     }
   };
 
@@ -1254,8 +1306,8 @@ async function renderMirror(date) {
     simCard = `<div class="card">
       <h2>${sim.mode === 'text' ? 'Tu as déjà écrit ça' : 'Les autres fois à ' + m.note + '/10'}</h2>
       ${sim.mode === 'text' ? '' : `<p class="sub">${sim.reason === 'no_theme'
-        ? "Rien de commun dans les mots aujourd'hui. Comparaison sur les notes."
-        : 'Comparaison sur les notes, pas sur les mots.'}</p>`}
+        ? 'Rien de commun dans les mots — comparaison sur les notes.'
+        : 'Comparaison sur les notes.'}</p>`}
       ${sim.items.map(it => `<div class="simitem">
         <div class="hd">
           <span class="d">${fmtDay(it.date)}</span>
@@ -1507,23 +1559,18 @@ async function renderCarte() {
     <div class="carte">
       <div class="card cartebox">
         <div class="cardhead">
-          <h2>Carte de tes mots</h2>
+          <h2 title="La taille dit combien de journées portent ce mot — jamais les notes apportées. La couleur est celle de leur note. Un anneau marque tes repères d'étalonnage.">Carte de tes mots</h2>
           <span class="sub" style="margin:0">${G.noeuds.length} mots qui reviennent</span>
         </div>
         <div class="cartewrap"><canvas id="carteCv"></canvas>
           <div class="cartetip" id="carteTip" hidden></div>
         </div>
-        <p class="sub cartelegende">
-          La taille dit combien de journées portent ce mot. La couleur est celle de leur note,
-          sur la même échelle que la grille. Un anneau marque tes repères d'étalonnage.
-          La taille dit les journées, jamais les notes apportées.
-        </p>
+
       </div>
 
       <div class="mcol">
         <div class="card">
           <h2>Les groupes</h2>
-          <p class="sub">Clique sur un groupe pour l'ouvrir.</p>
           <div class="amaslist">
             ${G.amas.filter(a => a.taille >= 2).map(a => `
               <button class="amasrow" data-theme="${a.id}" data-nom="${esc(a.nom)}">
@@ -1557,10 +1604,7 @@ async function renderCarte() {
       vide: "Rien encore. Tu peux déposer ici des notes prises ailleurs — datées ou non."
     })}
 
-    <p class="sub piedremarque">
-      Des comptes sur tes propres journées, rien de plus. L'application ne dit pas ce qu'ils
-      veulent dire — le lien, c'est toi qui le fais.
-    </p>`;
+`;
 
   monterCarte();
   wireCarnet(() => renderCarte());
@@ -1584,16 +1628,16 @@ function bandeauRemarque(G) {
   const c = G.carnet ?? { notes: 0, datees: 0, libres: 0 };
   return `<div class="card bandeau">
     <div class="cardhead">
-      <h2>Ce que je remarque</h2>
+      <h2 title="Des comptes sur tes propres journées, rien de plus. L'application ne dit pas ce qu'ils veulent dire — le lien, c'est toi qui le fais.">Ce que je remarque</h2>
       <div class="centerpick" style="margin-left:auto">
         <button data-mode="global" aria-pressed="${REMQ_MODE === 'global'}">état global</button>
         <button data-mode="theme" aria-pressed="${REMQ_MODE === 'theme'}">explorer un thème</button>
       </div>
     </div>
-    <p class="mono comptes">${G.jours} journées écrites${G.notees !== undefined ? ` · dont ${G.notees} notées` : ''}
+    <p class="mono comptes" title="${c.libres ? `Les ${c.libres} notes sans date sont comptées dans les quatre fenêtres.` : ''}">${G.jours} journées écrites${G.notees !== undefined ? ` · dont ${G.notees} notées` : ''}
       · ${c.notes} note${c.notes > 1 ? 's' : ''} apportée${c.notes > 1 ? 's' : ''} (${c.datees} datée${c.datees > 1 ? 's' : ''}, ${c.libres} sans date)${G.depuis ? ` · depuis le ${fmtDay(G.depuis)}` : ''}</p>
     <div class="centerpick">${choix}</div>
-    ${c.libres ? `<p class="sub" style="margin:8px 0 0;font-size:11.5px">Les ${c.libres} notes sans date sont comptées dans les quatre fenêtres.</p>` : ''}
+
   </div>`;
 }
 
@@ -1602,11 +1646,10 @@ function tableauMots(G) {
   if (!lignes.length) return '';
   return `<div class="card">
     <h2>Ce qui revient le plus</h2>
-    <p class="sub">Classé par nombre de journées. Clique une ligne pour ouvrir son groupe.</p>
     <div class="tblwrap"><table class="tbl">
       <thead><tr>
-        <th>mot</th><th class="n">journées</th><th class="n">dont notées</th>
-        <th class="n">moyenne</th><th class="n">écart</th><th class="n">notes apportées</th>
+        <th>mot</th><th class="n">journées</th><th class="n" title="Le dénominateur réel de la moyenne. En dessous de ${G.minNotees}, un tiret plutôt qu'un chiffre prudent.">dont notées</th>
+        <th class="n">moyenne</th><th class="n">écart</th><th class="n" title="Une colonne à part, jamais additionnée aux journées.">notes apportées</th>
       </tr></thead>
       <tbody>${lignes.map(n => `<tr data-theme="${n.amas}" data-nom="${esc(G.amas.find(a => a.id === n.amas)?.nom ?? '')}">
         <td>${esc(n.mot)}</td>
@@ -1618,11 +1661,6 @@ function tableauMots(G) {
         <td class="n">${n.carnet || '—'}</td>
       </tr>`).join('')}</tbody>
     </table></div>
-    <p class="sub" style="margin:10px 0 0;font-size:11.5px">
-      « dont notées » existe pour que le nombre de journées et la moyenne ne puissent pas se lire
-      comme portant sur le même ensemble. En dessous de ${G.minNotees} journées notées : un tiret,
-      pas un chiffre prudent. « notes apportées » est une colonne à part, jamais additionnée.
-    </p>
   </div>`;
 }
 
@@ -1653,7 +1691,6 @@ function tableauPaires(G) {
   const top = G.liens.slice().sort((a, b) => b.force - a.force).slice(0, 8);
   return `<div class="card">
     <h2>Ce qui va avec quoi</h2>
-    <p class="sub">Le nombre de journées où les deux mots apparaissent ensemble.</p>
     ${top.map(l => {
       const a = G.noeuds[l.s], b = G.noeuds[l.t];
       if (!a || !b) return '';
@@ -1669,7 +1706,6 @@ function tableauBouge(G) {
   if (!G.bouge?.length || CARTE_FENETRE === '90') return '';
   return `<div class="card">
     <h2>Ce qui a changé de place</h2>
-    <p class="sub">Classé par l'écart entre les deux proportions. Deux fractions, rien d'autre.</p>
     <div class="tblwrap"><table class="tbl">
       <thead><tr><th>mot</th><th class="n">90 derniers jours</th><th class="n">sur l'ensemble</th></tr></thead>
       <tbody>${G.bouge.map(b => `<tr>
@@ -1722,7 +1758,7 @@ async function renderTheme() {
       <div class="mcol">
         <div class="card">
           <h2>Les journées</h2>
-          <p class="sub">${T.jours.length} journées écrites contiennent un de ces mots. Clique une date pour l'ouvrir.</p>
+          <p class="sub">${T.jours.length} journées</p>
           <div class="cnliste">
             ${T.jours.slice(0, 40).map(j => `<div class="cnitem">
               <div class="cnmeta">
@@ -1743,16 +1779,13 @@ async function renderTheme() {
         <div class="card">
           <h2>Dans ton carnet</h2>
           ${T.notes.length
-            ? `<p class="sub">${T.notes.length} note${T.notes.length > 1 ? 's' : ''} sur les ${T.carnetTotal} de
-                 ton carnet. Elles n'entrent dans aucun chiffre de cette page — elles sont là
-                 parce qu'elles contiennent un de ces mots.</p>
+            ? `<p class="sub" title="Elles n'entrent dans aucun chiffre de cette page : elles sont là parce qu'elles contiennent un de ces mots.">${T.notes.length} sur ${T.carnetTotal}</p>
                <div class="cnliste">${T.notes.map(n => carnetItemMarkup(n)).join('')}</div>`
             : `<p class="sub" style="margin:0">Aucune note de ton carnet ne contient un de ces mots.</p>`}
         </div>
 
         ${T.liens.length ? `<div class="card">
           <h2>Ce qui revient avec</h2>
-          <p class="sub">Les deux dénominateurs sont là pour que le compte se lise.</p>
           ${T.liens.map(l => `<p class="fait"><b>${esc(l.a)}</b> · <b>${esc(l.b)}</b> —
             ${l.n ?? '?'} journées ensemble <span class="muted">(sur ${l.ja} et ${l.jb})</span></p>`).join('')}
         </div>` : ''}

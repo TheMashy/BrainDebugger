@@ -219,7 +219,8 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
  * @param {(theme:string, taille:number) => string} icone
  * @returns {string} le SVG complet
  */
-export function friseMarkup(F, icone, { hauteurVoie = 30, survol = null, cadre = 'vie' } = {}) {
+export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre = 'vie',
+                                        mg = 12, md = 12, domaine = null } = {}) {
   /*
    * LE ZOOM, ET PAS UNE DEFORMATION DE L'AXE.
    *
@@ -233,17 +234,22 @@ export function friseMarkup(F, icone, { hauteurVoie = 30, survol = null, cadre =
    * On change donc de CADRE, pas d'echelle. Chaque cadre reste lineaire ; ce
    * qui deborde est ramene au bord et son infobulle garde les vraies dates.
    */
-  const et = cadre === 'journal' && F?.etendue?.journal
-    ? { ...F.etendue.journal, journal: F.etendue.journal }
-    : F?.etendue;
+  // `domaine` permet de coller EXACTEMENT a l'axe d'un graphe : la frise se pose
+  // alors sous la courbe et un repere tombe sur le moment qu'il explique. C'est
+  // toute la raison d'etre de cette option -- lire un fait et une inflexion
+  // ensemble, sans avoir a chercher la correspondance des yeux.
+  const et = domaine ? { ...domaine, journal: F?.etendue?.journal ?? null }
+           : cadre === 'journal' && F?.etendue?.journal
+             ? { ...F.etendue.journal, journal: F.etendue.journal }
+             : F?.etendue;
   if (!et) return '';
 
-  const W = 1000, MG = 12, MD = 12;
+  const W = 1000, MG = mg, MD = md;
   const iw = W - MG - MD;
   const X = d => MG + situer(d, et) * iw;
 
   const nbVoies = F.periodes.length ? Math.max(...F.periodes.map(p => p.voie)) + 1 : 0;
-  const HAUT = 20;                                   // la rangee des annees
+  const HAUT = domaine ? 6 : 20;                     // la rangee des annees, inutile sous un graphe
   const VOIES = nbVoies * hauteurVoie;
   const POINTS = 52;                                 // la rangee des instants
   const H = HAUT + VOIES + (VOIES ? 12 : 0) + POINTS;
@@ -262,13 +268,15 @@ export function friseMarkup(F, icone, { hauteurVoie = 30, survol = null, cadre =
           fill="var(--accent)" fill-opacity=".04"/>
     <line x1="${X(j.debut).toFixed(1)}" y1="${HAUT - 5}" x2="${X(j.debut).toFixed(1)}" y2="${yAxe}"
           stroke="var(--accent)" stroke-opacity=".28" stroke-dasharray="2 4"/>
-    ${cadre === 'vie' ? `<text x="${(X(j.debut) + 5).toFixed(1)}" y="${HAUT - 9}" class="frisejournal">ton journal</text>` : ''}` : '';
+    ${cadre === 'vie' && !domaine ? `<text x="${(X(j.debut) + 5).toFixed(1)}" y="${HAUT - 9}" class="frisejournal">ton journal</text>` : ''}` : '';
 
   const ans = graduations(et).map(a => {
     const x = X(`${a}-01-01`);
     if (x < MG - 1 || x > W - MD + 1) return '';
+    // Sous un graphe, les annees sont deja ecrites juste au-dessus : on ne garde
+    // que les guides, qui font le lien entre les deux figures.
     return `<line x1="${x.toFixed(1)}" y1="${HAUT - 5}" x2="${x.toFixed(1)}" y2="${yAxe}" stroke="var(--line-soft)"/>
-            <text x="${x.toFixed(1)}" y="11" text-anchor="middle" class="frisean">${a}</text>`;
+            ${domaine ? '' : `<text x="${x.toFixed(1)}" y="11" text-anchor="middle" class="frisean">${a}</text>`}`;
   }).join('');
 
   /* --- les periodes : une barre par voie --- */
@@ -296,7 +304,9 @@ export function friseMarkup(F, icone, { hauteurVoie = 30, survol = null, cadre =
     // Combien de place a droite avant la barre suivante de cette voie.
     const place = (suivanteSurLaVoie.get(p.id) ?? W - MD) - x2 - 8;
     const etiquette = large || place > 60;
-    return `<g class="fperiode${actif ? ' on' : ''}${p.fort ? ' fort' : ''}" data-ev="${p.id}">
+    return `<g class="fperiode${actif ? ' on' : ''}${p.fort ? ' fort' : ''}"
+      data-ev="${p.id}" data-date="${p.date}" data-fin="${p.fin}" data-label="${esc(p.label)}"
+      data-theme="${p.theme}" data-duree="${p.jours?.length ?? 0}">
       <rect x="${x1.toFixed(1)}" y="${y}" width="${(x2 - x1).toFixed(1)}" height="${h}" rx="3"
             fill="${g.ref}" fill-opacity="${actif ? .85 : .62}"
             stroke="${contour}" stroke-opacity="${actif ? 1 : p.teinte != null ? .85 : .5}"
@@ -305,7 +315,6 @@ export function friseMarkup(F, icone, { hauteurVoie = 30, survol = null, cadre =
          color="${p.teinte != null ? contour : 'var(--ink-dim)'}">${icone(p.theme, 24)}</g>
       ${etiquette ? `<text x="${(large ? x1 + 18 : x2 + 6).toFixed(1)}" y="${(y + h / 2 + 3.5).toFixed(1)}"
             class="fetiq${large ? ' dedans' : ''}">${esc(p.label)}</text>` : ''}
-      <title>${esc(p.label)} — ${esc(p.date)} → ${esc(p.ouvert ? "aujourd'hui" : p.fin)} (${p.jours?.length ?? 0} journées écrites dessous)</title>
     </g>`;
   }).join('');
 
@@ -318,14 +327,16 @@ export function friseMarkup(F, icone, { hauteurVoie = 30, survol = null, cadre =
     const actif = survol === p.id;
     const r = p.fort ? 3.6 : 2.6;
     const t = p.fort ? 26 : 22;
-    return `<g class="fpoint${actif ? ' on' : ''}${p.fort ? ' fort' : ''}" data-ev="${p.id}">
+    return `<g class="fpoint${actif ? ' on' : ''}${p.fort ? ' fort' : ''}"
+      data-ev="${p.id}" data-date="${p.date}" data-label="${esc(p.label)}"
+      data-theme="${p.theme}" data-note="${p.note ?? ''}">
       <line x1="${x.toFixed(1)}" y1="${(yAxe - 18).toFixed(1)}" x2="${x.toFixed(1)}" y2="${yAxe}"
             stroke="${remplissage}" stroke-opacity=".55"/>
       <circle cx="${x.toFixed(1)}" cy="${yAxe}" r="${actif ? r + 1 : r}"
               fill="${remplissage}" stroke="${contour}" stroke-width="1.4"/>
       <g transform="translate(${(x - t / 2).toFixed(1)} ${(yAxe - 18 - t).toFixed(1)}) scale(${(t / 24).toFixed(3)})"
          color="${remplissage}">${icone(p.theme, 24)}</g>
-      <title>${esc(p.label)} — ${esc(p.date)}${p.note !== null && p.note !== undefined ? ` · ${p.note}/10` : ' · pas de journée écrite'}</title>
+      <rect class="fcapte" x="${(x - 9).toFixed(1)}" y="${(yAxe - 46).toFixed(1)}" width="18" height="52"/>
     </g>`;
   }).join('');
 

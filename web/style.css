@@ -27,6 +27,13 @@
 }
 
 * { box-sizing: border-box; }
+
+/* `[hidden]` ne peut rien contre un `display` explicite, et l'attribut cesse
+   alors silencieusement de cacher : le formulaire du carnet restait ouvert en
+   permanence, l'infobulle de la frise aussi. Le cas touche tout ce qui est
+   masque par attribut et pose un display en CSS -- la jauge, le decor, le
+   panneau de jetons. Une regle, une fois. */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -1324,3 +1331,35 @@ button.amasrow:hover { background: var(--panel); }
 .naissance { display: inline-flex; align-items: center; gap: 8px; margin-left: auto;
              font-size: 11.5px; color: var(--ink-faint); }
 .naissance input { width: auto; padding: 5px 8px; font-size: 12px; border-radius: 6px; }
+
+/* ---- le survol de la frise ----
+   L'infobulle native met une seconde et demie à venir et se pose où le
+   navigateur veut : sur une bande où les marques font deux pixels, elle est
+   inutilisable. Celle-ci suit le curseur et apparaît tout de suite. */
+.frisewrap { position: relative; }
+.frisetip {
+  position: absolute; z-index: 4; pointer-events: none;
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 11px 7px 9px; border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 92%, black);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 22px rgba(0,0,0,.6);
+  white-space: nowrap; font-size: 12.5px;
+  animation: fttap .09s ease-out;
+}
+@keyframes fttap { from { opacity: 0; transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) { .frisetip { animation: none; } }
+.frisetip .ft-ico { display: grid; place-items: center; color: var(--ink-dim); flex: none; }
+.frisetip .ft-txt { display: flex; flex-direction: column; gap: 1px; }
+.frisetip .ft-txt b { font-weight: 500; color: var(--ink); }
+.frisetip .ft-txt span { font-size: 10.5px; color: var(--ink-faint); font-family: var(--mono); }
+
+/* Une zone de capture large : viser une icône de deux pixels au pixel près est
+   injouable, à la souris comme au doigt. */
+.frisesvg .fcapte { fill: transparent; }
+.frisesvg [data-ev] { cursor: pointer; }
+.frisesvg { margin-top: -4px; }
+
+.etalonfield { margin: 0 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.etalonfield span { margin: 0; font-size: 12px; }
+.etalonfield input { width: 72px; }
