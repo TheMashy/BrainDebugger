@@ -2105,15 +2105,17 @@ button.amasrow:hover { background: var(--panel); }
               color: var(--ink-faint); border: 1px solid var(--line); border-radius: 4px;
               padding: 1px 5px; }
 
-/* ---- le bouton du mode pudique, dans la barre du haut ----
+/* ---- le bouton du mode prive, au pied du rail ----
 
-   Il est la en permanence, a cote des onglets : on l'allume dans la seconde
-   qui precede un partage d'ecran, et un reglage qu'il faut aller chercher
-   arrive toujours trop tard. Une icone seule -- ecrit « mode pudique » a cote
-   des onglets et c'est le mot qu'un invite lit en premier. */
+   A cote du compte, parce que c'est la meme question : qui regarde. Il est la
+   en permanence -- on l'allume dans la seconde qui precede un partage d'ecran,
+   et un reglage qu'il faut aller chercher arrive toujours trop tard. Une icone
+   seule : ecrit en toutes lettres, « mode prive » est le mot qu'un invite lit
+   en premier. */
+.railqui { display: flex; align-items: center; gap: 4px; }
 .floubtn {
   display: inline-grid; place-items: center; flex: none;
-  width: 30px; height: 30px; padding: 0;
+  width: 28px; height: 28px; padding: 0;
   border: 1px solid transparent; border-radius: 8px;
   background: none; color: var(--ink-faint); cursor: pointer;
   transition: color .14s ease, border-color .14s ease;
@@ -2176,3 +2178,113 @@ button.amasrow:hover { background: var(--panel); }
 /* Les fleches de bout : elles n'ont jamais servi a personne et elles sont le
    morceau le plus « systeme » de l'objet. */
 ::-webkit-scrollbar-button { display: none; }
+
+/* ================================ vue « Moi » ================================
+
+   Le tableau de bord. Trois etages, du plus large au plus proche : les pistes,
+   le mois, les ecarts. Rien de nouveau au milieu -- le calendrier et la journee
+   ouverte sont ceux qui existaient deja, simplement encadres autrement. */
+
+.moiresume {
+  display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline;
+  margin: 0 0 16px; font-size: 12.5px; color: var(--ink-faint);
+  font-family: var(--mono);
+}
+.moiresume b { color: var(--ink-dim); font-weight: 500; }
+
+.moihead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.moihead h2 { margin: 0; }
+.moiwin { display: inline-flex; gap: 2px; margin-left: auto; }
+.moiwin button {
+  font-size: 11.5px; padding: 5px 11px; border-radius: 7px;
+  background: none; border: 1px solid transparent; color: var(--ink-faint);
+}
+.moiwin button:hover { color: var(--ink-dim); background: none; }
+.moiwin button[aria-pressed="true"] {
+  color: var(--ink); border-color: var(--line); background: var(--panel-2);
+}
+
+/* ---- une piste ----
+   Le mot lourd a le droit de s'ecrire ici, et nulle part ailleurs. Ce qui
+   l'empeche d'etre une etiquette est la FORME : le cadre « une piste, du cote
+   de » se lit AVANT le mot, et « ce qui va contre » a le meme poids visuel que
+   « ce qui va dans ce sens ». Une hypothese dont on cache ce qui l'affaiblit
+   est un verdict deguise. */
+.pistes { display: flex; flex-direction: column; gap: 8px; }
+.piste {
+  border: 1px solid var(--line);
+  border-left: 2px solid hsl(var(--p) 55% 58%);
+  border-radius: 10px; overflow: hidden;
+  background: linear-gradient(90deg, hsl(var(--p) 55% 58% / .07), transparent 42%);
+}
+.piste.ouvert { background: linear-gradient(90deg, hsl(var(--p) 55% 58% / .11), transparent 62%); }
+.ptete {
+  width: 100%; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 13px 16px; background: none; border: 0; text-align: left; cursor: pointer;
+}
+.ptete:hover { background: none; }
+.pcadre {
+  font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--ink-faint); flex: 0 0 100%;
+}
+.pnom {
+  font-size: 19px; color: var(--ink); letter-spacing: -.01em;
+  /* Pas de majuscule initiale : « Dépression » en tête de carte se lit comme
+     un titre de dossier médical. */
+  text-transform: none;
+}
+.pforce { display: inline-flex; gap: 3px; margin-left: auto; align-self: center; }
+.pforce i {
+  width: 5px; height: 5px; border-radius: 50%;
+  border: 1px solid hsl(var(--p) 55% 62%);
+}
+.pforce[data-f="1"] i:nth-child(1),
+.pforce[data-f="2"] i:nth-child(-n+2),
+.pforce[data-f="3"] i { background: hsl(var(--p) 55% 62%); }
+
+.pcorps { padding: 0 16px 15px; display: flex; flex-direction: column; gap: 12px; }
+.pquoi { margin: 0; font-size: 14.5px; line-height: 1.62; color: var(--ink-dim); }
+.pcontre {
+  margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-dim);
+  padding: 10px 13px; border-radius: 8px;
+  background: var(--panel-2); border: 1px dashed var(--line);
+}
+.pcontre .k {
+  display: block; font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--ink-faint); margin-bottom: 5px;
+}
+.pthemes { display: flex; flex-wrap: wrap; gap: 6px; }
+.pthemes button {
+  font-size: 12px; padding: 5px 10px; border-radius: 999px;
+  background: none; border: 1px solid var(--line); color: var(--ink-dim);
+}
+.pthemes button:hover { color: var(--ink); border-color: hsl(var(--p) 55% 58%); background: none; }
+.prenvoi {
+  margin: 14px 0 0; padding-top: 13px; border-top: 1px solid var(--line-soft);
+  font-size: 12.5px; line-height: 1.6; color: var(--ink-faint);
+}
+
+/* ---- les ecarts ----
+   Aucun de ces nombres n'a traverse un modele : le serveur les mesure et ecrit
+   la phrase. La barre est PLEINE, comme toute chose mesuree. */
+.ecarts { display: flex; flex-direction: column; gap: 9px; }
+.ecart { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--ink-dim); }
+.ecart .ebarre {
+  flex: 0 0 54px; height: 5px; border-radius: 3px;
+  background: var(--panel-2); overflow: hidden; display: block;
+}
+.ecart .ebarre i { display: block; height: 100%; border-radius: 3px; }
+.ecart[data-signe="plus"]  .ebarre i { background: var(--accent); }
+.ecart[data-signe="moins"] .ebarre i { background: var(--danger); }
+.ecart .etxt { flex: 1; min-width: 0; }
+.ecart .enum { flex: none; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ecart[data-signe="plus"]  .enum { color: var(--accent); }
+.ecart[data-signe="moins"] .enum { color: var(--danger); }
+
+/* Le calendrier prend plus de place ici que dans « Ma carte » : c'est l'objet
+   qu'on vient manipuler, pas un rappel de contexte. */
+.jourseul.dansmoi .calcard { padding-bottom: 6px; }
+.jourseul.dansmoi .calgrid.jours button { min-height: 40px; }
+/* Sous le calendrier, la barre n'est plus un retour : c'est la molette du jour.
+   Elle se colle donc a la journee qu'elle fait defiler. */
+.retourlect.souscal { margin: -2px 0 12px; justify-content: flex-start; }

@@ -28,7 +28,21 @@
     </div>
 
     <div class="railfoot">
-      <button class="gauge" id="gauge" aria-haspopup="dialog" aria-expanded="false" hidden></button>
+      <div class="railqui">
+        <button class="gauge" id="gauge" aria-haspopup="dialog" aria-expanded="false" hidden></button>
+        <!-- Le mode prive s'allume dans la seconde qui precede un partage
+             d'ecran : il lui faut un bouton qui est LA, tout le temps. Il vit
+             a cote du compte parce que c'est la meme question -- qui regarde. -->
+        <button class="floubtn" id="flou" data-bascule-pudique aria-pressed="false"
+                aria-label="Mode privé" data-tip="Mode privé — Ctrl+Maj+P">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path class="oeil" d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/>
+            <circle class="iris" cx="12" cy="12" r="2.8"/>
+            <line class="barre" x1="4" y1="20" x2="20" y2="4"/>
+          </svg>
+        </button>
+      </div>
       <div class="ambianceread" id="ambianceRead" hidden></div>
     </div>
   </aside>
@@ -36,21 +50,9 @@
   <div class="panel">
     <header class="top">
       <div class="viewname" id="viewName"></div>
-      <!-- Le mode pudique s'allume dans la seconde qui precede un partage
-           d'ecran : il lui faut un bouton qui est LA, tout le temps, dans la
-           barre du haut. Aller le chercher dans Reglages, c'est trois vues de
-           journal a l'ecran avant d'y arriver. -->
-      <button class="floubtn" id="flou" data-bascule-pudique aria-pressed="false"
-              aria-label="Mode pudique" data-tip="Masquer les mots — Ctrl+Maj+P">
-        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
-             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path class="oeil" d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/>
-          <circle class="iris" cx="12" cy="12" r="2.8"/>
-          <line class="barre" x1="4" y1="20" x2="20" y2="4"/>
-        </svg>
-      </button>
       <nav>
         <button data-view="tonight">Parler</button>
+        <button data-view="moi">Moi</button>
         <button data-view="year">Année</button>
         <button data-view="mirror">Ma carte</button>
         <button data-view="settings">Réglages</button>

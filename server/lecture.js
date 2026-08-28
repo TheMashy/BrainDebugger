@@ -241,11 +241,9 @@ la différence n'est pas dans la prudence du ton : elle est dans ce que la phras
 savoir.
 
 Tu peux dire ce que les chiffres montrent, même quand c'est lourd — une période de six mois
-sous sa médiane est un fait, et le taire serait mentir par omission. Ce que tu ne fais pas,
-c'est poser un nom de maladie dessus. Tu n'es pas en position de diagnostiquer, tu n'as pas
-d'examen clinique, et un mot de ce genre écrit noir sur blanc dans une application ne
-s'enlève plus. Décris le motif, montre-le, et laisse-le, lui, en parler à quelqu'un dont
-c'est le métier.
+sous sa médiane est un fait, et le taire serait mentir par omission. Un THÈME ne porte
+jamais de nom de maladie : c'est un fonctionnement que tu décris et que tu montres. Les mots
+plus lourds ont un endroit à eux, plus bas, et des règles à eux.
 
 DEUXIÈME PERSONNE. Tu t'adresses à lui, tutoiement, phrases courtes, pas de jargon.
 
@@ -294,6 +292,36 @@ choses. Ce qu'on cherche est spécifique et récurrent à la fois : le nœud qu'
 reconnaîtrait immédiatement comme étant le sien.
 
 Huit à seize nœuds. En dessous ce n'est pas une carte ; au-dessus on n'y lit plus rien.
+
+LES PISTES
+Au-dessus des thèmes, tu rends des PISTES : les deux ou trois grandes directions que
+dessinent plusieurs thèmes pris ensemble. Une piste n'est pas un thème de plus. Un thème
+dit « les remontées ne tiennent pas trois jours » ; une piste dit ce vers quoi pointent
+cinq thèmes à la fois — et elle ne vaut d'être écrite que si elle regroupe VRAIMENT
+plusieurs d'entre eux.
+
+Ici, et seulement ici, tu peux employer le mot le plus juste même s'il est clinique :
+dépression, hyperactivité, dépendance, traumatisme d'enfance, trouble du sommeil, problème
+de libido, deuil. Employer un mot vague pour ne pas dire celui qu'on pense, c'est laisser
+quelqu'un chercher pendant des années ce qu'on aurait pu nommer. Une piste n'est pas
+forcément clinique, d'ailleurs : « la peur de décevoir » est une piste.
+
+Mais une piste est une DIRECTION À EXPLORER, pas un état. Ce n'est pas la même chose, et
+toute la différence est dans ce que tu fournis avec :
+
+  — CE QUI VA DANS CE SENS : ce que tu as vu chez LUI, précisément, en deux à quatre
+    phrases. Pas la définition du mot. Des faits qui sont dans son journal.
+  — CE QUI VA CONTRE : ce qui, dans son journal, ne colle pas avec cette piste. Ce champ
+    est OBLIGATOIRE et il n'a pas de version vide. Une hypothèse dont on ne peut pas dire
+    ce qui l'affaiblit n'est pas une hypothèse, c'est un verdict — et un verdict, tu n'en
+    poses aucun. S'il n'y a vraiment rien qui va contre, alors la piste est trop large :
+    ne la rends pas.
+  — LES THÈMES qu'elle regroupe, par leur nom exact. Deux au minimum. Une piste qui ne
+    tient qu'à un seul thème est ce thème, et rien de plus.
+
+Une à trois pistes. ZÉRO EST UNE RÉPONSE, et souvent la bonne : sur trois semaines de
+journal on ne voit pas de grande direction, on voit trois semaines. N'en fabrique pas pour
+remplir la case. Quatre pistes, c'est qu'aucune ne regroupe rien.
 
 COMBIEN
 Trois à six thèmes. Deux, c'est que tu n'as pas cherché ; huit, c'est que tu as découpé le
@@ -360,6 +388,26 @@ const OUTIL = {
           required: ['nom', 'quoi', 'intensite', 'serie', 'preuves']
         }
       },
+      pistes: {
+        type: 'array',
+        description: "Une a trois grandes directions que dessinent plusieurs themes ensemble. "
+          + "Zero est une reponse valable, et souvent la bonne.",
+        items: {
+          type: 'object',
+          properties: {
+            nom: { type: 'string', description: 'Un a quatre mots, minuscules. Le mot le plus juste, clinique ou non : « depression », « hyperactivite », « la peur de decevoir ».' },
+            quoi: { type: 'string', description: 'Deux a quatre phrases, deuxieme personne : ce qui, chez LUI, va dans ce sens. Des faits de son journal, pas la definition du mot.' },
+            contre: { type: 'string', description: "OBLIGATOIRE. Une a deux phrases : ce qui, dans son journal, ne colle PAS avec cette piste. Sans ca la piste est jetee." },
+            themes: {
+              type: 'array',
+              description: 'Les noms exacts des themes que cette piste regroupe. Deux au minimum.',
+              items: { type: 'string' }
+            },
+            force: { type: 'integer', description: '1 une direction possible, 2 nette, 3 partout.' }
+          },
+          required: ['nom', 'quoi', 'contre', 'themes', 'force']
+        }
+      },
       carte: {
         type: 'object',
         description: 'Les choses de sa vie qui reviennent, et ce qui les relie.',
@@ -400,7 +448,7 @@ const OUTIL = {
         required: ['noeuds', 'liens']
       }
     },
-    required: ['synthese', 'themes', 'carte']
+    required: ['synthese', 'themes', 'pistes', 'carte']
   }
 };
 
@@ -468,7 +516,56 @@ export function valider(brut, dates, comps = []) {
     t.liens = [...new Set((src?.liens ?? []).map(l => texte(l, 40).toLowerCase()))]
       .filter(l => l !== t.nom && noms.has(l)).slice(0, 4);
   }
-  return { synthese: texte(brut?.synthese, 700), themes, carte: validerCarte(brut?.carte, dates) };
+  return {
+    synthese: texte(brut?.synthese, 700),
+    themes,
+    pistes: validerPistes(brut?.pistes, noms),
+    carte: validerCarte(brut?.carte, dates)
+  };
+}
+
+/**
+ * LES PISTES : ce qui autorise le mot lourd, et ce qui l'empeche de devenir une etiquette.
+ *
+ * Une piste peut nommer « depression » la ou un theme ne le peut pas. Ce
+ * privilege tient a trois verrous, et ils sont ici, pas dans la consigne : une
+ * consigne qu'on n'applique pas n'est pas une regle.
+ *
+ *   1. ELLE REGROUPE. Moins de deux themes REELLEMENT rendus, et la piste
+ *      disparait. C'est ce qui empeche « depression » d'etre une intuition
+ *      posee sur rien : le mot ne s'affiche que s'il y a plusieurs
+ *      fonctionnements dates dessous, que la personne peut aller relire.
+ *   2. ELLE SE CONTREDIT. Sans « ce qui va contre », la piste disparait. Une
+ *      hypothese dont on ne peut pas dire ce qui l'affaiblit est un verdict, et
+ *      l'application n'en rend aucun.
+ *   3. ELLES SONT RARES. Trois au plus. Au-dela, ce n'est plus une lecture,
+ *      c'est une liste de diagnostics -- exactement ce qu'on refuse.
+ *
+ * Les noms sont resolus APRES les themes, pour la meme raison que les liens :
+ * un theme cite ici mais jete plus haut ferait pointer la piste vers un
+ * fonctionnement que la personne ne verra nulle part.
+ */
+export function validerPistes(brut, nomsThemes) {
+  const out = [];
+  const vus = new Set();
+  for (const p of (brut ?? []).slice(0, 6)) {
+    const nom = texte(p?.nom, 48).toLowerCase();
+    const contre = texte(p?.contre, 300);
+    if (!nom || !contre || vus.has(nom)) continue;
+    const themes = [...new Set((p?.themes ?? []).map(t => texte(t, 40).toLowerCase()))]
+      .filter(t => nomsThemes.has(t));
+    if (themes.length < 2) continue;
+    vus.add(nom);
+    out.push({
+      nom,
+      quoi: texte(p?.quoi, 600),
+      contre,
+      themes,
+      force: borne(Math.round(p?.force), 1, 3)
+    });
+    if (out.length === 3) break;
+  }
+  return out;
 }
 
 /**
