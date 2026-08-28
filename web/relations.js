@@ -84,6 +84,37 @@ export function versGraphe(carte) {
 const RAYON = n => 4 + n.poids * 2.6;
 
 /*
+ * LA VUE : UN DEPLACEMENT ET UNE ECHELLE, RIEN DE PLUS.
+ *
+ * La carte tenait dans son cadre et n'en bougeait pas. Sur seize noeuds
+ * regroupes par genre, l'amas le plus dense est justement celui qu'on veut
+ * regarder de pres -- et c'est celui ou tout se chevauche. Pouvoir s'approcher
+ * ne rend pas la carte plus jolie, ca la rend LISIBLE la ou elle ne l'etait pas.
+ *
+ * Les bornes ne sont pas cosmetiques non plus. En dessous de 0,4 la carte
+ * devient un nuage de points sans nom ; au-dela de 4, on ne voit plus qu'un
+ * noeud et on a perdu ce qui fait une carte, c'est-a-dire le reste.
+ */
+export const K_MIN = 0.4, K_MAX = 4;
+export const vueNeutre = () => ({ x: 0, y: 0, k: 1 });
+
+/** Ecran vers carte. Toute detection de clic passe par la. */
+export const versCarte = (vue, sx, sy) => ({ x: (sx - vue.x) / vue.k, y: (sy - vue.y) / vue.k });
+
+/**
+ * Zoome en gardant fixe le point sous le curseur.
+ *
+ * C'est la seule facon de zoomer qui ne desoriente pas : on grossit ce qu'on
+ * vise, pas le centre du cadre. Zoomer vers le centre oblige a rattraper au
+ * glisse a chaque cran de molette.
+ */
+export function zoomer(vue, sx, sy, facteur) {
+  const k = Math.max(K_MIN, Math.min(K_MAX, vue.k * facteur));
+  if (k === vue.k) return vue;
+  return { k, x: sx - (sx - vue.x) * (k / vue.k), y: sy - (sy - vue.y) * (k / vue.k) };
+}
+
+/*
  * LES JOURNEES D'UN NOEUD, EN COURONNE.
  *
  * Un noeud n'est pas une idee : c'est un tas de journees. Chacune de celles que
@@ -188,9 +219,15 @@ export function cadrer(pts, largeur, hauteur, mx = 62, my = 38) {
  * @param {object} G      la sortie de versGraphe()
  * @param {object} dispo  la sortie de disposer()
  */
-export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1, dpr = 1 }) {
+export function dessinerRelations(ctx, G, dispo,
+    { largeur, hauteur, survol = -1, dpr = 1, vue = null, jourSurvol = null }) {
+  const v = vue ?? vueNeutre();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, largeur, hauteur);
+  // Tout ce qui suit est dessine dans les coordonnees de la CARTE : la
+  // transformation porte le deplacement et l'echelle une fois pour toutes,
+  // plutot que chaque appel de dessin les recalcule.
+  ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y);
   const { pts } = dispo;
   if (!pts.length) return;
 
@@ -205,7 +242,9 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
 
   ctx.lineCap = 'round';
   const ech = echelle(largeur, hauteur);
-  let survolLib = null;
+  // Les bords du cadre, exprimes dans les coordonnees de la carte.
+  const g0 = -v.x / v.k, g1 = (largeur - v.x) / v.k;
+  let survolLib = null, etiquette = null;
 
   /* --- les liens --- */
   for (const l of G.liens) {
@@ -246,13 +285,13 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
       const tx = u * u * a.x + 2 * t * u * cx + t * t * b.x;
       const ty = u * u * a.y + 2 * t * u * cy + t * t * b.y;
       ctx.globalAlpha = 1;
-      ctx.font = '500 10.5px ui-sans-serif, system-ui, sans-serif';
+      ctx.font = `500 ${(10.5 / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const w = ctx.measureText(l.quoi).width;
       ctx.fillStyle = 'rgba(10,12,11,.88)';
       ctx.beginPath();
-      ctx.roundRect(tx - w / 2 - 5, ty - 8, w + 10, 16, 4);
+      ctx.roundRect(tx - w / 2 - 5 / v.k, ty - 8 / v.k, w + 10 / v.k, 16 / v.k, 4 / v.k);
       ctx.fill();
       ctx.fillStyle = couleur(G.noeuds[l.s].genre, 72);
       ctx.fillText(l.quoi, tx, ty);
@@ -277,17 +316,28 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
     // distingue plus le contour du grain.
     for (const pt of couronne(n, r, ech)) {
       const c2 = couleurEcart(pt.e);
+      const vise = jourSurvol && jourSurvol.noeud === i && jourSurvol.date === pt.date;
+      const rp = (vise ? 3.2 : 1.5) * Math.max(0.75, ech);
       ctx.beginPath();
-      ctx.arc(p.x + pt.x, p.y + pt.y, 1.5 * Math.max(0.75, ech), 0, 7);
+      ctx.arc(p.x + pt.x, p.y + pt.y, rp, 0, 7);
       if (c2) {
-        ctx.globalAlpha = actif ? 0.82 : 0.16;
+        ctx.globalAlpha = vise ? 1 : (actif ? 0.82 : 0.16);
         ctx.fillStyle = c2;
         ctx.fill();
       } else {
-        ctx.globalAlpha = actif ? 0.4 : 0.1;
+        ctx.globalAlpha = vise ? 0.9 : (actif ? 0.4 : 0.1);
         ctx.strokeStyle = couleur(n.genre, 58);
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1 / v.k;
         ctx.stroke();
+      }
+      if (vise) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#e9efeb';
+        ctx.lineWidth = 1.2 / v.k;
+        ctx.beginPath();
+        ctx.arc(p.x + pt.x, p.y + pt.y, rp + 2.5 / v.k, 0, 7);
+        ctx.stroke();
+        etiquette = { texte: pt.date, x: p.x + pt.x, y: p.y + pt.y - rp - 7 / v.k };
       }
     }
     ctx.globalAlpha = actif ? 1 : 0.22;
@@ -303,7 +353,12 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
     ctx.fillStyle = actif ? '#e9efeb' : '#93a099';
     // Un libelle de 12 px sur un cadre de telephone occupe le tiers de sa
     // largeur : dix d'entre eux se croisent forcement.
-    ctx.font = `${i === survol ? '600' : '400'} ${(11 * Math.max(0.82, ech)).toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
+    /* LA GEOMETRIE ZOOME, PAS LE TEXTE. Un libelle de 11 px devient 44 px a
+       l'echelle 4 : la carte se transforme en affiche. En divisant par
+       l'echelle, il garde exactement la meme taille A L'ECRAN, et zoomer
+       revient a ecarter les noeuds -- ce qu'on veut vraiment quand un amas se
+       chevauche. */
+    ctx.font = `${i === survol ? '600' : '400'} ${(11 * Math.max(0.82, ech) / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     // Le libelle est borne au cadre : le recadrage laisse de la marge autour des
@@ -321,26 +376,52 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
       continue;
     }
     const lw = ctx.measureText(n.nom).width;
-    ctx.fillText(n.nom, Math.max(lw / 2 + 4, Math.min(largeur - lw / 2 - 4, p.x)), ly);
+    // Le bornage suit le CADRE VISIBLE, pas le canvas : sous zoom, « largeur »
+    // n'est plus la limite droite de ce qu'on voit, et les libelles se
+    // seraient tasses contre un bord invisible.
+    ctx.fillText(n.nom, Math.max(g0 + lw / 2 + 4, Math.min(g1 - lw / 2 - 4, p.x)), ly);
+  }
+
+  // La date de la journee visee. Sans elle, un point qui grossit sous le curseur
+  // est un point qui grossit : on ne sait pas qu'il porte une date, donc on ne
+  // pense pas a cliquer.
+  if (etiquette) {
+    ctx.globalAlpha = 1;
+    ctx.font = `500 ${(10.5 / v.k).toFixed(2)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const w = ctx.measureText(etiquette.texte).width;
+    ctx.fillStyle = 'rgba(10,12,11,.92)';
+    ctx.beginPath();
+    ctx.roundRect(etiquette.x - w / 2 - 5 / v.k, etiquette.y - 14 / v.k, w + 10 / v.k, 16 / v.k, 4 / v.k);
+    ctx.fill();
+    ctx.fillStyle = '#e9efeb';
+    ctx.fillText(etiquette.texte, etiquette.x, etiquette.y);
   }
 
   if (survolLib) {
     ctx.globalAlpha = 1;
-    ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif';
+    ctx.font = `600 ${(12 / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     const w = ctx.measureText(survolLib.texte).width;
-    const x = Math.max(w / 2 + 4, Math.min(largeur - w / 2 - 4, survolLib.x));
+    const x = Math.max(g0 + w / 2 + 4, Math.min(g1 - w / 2 - 4, survolLib.x));
     ctx.fillStyle = 'rgba(10,12,11,.9)';
-    ctx.beginPath(); ctx.roundRect(x - w / 2 - 7, survolLib.y - 14, w + 14, 18, 5); ctx.fill();
+    ctx.beginPath();
+    ctx.roundRect(x - w / 2 - 7 / v.k, survolLib.y - 14 / v.k, w + 14 / v.k, 18 / v.k, 5 / v.k);
+    ctx.fill();
     ctx.fillStyle = '#e9efeb';
     ctx.fillText(survolLib.texte, x, survolLib.y);
   }
   ctx.globalAlpha = 1;
 }
 
-/** Le noeud sous le curseur, ou -1. Rayon de capture large : on vise mal. */
-export function noeudAu(pts, G, x, y, ech = 1) {
+/**
+ * Le noeud sous le curseur, ou -1. Rayon de capture large : on vise mal.
+ * `sx, sy` sont des coordonnees ECRAN ; la vue les ramene sur la carte.
+ */
+export function noeudAu(pts, G, sx, sy, ech = 1, vue = null) {
+  const { x, y } = versCarte(vue ?? vueNeutre(), sx, sy);
   let best = -1, bd = Infinity;
   for (let i = 0; i < pts.length; i++) {
     const d = Math.hypot(pts[i].x - x, pts[i].y - y);
@@ -352,4 +433,66 @@ export function noeudAu(pts, G, x, y, ech = 1) {
     if (d < seuil && d < bd) { bd = d; best = i; }
   }
   return best;
+}
+
+/**
+ * LA JOURNEE SOUS LE CURSEUR.
+ *
+ * Une carte dont les points sont des journees et qu'on ne peut pas ouvrir
+ * s'arrete a mi-chemin : elle dit « ces trente-quatre fois » sans jamais dire
+ * lesquelles. Chaque point porte donc sa date, et un clic l'ouvre.
+ *
+ * Le rayon de capture est en pixels ECRAN, converti a la fin : sous zoom fort,
+ * un rayon en coordonnees carte deviendrait minuscule a viser, et sous zoom
+ * faible il attraperait le point d'a cote. Ce qui doit rester constant est la
+ * tolerance de la main, qui, elle, ne zoome pas.
+ */
+export function journeeAu(pts, G, sx, sy, ech = 1, vue = null) {
+  const v = vue ?? vueNeutre();
+  const { x, y } = versCarte(v, sx, sy);
+  const seuil = 7 / v.k;
+  let best = null, bd = seuil;
+  for (let i = 0; i < pts.length; i++) {
+    const n = G.noeuds[i], p = pts[i];
+    if (!n.occurrences?.length) continue;
+    // Un filtre grossier avant la couronne : recalculer trente points pour un
+    // noeud a l'autre bout du cadre, seize fois par mouvement de souris, se
+    // sent sur un portable.
+    const large = RAYON(n) + (12 + Math.min(24, 7 + n.occurrences.length * 0.16)) * ech + seuil;
+    if (Math.abs(p.x - x) > large || Math.abs(p.y - y) > large) continue;
+    for (const pt of couronne(n, RAYON(n), ech)) {
+      if (!pt.date) continue;
+      const d = Math.hypot(p.x + pt.x - x, p.y + pt.y - y);
+      if (d < bd) { bd = d; best = { noeud: i, date: pt.date, ecart: pt.e }; }
+    }
+  }
+  return best;
+}
+
+/**
+ * Le cadrage qui remet tout dans le cadre : le geste « je me suis perdu ».
+ * Il ne recentre pas sur le milieu du canvas, il recentre sur le GRAPHE --
+ * apres trois glissades, ce sont deux choses tres differentes.
+ *
+ * La marge est large parce qu'un noeud n'est pas un point : il porte sa
+ * couronne de journees et son libelle au-dessus. Calee sur les centres, elle
+ * laissait les noeuds du bord entiers et leurs libelles coupes.
+ *
+ * Elle ne grossit jamais (k plafonne a 1) : « revenir au centre » doit rendre
+ * la vue de depart, pas une vue plus serree que celle qu'on n'a jamais
+ * demandee.
+ */
+export function recadrer(pts, largeur, hauteur, marge = 74) {
+  if (!pts.length) return vueNeutre();
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const l = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  const k = Math.max(K_MIN, Math.min(K_MAX, 1,
+    (largeur - marge * 2) / l, (hauteur - marge * 2) / h));
+  return {
+    k,
+    x: largeur / 2 - ((x0 + x1) / 2) * k,
+    y: hauteur / 2 - ((y0 + y1) / 2) * k
+  };
 }

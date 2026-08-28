@@ -326,6 +326,104 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
 .msg.pet  { align-self: flex-start; }
 .msg.user { align-self: flex-end; color: var(--ink); }
 .msg .tx { display: block; white-space: pre-wrap; }
+.msg { position: relative; }
+
+/* ---------------------------------------------------------------------
+   CE QU'IL S'EST DIT AVANT DE RÉPONDRE.
+
+   Tout ce bloc est en RETRAIT : plus petit, plus pâle, séparé de la réponse
+   par un filet. C'est un brouillon — il hésite, il se reprend, il formule
+   parfois de travers ce que la réponse dira correctement — et il ne doit à
+   aucun moment pouvoir se lire comme un deuxième avis.
+   --------------------------------------------------------------------- */
+.pensee { margin: 0 0 9px; }
+.penseetete {
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: 0; padding: 0; margin: 0;
+  font-size: 11px; letter-spacing: .04em; color: var(--ink-faint);
+  cursor: pointer; text-align: left;
+}
+.penseetete:hover { color: var(--ink-dim); }
+
+/* La lueur : elle pulse tant qu'il réfléchit, et se fige dès la première
+   lettre. Un signe qui bouge dit « il est là » ; figé, il dit seulement
+   « il y a quelque chose à lire ici ». */
+.lueur {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.pensee.vivante .lueur { animation: lueur 1.5s ease-in-out infinite; }
+@keyframes lueur {
+  0%, 100% { opacity: .35; box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  50%      { opacity: 1;   box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+.penseetx {
+  margin: 7px 0 0; padding: 0 0 9px 14px;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 11.5px; line-height: 1.65; color: var(--ink-faint);
+  white-space: pre-wrap;
+  /* Repliée, on n'en voit que la dernière ligne, qui défile toute seule : ce
+     qui informe est qu'elle bouge, pas ce qu'elle dit. */
+  max-height: 2.6em; overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.3em);
+}
+.pensee.ouverte .penseetx {
+  max-height: 260px; overflow-y: auto; mask-image: none;
+}
+.pensee[hidden] { display: none; }
+
+/* Les trois points, avant la première lettre. */
+.attente { display: inline-flex; gap: 4px; align-items: center; height: 1.6em; }
+.attente i {
+  width: 4px; height: 4px; border-radius: 50%; background: var(--ink-faint);
+  animation: attente 1.25s ease-in-out infinite;
+}
+.attente i:nth-child(2) { animation-delay: .16s; }
+.attente i:nth-child(3) { animation-delay: .32s; }
+@keyframes attente {
+  0%, 60%, 100% { opacity: .25; transform: translateY(0); }
+  30%           { opacity: 1;   transform: translateY(-3px); }
+}
+
+/* Chaque lettre arrive en fondu : à vingt-deux millisecondes, une lettre qui
+   apparaît à plein contraste se voit comme une bordure qui clignote. */
+.lettre { animation: lettre .34s ease both; }
+@keyframes lettre {
+  from { opacity: 0; filter: blur(1.5px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+
+/* ---------------------------------------------------------------------
+   REVENIR ICI. Discret jusqu'au survol : c'est un geste rare, et un bouton
+   d'effacement visible en permanence sous chacune de ses phrases changerait
+   la nature de la page.
+   --------------------------------------------------------------------- */
+.rembob {
+  position: absolute; top: 50%; right: calc(100% + 10px); translate: 0 -50%;
+  background: none; border: 0; padding: 2px 4px; border-radius: 5px;
+  font-size: 10px; letter-spacing: .05em; color: var(--ink-faint);
+  white-space: nowrap; opacity: 0; transition: opacity .14s ease, color .14s ease;
+  cursor: pointer;
+}
+.msg:hover .rembob, .rembob:focus-visible { opacity: 1; }
+.rembob:hover { color: var(--warn); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lueur, .attente i { animation: none; }
+  .lettre { animation: none; }
+}
+
+/* Sur un écran tactile il n'y a pas de survol, et la marge à gauche de la
+   bulle n'existe pas : le bouton passe sous le message. */
+@media (max-width: 720px), (hover: none) {
+  .rembob {
+    position: static; translate: none; opacity: 1;
+    display: block; margin: 6px 0 0 auto; padding: 4px 0;
+  }
+}
 .msg .t {
   display: block; font-size: 9.5px; color: var(--ink-faint);
   font-family: var(--mono); letter-spacing: .05em; margin-bottom: 6px;
@@ -870,7 +968,40 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 /* La carte a besoin de largeur ; le texte n'en veut pas. Le conteneur suit donc
    la carte, et ce qui se lit en lignes garde sa colonne. */
 .lecture { max-width: 980px; }
-.lechead, .synthese, .themes, .lectvide { max-width: 720px; }
+.lechead, .lectvide { max-width: 720px; }
+.themes { max-width: 720px; }
+
+/* ---------------------------------------------------------------------
+   LA CARTE ET CE QU'ELLE DIT, CÔTE À CÔTE.
+
+   Ils se suivaient, et la seule question qu'on se pose devant un nœud —
+   « qu'est-ce qu'il en dit ? » — demandait de faire défiler. Sous 1080 px la
+   colonne passe dessous : deux colonnes de 300 px ne servent personne.
+   --------------------------------------------------------------------- */
+.lectgrille {
+  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 26px 30px; align-items: start; margin-bottom: 34px;
+}
+@media (max-width: 1080px) { .lectgrille { grid-template-columns: 1fr; } }
+.lectcarte .cartewrap { margin: 0; }
+/* Dans la colonne, le canvas est plus étroit : gardé à 52vh il laissait un
+   tiers de vide sous un graphe qui ne peut pas s'étaler davantage. */
+.lectcarte .cartewrap canvas { height: clamp(320px, 44vh, 480px); }
+.lectdit { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.lectdit .synthese { max-width: none; margin: 0; }
+.lectdit .motifcard { margin: 0; }
+
+/* La barre de fenêtre d'Année : un seul réglage, en tête des trois graphiques.
+   Il y en avait trois, à trois endroits, avec trois vocabulaires. */
+.fenetrebar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 0 0 4px;
+}
+.fenetrebar .k {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+}
+.fenmeta { font-size: 11.5px; margin-left: auto; }
+
 .lechead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 26px; }
 .lecmeta { font-size: 11.5px; }
 .lecmeta b { color: var(--warn); font-weight: 500; }
@@ -971,7 +1102,38 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 /* Elle prend la largeur : c'est la forme qu'on vient reconnaitre, et une carte
    de trois cents pixels dans une colonne de texte n'est plus une carte. */
-.cartewrap { margin: 0 0 30px; }
+.cartewrap { margin: 0 0 30px; position: relative; }
+
+/* Les commandes de la carte. Posées dessus, en retrait, et elles s'affirment
+   au survol : ce sont des béquilles pour un geste qui se fait surtout à la
+   souris et au doigt — elles ne doivent pas se disputer l'attention avec ce
+   qu'elles servent à regarder. */
+/* En haut à droite, et pas en bas : la légende sous le canvas passe à deux
+   lignes dès que la colonne rétrécit, et les commandes se retrouvaient à
+   flotter au milieu du vide. Le haut du canvas, lui, ne bouge jamais. */
+.cartecmd {
+  position: absolute; right: 10px; top: 10px;
+  display: flex; flex-direction: column; gap: 1px;
+  border-radius: 9px; overflow: hidden;
+  border: 1px solid var(--line-soft); background: color-mix(in srgb, var(--panel) 88%, transparent);
+  opacity: .45; transition: opacity .16s ease;
+  backdrop-filter: blur(4px);
+}
+.cartewrap:hover .cartecmd, .cartecmd:focus-within { opacity: 1; }
+.cartecmd button {
+  width: 30px; height: 28px; padding: 0; border: 0; border-radius: 0;
+  background: none; color: var(--ink-dim);
+  font-size: 14px; line-height: 1; display: grid; place-items: center;
+}
+.cartecmd button:hover { background: var(--surface); color: var(--ink); }
+/* Le point du milieu : c'est le geste « je me suis perdu ». Un anneau plutôt
+   qu'un signe — la carte est faite d'anneaux, il en reprend la forme. */
+.cartecmd button[data-carte="centre"] i {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+.cartecmd button[data-carte="centre"]:hover i { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+@media (hover: none) { .cartecmd { opacity: 1; } .cartecmd button { width: 36px; height: 34px; } }
 .cartewrap canvas {
   display: block; width: 100%; height: clamp(340px, 52vh, 560px);
   border-radius: 3px;
@@ -1183,6 +1345,45 @@ body:has(#ambiance) { background: transparent; }
    fil n'en a plus, et en rajouter un ici recréerait la bulle qu'on vient
    d'enlever. */
 .msg.teinte { border-left-color: hsl(var(--motif) 68% 58% / .9); }
+
+/* ---------------------------------------------------------------------
+   LE CODE COULEUR DES COMPORTEMENTS.
+
+   La teinte était posée dans l'ordre de création : sûrement distincte, mais
+   sans aucun rapport avec le sens. Deux mécanismes qui vont ensemble se
+   retrouvaient de deux couleurs étrangères. La pastille devient donc un
+   bouton, et la palette reste celle des DÉCLARÉES (232–336) — disjointe de la
+   rampe des notes, pour qu'une déclaration ne puisse jamais passer pour une
+   mesure.
+   --------------------------------------------------------------------- */
+.motifitem { position: relative; flex-wrap: wrap; }
+button.motifpuce {
+  border: 0; padding: 0; cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+button.motifpuce:hover, button.motifpuce:focus-visible {
+  transform: scale(1.45);
+  box-shadow: 0 0 0 3px color-mix(in srgb, hsl(var(--motif) 68% 58%) 22%, transparent);
+}
+.motiflie {
+  display: block; margin-top: 3px; font-size: 11px;
+  color: hsl(var(--motif) 55% 66%);
+}
+/* `.motifitem` est une rangée flex : la palette doit passer à la ligne, pas
+   se glisser entre le compte et la croix. `flex-basis: 100%` avec le wrap du
+   parent, et elle prend sa propre ligne. */
+.motifteintes {
+  flex: 0 0 100%; display: flex; gap: 7px;
+  padding: 10px 0 2px; margin-left: 20px;
+}
+.motifteintes[hidden] { display: none; }
+.motifteintes button {
+  width: 17px; height: 17px; border-radius: 50%; padding: 0;
+  border: 1.5px solid hsl(var(--t) 58% 62%); background: none;
+  transition: background .12s ease;
+}
+.motifteintes button:hover { background: hsl(var(--t) 58% 62% / .4); }
+.motifteintes button[aria-pressed="true"] { background: hsl(var(--t) 58% 62%); }
 .msg.teinte .tx { color: var(--ink); }
 .msg .motifs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 /* Une puce de motif n'est pas un bouton d'action : c'est une note en marge.

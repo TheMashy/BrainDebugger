@@ -328,7 +328,27 @@ produit, un refus de modèle tomberait exactement au pire moment.
 **La réponse est streamée.** Sans streaming, il y a plusieurs secondes de silence avant
 que le compagnon écrive quoi que ce soit, et l'illusion de quelqu'un en face tombe. Les
 fragments sont mis en file et drainés à cadence constante côté navigateur, pour que la
-frappe reste régulière quelle que soit la vitesse du modèle.
+frappe reste régulière quelle que soit la vitesse du modèle, et chaque lettre arrive en
+fondu.
+
+**Sa réflexion aussi.** Les blocs de réflexion étendue sont diffusés jusqu'au fil : la
+bulle s'ouvre sur trois points qui respirent, puis la pensée défile derrière une lueur qui
+pulse, repliée à une ligne. Elle est gardée en base — une réflexion qui disparaît au
+rechargement ne peut pas être relue, et c'est justement quand une réponse tombe à côté
+qu'on veut savoir ce qu'il avait compris.
+
+Repliée par défaut, et ce n'est pas de la timidité d'interface : une réflexion est un
+brouillon, elle hésite, elle se reprend, elle formule parfois de travers ce que la réponse
+dira correctement. Dépliée d'office, elle se lirait comme un deuxième avis — souvent plus
+cru que le premier. Elle n'entre jamais dans le texte d'une journée : ce que la machine
+s'est dit n'est pas ce que la personne a écrit.
+
+**On peut rembobiner.** Un message ramène le fil à lui : ce qui suit disparaît, et sa
+phrase revient dans le composeur. C'est le geste qu'on cherche quand le compagnon vient de
+retomber hors-ligne, ou quand on se relit une faute trop tard. La suppression est réelle —
+le texte d'une journée est la concaténation de ses messages, et un message « caché » qui
+resterait en base resterait dans la carte, dans les échos et dans toutes les statistiques.
+Le texte des journées touchées est recalculé dans la foulée.
 
 Si un backend distant tombe — ou si le modèle décline — le serveur retombe sur les
 relances scriptées **et le signale**, et l'interface remonte le numéro d'aide. Une panne
@@ -340,8 +360,12 @@ refus serait pire.
 ## Les vues
 
 - **Parler** — le fil continu, le compagnon, la note du jour avec les ancres sous les yeux.
-- **Année** — la grille mois × jours, le cumul commutable entre les trois centres, et les
-  repères de vie (saisie et affichage en pointillés sur la courbe).
+- **Année** — la grille mois × jours, l'écart quotidien, le cumul, les repères de vie et
+  les notes rangées. **Une seule fenêtre** commande les trois graphiques : il y en avait
+  trois, à trois endroits, avec trois vocabulaires, et rien n'empêchait de lire un
+  quotidien de 2026 au-dessus d'un cumul sur quatre ans en croyant lire la même période.
+  Le cumul démarre en référence glissante — l'étalon fixe compare quatre ans de journées à
+  une même constante, ce qui fait lire 2026 à l'aune de 2022.
 - **Ma carte** — la lecture : la carte organique de ce qui revient, la synthèse, et les
   thèmes avec leur évolution, à trois distances. Une journée s'ouvre derrière une preuve,
   un repère ou le calendrier : la note en grand, ce qui a été écrit, le repère de ce
@@ -349,7 +373,10 @@ refus serait pire.
   ressemblent existe toujours, mais c'est le compagnon qui le dit, dans Parler, quand il
   juge que ça sert. Une colonne qui l'affiche à chaque ouverture n'est pas la même chose
   que quelqu'un qui te le rappelle.
-- **Réglages** — compagnon, timbre des bips, backend, plancher, tenue du retour, import/export.
+- **Réglages** — compagnon, timbre des bips, backend, plancher, tenue du retour,
+  import/export. Rien d'autre : « ce qui revient » et les notes rangées y vivaient parce
+  qu'on pouvait les retirer, et « ce qu'on peut retirer » avait fini par vouloir dire
+  « réglage ». C'était un classement par le geste plutôt que par le sens.
 
 ### La carte
 
@@ -377,6 +404,21 @@ journées-là »). Elles se dessinent en couronne autour du nœud, un point par 
 chacun à la couleur de son écart — on voit qu'une chose pèse non pas parce qu'un cercle est
 gros, mais parce qu'il y a quarante jours autour. Comme pour les preuves des thèmes, une
 date absente du corpus est retirée en silence.
+
+**On se promène dedans.** Clic-glissé pour se déplacer, molette ou pincement pour zoomer,
+un point pour revenir au centre. Sur seize nœuds regroupés par genre, l'amas le plus dense
+est justement celui qu'on veut regarder de près — et c'est celui où tout se chevauche.
+La géométrie zoome, pas le texte : un libellé garde sa taille à l'écran, et zoomer revient
+donc à écarter les nœuds. Chaque point de journée est cliquable et ouvre sa journée : une
+carte qui dit « ces trente-quatre fois » sans jamais dire lesquelles s'arrête à mi-chemin.
+
+**La carte est à côté de ce qu'elle dit.** La synthèse et les comportements suivis
+occupent la colonne de droite, avec leur code couleur — la seule question qu'on se pose
+devant un nœud est « qu'est-ce qu'il en dit ? », et il fallait faire défiler pour le
+savoir. La teinte d'un comportement se choisit : posée dans l'ordre de création, elle
+était sûrement distincte mais sans aucun rapport avec le sens. Elle reste dans la bande
+déclarée (232–336), disjointe de la rampe des notes, pour qu'une déclaration ne puisse
+jamais passer pour une mesure.
 
 Les nœuds sont des **anneaux**, jamais des disques ; les points, eux, sont **pleins**.
 « Ce qui est rempli est mesuré, ce qui est contouré est déclaré » : le nœud est une lecture

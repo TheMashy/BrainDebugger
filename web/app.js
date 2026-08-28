@@ -1,7 +1,8 @@
 import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
 import { disposer } from './carte.js';
-import { versGraphe, dessinerRelations, noeudAu, cadrer, NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
+import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
+         vueNeutre, zoomer, NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -277,10 +278,7 @@ async function renderTonight() {
   });
 
   const input = $('#input');
-  input.oninput = () => {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
-  };
+  input.oninput = () => autoSize(input);
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
 
@@ -413,9 +411,9 @@ function drawThread() {
           `<button class="motifchip" data-motif="${x.id}" style="--motif:${x.teinte}"
             title="Motif suivi par le compagnon">${esc(x.nom)}</button>`).join('')}</span>`
       : '';
-    return sep + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte}
+    return sep + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte} data-id="${m.id ?? ''}"
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
-      }<span class="tx">${esc(m.text)}</span>${marque}</div>`;
+      }${reflexionMarkup(m)}<span class="tx">${esc(m.text)}</span>${marque}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
@@ -425,6 +423,52 @@ function drawThread() {
   majFil(th);
   bindGestes(th);
   syncPetSay();
+}
+
+/*
+ * CE QU'IL S'EST DIT AVANT DE REPONDRE.
+ *
+ * Replie par defaut, et ce n'est pas de la timidite d'interface : une
+ * reflexion est un BROUILLON. Elle hesite, elle se reprend, elle formule
+ * parfois de travers ce que la reponse dira correctement. Depliee d'office,
+ * elle se lirait comme un deuxieme avis -- souvent plus cru que le premier, et
+ * sur cette application-la, lu par quelqu'un qui vient de raconter sa soiree.
+ *
+ * Elle reste montrable, et c'est tout l'interet : quand une reponse tombe a
+ * cote, la premiere question est « qu'est-ce qu'il a compris ? », et la
+ * reponse est ici.
+ */
+const PENSEES_OUVERTES = new Set();
+
+function reflexionMarkup(m) {
+  if (m.role !== 'pet' || !m.reflexion) return '';
+  const ouvert = PENSEES_OUVERTES.has(m.id);
+  return `<div class="pensee${ouvert ? ' ouverte' : ''}">
+    <button class="penseetete" data-pensee="${m.id}" aria-expanded="${ouvert}">
+      <span class="lueur" aria-hidden="true"></span>
+      <span>${ouvert ? 'ce qu\'il s\'est dit' : 'il a réfléchi avant de répondre'}</span>
+    </button>
+    ${ouvert ? `<p class="penseetx">${esc(m.reflexion)}</p>` : ''}
+  </div>`;
+}
+
+/*
+ * REVENIR ICI.
+ *
+ * Le geste manquait, et il manquait exactement aux moments ou l'on tient le
+ * moins a se battre avec une interface : le compagnon vient de retomber
+ * hors-ligne et repond a cote, ou l'on se relit une faute une seconde trop
+ * tard. Sans lui, il ne restait qu'a ecrire un deuxieme message pour corriger
+ * le premier -- et les deux entraient dans la journee.
+ *
+ * Il n'est propose que sur ses propres messages : rembobiner depuis une reponse
+ * du compagnon laisserait la question sans reponse, ce qui n'est pas un etat
+ * dans lequel on veut se retrouver.
+ */
+function rembobMarkup(m) {
+  if (m.role !== 'user' || !m.id) return '';
+  return `<button class="rembob" data-rembob="${m.id}"
+    title="Revenir à ce message : ce qui suit est effacé, et cette phrase revient dans le champ.">revenir ici</button>`;
 }
 
 /* ---------- ce que le compagnon a posé pendant qu'il parlait ---------- */
@@ -576,6 +620,23 @@ function bindGestes(th) {
   if (th.dataset.gestes) return;
   th.dataset.gestes = '1';
   th.addEventListener('click', e => {
+    // Déplier ou replier une réflexion. Sur la bulle en cours, la boîte n'a pas
+    // encore d'identifiant : on bascule la classe sur place.
+    const pv = e.target.closest('[data-pensee-live]');
+    if (pv) {
+      pv.closest('.pensee').classList.toggle('ouverte');
+      pv.setAttribute('aria-expanded', String(pv.closest('.pensee').classList.contains('ouverte')));
+      return;
+    }
+    const pe = e.target.closest('[data-pensee]');
+    if (pe) {
+      const id = Number(pe.dataset.pensee);
+      if (PENSEES_OUVERTES.has(id)) PENSEES_OUVERTES.delete(id); else PENSEES_OUVERTES.add(id);
+      return drawThread();
+    }
+    const rb = e.target.closest('[data-rembob]');
+    if (rb) return rembobiner(Number(rb.dataset.rembob));
+
     const v = e.target.closest('[data-voir]');
     if (v) {
       demanderAura(v.dataset.voir);
@@ -629,6 +690,27 @@ function bindThreadReveal(th) {
   th.addEventListener('scroll', () => majFil(th), { passive: true });
 }
 
+/*
+ * La bulle en cours d'ecriture. Elle vit hors de `S.messages` : ce message
+ * n'existe pas encore en base, et le mettre dans l'etat obligerait chaque
+ * redessin du fil a savoir qu'un de ses elements est en train d'etre tape.
+ */
+let EN_COURS = null;
+
+/** Le point qui pulse s'arrete des la premiere lettre : il a dit ce qu'il avait a dire. */
+function finAttente(el) {
+  const a = el?.querySelector('.attente');
+  if (a) a.remove();
+  el?.querySelector('.penseeetat')?.replaceChildren(document.createTextNode('ce qu\'il s\'est dit'));
+  el?.querySelector('.pensee')?.classList.remove('vivante');
+}
+
+/** Le composeur grandit avec le texte, jusqu'à 160 px. */
+function autoSize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
 /** Lit un flux SSE renvoyé par fetch et appelle `on(event, data)` par trame. */
 async function readSSE(res, on) {
   const reader = res.body.getReader();
@@ -678,16 +760,50 @@ async function send() {
       if (ev === 'user') {
         S.messages = data.messages;
         drawThread();
-        // bulle vide dans laquelle le compagnon va écrire
+        /*
+         * LA BULLE EXISTE AVANT LA PREMIERE LETTRE.
+         *
+         * Elle s'ouvre sur un point qui pulse. Entre l'envoi et le premier mot
+         * il peut s'ecouler plusieurs secondes -- davantage quand le compagnon
+         * pose un repere en chemin -- et ce blanc-la, sur une application ou
+         * l'on vient de raconter quelque chose de difficile, se lit comme
+         * « il n'a rien reçu ». Un signe qui bouge dit « il est là », ce qui
+         * est le minimum qu'on doive a quelqu'un qui attend.
+         */
         const th = $('#thread');
         const el = document.createElement('div');
-        el.className = 'msg pet';
-        el.innerHTML = '<span class="tx"></span>';
+        el.className = 'msg pet encours';
+        el.innerHTML = `<div class="pensee vivante" hidden>
+            <button class="penseetete" data-pensee-live aria-expanded="false">
+              <span class="lueur" aria-hidden="true"></span><span class="penseeetat">il réfléchit</span>
+            </button>
+            <p class="penseetx"></p>
+          </div>
+          <span class="attente" aria-label="Il réfléchit"><i></i><i></i><i></i></span>
+          <span class="tx"></span>`;
         th.appendChild(el);
+        EN_COURS = el;
         th.scrollTop = th.scrollHeight;
         majFil(th);
         Blip.reset();
-        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'), { onChar: speakChar });
+        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'),
+                                     { onChar: speakChar, onPremier: () => finAttente(el) });
+        return;
+      }
+
+      /*
+       * La reflexion arrive AVANT la reponse, et se pousse toute seule vers le
+       * bas : on suit la derniere ligne comme on suit un curseur, sans avoir a
+       * la lire -- c'est le fait qu'elle bouge qui informe, pas son contenu.
+       */
+      if (ev === 'pense') {
+        if (!EN_COURS) return;
+        const box = EN_COURS.querySelector('.pensee');
+        const tx = EN_COURS.querySelector('.penseetx');
+        box.hidden = false;
+        tx.textContent += data.text;
+        if (!box.classList.contains('ouverte')) tx.scrollTop = tx.scrollHeight;
+        $('#thread').scrollTop = $('#thread').scrollHeight;
         return;
       }
 
@@ -709,10 +825,15 @@ async function send() {
         return;
       }
 
-      if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
+      if (ev === 'delta') {
+        PetTalk.feed(data.text);
+        $('#thread').scrollTop = $('#thread').scrollHeight;
+        return;
+      }
 
       if (ev === 'done') {
         PetTalk.endStream();
+        finAttente(EN_COURS);
         if (data.usage) { S.usage = data.usage; syncGauge(); }
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
@@ -728,14 +849,62 @@ async function send() {
     });
 
     await typing;
+    EN_COURS = null;
     drawThread();                       // repose les horodatages définitifs
   } catch (err) {
     PetTalk.stop();
+    EN_COURS = null;
     toast(String(err.message));
   } finally {
     const b = $('#send');
     if (b) b.disabled = false;
     $('#input')?.focus();
+  }
+}
+
+/*
+ * REMBOBINER.
+ *
+ * Deux choses la rendent sure sans qu'elle ait besoin d'une boite de dialogue :
+ * on dit combien de messages partent, et le message vise revient dans le
+ * composeur. Ce qui disparait de la base reapparait donc dans le champ ou l'on
+ * ecrit -- il n'y a pas d'instant ou la phrase n'existe nulle part.
+ *
+ * L'etat entier est relu apres coup. Le rembobinage change le texte d'une
+ * journee, donc le compte des journees ecrites, donc la reference, donc le
+ * decor : recoller ces morceaux un par un cote client, c'est se garantir qu'un
+ * d'entre eux finira par mentir.
+ */
+async function rembobiner(id) {
+  const msg = S.messages.find(m => m.id === id);
+  if (!msg) return;
+  const apres = S.messages.filter(m => (Date.parse(m.ts) || 0) > (Date.parse(msg.ts) || 0)).length;
+  if (apres && !confirm(
+      `Revenir à ce message ?\n\n${apres} message${apres > 1 ? 's' : ''} qui ${apres > 1 ? 'suivent' : 'suit'} `
+      + `${apres > 1 ? 'seront effacés' : 'sera effacé'}. Ta phrase revient dans le champ pour que tu la réécrives.`)) {
+    return;
+  }
+  PetTalk.stop();
+  try {
+    const r = await api('/api/message/rembobiner', { id });
+    S = await api('/api/state');
+    GESTES = [];
+    drawThread();
+    syncHeader();
+    syncGauge();
+    syncAmbiance();
+    const input = $('#input');
+    if (input && r.texte) {
+      input.value = r.texte;
+      autoSize(input);
+      input.focus();
+      // Le curseur au bout : on revient corriger la fin d'une phrase bien plus
+      // souvent qu'on ne revient la reecrire depuis le debut.
+      input.setSelectionRange(r.texte.length, r.texte.length);
+    }
+    toast(r.supprimes > 1 ? `${r.supprimes} messages retirés.` : 'Message retiré.');
+  } catch (err) {
+    toast(err.message);
   }
 }
 
@@ -812,8 +981,19 @@ let FRISE = null;
 // celui ou un repere tombe sur l'inflexion qu'il explique. « vie » reste a un
 // clic pour aller voir l'avant-journal.
 let FRISE_CADRE = 'journal';
-let CUMMODE = 'etalon';
-let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
+/*
+ * LE CUMUL DEMARRE EN REFERENCE GLISSANTE.
+ *
+ * L'etalon fixe compare quatre ans de journees a une meme constante : c'est la
+ * formule du tableur d'origine, et elle a le defaut de son epoque -- quelqu'un
+ * dont la vie a change en 2024 lit encore ses journees de 2026 a l'aune de
+ * 2022. La mediane glissante des 365 jours precedents compare chaque journee a
+ * la periode qui l'entoure, ce qui est la question qu'on se pose vraiment.
+ *
+ * L'etalon reste accessible : c'est la meme serie, lue autrement, et l'ancienne
+ * lecture n'est pas fausse.
+ */
+let CUMMODE = 'reference';
 
 /*
  * LA FENETRE DU CUMUL.
@@ -837,6 +1017,12 @@ let DAILYALL = false;   // le tableur d'origine montrait une annee a la fois
 const FENETRES = [['7j', 7, '7 j'], ['30j', 30, '30 j'], ['365j', 365, '1 an'], ['tout', null, 'tout']];
 let CUMWIN = 'tout';
 
+/** Le libellé humain de la fenêtre courante. */
+function libFenetre() {
+  const f = FENETRES.find(x => x[0] === CUMWIN) ?? FENETRES.at(-1);
+  return f[1] === null ? 'tout le journal' : `les ${f[1]} derniers jours`;
+}
+
 function fenetreCumul() {
   const f = FENETRES.find(x => x[0] === CUMWIN) ?? FENETRES.at(-1);
   if (f[1] === null) return { i0: 0, jours: null };
@@ -852,7 +1038,6 @@ async function renderYear(year) {
   CARNET = await api('/api/carnet');
   FRISE = await api('/api/frise');
   const grid = await api(`/api/year?year=${year}`);
-  const years = S.stats.years;
   const eta = SERIES.etalon;
 
   const cumKey = CUMMODE === 'etalon' ? 'cumEtalon' : 'cumDeltaRef';
@@ -862,14 +1047,46 @@ async function renderYear(year) {
   const cumY = SERIES[cumKey].slice(CUM0).map(v => Math.round((v - base) * 1000) / 1000);
   const drift = cumY.length ? cumY.at(-1) / cumY.length : 0;
 
+  /*
+   * Les annees que la fenetre couvre, et rien d'autre. C'est ce qui empeche la
+   * grille de contredire les deux courbes en dessous : sur « 30 j », proposer
+   * 2022 laisserait regarder une grille de 2022 au-dessus d'un cumul du mois
+   * dernier, en croyant lire la meme periode.
+   */
+  const anneesFenetre = [...new Set(cumX.map(d => d.slice(0, 4)))];
+  if (!anneesFenetre.includes(String(year))) year = Number(anneesFenetre.at(-1) ?? year);
+
   $('#view').innerHTML = `
     <div class="stack">
+      ${/*
+         * UNE SEULE FENETRE POUR LES TROIS.
+         *
+         * Il y en avait trois : les annees au-dessus de la grille, « annee /
+         * tout » au-dessus du quotidien, et « 7 j / 30 j / 1 an / tout »
+         * au-dessus du cumul. Trois reglages du meme parametre, a trois
+         * endroits, avec trois vocabulaires -- et rien n'empechait de regarder
+         * un quotidien de 2026 au-dessus d'un cumul sur quatre ans en croyant
+         * lire la meme periode.
+         *
+         * Les annees restent, mais elles ont change de metier : ce ne sont plus
+         * des fenetres concurrentes, c'est la page de la grille A L'INTERIEUR de
+         * la fenetre, et elles disparaissent quand la fenetre n'en couvre qu'une.
+         */''}
+      <div class="fenetrebar">
+        <span class="k faint">Fenêtre</span>
+        <div class="centerpick">
+          ${FENETRES.map(([id, , lib]) => `<button data-win="${id}"
+            aria-pressed="${CUMWIN === id}">${lib}</button>`).join('')}
+        </div>
+        <span class="faint mono fenmeta">${cumX.length} journée${cumX.length > 1 ? 's' : ''} · ${libFenetre()}</span>
+      </div>
+
       <div class="card">
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:15px">
-          <h2 style="margin:0">Grille</h2>
-          <div class="centerpick" style="margin:0 0 0 auto">
-            ${years.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
-          </div>
+        <div class="cardhead" style="margin-bottom:15px">
+          <h2>Grille</h2>
+          ${anneesFenetre.length > 1 ? `<div class="centerpick" style="margin-left:auto">
+            ${anneesFenetre.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
+          </div>` : ''}
         </div>
         <div class="gridwrap">${gridMarkup(grid)}</div>
         <div class="legend">
@@ -882,20 +1099,12 @@ async function renderYear(year) {
       </div>
 
       <div class="card">
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px">
-          <h2 style="margin:0">Écart quotidien</h2>
-          <div class="centerpick" style="margin:0 0 0 auto">
-            <button data-daily="year" aria-pressed="${!DAILYALL}">${year}</button>
-            <button data-daily="all" aria-pressed="${DAILYALL}">tout</button>
-          </div>
+        <div class="cardhead" style="margin-bottom:4px">
+          <h2>Écart quotidien</h2>
+          <span class="faint mono" style="font-size:11.5px">${libFenetre()}</span>
         </div>
-        ${(() => {
-          const idx = DAILYALL
-            ? SERIES.date.map((_, i) => i)
-            : SERIES.date.map((d, i) => d.startsWith(String(year)) ? i : -1).filter(i => i >= 0);
-          return dailyChart(idx.map(i => SERIES.date[i]), idx.map(i => SERIES.contrastFixed[i]),
-                            { height: 240, events: SERIES.events });
-        })()}
+        ${dailyChart(cumX, cumX.map((_, i) => SERIES.contrastFixed[CUM0 + i]),
+                     { height: 240, events: SERIES.events })}
       </div>
 
       <div class="card">
@@ -904,10 +1113,6 @@ async function renderYear(year) {
               de hauteur avant d'atteindre la courbe qu'on est venu voir. */''}
         <div class="cardhead cumhead">
           <h2>Cumul</h2>
-          <div class="centerpick">
-            ${FENETRES.map(([id, , lib]) => `<button data-win="${id}"
-              aria-pressed="${CUMWIN === id}">${lib}</button>`).join('')}
-          </div>
           ${/* « vie » n'a de sens que sur tout : une fenetre de sept jours n'a
                 pas d'avant-journal a montrer. */''}
           ${CUMWIN === 'tout' && FRISE?.etendue?.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
@@ -945,6 +1150,29 @@ async function renderYear(year) {
         })()}
       </div>
 
+      ${/*
+         * LES NOTES RANGEES, DANS ANNEE.
+         *
+         * Elles vivaient dans Reglages, ou personne ne va chercher ce qu'il a
+         * ecrit. Leur place est ici, avec le reste du journal -- et surtout a
+         * cote de la frise et de la grille, puisque la plupart portent une date
+         * et renvoient a une journee.
+         *
+         * L'INVARIANT TIENT ENCORE : elles sont dans Annee, elles ne sont
+         * toujours pas des journees. Aucun compte de cette page ne les inclut,
+         * et le bloc le dit en toutes lettres plutot que de compter sur le fait
+         * que personne ne se posera la question.
+         */''}
+      ${CARNET?.notes?.length ? `<div class="card">
+        <div class="cardhead">
+          <h2>Notes rangées</h2>
+          <span class="faint mono" style="font-size:11.5px;margin-left:auto">${CARNET.compte.total} note${CARNET.compte.total > 1 ? 's' : ''}</span>
+        </div>
+        <p class="sub">Ce que tu as écrit ailleurs et donné au compagnon. Elles ne comptent
+        jamais comme des journées écrites — ni ici, ni dans la carte, ni dans aucune moyenne.</p>
+        <div class="cnliste">${CARNET.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>
+      </div>` : ''}
+
       <div class="card">
         <div class="cardhead">
           <h2>Repères</h2>
@@ -968,8 +1196,6 @@ async function renderYear(year) {
     if (c) { CUMMODE = c.dataset.cum; return renderYear(year); }
     const w = e.target.closest('[data-win]');
     if (w) { CUMWIN = w.dataset.win; return renderYear(year); }
-    const dl = e.target.closest('[data-daily]');
-    if (dl) { DAILYALL = dl.dataset.daily === 'all'; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
     if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
     const cad = e.target.closest('[data-cadre]');
@@ -1589,6 +1815,14 @@ function carteMarkup(carte) {
   if (!carte?.noeuds?.length) return '';
   return `<div class="cartewrap">
     <canvas id="cartec" aria-label="La carte de ce qui revient et de ce qui le relie"></canvas>
+    ${/* Trois commandes, et le point du milieu est celle qui compte : après
+          trois glissades on ne sait plus où l'on est, et sans lui il faudrait
+          changer d'onglet pour revenir. */''}
+    <div class="cartecmd">
+      <button data-carte="plus" aria-label="Zoomer" title="Zoomer">+</button>
+      <button data-carte="centre" aria-label="Revenir au centre" title="Revenir au centre"><i></i></button>
+      <button data-carte="moins" aria-label="Dézoomer" title="Dézoomer">−</button>
+    </div>
     <div class="cartelegende">${
       [...new Set(carte.noeuds.map(n => n.genre))].map(g =>
         `<span><i style="--g:${TEINTE_GENRE[g]}"></i>${esc(NOM_GENRE[g] ?? g)}</span>`).join('')}
@@ -1601,11 +1835,32 @@ function carteMarkup(carte) {
   </div>`;
 }
 
+/*
+ * ON SE PROMENE DEDANS.
+ *
+ * La carte tenait dans son cadre et n'en bougeait pas. Sur seize noeuds
+ * regroupes par genre, l'amas le plus dense est justement celui qu'on veut
+ * regarder de pres -- et c'est celui ou tout se chevauche. S'approcher ne rend
+ * pas la carte plus jolie : ca la rend lisible la ou elle ne l'etait pas.
+ *
+ * Et chaque point est une journee, avec sa date : une carte qui dit « ces
+ * trente-quatre fois » sans jamais dire lesquelles s'arrete a mi-chemin. Un
+ * clic sur un point ouvre la journee.
+ *
+ * Le glisse et le clic se distinguent a la DISTANCE, pas au temps : quatre
+ * pixels. Sur un ecran tactile, le doigt bouge toujours un peu -- au seuil
+ * temporel, un appui pose devient une glissade et le point ne s'ouvre jamais.
+ */
+let RELA_VUE = null, RELA_JOUR = null;
+const GLISSE_MIN = 4;
+
 function monterCarte(carte) {
   const cv = $('#cartec');
   if (!cv || !carte?.noeuds?.length) return;
   RELA = versGraphe(carte);
   RELA_SURVOL = -1;
+  RELA_JOUR = null;
+  RELA_VUE = vueNeutre();
 
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   let L = 0, H = 0;
@@ -1616,23 +1871,140 @@ function monterCarte(carte) {
     cv.width = L * dpr; cv.height = H * dpr;
     RELA_DISPO = disposer(RELA, L, H);
     cadrer(RELA_DISPO.pts, L, H);
+    RELA_VUE = vueNeutre();
     peindre();
   };
+  let attente = 0;
   const peindre = () => {
-    if (!RELA_DISPO) return;
-    dessinerRelations(cv.getContext('2d'), RELA, RELA_DISPO,
-      { largeur: L, hauteur: H, survol: RELA_SURVOL, dpr });
+    if (!RELA_DISPO || attente) return;
+    // Une image par rafraichissement : molette et glisse produisent plus
+    // d'evenements que l'ecran n'a de trames, et repeindre a chaque evenement
+    // fait ramer une carte qui n'a rien de lourd a dessiner.
+    attente = requestAnimationFrame(() => {
+      attente = 0;
+      dessinerRelations(cv.getContext('2d'), RELA, RELA_DISPO,
+        { largeur: L, hauteur: H, survol: RELA_SURVOL, dpr, vue: RELA_VUE, jourSurvol: RELA_JOUR });
+    });
   };
 
-  cv.addEventListener('mousemove', e => {
+  const pos = e => {
     const r = cv.getBoundingClientRect();
-    const i = noeudAu(RELA_DISPO?.pts ?? [], RELA, e.clientX - r.left, e.clientY - r.top, echelle(L, H));
-    if (i === RELA_SURVOL) return;
-    RELA_SURVOL = i;
-    cv.style.cursor = i >= 0 ? 'pointer' : 'default';
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+
+  const viser = (x, y) => {
+    const ech = echelle(L, H);
+    const j = journeeAu(RELA_DISPO?.pts ?? [], RELA, x, y, ech, RELA_VUE);
+    const i = j ? j.noeud : noeudAu(RELA_DISPO?.pts ?? [], RELA, x, y, ech, RELA_VUE);
+    const memeJour = (RELA_JOUR?.date ?? null) === (j?.date ?? null)
+                  && (RELA_JOUR?.noeud ?? -1) === (j?.noeud ?? -1);
+    if (i === RELA_SURVOL && memeJour) return;
+    RELA_SURVOL = i; RELA_JOUR = j;
+    // La main ouverte partout, le doigt UNIQUEMENT sur une journee. Un noeud
+    // survole s'allume mais ne s'ouvre pas : lui donner le curseur du clic
+    // promet quelque chose qui n'arrive pas.
+    cv.style.cursor = j ? 'pointer' : 'grab';
     peindre();
+  };
+
+  /* ---- le glissé ---- */
+  let tire = null;
+  cv.addEventListener('pointerdown', e => {
+    if (e.button !== undefined && e.button !== 0) return;
+    const p = pos(e);
+    tire = { x0: p.x, y0: p.y, vx: RELA_VUE.x, vy: RELA_VUE.y, bouge: false, id: e.pointerId };
+    cv.setPointerCapture?.(e.pointerId);
+  });
+
+  cv.addEventListener('pointermove', e => {
+    const p = pos(e);
+    if (!tire) return viser(p.x, p.y);
+    const dx = p.x - tire.x0, dy = p.y - tire.y0;
+    if (!tire.bouge && Math.hypot(dx, dy) < GLISSE_MIN) return;
+    tire.bouge = true;
+    cv.style.cursor = 'grabbing';
+    RELA_VUE = { ...RELA_VUE, x: tire.vx + dx, y: tire.vy + dy };
+    RELA_SURVOL = -1; RELA_JOUR = null;
+    peindre();
+  });
+
+  const relacher = e => {
+    if (!tire) return;
+    const p = pos(e);
+    const bouge = tire.bouge;
+    cv.releasePointerCapture?.(tire.id);
+    tire = null;
+    if (bouge) { cv.style.cursor = 'grab'; return viser(p.x, p.y); }
+    // Un vrai clic : on ouvre la journée visée.
+    const j = journeeAu(RELA_DISPO?.pts ?? [], RELA, p.x, p.y, echelle(L, H), RELA_VUE);
+    if (j) { view = 'mirror'; syncNav(); renderMirror(j.date); }
+  };
+  cv.addEventListener('pointerup', relacher);
+  cv.addEventListener('pointercancel', () => { tire = null; cv.style.cursor = 'grab'; });
+  cv.addEventListener('mouseleave', () => {
+    if (tire) return;
+    RELA_SURVOL = -1; RELA_JOUR = null; peindre();
   }, { passive: true });
-  cv.addEventListener('mouseleave', () => { RELA_SURVOL = -1; peindre(); }, { passive: true });
+
+  /* ---- la molette ---- */
+  cv.addEventListener('wheel', e => {
+    e.preventDefault();
+    const p = pos(e);
+    // `deltaMode` : certaines souris comptent en lignes, pas en pixels, et un
+    // cran de molette y vaut 3 au lieu de 100 — sans ça le zoom est trente
+    // fois plus lent sur ces machines-là.
+    const d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    RELA_VUE = zoomer(RELA_VUE, p.x, p.y, Math.exp(-d * 0.0016));
+    viser(p.x, p.y);
+    peindre();
+  }, { passive: false });
+
+  /* ---- le pincement, à deux doigts ---- */
+  const doigts = new Map();
+  let ecartInitial = 0, vueInitiale = null;
+  cv.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    doigts.set(e.pointerId, pos(e));
+    if (doigts.size === 2) {
+      tire = null;                      // deux doigts : ce n'est plus un glissé
+      const [a, b] = [...doigts.values()];
+      ecartInitial = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      vueInitiale = RELA_VUE;
+    }
+  });
+  cv.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'touch' || !doigts.has(e.pointerId)) return;
+    doigts.set(e.pointerId, pos(e));
+    if (doigts.size !== 2 || !vueInitiale) return;
+    const [a, b] = [...doigts.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    RELA_VUE = zoomer(vueInitiale, mx, my, d / ecartInitial);
+    peindre();
+  });
+  const oublier = e => {
+    doigts.delete(e.pointerId);
+    if (doigts.size < 2) vueInitiale = null;
+  };
+  cv.addEventListener('pointerup', oublier);
+  cv.addEventListener('pointercancel', oublier);
+
+  /* ---- les commandes ---- */
+  const cmd = cv.parentElement?.querySelector('.cartecmd');
+  if (cmd) {
+    cmd.onclick = e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const centre = { x: L / 2, y: H / 2 };
+      if (b.dataset.carte === 'plus')  RELA_VUE = zoomer(RELA_VUE, centre.x, centre.y, 1.35);
+      if (b.dataset.carte === 'moins') RELA_VUE = zoomer(RELA_VUE, centre.x, centre.y, 1 / 1.35);
+      if (b.dataset.carte === 'centre') RELA_VUE = recadrer(RELA_DISPO?.pts ?? [], L, H);
+      peindre();
+    };
+  }
+
+  cv.style.cursor = 'grab';
+  cv.style.touchAction = 'none';        // sinon le navigateur fait défiler la page
 
   // Un seul observateur, retire avec le canvas : sans ca, changer d'horizon
   // trois fois laisse trois observateurs qui repeignent un canvas detache.
@@ -1667,9 +2039,26 @@ async function renderLecture() {
     // La carte d'abord : c'est la forme qu'on vient reconnaitre. La synthese la
     // dit en mots, les themes la detaillent -- l'ordre va du coup d'oeil au
     // detail, et pas l'inverse.
+    /*
+     * LA CARTE ET CE QU'ELLE DIT, COTE A COTE.
+     *
+     * Ils se suivaient : la carte, puis la synthese sous elle, puis les
+     * comportements dans un autre onglet. Trois vues d'une meme lecture, qu'on
+     * ne pouvait jamais regarder ensemble -- alors que la seule question qu'on
+     * se pose devant un noeud est « qu'est-ce qu'il en dit ? », et qu'il fallait
+     * faire defiler pour le savoir.
+     *
+     * Sous 1080 px la colonne passe dessous : deux colonnes de 300 px ne
+     * servent personne.
+     */
     corps = `
-      ${carteMarkup(L.lecture.carte)}
-      <p class="synthese">${esc(L.lecture.synthese)}</p>
+      <div class="lectgrille">
+        <div class="lectcarte">${carteMarkup(L.lecture.carte)}</div>
+        <div class="lectdit">
+          <p class="synthese">${esc(L.lecture.synthese)}</p>
+          ${motifsMarkup({ carte: L.lecture.carte })}
+        </div>
+      </div>
       <div class="themes">${themes.map(themeMarkup).join('')}</div>`;
   } else if (LECTURE_EN_COURS) {
     corps = `<div class="lectvide"><span class="spin"></span>
@@ -1755,6 +2144,39 @@ async function lancerLecture() {
 
 function wireLecture() {
   $('#view').onclick = async e => {
+    // La palette d'un comportement : ouverte sur place, pas dans un panneau.
+    // Cinq pastilles n'ont pas besoin d'une fenêtre pour se poser.
+    const tt = e.target.closest('[data-teinter]');
+    if (tt) {
+      const box = tt.closest('.motifitem').querySelector('.motifteintes');
+      const ouvert = !box.hidden;
+      for (const b of $('#view').querySelectorAll('.motifteintes')) b.hidden = true;
+      box.hidden = ouvert;
+      return;
+    }
+    const tc = e.target.closest('[data-teinte][data-pour]');
+    if (tc) {
+      const item = tc.closest('.motifitem');
+      // La couleur change à l'écran avant la réponse du serveur : c'est un
+      // choix esthétique immédiat, pas une écriture qu'on attend.
+      item.style.setProperty('--motif', tc.dataset.teinte);
+      for (const b of item.querySelectorAll('.motifteintes button')) {
+        b.setAttribute('aria-pressed', String(b === tc));
+      }
+      item.querySelector('.motifteintes').hidden = true;
+      try {
+        S.motifs = await api('/api/motifs', { id: Number(tc.dataset.pour), teinte: Number(tc.dataset.teinte) });
+      } catch (err) { toast(err.message); }
+      return;
+    }
+    const dm = e.target.closest('[data-delmotif]');
+    if (dm) {
+      try {
+        S.motifs = await api('/api/motifs', { delete: Number(dm.dataset.delmotif) });
+        return renderLecture();
+      } catch (err) { return toast(err.message); }
+    }
+
     const h = e.target.closest('[data-horizon]');
     if (h) { MIR_HORIZON = h.dataset.horizon; MIR_THEME = null; LECTURE = null; LECTURE_ERR = null; return renderLecture(); }
     if (e.target.closest('[data-lire]')) return lancerLecture();
@@ -2050,66 +2472,72 @@ function wireMirror() {
  * sur quelqu'un par une machine, doit pouvoir disparaître d'un clic — sinon
  * c'est une étiquette, et ce produit n'en pose pas.
  */
-function motifsMarkup() {
+/*
+ * LES COMPORTEMENTS SONT SORTIS DES REGLAGES.
+ *
+ * Ils y vivaient parce qu'on pouvait en retirer un, et « ce qu'on peut retirer »
+ * avait fini par vouloir dire « reglage ». C'etait un classement par le geste
+ * plutot que par le sens : un mecanisme repere dans la duree n'est pas une
+ * preference d'application, c'est ce que le compagnon comprend -- exactement ce
+ * que « Ma carte » sert a montrer. On les lisait donc dans l'onglet ou l'on ne
+ * va que pour changer une couleur de compagnon ou coller une cle.
+ *
+ * Ici, ils sont a cote de la carte et de la synthese, qui parlent de la meme
+ * chose. Et la couleur devient choisissable : elle etait posee dans l'ordre de
+ * creation -- surement distincte, mais sans aucun rapport avec le sens. Deux
+ * mecanismes qui vont ensemble se retrouvaient de deux couleurs etrangeres, et
+ * rien ne permettait de les rapprocher a l'oeil.
+ */
+function motifsMarkup({ carte = null } = {}) {
   const liste = S.motifs?.liste ?? [];
   if (!liste.length) return '';
+  // Ce qu'un motif rejoint sur la carte : meme nom, ou nom contenu dans un
+  // noeud. Le rapprochement n'est propose que quand il existe -- inventer un
+  // lien serait pire que de n'en montrer aucun.
+  const noeuds = carte?.noeuds ?? [];
+  const relie = m => {
+    const n = m.nom.toLowerCase();
+    return noeuds.find(x => {
+      const v = x.nom.toLowerCase();
+      return v === n || v.includes(n) || n.includes(v);
+    }) ?? null;
+  };
   return `<div class="card motifcard">
-    <h2>Ce qui revient</h2>
-    <p class="sub">Des mécanismes que le compagnon a repérés tout seul et suit dans la durée.
+    <h2>Ce qu'il voit revenir</h2>
+    <p class="sub">Des mécanismes qu'il a repérés tout seul et suit dans la durée.
     Ce sont ses mots, pas un diagnostic — et tu peux en retirer un à tout moment.</p>
     <div class="motiflist">
-      ${liste.map(m => `<div class="motifitem" style="--motif:${m.teinte}">
-        <span class="motifpuce"></span>
+      ${liste.map(m => {
+        const lie = relie(m);
+        return `<div class="motifitem" style="--motif:${m.teinte}" data-motif-id="${m.id}">
+        <button class="motifpuce" data-teinter="${m.id}"
+                title="Changer sa couleur" aria-label="Changer la couleur de ${esc(m.nom)}"></button>
         <div class="motiftxt">
           <b>${esc(m.nom)}</b>
           <span class="faint">${esc(m.mecanisme)}</span>
+          ${lie ? `<span class="motiflie">sur la carte : ${esc(lie.nom)}</span>` : ''}
         </div>
         <span class="motifn mono">${m.vues}<small>×</small></span>
         <button class="repdel" data-delmotif="${m.id}" title="Ne plus suivre" aria-label="Ne plus suivre ${esc(m.nom)}">×</button>
-      </div>`).join('')}
+        <div class="motifteintes" hidden>
+          ${TEINTES_DECLAREES.map(t => `<button data-teinte="${t}" data-pour="${m.id}"
+            style="--t:${t}" aria-pressed="${m.teinte === t}" aria-label="Teinte ${t}"></button>`).join('')}
+        </div>
+      </div>`;
+      }).join('')}
     </div>
-  </div>`;
-}
-
-/**
- * Ce que le compagnon a lu.
- *
- * La question « qu'est-ce qu'il sait de moi ? » se pose, et rien n'y répondait :
- * les notes rangées depuis la conversation disparaissaient dans une table que
- * rien n'affichait en entier.
- *
- * Trois nombres, jamais additionnés. Une journée écrite, un message du fil et
- * une note apportée ne veulent pas dire la même chose, et le compte de journées
- * sert de dénominateur à toute la carte : les mélanger le viderait de son sens.
- */
-function contexteMarkup(C) {
-  if (!C) return '';
-  const n = (v, u) => `<div class="s"><div class="k">${u}</div><div class="v">${v}</div></div>`;
-  return `<div class="card">
-    <h2>Ce qu'il a lu</h2>
-    ${/* pas `.tight` : cette variante vaut `display: contents`, faite pour se
-          fondre dans l'en-tête du Miroir. Ici elle empilerait les trois. */''}
-    <div class="statgrid" style="margin-bottom:16px;max-width:440px">
-      ${n(C.journal.ecrites, 'journées écrites')}
-      ${n(C.fil.messages, 'messages')}
-      ${n(C.compte.total, 'notes rangées')}
-    </div>
-    ${C.notes.length ? `<div class="cnliste">${C.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>`
-      : `<p class="sub" style="margin:0">Colle-lui tes notes dans la conversation — de vieux carnets,
-         un journal tenu ailleurs. Il les range ici, elles ne comptent jamais comme des journées écrites,
-         et il s'en sert ensuite.</p>`}
   </div>`;
 }
 
 async function renderSettings() {
   const s = S.settings;
-  let CTX = null;
-  try { CTX = await api('/api/contexte'); CARNET = { notes: CTX.notes, compte: CTX.compte }; }
-  catch { /* le contexte ne doit pas casser les réglages */ }
 
   $('#view').innerHTML = `
-    ${motifsMarkup()}
-    ${contexteMarkup(CTX)}
+    ${/* « Ce qui revient » vit maintenant dans Ma carte, à côté de la carte et
+          de la synthèse — c'est là qu'on va pour savoir ce que le compagnon
+          comprend. Et les notes rangées se retrouvent dans Année, avec le reste
+          du journal. Ce qui restait ici obligeait à venir chercher une lecture
+          dans l'onglet des préférences. */''}
     <div class="row">
       <div class="card">
         <h2>Le compagnon</h2>
@@ -2256,14 +2684,6 @@ async function renderSettings() {
     }
     const g = e.target.closest('.cndate[data-goto]');
     if (g) { view = 'mirror'; syncNav(); return renderMirror(g.dataset.goto); }
-  });
-
-  $('.motiflist')?.addEventListener('click', async e => {
-    const b = e.target.closest('[data-delmotif]');
-    if (!b) return;
-    S.motifs = await api('/api/motifs', { delete: Number(b.dataset.delmotif) });
-    drawThread();                       // le fil perd la teinte du motif retiré
-    renderSettings();
   });
 
   $('#voicepick')?.addEventListener('click', async e => {

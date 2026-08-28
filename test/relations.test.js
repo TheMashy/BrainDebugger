@@ -4,7 +4,8 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { versGraphe, cadrer, couronne, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
+         K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
 
@@ -145,4 +146,68 @@ test('une journée sans écart reste une journée', () => {
   const pts = couronne({ occurrences: [{ d: '2024-01-01', e: null }] }, 6);
   assert.equal(pts.length, 1);
   assert.equal(pts[0].e, null);
+});
+
+/* ------------------------- se promener dans la carte ------------------------- */
+
+test('le zoom garde fixe le point visé', () => {
+  // La seule façon de zoomer qui ne désoriente pas : on grossit ce qu'on vise,
+  // pas le centre du cadre. Sinon il faut rattraper au glissé à chaque cran.
+  const v0 = vueNeutre();
+  const v1 = zoomer(v0, 300, 200, 2);
+  assert.equal(v1.k, 2);
+  const avant = versCarte(v0, 300, 200);
+  const apres = versCarte(v1, 300, 200);
+  assert.ok(Math.abs(avant.x - apres.x) < 1e-9 && Math.abs(avant.y - apres.y) < 1e-9,
+    'le point sous le curseur a bougé');
+});
+
+test('le zoom est borné des deux côtés', () => {
+  let v = vueNeutre();
+  for (let i = 0; i < 40; i++) v = zoomer(v, 0, 0, 2);
+  assert.equal(v.k, K_MAX);
+  for (let i = 0; i < 80; i++) v = zoomer(v, 0, 0, 0.5);
+  assert.equal(v.k, K_MIN);
+});
+
+test('recadrer ramène le graphe dans le cadre, pas le cadre sur zéro', () => {
+  // On recentre sur le GRAPHE : après trois glissades, ce sont deux choses
+  // très différentes.
+  const pts = [{ x: 900, y: 900 }, { x: 1100, y: 1000 }];
+  const v = recadrer(pts, 600, 400);
+  const c = versCarte(v, 300, 200);
+  assert.ok(Math.abs(c.x - 1000) < 1e-6, 'le milieu du graphe doit tomber au milieu du cadre');
+  assert.ok(Math.abs(c.y - 950) < 1e-6);
+  assert.ok(v.k >= K_MIN && v.k <= K_MAX);
+  // Un graphe vide ne fait pas planter le bouton.
+  assert.deepEqual(recadrer([], 600, 400), vueNeutre());
+});
+
+test('un point de la couronne se vise à l’écran, pas dans la carte', () => {
+  // Le rayon de capture est en pixels ÉCRAN : sous zoom fort, un rayon en
+  // coordonnées carte deviendrait minuscule à viser.
+  const G = versGraphe({
+    noeuds: [{ nom: 'a', genre: 'corps', poids: 2,
+               jours: [{ d: '2024-03-01', e: 2 }, { d: '2024-03-02', e: -1 }] }],
+    liens: []
+  });
+  const pts = [{ x: 100, y: 100 }];
+  const cible = couronne(G.noeuds[0], 9)[0];
+  const sx = 100 + cible.x, sy = 100 + cible.y;
+
+  const sansZoom = journeeAu(pts, G, sx, sy, 1, vueNeutre());
+  assert.equal(sansZoom?.date, '2024-03-01');
+
+  const v = { x: 0, y: 0, k: 3 };
+  const zoome = journeeAu(pts, G, sx * 3, sy * 3, 1, v);
+  assert.equal(zoome?.date, '2024-03-01', 'la même journée doit rester visable sous zoom');
+
+  // Loin de tout point, on ne renvoie rien : un clic dans le vide n'ouvre pas
+  // une journée au hasard.
+  assert.equal(journeeAu(pts, G, 400, 400, 1, vueNeutre()), null);
+});
+
+test('un nœud sans journées ne piège pas la visée', () => {
+  const G = versGraphe({ noeuds: [{ nom: 'a', genre: 'lieu', poids: 1, jours: [] }], liens: [] });
+  assert.equal(journeeAu([{ x: 50, y: 50 }], G, 50, 50, 1, vueNeutre()), null);
 });

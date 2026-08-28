@@ -276,7 +276,14 @@ export const DEFAULT_SETTINGS = {
   floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
   floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
   sustain: 2,                 // jours consecutifs >= reference pour valider un retour
-  etalon: 5.7,                // constante de calage du cumul (null = mediane globale)
+  /*
+   * L'etalon : la constante a laquelle chaque journee se compare dans le mode
+   * « etalon ». 5, et pas la moyenne reelle : c'est le milieu de l'echelle, ce
+   * que la personne a en tete quand elle note. Une constante calee sur SA
+   * moyenne rend le cumul plat par construction -- il ne dit plus rien, il
+   * decrit sa propre origine.
+   */
+  etalon: 5,
   // La naissance. Elle ne sert qu'a une chose : donner une origine a la frise,
   // pour qu'un repere d'enfance ait ou se poser. Aucun calcul ne s'en sert, et
   // surtout aucun ne calcule d'age -- ce serait une donnee sur la personne, pas
@@ -377,12 +384,68 @@ export function rebuildEntryText(date, userId = OWNER) {
 
 /* ---------- messages ---------- */
 
-export function addMessage({ ts, date, source = 'web', role, text, userId = OWNER }) {
+export function addMessage({ ts, date, source = 'web', role, text, reflexion = null, userId = OWNER }) {
   const info = db.prepare(
-    'INSERT INTO messages(user_id, ts, date, source, role, text) VALUES(?,?,?,?,?,?)'
-  ).run(userId, ts, date, source, role, text);
+    'INSERT INTO messages(user_id, ts, date, source, role, text, reflexion) VALUES(?,?,?,?,?,?,?)'
+  ).run(userId, ts, date, source, role, text, reflexion || null);
   if (role === 'user') rebuildEntryText(date, userId);
   return Number(info.lastInsertRowid);
+}
+
+/**
+ * REMBOBINER LE FIL JUSQU'A UN MESSAGE.
+ *
+ * Ce qui a ete dit apres ce message disparait, et le message lui-meme revient
+ * a celui qui l'a ecrit pour qu'il le reprenne. C'est le geste qu'on cherche
+ * quand le compagnon vient de retomber hors-ligne, quand la reponse est a cote,
+ * ou quand on s'est relu une phrase trop tard.
+ *
+ * ON SUPPRIME VRAIMENT, ET C'EST LE CHOIX DIFFICILE. Marquer les messages
+ * « caches » aurait garde une trace, mais le texte de la journee est la
+ * concatenation des messages de la journee : un message rembobine qui resterait
+ * en base resterait dans la journee, donc dans la carte, dans les echos, dans
+ * toutes les statistiques. On aurait retire une phrase de l'ecran en la
+ * laissant dans tout ce que l'application en deduit -- c'est-a-dire le
+ * contraire de ce qu'on demande.
+ *
+ * D'ou : suppression, et le texte des journees touchees recalcule dans la meme
+ * transaction. Sans ce recalcul, la journee garderait la phrase effacee
+ * jusqu'au prochain message, et personne ne saurait pourquoi.
+ */
+export function rembobiner(id, userId = OWNER) {
+  const cible = db.prepare(
+    'SELECT id, ts, date, role, text FROM messages WHERE user_id = ? AND id = ?'
+  ).get(userId, id);
+  if (!cible) return null;
+
+  // Par (ts, id), pas par id seul : un message importe ou venu de Discord peut
+  // porter un identifiant plus grand qu'un message anterieur, et l'ordre du fil
+  // est celui du temps. C'est exactement l'ordre de recentMessages().
+  const suite = db.prepare(
+    'SELECT id, date, role FROM messages WHERE user_id = ? AND (ts > ? OR (ts = ? AND id >= ?)) ORDER BY ts ASC, id ASC'
+  ).all(userId, cible.ts, cible.ts, cible.id);
+
+  const jours = [...new Set(suite.filter(m => m.role === 'user').map(m => m.date))];
+
+  db.exec('BEGIN');
+  try {
+    const del = db.prepare('DELETE FROM messages WHERE user_id = ? AND id = ?');
+    const delVues = db.prepare('DELETE FROM motif_vues WHERE message_id = ?');
+    for (const m of suite) { delVues.run(m.id); del.run(userId, m.id); }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+
+  // Hors transaction : rebuildEntryText ecrit dans entries, et une journee qui
+  // se retrouve vide n'a plus de raison d'exister -- sauf si elle porte une
+  // note, qui, elle, a ete saisie a la main et n'appartient pas au fil.
+  for (const d of jours) {
+    rebuildEntryText(d, userId);
+    db.prepare(
+      "DELETE FROM entries WHERE user_id = ? AND date = ? AND note IS NULL AND (text IS NULL OR TRIM(text) = '')"
+    ).run(userId, d);
+  }
+
+  return { texte: cible.role === 'user' ? cible.text : '', supprimes: suite.length, date: cible.date };
 }
 
 /**
@@ -401,8 +464,8 @@ export function addMessage({ ts, date, source = 'web', role, text, userId = OWNE
 export function recentMessages(limit = 80, userId = OWNER) {
   const since = getSettings(userId).chatSince;
   const rows = since
-    ? db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
-    : db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
+    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
+    : db.prepare('SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
   return rows.reverse();
 }
 
@@ -728,6 +791,26 @@ export function motifsDesMessages(ids, userId = OWNER) {
   const par = {};
   for (const r of rows) (par[r.message_id] ??= []).push({ id: r.id, nom: r.nom, teinte: r.teinte });
   return par;
+}
+
+/**
+ * La couleur d'un motif, choisie par la personne.
+ *
+ * Elle est posee a la creation dans l'ordre des TEINTES_DECLAREES -- deux
+ * motifs crees a la suite sont ainsi surement distincts. Mais l'ordre de
+ * creation n'a aucun rapport avec le sens : deux mecanismes qui vont ensemble
+ * se retrouvent de deux couleurs etrangeres, et rien ne permettait de les
+ * rapprocher a l'oeil.
+ *
+ * La bande reste celle des DECLAREES (232-336). Ce n'est pas une preference
+ * d'interface : ces teintes sont disjointes de la rampe des notes, et laisser
+ * choisir un vert de note ferait passer une declaration pour une mesure.
+ */
+export function teinterMotif(id, teinte, userId = OWNER) {
+  const t = Number(teinte);
+  if (!TEINTES.includes(t)) return false;
+  const info = db.prepare('UPDATE motifs SET teinte = ? WHERE id = ? AND user_id = ?').run(t, id, userId);
+  return info.changes > 0;
 }
 
 export function deleteMotif(id, userId = OWNER) {
