@@ -23,23 +23,39 @@
  * demande cent noeuds de DOM qu'on redessine a chaque survol.
  */
 
+import { TEINTES_DECLAREES, ICONES } from './reperes.js';
+
 /* Une teinte par genre, prise dans la bande DECLAREE (229-337) partagee avec les
    reperes et les motifs. Elle ne peut donc pas se confondre avec la rampe des
    notes, qui occupe le reste du cercle. */
 export const TEINTE_GENRE = {
-  personne:  336,
-  lieu:      258,
-  travail:   232,
-  corps:     310,
-  mecanisme: 284,
-  periode:   246,
-  activite:  272
+  personne:   336,
+  lieu:       258,
+  travail:    232,
+  corps:      310,
+  mecanisme:  284,
+  periode:    246,
+  activite:   272,
+  dependance: 296
 };
 
 export const NOM_GENRE = {
   personne: 'quelqu\'un', lieu: 'un lieu', travail: 'le travail', corps: 'le corps',
-  mecanisme: 'un mécanisme', periode: 'un moment', activite: 'quelque chose que tu fais'
+  mecanisme: 'un mécanisme', periode: 'un moment', activite: 'quelque chose que tu fais',
+  dependance: 'une dépendance'
 };
+
+/*
+ * L'icone de consommation, en Path2D.
+ *
+ * Le meme trace SVG que la frise et les reperes : deux dessins differents pour
+ * la meme idee, c'est deux choses a l'oeil. `Path2D` accepte la chaine de path
+ * telle quelle -- la seule facon de partager un dessin entre du SVG et une
+ * toile sans le redessiner a la main.
+ */
+const ICONE_CONSO = (() => {
+  try { return new Path2D(ICONES.conso); } catch { return null; }
+})();
 
 const teinte = g => TEINTE_GENRE[g] ?? TEINTE_GENRE.activite;
 const couleur = (g, l = 62, a = 1) => `hsl(${teinte(g)} 58% ${l}% / ${a})`;
@@ -53,10 +69,36 @@ const couleur = (g, l = 62, a = 1) => `hsl(${teinte(g)} 58% ${l}% / ${a})`;
  * regroupent, les lieux aussi. Le regroupement par genre n'est pas cosmetique :
  * sans lui, seize noeuds relies dans tous les sens forment une pelote.
  */
-export function versGraphe(carte) {
+/**
+ * Du format serveur vers celui de `disposer()`, avec les ILOTS.
+ *
+ * Une piste nomme des noeuds ; ces noeuds deviennent un AMAS, et `disposer` les
+ * range cote a cote sans rien savoir de plus -- le regroupement spatial tombe
+ * tout seul. Sans piste, on retombe sur le regroupement par genre, qui reste le
+ * bon defaut : seize noeuds relies dans tous les sens forment une pelote.
+ */
+export function versGraphe(carte, pistes = []) {
   const noeuds = carte?.noeuds ?? [];
   const index = new Map(noeuds.map((n, i) => [n.nom, i]));
+  // Quel ilot pour quel noeud. Le serveur garantit deja l'exclusivite ; on la
+  // retient ici aussi, parce que deux enveloppes qui se traversent effacent
+  // exactement ce qu'on venait chercher.
+  const parCasse = new Map(noeuds.map((n, i) => [String(n.nom).toLowerCase(), i]));
+  const ilotDe = new Map();
+  pistes.forEach((p, i) => {
+    for (const nom of p?.noeuds ?? []) {
+      const k = String(nom).toLowerCase();
+      // Un nom qui n'est PAS sur la carte est ignore ici aussi, meme si le
+      // serveur le filtre deja : une lecture enregistree avant un changement de
+      // carte peut nommer un noeud disparu, et l'ilot dessinerait alors une
+      // enveloppe autour de rien, avec un titre flottant au-dessus.
+      if (parCasse.has(k) && !ilotDe.has(k)) ilotDe.set(k, i);
+    }
+  });
+  const utilises = new Set([...ilotDe.values()]);
   return {
+    ilots: pistes.map((p, i) => ({ i, nom: p.nom, teinte: TEINTES_DECLAREES[i % TEINTES_DECLAREES.length] }))
+                 .filter(a => utilises.has(a.i)),
     /*
      * `jours` est le nom que `disposer()` donne a la MASSE d'un noeud, et c'est
      * aussi le nom que le serveur donne a la LISTE de ses journees. Les deux se
@@ -68,17 +110,79 @@ export function versGraphe(carte) {
      * exactement ce qu'on veut voir dans la disposition. Sans dates, on retombe
      * sur le poids.
      */
-    noeuds: noeuds.map(n => ({
-      ...n,
-      occurrences: n.jours ?? [],
-      jours: n.jours?.length || n.poids,
-      amas: n.genre
-    })),
+    noeuds: noeuds.map(n => {
+      const pi = ilotDe.get(String(n.nom).toLowerCase());
+      return {
+        ...n,
+        occurrences: n.jours ?? [],
+        jours: n.jours?.length || n.poids,
+        ilot: pi ?? null,
+        amas: pi != null ? `p${pi}` : n.genre
+      };
+    }),
     liens: (carte?.liens ?? []).map(l => ({
       s: index.get(l.de), t: index.get(l.vers),
       quoi: l.quoi, force: l.force / 3
     })).filter(l => l.s !== undefined && l.t !== undefined)
   };
+}
+
+/**
+ * L'ENVELOPPE D'UN ILOT : une forme qui EPOUSE ses noeuds.
+ *
+ * Un cercle englobant paraissait plus simple, et il l'etait -- mais des qu'un
+ * ilot s'etire, son cercle recouvre la moitie de la carte et les enveloppes se
+ * traversent toutes. Ce qu'on veut n'est pas « la zone qui contient », c'est
+ * « la forme de ce groupe-la ».
+ *
+ * Enveloppe convexe (chaine monotone), puis dilatation depuis le centre, puis
+ * lissage par les milieux. Le lissage est ce qui la rend organique : sans lui
+ * on obtient un polygone, et un polygone se lit comme un schema.
+ */
+export function contour(points, marge = 30) {
+  const pts = points.map(p => ({ x: p.x, y: p.y }))
+    .sort((a, b) => a.x - b.x || a.y - b.y);
+  if (pts.length < 3) {
+    // Deux noeuds : pas de polygone possible, on rend un losange autour d'eux.
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const d = Math.max(marge, ...pts.map(p => Math.hypot(p.x - cx, p.y - cy) + marge));
+    return [0, 1, 2, 3, 4, 5].map(i => {
+      const a = (i / 6) * Math.PI * 2;
+      return { x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d };
+    });
+  }
+  const gauche = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const bas = [], haut = [];
+  for (const p of pts) {
+    while (bas.length >= 2 && gauche(bas.at(-2), bas.at(-1), p) <= 0) bas.pop();
+    bas.push(p);
+  }
+  for (const p of [...pts].reverse()) {
+    while (haut.length >= 2 && gauche(haut.at(-2), haut.at(-1), p) <= 0) haut.pop();
+    haut.push(p);
+  }
+  const hull = [...bas.slice(0, -1), ...haut.slice(0, -1)];
+  const cx = hull.reduce((s, p) => s + p.x, 0) / hull.length;
+  const cy = hull.reduce((s, p) => s + p.y, 0) / hull.length;
+  return hull.map(p => {
+    const d = Math.hypot(p.x - cx, p.y - cy) || 1;
+    return { x: p.x + (p.x - cx) / d * marge, y: p.y + (p.y - cy) / d * marge };
+  });
+}
+
+/** Le trace lisse d'une enveloppe fermee : chaque sommet devient une courbe. */
+function tracer(ctx, bord) {
+  ctx.beginPath();
+  const n = bord.length;
+  const mi = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  let m = mi(bord[n - 1], bord[0]);
+  ctx.moveTo(m.x, m.y);
+  for (let i = 0; i < n; i++) {
+    const suiv = mi(bord[i], bord[(i + 1) % n]);
+    ctx.quadraticCurveTo(bord[i].x, bord[i].y, suiv.x, suiv.y);
+  }
+  ctx.closePath();
 }
 
 const RAYON = n => 4 + n.poids * 2.6;
@@ -258,6 +362,52 @@ export function dessinerRelations(ctx, G, dispo,
   const g0 = -v.x / v.k, g1 = (largeur - v.x) / v.k;
   let survolLib = null, etiquette = null;
 
+  /* ===================== LES ILOTS, ET LE ZOOM SEMANTIQUE =====================
+   *
+   * De loin, une carte de seize noms est illisible : on lit seize mots et on
+   * n'en retient aucun. De pres, un nom d'ilot est une generalite qui recouvre
+   * ce qu'on est venu regarder. Les deux ne se disputent donc pas la place --
+   * ils se relaient, et c'est le ZOOM qui decide lequel parle.
+   *
+   * Dezoome, on voit les grandes directions et ou elles se touchent. En
+   * approchant, elles s'effacent et les motifs qui les composent apparaissent.
+   * C'est exactement le geste qu'on fait sur une carte routiere : les regions
+   * d'abord, les rues ensuite -- jamais les deux a pleine encre.
+   */
+  const fondu = (a, b, x) => Math.max(0, Math.min(1, (x - a) / (b - a)));
+  const aIlot  = 1 - 0.85 * fondu(1.4, 2.6, v.k);   // les pistes s'effacent en approchant
+  const aNoeud = 0.28 + 0.72 * fondu(0.9, 1.8, v.k); // les noms de noeuds montent
+
+  const ilots = [];
+  for (const a of G.ilots ?? []) {
+    const membres = [];
+    G.noeuds.forEach((n, i) => { if (n.ilot === a.i && pts[i]) membres.push(pts[i]); });
+    if (membres.length < 2) continue;   // un ilot d'un seul noeud est ce noeud
+    const bord = contour(membres, 34 * Math.max(0.7, ech));
+    const cx = bord.reduce((s, p) => s + p.x, 0) / bord.length;
+    const haut = bord.reduce((m, p) => Math.min(m, p.y), Infinity);
+    ilots.push({ ...a, bord, cx, haut });
+  }
+
+  /* --- l'enveloppe des ilots, sous tout le reste --- */
+  if (aIlot > 0.02) {
+    for (const a of ilots) {
+      tracer(ctx, a.bord);
+      ctx.fillStyle = `hsl(${a.teinte} 60% 58% / ${(0.085 * aIlot).toFixed(3)})`;
+      ctx.fill();
+      // CONTOUR POINTILLE, jamais plein : un ilot est DECLARE par le modele,
+      // et la regle de couleur du produit tient jusqu'ici.
+      ctx.globalAlpha = 0.45 * aIlot;
+      ctx.strokeStyle = `hsl(${a.teinte} 60% 62%)`;
+      ctx.lineWidth = 1 / v.k;
+      ctx.setLineDash([5 / v.k, 7 / v.k]);
+      tracer(ctx, a.bord);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   /* --- les liens --- */
   for (const l of G.liens) {
     const a = pts[l.s], b = pts[l.t];
@@ -362,6 +512,30 @@ export function dessinerRelations(ctx, G, dispo,
     ctx.lineWidth = i === survol ? 2.4 : 1.6;
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.stroke();
 
+    /*
+     * UNE DEPENDANCE SE VOIT SANS QU'ON LISE SON NOM.
+     *
+     * Double anneau et l'icone de consommation au centre -- la meme que sur la
+     * frise, pour que les deux vues parlent de la meme chose. Ce n'est pas un
+     * suivi : rien n'est compte, rien n'est felicite. C'est une PRESENCE sur la
+     * carte, qui se relie au reste comme n'importe quel noeud -- et c'est
+     * justement l'interet de la nommer, voir a quoi elle tient.
+     */
+    if (n.genre === 'dependance') {
+      ctx.lineWidth = 1 / v.k;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r + 3.2 / v.k, 0, 7); ctx.stroke();
+      if (ICONE_CONSO) {
+        const t = (r * 1.5) / 24;
+        ctx.save();
+        ctx.translate(p.x - r * 0.75, p.y - r * 0.75);
+        ctx.scale(t, t);
+        ctx.lineWidth = 1.6 / t / v.k * 0.9;
+        ctx.strokeStyle = c;
+        ctx.stroke(ICONE_CONSO);
+        ctx.restore();
+      }
+    }
+
     ctx.globalAlpha = actif ? 1 : 0.2;
     ctx.fillStyle = actif ? '#e9efeb' : '#93a099';
     // Un libelle de 12 px sur un cadre de telephone occupe le tiers de sa
@@ -388,6 +562,11 @@ export function dessinerRelations(ctx, G, dispo,
       survolLib = { texte: k ? `${mot(n.nom)} · ${k} jour${k > 1 ? 's' : ''}` : mot(n.nom), x: p.x, y: ly };
       continue;
     }
+    // Un noeud DANS un ilot laisse la parole a l'ilot quand on est loin ; un
+    // noeud seul garde son nom, il n'a personne pour parler a sa place.
+    const opa = (actif ? 1 : 0.2) * (n.ilot != null ? aNoeud : 1);
+    if (opa < 0.06) continue;
+    ctx.globalAlpha = opa;
     const nom = mot(n.nom);
     const lw = ctx.measureText(nom).width;
     // Le bornage suit le CADRE VISIBLE, pas le canvas : sous zoom, « largeur »
@@ -411,6 +590,32 @@ export function dessinerRelations(ctx, G, dispo,
     ctx.fill();
     ctx.fillStyle = '#e9efeb';
     ctx.fillText(etiquette.texte, etiquette.x, etiquette.y);
+  }
+
+  /* --- LE NOM DES ILOTS, par-dessus tout le reste ---
+     Peints en dernier et non bornes au cadre : ce sont les seuls libelles qu'on
+     doit pouvoir lire de loin, et de loin, le cadre EST la carte entiere. */
+  if (aIlot > 0.06) {
+    for (const a of ilots) {
+      const t = mot(a.nom).toUpperCase();
+      ctx.globalAlpha = aIlot;
+      ctx.font = `600 ${(13 * Math.max(0.85, ech) / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.letterSpacing = `${(1.4 / v.k).toFixed(2)}px`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const y = a.haut - 12 / v.k;
+      const w = ctx.measureText(t).width;
+      // Une pastille sous le mot : sans elle, un nom d'ilot pose sur un lien
+      // devient illisible des que deux ilots se touchent.
+      ctx.fillStyle = 'rgba(10,12,11,.82)';
+      ctx.beginPath();
+      ctx.roundRect(a.cx - w / 2 - 9 / v.k, y - 10 / v.k, w + 18 / v.k, 20 / v.k, 10 / v.k);
+      ctx.fill();
+      ctx.fillStyle = `hsl(${a.teinte} 62% 74%)`;
+      ctx.fillText(t, a.cx, y);
+      ctx.letterSpacing = '0px';
+    }
+    ctx.globalAlpha = 1;
   }
 
   if (survolLib) {

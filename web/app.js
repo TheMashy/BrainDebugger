@@ -2337,6 +2337,48 @@ function mecanismes(lecture) {
     (b.intensite - a.intensite) || ((b.serie?.length ?? 0) - (a.serie?.length ?? 0)));
 }
 
+/**
+ * LES MECANISMES, RANGES SOUS LEURS PISTES.
+ *
+ * La meme lecture se presentait de deux facons : des ilots nommes sur la carte,
+ * et une liste a plat en dessous. On voyait donc « depression » sur la toile
+ * sans jamais savoir lesquels de ces douze mecanismes la portaient.
+ *
+ * Ils sont maintenant groupes, avec la teinte de leur ilot -- la meme que sur la
+ * carte et la meme que dans « Moi ». Trois vues, un seul code couleur : un nom
+ * lu quelque part se retrouve partout ailleurs sans qu'on le cherche.
+ *
+ * Ce qui n'appartient a aucune piste vient a la fin, sans titre. Ce n'est pas un
+ * reste : c'est ce qui n'entre pas dans une case, et tout n'a pas a y entrer.
+ */
+function mecaGroupes(lecture) {
+  const tous = mecanismes(lecture);
+  const pistes = lecture?.pistes ?? [];
+  if (!pistes.length) return tous.map(mecaMarkup).join('');
+
+  const restant = new Set(tous.map(m => m.cle));
+  const bloc = [];
+  pistes.forEach((p, i) => {
+    const noms = new Set((p.themes ?? []).map(t => String(t).toLowerCase()));
+    const dedans = tous.filter(m => restant.has(m.cle) && noms.has(String(m.nom).toLowerCase()));
+    if (!dedans.length) return;
+    for (const m of dedans) restant.delete(m.cle);
+    const teinte = TEINTES_DECLAREES[i % TEINTES_DECLAREES.length];
+    bloc.push(`<div class="mecagroupe" style="--p:${teinte}">
+      <div class="mecatitre"><span></span>${esc(p.nom)}</div>
+      ${dedans.map(mecaMarkup).join('')}
+    </div>`);
+  });
+  const seuls = tous.filter(m => restant.has(m.cle));
+  if (seuls.length) {
+    bloc.push(`<div class="mecagroupe seuls">
+      ${pistes.length ? '<div class="mecatitre"><span></span>hors des pistes</div>' : ''}
+      ${seuls.map(mecaMarkup).join('')}
+    </div>`);
+  }
+  return bloc.join('');
+}
+
 /** La carte de la lecture affichée, pour rapprocher un motif d'un nœud. */
 const carteCourante = () => LECTURE?.lecture?.carte ?? null;
 
@@ -2401,10 +2443,12 @@ let RELA_VUE = null, RELA_JOUR = null;
 let RELA_PEINDRE = null;
 const GLISSE_MIN = 4;
 
-function monterCarte(carte) {
+function monterCarte(carte, pistes = []) {
   const cv = $('#cartec');
   if (!cv || !carte?.noeuds?.length) return;
-  RELA = versGraphe(carte);
+  // Les pistes font les ILOTS : les noeuds qu'elles nomment se regroupent, et
+  // leur nom se lit de loin, la ou seize noms de noeuds ne se lisent pas.
+  RELA = versGraphe(carte, pistes);
   RELA_SURVOL = -1;
   RELA_JOUR = null;
   RELA_VUE = vueNeutre();
@@ -2417,7 +2461,10 @@ function monterCarte(carte) {
     if (!L || !H) return;
     cv.width = L * dpr; cv.height = H * dpr;
     RELA_DISPO = disposer(RELA, L, H);
-    cadrer(RELA_DISPO.pts, L, H);
+    // Plus de marge en haut dès qu'il y a des îlots : leur nom se pose
+    // AU-DESSUS de l'enveloppe, et le cadrage ne réserve de la place que pour
+    // les nœuds — le titre du plus haut sortait par le bord.
+    cadrer(RELA_DISPO.pts, L, H, 62, RELA.ilots?.length ? 66 : 38);
     RELA_VUE = vueNeutre();
     peindre();
   };
@@ -2552,7 +2599,7 @@ function monterCarte(carte) {
       const centre = { x: L / 2, y: H / 2 };
       if (b.dataset.carte === 'plus')  RELA_VUE = zoomer(RELA_VUE, centre.x, centre.y, 1.35);
       if (b.dataset.carte === 'moins') RELA_VUE = zoomer(RELA_VUE, centre.x, centre.y, 1 / 1.35);
-      if (b.dataset.carte === 'centre') RELA_VUE = recadrer(RELA_DISPO?.pts ?? [], L, H);
+      if (b.dataset.carte === 'centre') RELA_VUE = recadrer(RELA_DISPO?.pts ?? [], L, H, RELA?.ilots?.length ? 96 : 74);
       peindre();
     };
   }
@@ -2604,7 +2651,7 @@ async function renderLecture() {
         <div class="lectcarte">${carteMarkup(L.lecture.carte)}</div>
         <div class="lectdit">
           <p class="synthese">${esc(L.lecture.synthese)}</p>
-          <div class="themes">${mecanismes(L.lecture).map(mecaMarkup).join('')}</div>
+          <div class="themes">${mecaGroupes(L.lecture)}</div>
         </div>
       </div>`;
   } else if (LECTURE_EN_COURS) {
@@ -2649,7 +2696,7 @@ async function renderLecture() {
   </div>`;
 
   wireLecture();
-  monterCarte(L.lecture?.carte);
+  monterCarte(L.lecture?.carte, L.lecture?.pistes ?? []);
 
   // « elle doit toujours faire de l'analyse de fond » : si elle manque, on la
   // lance en arrivant, sans rien demander. Si elle existe mais a pris du
