@@ -377,12 +377,68 @@ export function rebuildEntryText(date, userId = OWNER) {
 
 /* ---------- messages ---------- */
 
-export function addMessage({ ts, date, source = 'web', role, text, userId = OWNER }) {
+export function addMessage({ ts, date, source = 'web', role, text, reflexion = null, userId = OWNER }) {
   const info = db.prepare(
-    'INSERT INTO messages(user_id, ts, date, source, role, text) VALUES(?,?,?,?,?,?)'
-  ).run(userId, ts, date, source, role, text);
+    'INSERT INTO messages(user_id, ts, date, source, role, text, reflexion) VALUES(?,?,?,?,?,?,?)'
+  ).run(userId, ts, date, source, role, text, reflexion || null);
   if (role === 'user') rebuildEntryText(date, userId);
   return Number(info.lastInsertRowid);
+}
+
+/**
+ * REMBOBINER LE FIL JUSQU'A UN MESSAGE.
+ *
+ * Ce qui a ete dit apres ce message disparait, et le message lui-meme revient
+ * a celui qui l'a ecrit pour qu'il le reprenne. C'est le geste qu'on cherche
+ * quand le compagnon vient de retomber hors-ligne, quand la reponse est a cote,
+ * ou quand on s'est relu une phrase trop tard.
+ *
+ * ON SUPPRIME VRAIMENT, ET C'EST LE CHOIX DIFFICILE. Marquer les messages
+ * « caches » aurait garde une trace, mais le texte de la journee est la
+ * concatenation des messages de la journee : un message rembobine qui resterait
+ * en base resterait dans la journee, donc dans la carte, dans les echos, dans
+ * toutes les statistiques. On aurait retire une phrase de l'ecran en la
+ * laissant dans tout ce que l'application en deduit -- c'est-a-dire le
+ * contraire de ce qu'on demande.
+ *
+ * D'ou : suppression, et le texte des journees touchees recalcule dans la meme
+ * transaction. Sans ce recalcul, la journee garderait la phrase effacee
+ * jusqu'au prochain message, et personne ne saurait pourquoi.
+ */
+export function rembobiner(id, userId = OWNER) {
+  const cible = db.prepare(
+    'SELECT id, ts, date, role, text FROM messages WHERE user_id = ? AND id = ?'
+  ).get(userId, id);
+  if (!cible) return null;
+
+  // Par (ts, id), pas par id seul : un message importe ou venu de Discord peut
+  // porter un identifiant plus grand qu'un message anterieur, et l'ordre du fil
+  // est celui du temps. C'est exactement l'ordre de recentMessages().
+  const suite = db.prepare(
+    'SELECT id, date, role FROM messages WHERE user_id = ? AND (ts > ? OR (ts = ? AND id >= ?)) ORDER BY ts ASC, id ASC'
+  ).all(userId, cible.ts, cible.ts, cible.id);
+
+  const jours = [...new Set(suite.filter(m => m.role === 'user').map(m => m.date))];
+
+  db.exec('BEGIN');
+  try {
+    const del = db.prepare('DELETE FROM messages WHERE user_id = ? AND id = ?');
+    const delVues = db.prepare('DELETE FROM motif_vues WHERE message_id = ?');
+    for (const m of suite) { delVues.run(m.id); del.run(userId, m.id); }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+
+  // Hors transaction : rebuildEntryText ecrit dans entries, et une journee qui
+  // se retrouve vide n'a plus de raison d'exister -- sauf si elle porte une
+  // note, qui, elle, a ete saisie a la main et n'appartient pas au fil.
+  for (const d of jours) {
+    rebuildEntryText(d, userId);
+    db.prepare(
+      "DELETE FROM entries WHERE user_id = ? AND date = ? AND note IS NULL AND (text IS NULL OR TRIM(text) = '')"
+    ).run(userId, d);
+  }
+
+  return { texte: cible.role === 'user' ? cible.text : '', supprimes: suite.length, date: cible.date };
 }
 
 /**
@@ -401,8 +457,8 @@ export function addMessage({ ts, date, source = 'web', role, text, userId = OWNE
 export function recentMessages(limit = 80, userId = OWNER) {
   const since = getSettings(userId).chatSince;
   const rows = since
-    ? db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
-    : db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
+    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
+    : db.prepare('SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
   return rows.reverse();
 }
 

@@ -634,7 +634,7 @@ export const ANTHROPIC_MODELS = [
  * @param {(chunk: string) => void} onText
  * @returns {Promise<{text: string, backend: string, refused?: boolean, model?: string}>}
  */
-export async function anthropicReply(history, s, memory, onText, outils = null) {
+export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null) {
   const { client, source } = await anthropicClient(s);
 
   const system = [{ type: 'text', text: SYSTEM_PROMPT }];
@@ -645,6 +645,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null) 
   const faits = [];              // ce que les outils ont reellement change
 
   let text = '';
+  let pensee = '';
   let final;
   // Cumulee sur TOUS les tours. Un echange avec outils coute deux ou trois
   // appels ; ne compter que le dernier ferait payer a l'enveloppe le tiers de
@@ -683,6 +684,31 @@ export async function anthropicReply(history, s, memory, onText, outils = null) 
           text += event.delta.text;
           onText?.(event.delta.text);
         }
+        /*
+         * LA REFLEXION, DIFFUSEE COMME LE RESTE.
+         *
+         * `thinking: { type: 'adaptive' }` etait deja demande, et ces blocs
+         * arrivaient depuis toujours dans le flux -- la boucle les jetait. Entre
+         * le moment ou quelqu'un appuie sur entree et la premiere lettre, il
+         * pouvait donc s'ecouler plusieurs secondes de rien du tout : pas un
+         * point, pas un signe. Sur une application ou l'on vient raconter sa
+         * soiree, ce blanc-la se lit comme une panne.
+         *
+         * Ce n'est pas la reponse et ca ne doit jamais en avoir l'air : c'est
+         * un brouillon, il tutoie parfois de travers, il se contredit. L'ecran
+         * le montre en retrait et replie -- montrable, pas mis en avant.
+         */
+        if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+          const bout = event.delta.thinking ?? '';
+          if (bout) { pensee += bout; onPense?.(bout); }
+        }
+        // Un tour d'outil ouvre un nouveau bloc de reflexion : on le separe du
+        // precedent, sinon la fin d'une pensee et le debut de la suivante se
+        // collent en un seul mot.
+        if (event.type === 'content_block_start' && event.content_block?.type === 'thinking' && pensee) {
+          pensee += '\n\n';
+          onPense?.('\n\n');
+        }
       }
       final = await stream.finalMessage();
     } catch (err) {
@@ -717,7 +743,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null) 
     messages.push({ role: 'user', content: resultats });
   }
 
-  return { text: text.trim(), backend: 'anthropic', model: final?.model, faits, usage };
+  return { text: text.trim(), pensee: pensee.trim(), backend: 'anthropic', model: final?.model, faits, usage };
 }
 
 /* ---------------- les outils du compagnon ---------------- */
@@ -956,7 +982,7 @@ export async function ollamaReply(history, s, memory, onText) {
  * Tout echec d'un backend distant retombe sur `scripted` ET LE DIT. Une panne
  * silencieuse serait un mensonge sur l'endroit ou partent les donnees.
  */
-export async function reply(history, settings, { memory = null, onText = null, exhausted = false, outils = null } = {}) {
+export async function reply(history, settings, { memory = null, onText = null, onPense = null, exhausted = false, outils = null } = {}) {
   const backend = settings.chatBackend ?? 'scripted';
 
   // Enveloppe epuisee : on ne coupe pas la parole a quelqu'un. Le compagnon
@@ -976,7 +1002,7 @@ export async function reply(history, settings, { memory = null, onText = null, e
 
   try {
     const r = backend === 'anthropic'
-      ? await anthropicReply(history, settings, memory, onText, outils)
+      ? await anthropicReply(history, settings, memory, onText, outils, onPense)
       : await ollamaReply(history, settings, memory, onText);
 
     if (r.refused) {

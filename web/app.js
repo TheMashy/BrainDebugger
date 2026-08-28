@@ -277,10 +277,7 @@ async function renderTonight() {
   });
 
   const input = $('#input');
-  input.oninput = () => {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
-  };
+  input.oninput = () => autoSize(input);
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
 
@@ -413,9 +410,9 @@ function drawThread() {
           `<button class="motifchip" data-motif="${x.id}" style="--motif:${x.teinte}"
             title="Motif suivi par le compagnon">${esc(x.nom)}</button>`).join('')}</span>`
       : '';
-    return sep + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte}
+    return sep + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte} data-id="${m.id ?? ''}"
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
-      }<span class="tx">${esc(m.text)}</span>${marque}</div>`;
+      }${reflexionMarkup(m)}<span class="tx">${esc(m.text)}</span>${marque}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
@@ -425,6 +422,52 @@ function drawThread() {
   majFil(th);
   bindGestes(th);
   syncPetSay();
+}
+
+/*
+ * CE QU'IL S'EST DIT AVANT DE REPONDRE.
+ *
+ * Replie par defaut, et ce n'est pas de la timidite d'interface : une
+ * reflexion est un BROUILLON. Elle hesite, elle se reprend, elle formule
+ * parfois de travers ce que la reponse dira correctement. Depliee d'office,
+ * elle se lirait comme un deuxieme avis -- souvent plus cru que le premier, et
+ * sur cette application-la, lu par quelqu'un qui vient de raconter sa soiree.
+ *
+ * Elle reste montrable, et c'est tout l'interet : quand une reponse tombe a
+ * cote, la premiere question est « qu'est-ce qu'il a compris ? », et la
+ * reponse est ici.
+ */
+const PENSEES_OUVERTES = new Set();
+
+function reflexionMarkup(m) {
+  if (m.role !== 'pet' || !m.reflexion) return '';
+  const ouvert = PENSEES_OUVERTES.has(m.id);
+  return `<div class="pensee${ouvert ? ' ouverte' : ''}">
+    <button class="penseetete" data-pensee="${m.id}" aria-expanded="${ouvert}">
+      <span class="lueur" aria-hidden="true"></span>
+      <span>${ouvert ? 'ce qu\'il s\'est dit' : 'il a réfléchi avant de répondre'}</span>
+    </button>
+    ${ouvert ? `<p class="penseetx">${esc(m.reflexion)}</p>` : ''}
+  </div>`;
+}
+
+/*
+ * REVENIR ICI.
+ *
+ * Le geste manquait, et il manquait exactement aux moments ou l'on tient le
+ * moins a se battre avec une interface : le compagnon vient de retomber
+ * hors-ligne et repond a cote, ou l'on se relit une faute une seconde trop
+ * tard. Sans lui, il ne restait qu'a ecrire un deuxieme message pour corriger
+ * le premier -- et les deux entraient dans la journee.
+ *
+ * Il n'est propose que sur ses propres messages : rembobiner depuis une reponse
+ * du compagnon laisserait la question sans reponse, ce qui n'est pas un etat
+ * dans lequel on veut se retrouver.
+ */
+function rembobMarkup(m) {
+  if (m.role !== 'user' || !m.id) return '';
+  return `<button class="rembob" data-rembob="${m.id}"
+    title="Revenir à ce message : ce qui suit est effacé, et cette phrase revient dans le champ.">revenir ici</button>`;
 }
 
 /* ---------- ce que le compagnon a posé pendant qu'il parlait ---------- */
@@ -576,6 +619,23 @@ function bindGestes(th) {
   if (th.dataset.gestes) return;
   th.dataset.gestes = '1';
   th.addEventListener('click', e => {
+    // Déplier ou replier une réflexion. Sur la bulle en cours, la boîte n'a pas
+    // encore d'identifiant : on bascule la classe sur place.
+    const pv = e.target.closest('[data-pensee-live]');
+    if (pv) {
+      pv.closest('.pensee').classList.toggle('ouverte');
+      pv.setAttribute('aria-expanded', String(pv.closest('.pensee').classList.contains('ouverte')));
+      return;
+    }
+    const pe = e.target.closest('[data-pensee]');
+    if (pe) {
+      const id = Number(pe.dataset.pensee);
+      if (PENSEES_OUVERTES.has(id)) PENSEES_OUVERTES.delete(id); else PENSEES_OUVERTES.add(id);
+      return drawThread();
+    }
+    const rb = e.target.closest('[data-rembob]');
+    if (rb) return rembobiner(Number(rb.dataset.rembob));
+
     const v = e.target.closest('[data-voir]');
     if (v) {
       demanderAura(v.dataset.voir);
@@ -629,6 +689,27 @@ function bindThreadReveal(th) {
   th.addEventListener('scroll', () => majFil(th), { passive: true });
 }
 
+/*
+ * La bulle en cours d'ecriture. Elle vit hors de `S.messages` : ce message
+ * n'existe pas encore en base, et le mettre dans l'etat obligerait chaque
+ * redessin du fil a savoir qu'un de ses elements est en train d'etre tape.
+ */
+let EN_COURS = null;
+
+/** Le point qui pulse s'arrete des la premiere lettre : il a dit ce qu'il avait a dire. */
+function finAttente(el) {
+  const a = el?.querySelector('.attente');
+  if (a) a.remove();
+  el?.querySelector('.penseeetat')?.replaceChildren(document.createTextNode('ce qu\'il s\'est dit'));
+  el?.querySelector('.pensee')?.classList.remove('vivante');
+}
+
+/** Le composeur grandit avec le texte, jusqu'à 160 px. */
+function autoSize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
 /** Lit un flux SSE renvoyé par fetch et appelle `on(event, data)` par trame. */
 async function readSSE(res, on) {
   const reader = res.body.getReader();
@@ -678,16 +759,50 @@ async function send() {
       if (ev === 'user') {
         S.messages = data.messages;
         drawThread();
-        // bulle vide dans laquelle le compagnon va écrire
+        /*
+         * LA BULLE EXISTE AVANT LA PREMIERE LETTRE.
+         *
+         * Elle s'ouvre sur un point qui pulse. Entre l'envoi et le premier mot
+         * il peut s'ecouler plusieurs secondes -- davantage quand le compagnon
+         * pose un repere en chemin -- et ce blanc-la, sur une application ou
+         * l'on vient de raconter quelque chose de difficile, se lit comme
+         * « il n'a rien reçu ». Un signe qui bouge dit « il est là », ce qui
+         * est le minimum qu'on doive a quelqu'un qui attend.
+         */
         const th = $('#thread');
         const el = document.createElement('div');
-        el.className = 'msg pet';
-        el.innerHTML = '<span class="tx"></span>';
+        el.className = 'msg pet encours';
+        el.innerHTML = `<div class="pensee vivante" hidden>
+            <button class="penseetete" data-pensee-live aria-expanded="false">
+              <span class="lueur" aria-hidden="true"></span><span class="penseeetat">il réfléchit</span>
+            </button>
+            <p class="penseetx"></p>
+          </div>
+          <span class="attente" aria-label="Il réfléchit"><i></i><i></i><i></i></span>
+          <span class="tx"></span>`;
         th.appendChild(el);
+        EN_COURS = el;
         th.scrollTop = th.scrollHeight;
         majFil(th);
         Blip.reset();
-        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'), { onChar: speakChar });
+        typing = PetTalk.startStream($('#art'), el.querySelector('.tx'),
+                                     { onChar: speakChar, onPremier: () => finAttente(el) });
+        return;
+      }
+
+      /*
+       * La reflexion arrive AVANT la reponse, et se pousse toute seule vers le
+       * bas : on suit la derniere ligne comme on suit un curseur, sans avoir a
+       * la lire -- c'est le fait qu'elle bouge qui informe, pas son contenu.
+       */
+      if (ev === 'pense') {
+        if (!EN_COURS) return;
+        const box = EN_COURS.querySelector('.pensee');
+        const tx = EN_COURS.querySelector('.penseetx');
+        box.hidden = false;
+        tx.textContent += data.text;
+        if (!box.classList.contains('ouverte')) tx.scrollTop = tx.scrollHeight;
+        $('#thread').scrollTop = $('#thread').scrollHeight;
         return;
       }
 
@@ -709,10 +824,15 @@ async function send() {
         return;
       }
 
-      if (ev === 'delta') { PetTalk.feed(data.text); $('#thread').scrollTop = $('#thread').scrollHeight; return; }
+      if (ev === 'delta') {
+        PetTalk.feed(data.text);
+        $('#thread').scrollTop = $('#thread').scrollHeight;
+        return;
+      }
 
       if (ev === 'done') {
         PetTalk.endStream();
+        finAttente(EN_COURS);
         if (data.usage) { S.usage = data.usage; syncGauge(); }
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
@@ -728,14 +848,62 @@ async function send() {
     });
 
     await typing;
+    EN_COURS = null;
     drawThread();                       // repose les horodatages définitifs
   } catch (err) {
     PetTalk.stop();
+    EN_COURS = null;
     toast(String(err.message));
   } finally {
     const b = $('#send');
     if (b) b.disabled = false;
     $('#input')?.focus();
+  }
+}
+
+/*
+ * REMBOBINER.
+ *
+ * Deux choses la rendent sure sans qu'elle ait besoin d'une boite de dialogue :
+ * on dit combien de messages partent, et le message vise revient dans le
+ * composeur. Ce qui disparait de la base reapparait donc dans le champ ou l'on
+ * ecrit -- il n'y a pas d'instant ou la phrase n'existe nulle part.
+ *
+ * L'etat entier est relu apres coup. Le rembobinage change le texte d'une
+ * journee, donc le compte des journees ecrites, donc la reference, donc le
+ * decor : recoller ces morceaux un par un cote client, c'est se garantir qu'un
+ * d'entre eux finira par mentir.
+ */
+async function rembobiner(id) {
+  const msg = S.messages.find(m => m.id === id);
+  if (!msg) return;
+  const apres = S.messages.filter(m => (Date.parse(m.ts) || 0) > (Date.parse(msg.ts) || 0)).length;
+  if (apres && !confirm(
+      `Revenir à ce message ?\n\n${apres} message${apres > 1 ? 's' : ''} qui ${apres > 1 ? 'suivent' : 'suit'} `
+      + `${apres > 1 ? 'seront effacés' : 'sera effacé'}. Ta phrase revient dans le champ pour que tu la réécrives.`)) {
+    return;
+  }
+  PetTalk.stop();
+  try {
+    const r = await api('/api/message/rembobiner', { id });
+    S = await api('/api/state');
+    GESTES = [];
+    drawThread();
+    syncHeader();
+    syncGauge();
+    syncAmbiance();
+    const input = $('#input');
+    if (input && r.texte) {
+      input.value = r.texte;
+      autoSize(input);
+      input.focus();
+      // Le curseur au bout : on revient corriger la fin d'une phrase bien plus
+      // souvent qu'on ne revient la reecrire depuis le debut.
+      input.setSelectionRange(r.texte.length, r.texte.length);
+    }
+    toast(r.supprimes > 1 ? `${r.supprimes} messages retirés.` : 'Message retiré.');
+  } catch (err) {
+    toast(err.message);
   }
 }
 

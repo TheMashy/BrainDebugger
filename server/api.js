@@ -5,7 +5,7 @@ import {
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
-  getLecture, setLecture, TEINTES
+  getLecture, setLecture, rembobiner, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -954,6 +954,28 @@ export const routes = {
              arelire: false, cle: true, usage: usageFor(userId) };
   },
 
+  /*
+   * REMBOBINER : revenir a un message et repartir de la.
+   *
+   * On rend le texte du message vise pour que l'interface le remette dans le
+   * composeur. Rien n'est perdu en silence : ce qui disparait de la base
+   * reapparait dans le champ ou on ecrit, et c'est la personne qui decide de le
+   * renvoyer ou non.
+   *
+   * `invalidate` n'est pas facultatif : la serie, l'index de recherche et le
+   * compte des journees ecrites sont en cache, et le rembobinage vient de
+   * changer le texte d'une journee. Sans lui, l'ecran suivant montrerait des
+   * chiffres calcules sur une phrase qui n'existe plus.
+   */
+  'POST /api/message/rembobiner': ({ body, userId }) => {
+    const id = Number(body?.id);
+    if (!Number.isInteger(id)) return { error: 'identifiant de message manquant' };
+    const r = rembobiner(id, userId);
+    if (!r) return { error: "Ce message n'existe plus." };
+    invalidate(userId);
+    return { ...r, messages: recentMessages(80, userId), motifs: motifsDuFil(userId) };
+  },
+
   'GET /api/objectifs': ({ userId }) => ({ objectifs: allObjectifs(userId) }),
 
   /**
@@ -1158,12 +1180,14 @@ export async function streamMessage(body, send, userId = OWNER) {
     // le texte du message en cours : c'est lui qui declenche les echos
     memory: recentMemory(date, userId, text),
     onText: chunk => send('delta', { text: chunk }),
+    onPense: chunk => send('pense', { text: chunk }),
     exhausted: before.exhausted,
     outils: outilsPour(userId, messageId, send)
   });
   if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
 
-  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
+  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
+               text: r.text, reflexion: r.pensee ?? null, userId });
   send('done', {
     messages: recentMessages(80, userId),
     motifs: motifsDuFil(userId),

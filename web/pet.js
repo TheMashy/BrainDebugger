@@ -100,7 +100,7 @@ export const PetTalk = {
 
   _q: null,
 
-  startStream(artEl, bubbleEl, { charMs = 22, onChar = null } = {}) {
+  startStream(artEl, bubbleEl, { charMs = 22, onChar = null, onPremier = null } = {}) {
     this.stop();
     const token = this._abort = {};
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -109,17 +109,48 @@ export const PetTalk = {
 
     const q = this._q = {
       token, artEl, bubbleEl, chars: [], closed: false, reduced,
-      done: null, charMs, onChar
+      done: null, charMs, onChar, onPremier, premier: false
     };
     q.done = new Promise(resolve => { q.resolve = resolve; });
     this._drain(q);
     return q.done;
   },
 
+  /*
+   * CHAQUE LETTRE ARRIVE EN FONDU.
+   *
+   * Le texte se posait par `textContent +=` : la lettre apparaissait d'un coup,
+   * a plein contraste. A vingt-deux millisecondes l'oeil ne voit pas des
+   * lettres, il voit une bordure qui clignote sur la droite du texte.
+   *
+   * Chaque caractere devient donc un <span> avec une breve animation
+   * d'apparition. Trois cents spans pour une reponse de compagnon, c'est
+   * l'ordre de grandeur d'un paragraphe de texte riche -- et ils disparaissent
+   * au redessin du fil, qui repose le message en texte simple.
+   *
+   * Les espaces restent des noeuds de texte : un <span> autour d'une espace
+   * empeche le navigateur d'y couper la ligne, et le paragraphe deborde de sa
+   * bulle des la premiere phrase longue.
+   */
+  _poser(q, c) {
+    if (q.reduced || c === ' ' || c === '\n') {
+      q.bubbleEl.appendChild(document.createTextNode(c));
+      return;
+    }
+    const n = document.createElement('span');
+    n.className = 'lettre';
+    n.textContent = c;
+    q.bubbleEl.appendChild(n);
+  },
+
   feed(chunk) {
     const q = this._q;
     if (!q || this._abort !== q.token || !chunk) return;
-    if (q.reduced) { q.bubbleEl.textContent += chunk; return; }
+    if (q.reduced) {
+      if (!q.premier) { q.premier = true; q.onPremier?.(); }
+      q.bubbleEl.appendChild(document.createTextNode(chunk));
+      return;
+    }
     q.chars.push(...chunk);
   },
 
@@ -135,7 +166,8 @@ export const PetTalk = {
     while (this._abort === q.token) {
       if (q.chars.length) {
         const c = q.chars.shift();
-        q.bubbleEl.textContent += c;
+        if (!q.premier) { q.premier = true; q.onPremier?.(); }
+        this._poser(q, c);
         q.onChar?.(c);
         if (c === ' ') this.beat(q.artEl);
         // file qui s'allonge : on accélère pour ne pas prendre du retard sur le modèle

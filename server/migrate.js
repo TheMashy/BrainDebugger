@@ -153,7 +153,20 @@ const AJOUTS = [
    * notes deviendrait un mot du 26 aout, la carte le relierait a ce jour-la, et
    * « tu as deja ecrit ca » renverrait le mardi ou on a colle.
    */
-  ['messages', 'rangee', 'INTEGER']
+  ['messages', 'rangee', 'INTEGER'],
+  /*
+   * Ce que le compagnon s'est dit avant de repondre.
+   *
+   * On la garde en base plutot qu'a l'ecran seulement : une reflexion qui
+   * disparait au rechargement ne peut pas etre relue, et c'est justement quand
+   * on relit une reponse etrange qu'on veut savoir d'ou elle vient. Elle reste
+   * dans le fil, repliee, a cote de la reponse qu'elle a produite.
+   *
+   * Elle n'entre JAMAIS dans le texte d'une journee : rebuildEntryText ne lit
+   * que `text`, et seulement des messages de role 'user'. Ce que la machine
+   * s'est dit n'est pas ce que la personne a ecrit.
+   */
+  ['messages', 'reflexion', 'TEXT']
 ];
 
 /**
