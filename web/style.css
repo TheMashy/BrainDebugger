@@ -66,9 +66,24 @@ a { color: var(--accent); }
  * et ne change pas quand on navigue : c'est le panneau de droite qui change.
  * Une navigation ou tout bouge donne l'impression de changer d'application.
  */
+/*
+ * LA COQUILLE PREND CE QU'ON LUI DONNE.
+ *
+ * Elle etait bornee a 1180 px, une mesure de page de texte -- juste pour un
+ * article, fausse pour cette application. Ce qu'on y regarde n'est pas du
+ * texte : c'est une grille de trente et un jours par douze mois, une courbe de
+ * quatre ans, une carte a seize noeuds. Chacun de ces trois objets etait
+ * comprime pendant qu'un tiers de l'ecran restait noir.
+ *
+ * 1520 et pas « aucune limite » : au-dela, la ligne de texte du fil et de la
+ * synthese depasse la centaine de caracteres, et l'oeil perd le debut de la
+ * ligne suivante. Les blocs qui ont besoin d'etre courts se bornent d'ailleurs
+ * eux-memes (la synthese, les themes) -- la coquille, elle, ne doit plus les
+ * en empecher.
+ */
 .shell {
-  max-width: 1180px; margin: 0 auto;
-  height: 100dvh; display: grid; grid-template-columns: 218px minmax(0, 1fr);
+  max-width: 1520px; margin: 0 auto;
+  height: 100dvh; display: grid; grid-template-columns: 234px minmax(0, 1fr);
 }
 /* Un enfant de grille vaut `min-height: auto` : il refuse de descendre sous la
    hauteur de son contenu, et c'est la PAGE qui grandit a sa place. Le fil ne
@@ -185,7 +200,19 @@ nav button[aria-current="true"] { color: var(--ink); background: none; }
    page coupé — un bouton « 0 » inatteignable le soir où il sert, ce n'est pas
    un défaut d'esthétique. */
 #view:has(> .tonight) { overflow: hidden; padding-bottom: 20px; }
-.tonight { height: 100%; }
+/*
+ * PARLER NE PREND PAS LA LARGEUR, ET C'EST LE SEUL.
+ *
+ * La coquille s'est elargie pour la grille, les courbes et la carte -- trois
+ * objets qui ont vraiment besoin de place. Une conversation, non : a mille cinq
+ * cents pixels, une bulle a gauche et la suivante a droite sont separees par un
+ * metre de vide, et l'oeil fait l'aller-retour a chaque tour de parole.
+ *
+ * Elle reste donc dans une colonne, centree. C'est la meme raison qui borne un
+ * paragraphe a soixante-cinq signes : ce qui se lit ligne apres ligne se lit
+ * mal quand la ligne est trop longue.
+ */
+.tonight { height: 100%; width: 100%; max-width: 980px; margin: 0 auto; }
 
 /*
  * ON ARRIVE PRET A ECRIRE.
@@ -283,6 +310,22 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
    concurrence avec elle-même. Dès qu'on remonte, tout redevient net : le geste
    de scroller EST l'intention de lire. */
 .msg.past { opacity: .42; transition: opacity .32s ease; }
+
+/* Le silence entre deux messages. Une heure de plus dans un horodatage ne se
+   remarque pas ; « 7 h plus tard », si — et c'est ce qu'on cherche en relisant
+   une soirée six mois après : est-ce qu'il y a eu une nuit entre ces deux
+   phrases. Un filet plutôt qu'une bulle : ce n'est rien qui a été dit. */
+.creux {
+  display: flex; align-items: center; gap: 12px;
+  margin: 4px 0; color: var(--ink-faint);
+}
+.creux::before, .creux::after {
+  content: ""; flex: 1; height: 1px; background: var(--line-soft);
+}
+.creux span {
+  font-family: var(--mono); font-size: 9.5px;
+  letter-spacing: .1em; text-transform: uppercase; white-space: nowrap;
+}
 .thread.reading .msg.past { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .msg.past { transition: none; }
@@ -704,9 +747,7 @@ nav button { white-space: nowrap; }
   .repligne { flex-wrap: wrap; gap: 8px 10px; }
   .replabel { flex: 1 1 100%; white-space: normal; order: 3; }
   .repdate { flex: 0 0 auto; }
-  .motifitem { flex-wrap: wrap; }
-  .motiftxt { flex: 1 1 60%; }
-  .frise, .repform, .motiflist { max-width: none; }
+  .frise, .repform { max-width: none; }
 
   /* Une bulle bornée à la moitié de la largeur devient une colonne de deux mots
      sur un écran de 390 px. */
@@ -989,7 +1030,6 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .lectcarte .cartewrap canvas { height: clamp(320px, 44vh, 480px); }
 .lectdit { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 .lectdit .synthese { max-width: none; margin: 0; }
-.lectdit .motifcard { margin: 0; }
 
 /* La barre de fenêtre d'Année : un seul réglage, en tête des trois graphiques.
    Il y en avait trois, à trois endroits, avec trois vocabulaires. */
@@ -1043,32 +1083,90 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 @keyframes tourne { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 
-/* --- un thème --- */
+/* ---------------------------------------------------------------------
+   UN MÉCANISME.
 
-.themes { display: flex; flex-direction: column; gap: 2px; margin-bottom: 34px; }
-.theme { border-radius: 11px; transition: background .13s; }
-.theme:hover { background: var(--panel-2); }
-.theme.ouvert { background: var(--panel-2); }
-.thead {
-  display: flex; align-items: center; gap: 13px; width: 100%;
-  background: none; border: 0; padding: 11px 13px; text-align: left; color: inherit;
+   Une seule forme pour les deux sources : ce que le compagnon reconnaît en
+   conversation (un motif) et ce qu'il tire d'une relecture du corpus (un
+   thème). Il y avait deux listes, deux formes, deux couleurs, deux endroits,
+   pour deux façons de répondre à la même question.
+
+   TOUTES LES TEINTES VIENNENT DE LA BANDE DÉCLARÉE (232–336), disjointe de la
+   rampe des notes. Un mécanisme est ce que le compagnon comprend, pas ce que
+   les journées mesurent : il ne peut pas emprunter le vert d'une bonne
+   journée, même par accident.
+   --------------------------------------------------------------------- */
+
+.themes { display: flex; flex-direction: column; gap: 5px; margin-bottom: 34px; }
+
+.meca {
+  border-radius: 11px;
+  background: color-mix(in srgb, hsl(var(--m) 50% 40%) 9%, var(--panel));
+  border: 1px solid color-mix(in srgb, hsl(var(--m) 55% 55%) 14%, transparent);
+  transition: background .13s, border-color .13s;
 }
-/* L'intensité est une TAILLE, jamais une couleur : la couleur dit déjà l'écart
-   d'une journée partout ailleurs dans l'application. */
-.tpuce { flex: none; border-radius: 50%; background: var(--ink-dim); }
-.tpuce[data-i="0"] { width: 4px; height: 4px; opacity: .45; }
-.tpuce[data-i="1"] { width: 6px; height: 6px; opacity: .6; }
-.tpuce[data-i="2"] { width: 8px; height: 8px; opacity: .8; }
-.tpuce[data-i="3"] { width: 10px; height: 10px; background: var(--accent); }
-.tnom { flex: 1; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meca:hover  { background: color-mix(in srgb, hsl(var(--m) 50% 42%) 15%, var(--panel)); }
+.meca.ouvert {
+  background: color-mix(in srgb, hsl(var(--m) 50% 42%) 15%, var(--panel));
+  border-color: color-mix(in srgb, hsl(var(--m) 55% 55%) 32%, transparent);
+}
+
+.mhead {
+  display: flex; align-items: center; gap: 13px; width: 100%;
+  background: none; border: 0; padding: 11px 14px; text-align: left; color: inherit;
+}
+/* L'intensité est une TAILLE, la couleur dit de quel mécanisme il s'agit.
+   Les deux ensemble : on repère un mécanisme à sa couleur d'un écran à
+   l'autre, et on lit où il en est à la taille de sa pastille. */
+.tpuce { flex: none; border-radius: 50%; background: hsl(var(--m) 58% 62%); }
+.tpuce[data-i="0"] { width: 5px;  height: 5px;  opacity: .4; }
+.tpuce[data-i="1"] { width: 6px;  height: 6px;  opacity: .62; }
+.tpuce[data-i="2"] { width: 8px;  height: 8px;  opacity: .82; }
+.tpuce[data-i="3"] { width: 10px; height: 10px; box-shadow: 0 0 8px hsl(var(--m) 60% 55% / .5); }
+.tnom {
+  flex: 1; font-size: 15px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: hsl(var(--m) 45% 84%);
+}
+.mcompte {
+  flex: none; font-size: 13px; color: hsl(var(--m) 50% 70%);
+  font-variant-numeric: tabular-nums;
+}
+.mcompte small { font-size: 10px; opacity: .6; }
 
 /* La série : une forme, pas un graphe. Pas d'axe, pas d'échelle — on y lit
    « ça monte », « ça revient par vagues », et c'est tout ce qu'on lui demande. */
 .tserie { display: flex; align-items: flex-end; gap: 1.5px; height: 20px; flex: none; }
-.tserie i { width: 3px; background: var(--ink-faint); border-radius: 1px; opacity: .7; }
-.theme.ouvert .tserie i, .theme:hover .tserie i { background: var(--accent); opacity: .85; }
+.tserie i {
+  width: 3px; border-radius: 1px;
+  background: hsl(var(--m) 45% 60%); opacity: .55;
+}
+.meca.ouvert .tserie i, .meca:hover .tserie i { opacity: .95; }
 
-.tcorps { padding: 0 13px 14px 39px; }
+.tcorps { padding: 0 14px 14px 40px; }
+
+/* La palette d'un motif, dans son corps déplié : cinq teintes et le retrait.
+   Le bouton « ne plus suivre » n'est pas une politesse — un mécanisme mal
+   nommé, posé sur quelqu'un par une machine, doit pouvoir disparaître d'un
+   clic, sinon c'est une étiquette, et ce produit n'en pose pas. */
+.mmeta { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-faint); }
+.mmeta b { color: var(--ink-dim); font-weight: 500; }
+.mpalette {
+  display: flex; align-items: center; gap: 7px;
+  padding-top: 10px; border-top: 1px solid var(--line-soft);
+}
+.mpalette [data-teinte] {
+  width: 16px; height: 16px; border-radius: 50%; padding: 0;
+  border: 1.5px solid hsl(var(--t) 58% 62%); background: none;
+  transition: background .12s ease;
+}
+.mpalette [data-teinte]:hover { background: hsl(var(--t) 58% 62% / .4); }
+.mpalette [data-teinte][aria-pressed="true"] { background: hsl(var(--t) 58% 62%); }
+.mpalette .repdel {
+  margin-left: auto; opacity: .5; width: auto; height: auto;
+  font-size: 11px; letter-spacing: .04em; padding: 4px 6px;
+}
+.mpalette .repdel:hover { opacity: 1; color: var(--warn); }
 .tquoi { margin: 0 0 12px; font-size: 14px; color: var(--ink-dim); max-width: 40em; }
 /* Le chiffre comparé à la normale. Il se lit comme une remarque — « tiens,
    ça » — et pas comme un verdict : chiffres en monospace pour qu'on voie tout
@@ -1078,7 +1176,7 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   margin: -4px 0 13px; padding: 8px 12px; max-width: 40em;
   font-size: 13px; line-height: 1.5; color: var(--ink);
   background: var(--panel); border-radius: 9px;
-  border-left: 2px solid var(--accent-dk);
+  border-left: 2px solid hsl(var(--m) 50% 42%);
   font-variant-numeric: tabular-nums;
 }
 .tpreuves { display: flex; flex-direction: column; gap: 2px; }
@@ -1087,7 +1185,7 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   background: none; border: 0; padding: 6px 8px; border-radius: 8px; color: inherit;
   border-left: 2px solid var(--line);
 }
-.tpreuve:hover { background: var(--surface); border-left-color: var(--accent); }
+.tpreuve:hover { background: var(--surface); border-left-color: hsl(var(--m) 58% 58%); }
 .tpreuve .mono { font-size: 11px; color: var(--ink-faint); flex: none; }
 .tpreuve span:last-child {
   font: 300 14px/1.5 var(--serif); color: var(--ink-dim);
@@ -1096,7 +1194,7 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .tliens { margin: 12px 0 0; font-size: 12px; color: var(--ink-faint); }
 .tliens button { background: none; border: 0; padding: 0; color: var(--ink-dim); text-decoration: underline;
   text-underline-offset: 3px; font-size: 12px; }
-.tliens button:hover { color: var(--accent); }
+.tliens button:hover { color: hsl(var(--m) 58% 68%); }
 
 /* --- la carte organique --- */
 
@@ -1224,6 +1322,51 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 }
 .dayhead .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .dayhead .bignum .sl { font-size: 16px; color: var(--ink-faint); }
+/* Le grand chiffre devient un bouton : on relit une journée cent fois pour une
+   fois qu'on la renote, mais quand on veut la renoter, c'est le chiffre qu'on
+   vise. Rien ne change à l'œil tant qu'on ne le survole pas. */
+button.bignum {
+  background: none; border: 0; padding: 0; border-radius: 8px;
+  font: inherit; text-align: left; cursor: pointer;
+}
+button.bignum:hover { opacity: .82; }
+.jourstrip { margin: 4px 0 16px; max-width: 420px; }
+.jourdenote {
+  background: none; border: 0; color: var(--ink-faint);
+  font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 0 6px; border-radius: 0;
+}
+.jourdenote:hover { color: var(--warn); }
+
+/* --------------------------------------------------------------------
+   LES JOURS MANQUÉS, DANS LA CARTE DE NOTE.
+
+   Ils n'apparaissent que s'il y en a : une rangée permanente de cases vides
+   serait un reproche quotidien, et ce produit ne relance pas les jours de
+   silence. Le point sous un jour dit qu'on a écrit ce jour-là sans le noter —
+   c'est celui-là qu'on veut rattraper en premier.
+   -------------------------------------------------------------------- */
+.manques { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -2px 0 10px; }
+.manques .k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; margin-right: 2px; }
+.manques button {
+  position: relative; background: var(--panel-2); border: 1px solid var(--line-soft);
+  color: var(--ink-dim); border-radius: 7px; padding: 3px 9px 4px;
+  font-size: 11.5px; white-space: nowrap;
+}
+.manques button:hover { border-color: var(--line); color: var(--ink); }
+.manques button[aria-pressed="true"] {
+  border-color: var(--accent-dk); color: var(--accent); background: var(--surface);
+}
+.manques button i {
+  position: absolute; left: 50%; bottom: 2px; translate: -50% 0;
+  width: 3px; height: 3px; border-radius: 50%; background: var(--accent); opacity: .8;
+}
+.notecard.rattrape { box-shadow: inset 2px 0 0 var(--accent-dk); }
+.retourjour {
+  background: none; border: 0; padding: 2px 4px; border-radius: 5px;
+  font-size: 11px; color: var(--ink-faint);
+}
+.retourjour:hover { color: var(--accent); }
 /* La note du jour ouvert est l'information la plus consultee de l'ecran, et
    elle etait un chiffre gris parmi d'autres chiffres gris. Meme couleur que sa
    case dans le calendrier : on retrouve la journee d'un coup d'oeil. */
@@ -1346,44 +1489,6 @@ body:has(#ambiance) { background: transparent; }
    d'enlever. */
 .msg.teinte { border-left-color: hsl(var(--motif) 68% 58% / .9); }
 
-/* ---------------------------------------------------------------------
-   LE CODE COULEUR DES COMPORTEMENTS.
-
-   La teinte était posée dans l'ordre de création : sûrement distincte, mais
-   sans aucun rapport avec le sens. Deux mécanismes qui vont ensemble se
-   retrouvaient de deux couleurs étrangères. La pastille devient donc un
-   bouton, et la palette reste celle des DÉCLARÉES (232–336) — disjointe de la
-   rampe des notes, pour qu'une déclaration ne puisse jamais passer pour une
-   mesure.
-   --------------------------------------------------------------------- */
-.motifitem { position: relative; flex-wrap: wrap; }
-button.motifpuce {
-  border: 0; padding: 0; cursor: pointer;
-  transition: transform .12s ease, box-shadow .12s ease;
-}
-button.motifpuce:hover, button.motifpuce:focus-visible {
-  transform: scale(1.45);
-  box-shadow: 0 0 0 3px color-mix(in srgb, hsl(var(--motif) 68% 58%) 22%, transparent);
-}
-.motiflie {
-  display: block; margin-top: 3px; font-size: 11px;
-  color: hsl(var(--motif) 55% 66%);
-}
-/* `.motifitem` est une rangée flex : la palette doit passer à la ligne, pas
-   se glisser entre le compte et la croix. `flex-basis: 100%` avec le wrap du
-   parent, et elle prend sa propre ligne. */
-.motifteintes {
-  flex: 0 0 100%; display: flex; gap: 7px;
-  padding: 10px 0 2px; margin-left: 20px;
-}
-.motifteintes[hidden] { display: none; }
-.motifteintes button {
-  width: 17px; height: 17px; border-radius: 50%; padding: 0;
-  border: 1.5px solid hsl(var(--t) 58% 62%); background: none;
-  transition: background .12s ease;
-}
-.motifteintes button:hover { background: hsl(var(--t) 58% 62% / .4); }
-.motifteintes button[aria-pressed="true"] { background: hsl(var(--t) 58% 62%); }
 .msg.teinte .tx { color: var(--ink); }
 .msg .motifs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 /* Une puce de motif n'est pas un bouton d'action : c'est une note en marge.
@@ -1613,31 +1718,13 @@ button.motifpuce:hover, button.motifpuce:focus-visible {
   font-size: 17px; line-height: 1; padding: 2px 7px; border-radius: 6px;
   opacity: 0; transition: opacity .12s, color .12s;
 }
-.repligne:hover .repdel, .motifitem:hover .repdel, .repdel:focus-visible { opacity: 1; }
+.repligne:hover .repdel, .repdel:focus-visible { opacity: 1; }
 .repdel:hover { color: #f0777c; }
 
 /* --- les motifs, dans Réglages --- */
 
-.motiflist { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
-.motifitem {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px; border-radius: 11px;
-  background: color-mix(in srgb, hsl(var(--motif) 50% 40%) 9%, var(--surface));
-  border: 1px solid hsl(var(--motif) 40% 34% / .45);
-}
-.motifpuce {
-  flex: none; width: 9px; height: 9px; border-radius: 50%;
-  background: hsl(var(--motif) 70% 62%);
-  box-shadow: 0 0 11px -1px hsl(var(--motif) 70% 62% / .75);
-}
-.motiftxt { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.motiftxt b { font-size: 14px; font-weight: 500; color: hsl(var(--motif) 55% 82%); }
-.motiftxt .faint { font-size: 12px; }
-.motifn {
-  flex: none; font-size: 14px; color: hsl(var(--motif) 60% 70%);
-  font-variant-numeric: tabular-nums;
-}
-.motifn small { font-size: 10px; opacity: .6; margin-left: 1px; }
+/* `.motiflist` et `.motifitem` ont disparu avec le panneau des comportements :
+   ils vivent maintenant dans la liste unique des mécanismes (`.meca`). */
 
 
 
@@ -1667,7 +1754,7 @@ button.motifpuce:hover, button.motifpuce:focus-visible {
   .repdel { opacity: 1; min-width: 38px; min-height: 38px; font-size: 20px; }
   .repligne { flex-wrap: wrap; gap: 8px 10px; padding: 9px 8px; }
   .replabel { flex: 1 1 100%; white-space: normal; order: 3; }
-  .frise, .repform, .motiflist { max-width: none; }
+  .frise, .repform { max-width: none; }
   .repform { gap: 8px; }
   .repform input[type="text"] { flex: 1 1 100%; order: 2; }
   .repapercu { order: 1; }
@@ -1702,23 +1789,65 @@ button.motifpuce:hover, button.motifpuce:focus-visible {
 .cnhint { margin: 0; font-size: 12px; line-height: 1.5; max-width: 62ch; }
 .cnactions { display: flex; gap: 8px; }
 
-.cnliste { display: flex; flex-direction: column; gap: 2px; }
-/* Une note ne doit jamais pouvoir se lire comme une journée : liseré à gauche,
-   fond en retrait, et la date d'apport dite quand elle diffère du jour raconté. */
+/* ---------------------------------------------------------------------
+   LES NOTES RANGÉES, REPLIÉES.
+
+   Une note collée fait souvent trois mille signes. Déroulées, dix d'entre
+   elles remplissent quinze écrans, et l'on ne peut plus retrouver celle qu'on
+   cherche : une liste où rien ne se distingue n'est pas une liste, c'est un
+   mur. Repliée, elle tient sur une pastille — son icône, sa date, sa taille.
+
+   Une note ne doit jamais pouvoir se lire comme une journée : liseré à gauche
+   et fond en retrait, ouverte comme fermée.
+   --------------------------------------------------------------------- */
+.cnliste { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+
 .cnitem {
-  border-left: 2px solid var(--line); padding: 9px 0 9px 13px;
-  border-bottom: 1px solid var(--line-soft);
+  border-radius: 10px; border: 1px solid var(--line-soft);
+  background: var(--panel); overflow: hidden;
+  transition: border-color .13s;
 }
-.cnitem:last-child { border-bottom: 0; }
-.cnitem:hover { border-left-color: var(--accent); }
-.cnmeta { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.cnitem:hover { border-color: var(--line); }
+/* Ouverte, elle prend toute la ligne : un texte de trois mille signes dans une
+   pastille de deux cents pixels serait illisible. */
+.cnitem.ouverte { flex: 1 1 100%; border-color: var(--line); }
+
+.cnpuce {
+  display: flex; align-items: center; gap: 9px;
+  background: none; border: 0; padding: 7px 12px 7px 10px;
+  color: var(--ink-dim); text-align: left; width: 100%;
+}
+.cnpuce:hover { color: var(--ink); }
+.cnicone { display: flex; flex: none; color: var(--ink-faint); }
+.cnitem:hover .cnicone, .cnitem.ouverte .cnicone { color: var(--accent); }
+.cnquand { font-size: 12.5px; white-space: nowrap; }
+.cntaille { font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; }
+
+.cncorps {
+  padding: 2px 14px 14px 14px;
+  border-left: 2px solid var(--line);
+  margin-left: 14px;
+}
+.cnmeta { display: flex; align-items: baseline; gap: 12px; margin-bottom: 9px; flex-wrap: wrap; }
 .cnmeta .faint { font-size: 11px; }
 .cndate {
   background: none; border: 0; padding: 0; color: var(--ink-dim);
   font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em;
 }
 button.cndate:hover { color: var(--accent); }
-.cnmeta .repdel { margin-left: auto; }
+.cnmeta .repdel {
+  margin-left: auto; opacity: .5; width: auto; height: auto;
+  font-size: 11px; letter-spacing: .04em; padding: 3px 5px;
+}
+.cnmeta .repdel:hover { opacity: 1; color: var(--warn); }
+
+/* Ce qui ressort de la note : ses termes qui pèsent, pas un résumé. Un résumé
+   serait une reformulation, et ses mots lui appartiennent. */
+.cntermes { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 11px; }
+.cntermes span {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  color: var(--ink-dim); background: var(--surface);
+}
 .cntexte { margin: 0; font-size: 13.5px; line-height: 1.62; color: var(--ink-dim);
            white-space: pre-wrap; max-width: 72ch; }
 

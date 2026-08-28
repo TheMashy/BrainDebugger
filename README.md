@@ -190,6 +190,20 @@ tient dans l'arrondi de la note). Et ces lignes disent « les dimanches sont plu
 les autres jours », un fait sur des jours ; jamais « tu vas moins bien le dimanche », un
 fait sur quelqu'un.
 
+**On peut renoter une journée, et rattraper celles qu'on a sautées.** La note ne se posait
+que sur aujourd'hui : une note mise trop vite le restait pour toujours, et une semaine
+sautée gardait ses trous — ce n'est pas une lacune d'interface, c'est la seule perte de
+données que ce produit ne savait pas réparer, puisque la référence glissante compte alors
+avec un mois de moins.
+
+Changer une note se fait dans la journée ouverte, en cliquant le grand chiffre : on y est
+déjà, on relit ce qu'on avait écrit, et c'est le seul endroit où l'on a de quoi juger.
+Rattraper se fait dans la carte de note de « Parler », qui liste les sept derniers jours
+non notés — sept, pas trente : au-delà on ne se souvient plus de sa journée, et une note
+posée de mémoire lointaine entre dans la même série que les autres sans avoir été calibrée
+comme elles. Ils n'apparaissent que s'il y en a : une rangée permanente de cases vides
+serait un reproche quotidien.
+
 **La note reste toujours saisie à la main.** Un modèle qui scorerait les journées
 casserait la comparabilité avec tout l'historique : la valeur d'une série de plusieurs
 années tient au fait que c'est le même cerveau qui a calibré à chaque fois.
@@ -331,6 +345,14 @@ fragments sont mis en file et drainés à cadence constante côté navigateur, p
 frappe reste régulière quelle que soit la vitesse du modèle, et chaque lettre arrive en
 fondu.
 
+**Il a une montre.** Chaque message du fil lui arrive précédé de son jour et de son heure.
+L'historique partait sans une seule date : il ne pouvait donc pas savoir qu'on lui écrivait
+à trois heures du matin, ni que sept heures s'étaient écoulées depuis la dernière phrase —
+alors que c'est ce qu'on remarque en premier chez quelqu'un qu'on connaît. Le marqueur est
+posé par l'application et la consigne lui interdit de le recopier ; elle lui demande aussi
+de *supposer* plutôt que d'affirmer, parce qu'entre deux messages on ne sait pas s'il
+dormait. Dans le fil, un silence de plus de trois heures se marque d'un filet.
+
 **Sa réflexion aussi.** Les blocs de réflexion étendue sont diffusés jusqu'au fil : la
 bulle s'ouvre sur trois points qui respirent, puis la pensée défile derrière une lueur qui
 pulse, repliée à une ligne. Elle est gardée en base — une réflexion qui disparaît au
@@ -361,7 +383,8 @@ refus serait pire.
 
 - **Parler** — le fil continu, le compagnon, la note du jour avec les ancres sous les yeux.
 - **Année** — la grille mois × jours, l'écart quotidien, le cumul, les repères de vie et
-  les notes rangées. **Une seule fenêtre** commande les trois graphiques : il y en avait
+  les notes rangées (repliées en pastilles : une note collée fait souvent trois mille
+  signes, et dix d'entre elles déroulées remplissent quinze écrans). **Une seule fenêtre** commande les trois graphiques : il y en avait
   trois, à trois endroits, avec trois vocabulaires, et rien n'empêchait de lire un
   quotidien de 2026 au-dessus d'un cumul sur quatre ans en croyant lire la même période.
   Le cumul démarre en référence glissante — l'étalon fixe compare quatre ans de journées à
@@ -412,13 +435,28 @@ La géométrie zoome, pas le texte : un libellé garde sa taille à l'écran, et
 donc à écarter les nœuds. Chaque point de journée est cliquable et ouvre sa journée : une
 carte qui dit « ces trente-quatre fois » sans jamais dire lesquelles s'arrête à mi-chemin.
 
-**La carte est à côté de ce qu'elle dit.** La synthèse et les comportements suivis
-occupent la colonne de droite, avec leur code couleur — la seule question qu'on se pose
-devant un nœud est « qu'est-ce qu'il en dit ? », et il fallait faire défiler pour le
-savoir. La teinte d'un comportement se choisit : posée dans l'ordre de création, elle
-était sûrement distincte mais sans aucun rapport avec le sens. Elle reste dans la bande
-déclarée (232–336), disjointe de la rampe des notes, pour qu'une déclaration ne puisse
-jamais passer pour une mesure.
+**La carte est à côté de ce qu'elle dit.** La synthèse et les mécanismes occupent la
+colonne de droite — la seule question qu'on se pose devant un nœud est « qu'est-ce qu'il en
+dit ? », et il fallait faire défiler pour le savoir.
+
+**Une seule liste de mécanismes.** Il y en avait deux, l'une au-dessus de l'autre : les
+*motifs* (ce que le compagnon reconnaît en conversation, tout de suite, avec un compte) en
+cartes colorées, et les *thèmes* (ce qu'il tire d'une relecture de tout le corpus, avec
+des preuves datées et une évolution) en lignes grises dessous. Deux formes, deux couleurs,
+deux endroits, pour deux façons de répondre à la même question.
+
+Une seule forme maintenant. Ce qui les distingue reste visible, mais dans le contenu :
+un motif s'ouvre sur sa couleur et son compte, un thème sur ses extraits datés et son
+chiffre. Les deux portent les mêmes petites barres de récurrence — pour un motif elles
+sont calculées depuis les messages où il a été reconnu, ramenées à son propre mois le plus
+fourni : comparer les motifs entre eux ferait dépendre la forme de l'un du bavardage de
+l'autre.
+
+Toutes les teintes viennent de la bande déclarée (232–336), disjointe de la rampe des
+notes : un mécanisme est ce que le compagnon comprend, pas ce que les journées mesurent,
+et il ne peut pas emprunter le vert d'une bonne journée même par accident. Celle d'un
+motif se choisit — posée dans l'ordre de création, elle était sûrement distincte mais sans
+aucun rapport avec le sens.
 
 Les nœuds sont des **anneaux**, jamais des disques ; les points, eux, sont **pleins**.
 « Ce qui est rempli est mesuré, ce qui est contouré est déclaré » : le nœud est une lecture

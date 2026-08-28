@@ -2,7 +2,7 @@ import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, messagesForDate, recentMessages, allEvents, deleteEvent,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
-  addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif,
+  addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
   getLecture, setLecture, rembobiner, TEINTES
@@ -17,6 +17,7 @@ import { buildGraph, MIN_JOURS } from './graph.js';
 import { corpusPour, lire, HORIZONS, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
+import { saillant, poids as poidsMot, lisible } from './lexique.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
 // cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
 // de web/reperes.js.
@@ -227,6 +228,49 @@ function decorerCarte(lecture, byDate) {
   };
 }
 
+/**
+ * De quoi parle un texte : ses termes saillants, et le theme qui les domine.
+ *
+ * `saillant` est le meme seuil que celui du reste de l'application : ce sont
+ * les mots qui nomment un etat ou un mecanisme, pas ceux qui nomment une
+ * circonstance. « anxieux » pese, « ensuite » non.
+ */
+function quoiDedans(texte, max = 4) {
+  const t = tokenize(String(texte ?? ''));
+  const compte = new Map();
+  for (const m of t) {
+    if (!saillant(m)) continue;
+    compte.set(m, (compte.get(m) ?? 0) + 1);
+  }
+  const termes = [...compte.entries()]
+    // Le poids d'abord, la frequence ensuite : un mot lourd vu une fois dit
+    // plus qu'un mot tiede vu trois fois.
+    .sort((a, b) => (poidsMot(b[0]) - poidsMot(a[0])) || (b[1] - a[1]))
+    .slice(0, max)
+    .map(([m]) => m);
+  return { termes, theme: termes.length ? themeDe(termes.join(' ')) : 'jalon' };
+}
+
+/**
+ * Les sept derniers jours sans note, aujourd'hui exclu (il a sa propre carte).
+ * Du plus recent au plus ancien : on rattrape en remontant.
+ */
+function aNoter(rows, aujourdhui) {
+  // `rows`, pas la serie : la serie porte les notes et les ecarts, pas le
+  // TEXTE -- et c'est le texte qui dit lesquels de ces jours valent d'etre
+  // rattrapes en premier.
+  const par = new Map(rows.map(r => [r.date, r]));
+  const out = [];
+  for (let k = 1; k <= 7; k++) {
+    const d = addDays(aujourdhui, -k);
+    const j = par.get(d);
+    if (j?.note === null || j?.note === undefined) {
+      out.push({ date: d, ecrit: !!j?.text?.trim() });
+    }
+  }
+  return out;
+}
+
 export const routes = {
 
   'GET /api/state': ({ userId }) => {
@@ -252,7 +296,22 @@ export const routes = {
         lastDate: last ? last.date : null,
         reference: last ? last.reference : null,
         streak: streak(ser, entry?.note != null ? t : addDays(t, -1)),
-        years: [...new Set(ser.map(x => x.date.slice(0, 4)))].sort()
+        years: [...new Set(ser.map(x => x.date.slice(0, 4)))].sort(),
+        /*
+         * LES JOURS QU'IL N'A PAS NOTES, DERRIERE LUI.
+         *
+         * On ne note qu'aujourd'hui, et une semaine sautee restait sautee pour
+         * toujours : la grille gardait ses trous, et la reference glissante
+         * comptait avec un mois de moins. Ce n'est pas une lacune d'interface,
+         * c'est une perte de donnees -- la seule que ce produit ne sache pas
+         * reparer.
+         *
+         * Sept jours, pas trente. Au-dela, on ne se souvient plus de sa
+         * journee, et une note posee de memoire lointaine vaut moins que pas de
+         * note du tout : elle entre dans la meme serie que les autres sans
+         * avoir ete calibree comme elles.
+         */
+        aNoter: aNoter(series(userId).rows, t)
       },
       saturation: CONTRAST_SATURATION
     };
@@ -276,7 +335,7 @@ export const routes = {
     addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
     invalidate(userId);
 
-    const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text }));
+    const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
     const r = await reply(history, getSettings(userId), { memory: recentMemory(date, userId, text) });
     if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
 
@@ -800,7 +859,24 @@ export const routes = {
     };
   },
 
-  'GET /api/carnet': ({ userId }) => ({ notes: allCarnet(userId), compte: countCarnet(userId) }),
+  /*
+   * LES NOTES, AVEC CE QUI EN RESSORT.
+   *
+   * Une note collee fait souvent trois mille signes. Deroulees, dix d'entre
+   * elles remplissent quinze ecrans, et l'on ne peut plus retrouver celle qu'on
+   * cherche -- une liste ou rien ne se distingue n'est pas une liste, c'est un
+   * mur.
+   *
+   * On calcule donc pour chacune les quelques termes qui pesent (le meme
+   * lexique que partout ailleurs, jamais un lexique a part), et le theme
+   * dominant qui lui donne son icone. Ca ne resume pas la note -- le resume
+   * serait une reformulation, et ses mots lui appartiennent : ca dit seulement
+   * de quoi elle parle, pour qu'on sache laquelle ouvrir.
+   */
+  'GET /api/carnet': ({ userId }) => ({
+    notes: allCarnet(userId).map(n => ({ ...n, ...quoiDedans(n.texte) })),
+    compte: countCarnet(userId)
+  }),
 
   /**
    * CE QUE LE COMPAGNON A LU.
@@ -1173,7 +1249,7 @@ export async function streamMessage(body, send, userId = OWNER) {
   invalidate(userId);
   send('user', { messages: recentMessages(80, userId) });
 
-  const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text }));
+  const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
   const settings = getSettings(userId);
 
   const before = usageFor(userId);
@@ -1381,8 +1457,32 @@ export function outilsPour(userId, messageId, send = () => {}) {
 /** Les motifs portes par les messages du fil courant, pour les teinter. */
 export function motifsDuFil(userId = OWNER) {
   const msgs = recentMessages(80, userId);
-  return {
-    liste: allMotifs(userId),
-    parMessage: motifsDesMessages(msgs.map(m => m.id), userId)
-  };
+  /*
+   * LA SERIE D'UN MOTIF, DANS LA MEME ECHELLE QUE CELLE D'UN THEME.
+   *
+   * Les deux se lisent cote a cote dans « Ma carte », avec les memes petites
+   * barres : il faut donc qu'un motif a trois occurrences dans le mois et un
+   * theme « dominant » ne se dessinent pas a la meme hauteur par accident.
+   *
+   * L'echelle des themes est 0-3, decidee par le modele. Celle d'un motif est
+   * un COMPTE, sans plafond. On la ramene donc a 0-3 en la divisant par le mois
+   * le plus fourni de CE motif : la barre dit « par rapport a ses autres mois »,
+   * ce qui est la seule comparaison honnete -- comparer les motifs entre eux
+   * ferait dependre la forme de l'un du bavardage de l'autre.
+   */
+  const series = motifSeries(userId);
+  const liste = allMotifs(userId).map(m => {
+    const brut = series.get(m.id) ?? [];
+    const max = Math.max(1, ...brut.map(p => p.n));
+    return {
+      ...m,
+      serie: brut.slice(-24).map(p => ({
+        periode: p.periode,
+        // Jamais zero quand il s'est passe quelque chose : une barre invisible
+        // dirait « rien ce mois-la » alors qu'il y a eu une occurrence.
+        valeur: Math.max(1, Math.round((p.n / max) * 3))
+      }))
+    };
+  });
+  return { liste, parMessage: motifsDesMessages(msgs.map(m => m.id), userId) };
 }
