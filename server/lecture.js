@@ -31,11 +31,37 @@ import { comparaisons, comparaisonBlock } from './comparer.js';
 
 let _sdk = null;
 
-export const HORIZONS = {
-  court: { jours: 30,   nom: 'court terme',  grain: 'semaine' },
-  moyen: { jours: 365,  nom: 'moyen terme',  grain: 'mois' },
-  long:  { jours: null, nom: 'long terme',   grain: 'année' }
-};
+/*
+ * UNE SEULE LECTURE, SUR TOUT LE JOURNAL.
+ *
+ * Il y en avait trois -- court, moyen, long terme -- et c'etait une erreur de
+ * decoupage. Ce qu'on cherche est ce qui REVIENT ; le decouper en fenetres,
+ * c'est demander trois fois la meme question a trois morceaux de la reponse,
+ * puis laisser quelqu'un choisir lequel il croit. Trois lectures coutaient
+ * aussi trois appels, se perimaient separement, et la seule qui portait la
+ * duree -- celle qui compte pour un motif -- etait celle qu'on regardait le
+ * moins.
+ *
+ * La periode ne disparait pas pour autant : chaque theme porte SA SERIE,
+ * periode par periode, sur toute l'etendue. C'est la serie qui dit le court et
+ * le long terme, pas un bouton -- et elle le dit mieux, parce qu'elle les met
+ * cote a cote au lieu de les faire alterner.
+ */
+export const FENETRE = { cle: 'tout', nom: 'tout le journal' };
+
+/**
+ * Le grain de la serie, deduit de l'etendue reelle.
+ *
+ * Une constante ne peut pas convenir aux deux bouts : sur trois semaines de
+ * journal, une barre par annee donne une barre ; sur cinq ans, une barre par
+ * semaine en donne deux cent soixante, et le schema de la consigne borne la
+ * serie a vingt-quatre points.
+ */
+export function grainPour(jours) {
+  if (jours <= 120) return 'semaine';
+  if (jours <= 900) return 'mois';
+  return 'année';
+}
 
 /** Combien de journees ecrites avant qu'une lecture ait un sens. */
 export const MIN_JOURS = 12;
@@ -99,17 +125,18 @@ function parMois(rows) {
 }
 
 /**
- * Le corpus d'un horizon.
+ * Le corpus : tout le journal, borne par le budget de caracteres.
  * @returns {{texte: string, dates: Set<string>, jours: number, depuis: string|null}}
  */
-export function corpusPour(horizon, { rows, events = [], carnet = [], motifs = [], objectifs = [],
-                                     amplitudes = [] },
-                           aujourdhui) {
-  const h = HORIZONS[horizon] ?? HORIZONS.long;
-  const depuis = h.jours ? decaler(aujourdhui, -(h.jours - 1)) : null;
-  const dans = d => !depuis || d >= depuis;
+export function corpusPour({ rows, events = [], carnet = [], motifs = [], objectifs = [],
+                             amplitudes = [] }) {
+  // Tout, sans borne. Le budget de caracteres fait deja le tri -- et il le fait
+  // sur la DENSITE des journees, ce qui est un bien meilleur critere qu'une
+  // date de coupure : ce qui revient depuis quatre ans compte autant que ce qui
+  // revient depuis trois semaines.
+  const dans = () => true;
 
-  const fenetre = rows.filter(r => dans(r.date));
+  const fenetre = rows.slice();
   const gardees = choisirJours(fenetre);
   const dates = new Set(gardees.map(r => r.date));
 
@@ -209,7 +236,11 @@ ${amp.map(a => `${a.date} | ${a.n} | ${a.bas} → ${a.haut} | ${a.ecart}`).join(
     dates,
     comparaisons: comps,
     jours: fenetre.filter(r => r.text?.trim()).length,
-    depuis
+    // L'etendue reelle, en jours : c'est elle qui decide du grain de la serie.
+    etendue: fenetre.length
+      ? Math.round((jourDe(fenetre.at(-1).date) - jourDe(fenetre[0].date)) / 86400000) + 1
+      : 0,
+    depuis: fenetre[0]?.date ?? null
   };
 }
 
@@ -635,7 +666,7 @@ export function validerCarte(brut, dates = null) {
 
 /* ------------------------------ l'appel ------------------------------ */
 
-export async function lire(horizon, corpus, settings) {
+export async function lire(corpus, settings) {
   if (!_sdk) {
     try { ({ default: _sdk } = await import('@anthropic-ai/sdk')); }
     catch { throw new Error("SDK absent — lance : npm install @anthropic-ai/sdk"); }
@@ -643,7 +674,7 @@ export async function lire(horizon, corpus, settings) {
   const { key } = resolveKey(settings);
   if (!key) throw new Error("Pas de clé API. Colle-la dans Réglages, ou définis ANTHROPIC_API_KEY.");
 
-  const h = HORIZONS[horizon] ?? HORIZONS.long;
+  const grain = grainPour(corpus.etendue ?? 0);
   const client = new _sdk({ apiKey: key });
 
   const res = await client.beta.messages.create({
@@ -673,7 +704,7 @@ export async function lire(horizon, corpus, settings) {
     tool_choice: { type: 'tool', name: 'rendre_lecture' },
     messages: [{
       role: 'user',
-      content: `Fenêtre : ${h.nom}. Découpe la série par ${h.grain}.\n\n${corpus.texte}`
+      content: `Tout son journal, du premier jour au dernier. Découpe les séries par ${grain}.\n\n${corpus.texte}`
     }]
   });
 

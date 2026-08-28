@@ -1341,26 +1341,38 @@ async function renderYear(year) {
          * et le bloc le dit en toutes lettres plutot que de compter sur le fait
          * que personne ne se posera la question.
          */''}
-      ${CARNET?.notes?.length ? `<div class="card">
-        <div class="cardhead">
-          <h2>Notes rangées</h2>
-          <span class="faint mono" style="font-size:11.5px;margin-left:auto">${CARNET.compte.total} note${CARNET.compte.total > 1 ? 's' : ''}</span>
-        </div>
-        <p class="sub">Ce que tu as écrit ailleurs et donné au compagnon. Elles ne comptent
-        jamais comme des journées écrites — ni ici, ni dans la carte, ni dans aucune moyenne.</p>
-        <div class="cnliste">${CARNET.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>
-      </div>` : ''}
-
+      ${/* LES DEUX LISTES SONT REPLIEES PAR DEFAUT.
+             On vient ici pour REGARDER son annee ; ecrire une note ou poser un
+             repere est un geste rare, et il occupait le tiers de la page avec
+             un formulaire toujours deplie. Ce qui se fait souvent reste a
+             l'ecran, ce qui se fait une fois par mois passe derriere un
+             bouton. */''}
       <div class="card">
         <div class="cardhead">
+          <h2 title="Des notes prises ailleurs, rangées depuis la conversation. Elles ne comptent jamais comme des journées écrites.">Notes rangées</h2>
+          <span class="faint mono" style="font-size:11.5px">${CARNET?.compte?.total ?? 0}</span>
+          <button class="ajoutbtn" data-ajout="note" aria-expanded="${NOTE_OUVERT}"
+                  style="margin-left:auto">${NOTE_OUVERT ? 'fermer' : '+ une note'}</button>
+        </div>
+        ${NOTE_OUVERT ? noteFormMarkup() : ''}
+        ${CARNET?.notes?.length
+          ? `<div class="cnliste">${CARNET.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>`
+          : `<p class="sub" style="margin:0">Rien de rangé. Colle-les au compagnon dans <b>Parler</b>, ou écris-en une ici.</p>`}
+      </div>
+
+      <div class="card" id="reperescard">
+        <div class="cardhead">
           <h2>Repères</h2>
+          <span class="faint mono" style="font-size:11.5px">${SERIES.events.length}</span>
+          <button class="ajoutbtn" data-ajout="repere" aria-expanded="${REP_OUVERT}"
+                  style="margin-left:auto">${REP_OUVERT ? 'fermer' : '+ un repère'}</button>
           <button class="repdatebtn" id="naissbtn" aria-expanded="false"
                   title="Donne une origine à la frise. Aucun âge n'est calculé."
-                  style="margin-left:auto;font-size:12.5px;padding:7px 11px">
+                  style="font-size:12.5px;padding:7px 11px">
             <span class="fl">naissance</span>${S.settings.naissance ? fmtDay(S.settings.naissance) : '—'}
           </button>
         </div>
-        ${composeurMarkup()}
+        ${REP_OUVERT || EV ? composeurMarkup() : ''}
         ${SERIES.events.length
           ? `<div class="frise">${friseMarkup(SERIES.events)}</div>`
           : `<p class="sub" style="margin:0">Aucun repère. Le compagnon en pose aussi de lui-même.</p>`}
@@ -1380,6 +1392,16 @@ async function renderYear(year) {
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
     // Une note s'ouvre sur place : le repli est l'état par défaut, et ouvrir
     // une note ne doit pas coûter un changement de page.
+    // Les deux boutons d'ajout. Ouvrir l'un ferme l'autre : deux formulaires
+    // dépliés en même temps, c'est ce qu'on venait de retirer.
+    const aj = e.target.closest('[data-ajout]');
+    if (aj) {
+      if (aj.dataset.ajout === 'note') { NOTE_OUVERT = !NOTE_OUVERT; REP_OUVERT = false; }
+      else { REP_OUVERT = !REP_OUVERT; NOTE_OUVERT = false; if (!REP_OUVERT) EV = null; }
+      await renderYear(year);
+      ($('#cntxt') ?? $('#evlabel'))?.focus();
+      return;
+    }
     const cno = e.target.closest('[data-cnouvre]');
     if (cno) {
       const id = Number(cno.dataset.cnouvre);
@@ -1400,6 +1422,23 @@ async function renderYear(year) {
 
   wireFrise();
   wireReperes(year);
+
+  // Une note rangée, écrite ici plutôt que collée au compagnon. La date est
+  // facultative — et même datée, elle ne comptera jamais comme une journée
+  // écrite : c'est l'invariant du carnet, et il tient côté serveur.
+  const nf = $('#cnnew');
+  if (nf) nf.onsubmit = async e => {
+    e.preventDefault();
+    const texte = $('#cntxt').value.trim();
+    if (!texte) return;
+    const jour = $('#cnjour').value || null;
+    try {
+      CARNET = await api('/api/carnet', { texte, jour });
+      NOTE_OUVERT = false;
+      await renderYear(year);
+      toast(jour ? `Note rangée sur le ${fmtDay(jour)}` : 'Note rangée');
+    } catch (err) { toast(err.message); }
+  };
 
   $('#etalon').onchange = async e => {
     const v = Number(e.target.value);
@@ -1425,8 +1464,18 @@ async function renderYear(year) {
  * des surprises.
  */
 function wireReperes(year) {
-  const carte = $('#evform')?.closest('.card');
+  /*
+   * LA CARTE, PAS LE FORMULAIRE.
+   *
+   * Le cablage partait de `#evform` : depuis que le composeur est replie par
+   * defaut, il n'existe plus la plupart du temps -- et avec lui partaient la
+   * LISTE des reperes (ouvrir, supprimer) et le bouton « naissance », qui
+   * n'ont rien a voir avec le fait d'en poser un nouveau. Tout ce qui touche
+   * au formulaire est donc garde, le reste marche sans lui.
+   */
+  const carte = $('#reperescard');
   if (!carte) return;
+  const ouvert = !!$('#evform');
 
   const saisi = () => { const c = $('#evlabel'); if (c && EV) EV.label = c.value; };
   /*
@@ -1439,6 +1488,11 @@ function wireReperes(year) {
    * charger. Le champ s'ouvrait vide sur le repere qu'on voulait corriger.
    */
   const redessiner = (lire = true) => {
+    // Composeur ferme : il n'y a rien a redessiner sur place. On repasse par la
+    // vue entiere -- et SANS forcer l'ouverture : le calendrier de naissance
+    // vit hors du composeur, et le faire apparaitre au passage refermait
+    // ensuite le composeur au clic suivant sur « + un repere ».
+    if (!$('#evform')) return renderYear(year);
     if (lire) saisi();
     $('#evform').outerHTML = composeurMarkup();
     wireReperes(year);
@@ -1446,13 +1500,13 @@ function wireReperes(year) {
     if (c && !POP) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); }
   };
 
-  EV ??= evVide();
+  if (ouvert) EV ??= evVide();
 
   // L'icône se décide pendant la frappe, tant qu'on ne l'a pas choisie à la
   // main. C'est la raison d'être du module partagé : le classement tourne dans
   // le navigateur, et c'est exactement celui que le serveur appliquera.
   const champ = $('#evlabel');
-  champ.oninput = () => {
+  if (champ) champ.oninput = () => {
     EV.label = champ.value;
     if (EV.theme != null) return;                 // choisi à la main : on n'y touche plus
     const t = themeDe(champ.value);
@@ -1461,9 +1515,11 @@ function wireReperes(year) {
     ic.dataset.theme = t;
   };
 
-  $('#evicone').onclick = () => { POP = POP === 'app' ? null : 'app'; redessiner(); };
+  const ico = $('#evicone');
+  if (ico) ico.onclick = () => { POP = POP === 'app' ? null : 'app'; redessiner(); };
 
-  $('#evdate').onclick = () => {
+  const bdate = $('#evdate');
+  if (bdate) bdate.onclick = () => {
     if (POP === 'date') { POP = null; return redessiner(); }
     ouvrirCal('date', { debut: EV.debut, fin: EV.fin, plage: !!EV.fin,
                         min: '1900-01-01', max: S.today });
@@ -1538,13 +1594,21 @@ function wireReperes(year) {
       EV = { id: ev.id, label: ev.label, theme: ev.theme ?? null, teinte: ev.teinte ?? null,
              debut: ev.date, fin: ev.fin ?? null };
       POP = null;
+      // Modifier, c'est le seul chemin qui DOIT ouvrir le composeur.
+      REP_OUVERT = true;
       return redessiner(false);
     }
   };
 
-  $('#evannul')?.addEventListener('click', () => { EV = null; POP = null; redessiner(false); });
+  // Annuler ferme le composeur pour de bon : on l'avait ouvert pour modifier un
+  // repere, et sortir de la modification sans sortir du formulaire laisserait
+  // un champ vide ouvert sous la liste, sans qu'on l'ait demande.
+  $('#evannul')?.addEventListener('click', () => {
+    EV = null; POP = null; REP_OUVERT = false; renderYear(year);
+  });
 
-  $('#evform').onsubmit = async e => {
+  const form = $('#evform');
+  if (form) form.onsubmit = async e => {
     e.preventDefault();
     saisi();
     const label = (EV.label ?? '').trim();
@@ -1559,7 +1623,7 @@ function wireReperes(year) {
       });
       SERIES.events = events;
       const quoi = EV.id ? 'Repère modifié' : EV.fin ? 'Période posée' : 'Repère posé';
-      EV = null; POP = null; FRISE = null;
+      EV = null; POP = null; FRISE = null; REP_OUVERT = false;
       await renderYear(year);
       toast(quoi);
     } catch (err) { toast(err.message); }
@@ -1584,6 +1648,34 @@ function wireReperes(year) {
 
 /** null = on pose ; un objet = on modifie ce repère-là. */
 let EV = null;
+
+/*
+ * Les deux formulaires d'ajout, replies par defaut.
+ *
+ * Ils etaient deplies en permanence, et prenaient a eux deux le tiers de la
+ * page pour des gestes qu'on fait une fois par mois. On vient dans « Annee »
+ * pour REGARDER son annee ; ecrire une note ou poser un repere est un
+ * detour, et un detour se range derriere un bouton.
+ */
+let NOTE_OUVERT = false, REP_OUVERT = false;
+
+/** Le formulaire d'une note rangee : le texte, et une date facultative. */
+function noteFormMarkup() {
+  return `<form id="cnnew" class="noteform">
+    <textarea id="cntxt" rows="3" maxlength="4000" required
+              placeholder="Ce que tu as écrit ailleurs, ou ce qu'on t'a écrit…"></textarea>
+    <div class="noteform-pied">
+      ${/* La date est facultative, et c'est le point : une note peut parler
+             d'un jour precis, ou de nulle part. Elle ne compte JAMAIS comme
+             une journee ecrite -- ni datee, ni libre. */''}
+      <label class="fl">de quel jour ?
+        <input type="date" id="cnjour" max="${S.today}">
+      </label>
+      <span class="sub" style="margin:0;flex:1;min-width:180px">Sans date, elle est rangée à part. Elle ne comptera jamais comme une journée écrite.</span>
+      <button class="btn primary" type="submit">Ranger</button>
+    </div>
+  </form>`;
+}
 /** 'date' | 'app' | 'naiss' | null — un seul panneau ouvert à la fois. */
 let POP = null;
 let CAL = null;
@@ -1866,7 +1958,6 @@ function carnetItemMarkup(n) {
                                                                             */
 
 let MOI = null;                 // la reponse de /api/moi
-let MOI_HORIZON = 'moyen';
 let MOI_PISTE = null;           // la piste depliee, par son nom
 let MOI_ECARTS = false;         // les ecarts, replies par defaut
 
@@ -1927,23 +2018,20 @@ function pisteMarkup(p, i) {
 function pistesMarkup() {
   if (!MOI) return '';
   const p = MOI.pistes ?? [];
-  const sel = `<div class="moiwin">${['court', 'moyen', 'long'].map(h =>
-    `<button data-moi-horizon="${h}" aria-pressed="${h === MOI_HORIZON}">${h} terme</button>`).join('')}</div>`;
-
   if (!p.length) {
     return `<div class="card pistescard">
-      <div class="moihead"><h2>Ce vers quoi ça pointe</h2>${sel}</div>
+      <div class="moihead"><h2>Ce vers quoi ça pointe</h2></div>
       <p class="sub" style="margin:0">${MOI.lue
-        ? `Sur cette fenêtre, aucune grande direction ne se dégage — et c'est une réponse,
+        ? `Aucune grande direction ne se dégage de ton journal — et c'est une réponse,
            pas une panne. Il y a ${MOI.themes?.length ?? 0} mécanisme${(MOI.themes?.length ?? 0) > 1 ? 's' : ''}
            dans <b>Ma carte</b>, mais rien qui les regroupe assez pour porter un nom.`
-        : `Cette fenêtre n'a pas encore été lue. Les pistes viennent de la lecture — elles sont
+        : `Ton journal n'a pas encore été lu. Les pistes viennent de la lecture — elle se lance
            dans <b>Ma carte</b>, bouton « relire ».`}</p>
     </div>`;
   }
 
   return `<div class="card pistescard">
-    <div class="moihead"><h2>Ce vers quoi ça pointe</h2>${sel}</div>
+    <div class="moihead"><h2>Ce vers quoi ça pointe</h2></div>
     <p class="sub">
       Chacune regroupe plusieurs mécanismes de <b>Ma carte</b>. Ce sont des directions à
       explorer, pas des états : clique pour voir ce qui va dans ce sens, ce qui va contre,
@@ -2001,7 +2089,7 @@ function ecartsMarkup() {
 async function renderMoi(date, { garderCal = false, rafraichir = false } = {}) {
   JOUR_DANS = 'moi';
   if (!MOI || rafraichir) {
-    try { MOI = await api(`/api/moi?horizon=${MOI_HORIZON}`); }
+    try { MOI = await api('/api/moi'); }
     catch { MOI = null; }
   }
   return renderMirror(date ?? MIRROR_DATE ?? S.today, { garderCal });
@@ -2115,7 +2203,6 @@ function termesMarkup(it) {
  * et lire l'un pour l'autre est l'erreur qu'une seule fenetre garantit.
  */
 
-let MIR_HORIZON = 'moyen';
 let MIR_THEME = null;          // le theme deplie
 let LECTURE = null;
 let LECTURE_EN_COURS = false;
@@ -2133,7 +2220,6 @@ let LECTURE_EN_COURS = false;
  */
 let LECTURE_ERR = null;
 
-const HORIZONS_UI = [['court', 'court terme'], ['moyen', 'moyen terme'], ['long', 'long terme']];
 
 /** Une barre par période. Petite, sans axe : c'est une forme, pas un graphe. */
 function serieMarkup(serie) {
@@ -2485,15 +2571,8 @@ async function renderLecture() {
   // La vue d'ensemble de « Ma carte » : ce qui s'ouvrira ensuite s'y encadre.
   JOUR_DANS = 'mirror';
   MIRROR_DATE = null;
-  if (!LECTURE || LECTURE.horizon !== MIR_HORIZON) {
-    LECTURE = await api(`/api/lecture?horizon=${MIR_HORIZON}`);
-  }
+  if (!LECTURE) LECTURE = await api('/api/lecture');
   const L = LECTURE;
-
-  const curseur = `<div class="horizons" role="group" aria-label="Fenêtre">
-    ${HORIZONS_UI.map(([id, nom]) => `<button data-horizon="${id}"
-      aria-pressed="${MIR_HORIZON === id}">${nom}</button>`).join('')}
-  </div>`;
 
   /*
    * UNE LECTURE EXISTANTE PASSE AVANT TOUT LE RESTE.
@@ -2549,13 +2628,12 @@ async function renderLecture() {
       <button class="btn primary" data-lire>Réessayer</button></div>`;
   } else {
     corps = `<div class="lectvide">
-      <p>Rien de lu sur cette fenêtre.</p>
+      <p>Ton journal n'a pas encore été lu.</p>
       <button class="btn primary" data-lire>Lancer la lecture</button></div>`;
   }
 
   $('#view').innerHTML = `<div class="lecture">
     <div class="lechead">
-      ${curseur}
       ${L.lecture ? `<span class="lecmeta faint">${L.jours} journées · ${fmtDay(L.fait_le.slice(0, 10))}${
         L.perime ? ` · <b>${L.retard} journée${L.retard > 1 ? 's' : ''} depuis</b>` : ''}</span>` : ''}
       ${L.lecture ? (LECTURE_EN_COURS
@@ -2597,7 +2675,7 @@ async function lancerLecture() {
   const avait = !!LECTURE?.lecture;
   if (!avait) await renderLecture();       // l'attente ne s'affiche que s'il n'y a rien à montrer
   try {
-    const r = await api('/api/lecture', { horizon: MIR_HORIZON });
+    const r = await api('/api/lecture', {});
     LECTURE = r;
     // Les pistes viennent de CETTE lecture : celles gardees pour « Moi »
     // parlent d'une fenetre qui vient d'etre relue, et il faut les redemander.
@@ -2640,8 +2718,6 @@ function wireLecture() {
       } catch (err) { return toast(err.message); }
     }
 
-    const h = e.target.closest('[data-horizon]');
-    if (h) { MIR_HORIZON = h.dataset.horizon; MIR_THEME = null; LECTURE = null; LECTURE_ERR = null; return renderLecture(); }
     if (e.target.closest('[data-lire]')) return lancerLecture();
     if (e.target.closest('[data-aller-reglages]')) { view = 'settings'; syncNav(); return renderSettings(); }
     const j = e.target.closest('[data-jour]');
@@ -2927,11 +3003,6 @@ function wireMirror() {
 
   $('#view').onclick = async e => {
     /* --- les pistes, propres a « Moi » --- */
-    const ph = e.target.closest('[data-moi-horizon]');
-    if (ph) {
-      MOI_HORIZON = ph.dataset.moiHorizon; MOI_PISTE = null;
-      return renderMoi(MIRROR_DATE, { garderCal: true, rafraichir: true });
-    }
     const pi = e.target.closest('[data-piste]');
     if (pi) {
       MOI_PISTE = MOI_PISTE === pi.dataset.piste ? null : pi.dataset.piste;
