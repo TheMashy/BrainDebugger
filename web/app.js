@@ -1,7 +1,7 @@
 import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
 import { disposer } from './carte.js';
-import { versGraphe, dessinerRelations, noeudAu, cadrer, NOM_GENRE, TEINTE_GENRE } from './relations.js';
+import { versGraphe, dessinerRelations, noeudAu, cadrer, NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -1592,6 +1592,11 @@ function carteMarkup(carte) {
     <div class="cartelegende">${
       [...new Set(carte.noeuds.map(n => n.genre))].map(g =>
         `<span><i style="--g:${TEINTE_GENRE[g]}"></i>${esc(NOM_GENRE[g] ?? g)}</span>`).join('')}
+      ${/* Sans cette ligne, la couronne se lit comme une décoration. Elle dit
+            aussi la règle de couleur en une phrase : le contour est déclaré, le
+            plein est mesuré. */''}
+      ${carte.noeuds.some(n => n.jours?.length)
+        ? `<span class="cartepoints">un point&nbsp;= une journée</span>` : ''}
     </div>
   </div>`;
 }
@@ -1621,7 +1626,7 @@ function monterCarte(carte) {
 
   cv.addEventListener('mousemove', e => {
     const r = cv.getBoundingClientRect();
-    const i = noeudAu(RELA_DISPO?.pts ?? [], RELA, e.clientX - r.left, e.clientY - r.top);
+    const i = noeudAu(RELA_DISPO?.pts ?? [], RELA, e.clientX - r.left, e.clientY - r.top, echelle(L, H));
     if (i === RELA_SURVOL) return;
     RELA_SURVOL = i;
     cv.style.cursor = i >= 0 ? 'pointer' : 'default';

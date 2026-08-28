@@ -57,7 +57,23 @@ export function versGraphe(carte) {
   const noeuds = carte?.noeuds ?? [];
   const index = new Map(noeuds.map((n, i) => [n.nom, i]));
   return {
-    noeuds: noeuds.map(n => ({ ...n, jours: n.poids, amas: n.genre })),
+    /*
+     * `jours` est le nom que `disposer()` donne a la MASSE d'un noeud, et c'est
+     * aussi le nom que le serveur donne a la LISTE de ses journees. Les deux se
+     * sont rencontres ici, et la liste ecrasait silencieusement la masse.
+     *
+     * Les dates passent donc sous `occurrences`, et la masse devient leur
+     * nombre reel plutot que le poids declare : une chose vue quarante fois
+     * pousse plus fort ses voisines qu'une chose vue six fois, et c'est
+     * exactement ce qu'on veut voir dans la disposition. Sans dates, on retombe
+     * sur le poids.
+     */
+    noeuds: noeuds.map(n => ({
+      ...n,
+      occurrences: n.jours ?? [],
+      jours: n.jours?.length || n.poids,
+      amas: n.genre
+    })),
     liens: (carte?.liens ?? []).map(l => ({
       s: index.get(l.de), t: index.get(l.vers),
       quoi: l.quoi, force: l.force / 3
@@ -66,6 +82,63 @@ export function versGraphe(carte) {
 }
 
 const RAYON = n => 4 + n.poids * 2.6;
+
+/*
+ * LES JOURNEES D'UN NOEUD, EN COURONNE.
+ *
+ * Un noeud n'est pas une idee : c'est un tas de journees. Chacune de celles que
+ * le compagnon a vues devient un point autour de l'anneau, et c'est ce qui
+ * donne a la carte sa texture -- on voit qu'une chose pese non pas parce qu'un
+ * cercle est gros, mais parce qu'il y a trente jours autour.
+ *
+ * LA REGLE DE COULEUR TIENT, ET C'EST ELLE QUI DICTE LE DESSIN.
+ * « Ce qui est REMPLI est MESURE, ce qui est CONTOURE est DECLARE. » Le noeud
+ * est declare par le compagnon : il reste un anneau. Chaque point, lui, est une
+ * journee reelle du corpus, avec son ecart a la reference : il est PLEIN, et
+ * teinte de la rampe des notes. Des points mesures dans un anneau declare --
+ * l'oeil lit la difference sans qu'on la lui explique.
+ *
+ * Une journee dont l'ecart manque (jamais notee) est un point creux : elle
+ * existe, elle ne dit rien.
+ */
+const MAX_POINTS = 96;
+
+/** La rampe des notes : rouge en dessous de la reference, vert au-dessus. */
+function couleurEcart(e) {
+  if (e === null || e === undefined) return null;
+  const t = Math.max(-1, Math.min(1, e / 3));
+  return `hsl(${18 + (t + 1) * 55} 62% ${46 + Math.abs(t) * 12}%)`;
+}
+
+/**
+ * Les points d'un noeud : une spirale serree autour de l'anneau.
+ *
+ * Une seule couronne sature a une quinzaine de points et les suivants se
+ * couvrent ; l'angle d'or repartit chaque nouveau point la ou il reste de la
+ * place, et le rayon croit en racine pour que la densite reste constante --
+ * c'est le meme placement que les graines d'un tournesol, et c'est le seul qui
+ * tienne quatre-vingts journees sans amas ni trou.
+ */
+export function couronne(n, r, ech = 1) {
+  // Sur un telephone, dix couronnes a taille pleine se recouvrent et la carte
+  // redevient la pelote qu'on avait evitee. On resserre ET on echantillonne :
+  // trente points disent « beaucoup » aussi bien que quatre-vingts, et on ne
+  // pretend rien de plus -- le compte exact est au survol, en toutes lettres.
+  const src = n.occurrences ?? [];
+  const max = Math.max(12, Math.round(MAX_POINTS * ech));
+  const pas = Math.max(1, Math.ceil(src.length / max));
+  const js = src.filter((_, i) => i % pas === 0).slice(0, max);
+  const OR = Math.PI * (3 - Math.sqrt(5));
+  return js.map((j, i) => {
+    const a = i * OR;
+    const d = r + (5.5 + Math.sqrt(i / Math.max(1, js.length)) * (7 + js.length * 0.16)) * ech;
+    return { x: Math.cos(a) * d, y: Math.sin(a) * d, e: j?.e ?? null, date: j?.d ?? null };
+  });
+}
+
+/** Le facteur de resserrement, du cadre disponible. */
+export const echelle = (largeur, hauteur) =>
+  Math.max(0.5, Math.min(1, Math.min(largeur / 780, hauteur / 420)));
 
 /**
  * Recadre le graphe pour qu'il occupe le cadre.
@@ -95,7 +168,13 @@ export function cadrer(pts, largeur, hauteur, mx = 62, my = 38) {
   // Deux marges, pas une : un libelle s'etale LATERALEMENT bien au-dela de son
   // noeud (« l'appart de Lyon » fait cent pixels pour un anneau de dix), et
   // c'est en largeur qu'il sort du cadre. En hauteur il ne prend qu'une ligne.
-  const k = Math.min(1.6, (largeur - mx * 2) / l, (hauteur - my * 2) / h);
+  // Les marges sont un PLAFOND, pas une constante. Sur un cadre de 330 px, deux
+  // marges de 62 en mangeaient 38 % et le graphe se retrouvait tasse au centre
+  // d'un canvas aux trois quarts vide -- le defaut se voyait sur telephone, et
+  // seulement la. On ne prend jamais plus du huitieme du cadre.
+  const mh = Math.min(mx, largeur / 8);
+  const mv = Math.min(my, hauteur / 8);
+  const k = Math.min(1.6, (largeur - mh * 2) / l, (hauteur - mv * 2) / h);
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   for (const p of pts) {
     p.x = largeur / 2 + (p.x - cx) * k;
@@ -125,6 +204,8 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
   }
 
   ctx.lineCap = 'round';
+  const ech = echelle(largeur, hauteur);
+  let survolLib = null;
 
   /* --- les liens --- */
   for (const l of G.liens) {
@@ -153,9 +234,17 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
      * exactement la question qu'on se pose en pointant quelque chose.
      */
     if (survol >= 0 && (l.s === survol || l.t === survol)) {
-      // Le point milieu d'une quadratique est en t=0.5, pas au milieu du segment.
-      const tx = 0.25 * a.x + 0.5 * cx + 0.25 * b.x;
-      const ty = 0.25 * a.y + 0.5 * cy + 0.25 * b.y;
+      /*
+       * Le verbe se pose aux DEUX TIERS de la courbe, du cote de l'autre noeud,
+       * et pas au milieu. Quatre liens qui partent du meme noeud ont quatre
+       * milieux a la meme distance de lui : les quatre chips se chevauchaient en
+       * eventail, et le survol -- qui existe pour rendre lisible -- rendait
+       * illisible. Repoussees vers leur extremite, elles s'ecartent d'elles-memes.
+       */
+      const t = l.s === survol ? 0.66 : 0.34;
+      const u = 1 - t;
+      const tx = u * u * a.x + 2 * t * u * cx + t * t * b.x;
+      const ty = u * u * a.y + 2 * t * u * cy + t * t * b.y;
       ctx.globalAlpha = 1;
       ctx.font = '500 10.5px ui-sans-serif, system-ui, sans-serif';
       ctx.textAlign = 'center';
@@ -184,6 +273,25 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(p.x, p.y, r * 4.5, 0, 7); ctx.fill();
 
+    // Les journees, sous l'anneau : il doit rester net par-dessus, sinon on ne
+    // distingue plus le contour du grain.
+    for (const pt of couronne(n, r, ech)) {
+      const c2 = couleurEcart(pt.e);
+      ctx.beginPath();
+      ctx.arc(p.x + pt.x, p.y + pt.y, 1.5 * Math.max(0.75, ech), 0, 7);
+      if (c2) {
+        ctx.globalAlpha = actif ? 0.82 : 0.16;
+        ctx.fillStyle = c2;
+        ctx.fill();
+      } else {
+        ctx.globalAlpha = actif ? 0.4 : 0.1;
+        ctx.strokeStyle = couleur(n.genre, 58);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = actif ? 1 : 0.22;
+
     // Le centre est le fond, pas la couleur : c'est ce qui fait l'anneau.
     ctx.fillStyle = '#0a0c0b';
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill();
@@ -193,23 +301,54 @@ export function dessinerRelations(ctx, G, dispo, { largeur, hauteur, survol = -1
 
     ctx.globalAlpha = actif ? 1 : 0.2;
     ctx.fillStyle = actif ? '#e9efeb' : '#93a099';
-    ctx.font = `${i === survol ? '600' : '400'} 12px ui-sans-serif, system-ui, sans-serif`;
+    // Un libelle de 12 px sur un cadre de telephone occupe le tiers de sa
+    // largeur : dix d'entre eux se croisent forcement.
+    ctx.font = `${i === survol ? '600' : '400'} ${(11 * Math.max(0.82, ech)).toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     // Le libelle est borne au cadre : le recadrage laisse de la marge autour des
     // NOEUDS, pas autour de leur texte, et un nom long au bord sortait quand meme.
+    // Au survol, le nombre de journees derriere le noeud : c'est la question
+    // qu'on se pose en pointant quelque chose, et la couronne la montre sans la
+    // chiffrer.
+    const k = n.occurrences?.length ?? 0;
+    const ry = r + 6 + (k ? (12 + Math.min(24, 7 + k * 0.16)) * ech : 0);
+    const ly = p.y - ry;
+    if (i === survol) {
+      // Peint en dernier, apres les verbes : c'est le seul libelle qui doit
+      // gagner toutes les superpositions, puisque c'est celui qu'on vise.
+      survolLib = { texte: k ? `${n.nom} · ${k} jour${k > 1 ? 's' : ''}` : n.nom, x: p.x, y: ly };
+      continue;
+    }
     const lw = ctx.measureText(n.nom).width;
-    ctx.fillText(n.nom, Math.max(lw / 2 + 4, Math.min(largeur - lw / 2 - 4, p.x)), p.y - r - 6);
+    ctx.fillText(n.nom, Math.max(lw / 2 + 4, Math.min(largeur - lw / 2 - 4, p.x)), ly);
+  }
+
+  if (survolLib) {
+    ctx.globalAlpha = 1;
+    ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const w = ctx.measureText(survolLib.texte).width;
+    const x = Math.max(w / 2 + 4, Math.min(largeur - w / 2 - 4, survolLib.x));
+    ctx.fillStyle = 'rgba(10,12,11,.9)';
+    ctx.beginPath(); ctx.roundRect(x - w / 2 - 7, survolLib.y - 14, w + 14, 18, 5); ctx.fill();
+    ctx.fillStyle = '#e9efeb';
+    ctx.fillText(survolLib.texte, x, survolLib.y);
   }
   ctx.globalAlpha = 1;
 }
 
 /** Le noeud sous le curseur, ou -1. Rayon de capture large : on vise mal. */
-export function noeudAu(pts, G, x, y) {
+export function noeudAu(pts, G, x, y, ech = 1) {
   let best = -1, bd = Infinity;
   for (let i = 0; i < pts.length; i++) {
     const d = Math.hypot(pts[i].x - x, pts[i].y - y);
-    const seuil = RAYON(G.noeuds[i]) + 16;
+    // La couronne fait partie du noeud : viser un de ses points, c'est viser le
+    // noeud. Sans ca, on survole un nuage de journees et rien ne s'allume.
+    const n = G.noeuds[i];
+    const k = n.occurrences?.length ?? 0;
+    const seuil = RAYON(n) + (k ? (12 + Math.min(24, 7 + k * 0.16)) * ech : 16);
     if (d < seuil && d < bd) { bd = d; best = i; }
   }
   return best;

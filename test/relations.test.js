@@ -4,7 +4,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { versGraphe, cadrer, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+import { versGraphe, cadrer, couronne, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
 
@@ -98,4 +98,51 @@ test('la marge latérale est plus large que la verticale', () => {
   const l = Math.abs(p[1].x - p[0].x), h = Math.abs(p[1].y - p[0].y);
   assert.ok(l <= 400 - 62 * 2 + 0.01, `déborde en largeur : ${l}`);
   assert.equal(Math.round(l), Math.round(h), 'la mise à l’échelle a déformé');
+});
+
+/* -------------------- les journées derrière un nœud -------------------- */
+
+test('les dates ne peuvent pas écraser la masse du nœud', () => {
+  // `jours` est le nom que disposer() donne à la MASSE et celui que le serveur
+  // donne à la LISTE. Ils se sont rencontrés ici, et la liste écrasait la masse
+  // sans rien casser de visible — la disposition devenait juste fausse.
+  const G = versGraphe({
+    noeuds: [{ nom: 'a', genre: 'corps', poids: 2, jours: [{ d: '2024-01-01', e: 1 }, { d: '2024-01-02', e: -2 }] },
+             { nom: 'b', genre: 'lieu', poids: 1, jours: [] }],
+    liens: [{ de: 'a', vers: 'b', quoi: 'précède', force: 2 }]
+  });
+  assert.equal(typeof G.noeuds[0].jours, 'number', 'la masse doit rester un nombre');
+  assert.equal(G.noeuds[0].jours, 2);
+  assert.equal(G.noeuds[0].occurrences.length, 2);
+  // Sans dates, on retombe sur le poids déclaré plutôt que sur zéro : un nœud
+  // de masse nulle se fait éjecter par la répulsion.
+  assert.equal(G.noeuds[1].jours, 1);
+});
+
+test('la couronne place une journée par point, sans se recouvrir', () => {
+  const n = { poids: 2, occurrences: Array.from({ length: 40 }, (_, i) => ({ d: `2024-01-${String(i + 1).padStart(2, '0')}`, e: i % 5 - 2 })) };
+  const pts = couronne(n, 9);
+  assert.equal(pts.length, 40);
+  // Chaque point est dehors : un point sous l'anneau serait invisible.
+  for (const p of pts) assert.ok(Math.hypot(p.x, p.y) > 9, 'un point tombe dans l’anneau');
+  // Deux points ne se superposent jamais.
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      assert.ok(Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y) > 1.4,
+        `les points ${i} et ${j} se recouvrent`);
+    }
+  }
+});
+
+test('la couronne tient un corpus démesuré sans exploser', () => {
+  const n = { poids: 3, occurrences: Array.from({ length: 900 }, () => ({ d: '2024-01-01', e: 0 })) };
+  const pts = couronne(n, 9);
+  assert.ok(pts.length <= 96, 'la couronne doit être plafonnée');
+  for (const p of pts) assert.ok(Math.hypot(p.x, p.y) < 60, 'la couronne déborde du nœud');
+});
+
+test('une journée sans écart reste une journée', () => {
+  const pts = couronne({ occurrences: [{ d: '2024-01-01', e: null }] }, 6);
+  assert.equal(pts.length, 1);
+  assert.equal(pts[0].e, null);
 });

@@ -986,6 +986,12 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   width: 8px; height: 8px; border-radius: 50%;
   border: 1.5px solid hsl(var(--g) 58% 62%);
 }
+/* Détachée des genres : elle ne nomme pas une couleur, elle explique le grain. */
+.cartelegende .cartepoints {
+  margin-left: auto; padding-left: 16px; color: var(--ink-faint);
+  border-left: 1px solid var(--line-soft);
+}
+@media (max-width: 700px) { .cartelegende .cartepoints { margin-left: 0; border-left: 0; padding-left: 0; } }
 
 .mirror { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px 34px; }
 /* La journée ouverte tient désormais dans une colonne : le calendrier, le
