@@ -1555,6 +1555,11 @@ function themeMarkup(t) {
     </button>
     ${ouvert ? `<div class="tcorps">
       <p class="tquoi">${esc(t.quoi)}</p>
+      ${/* Le chiffre. Il ne vient PAS du modèle : il a choisi lequel des faits
+            déjà calculés porte ce thème, et le serveur a mis la phrase. C'est
+            pour ça qu'on peut l'afficher tel quel — il n'a traversé personne
+            qui aurait pu l'arrondir. */''}
+      ${t.chiffre ? `<p class="tchiffre">${esc(t.chiffre)}</p>` : ''}
       <div class="tpreuves">${t.preuves.map(p => `<button class="tpreuve" data-jour="${p.date}">
         <span class="mono">${fmtDay(p.date)}</span>
         <span>${esc(p.extrait)}</span>

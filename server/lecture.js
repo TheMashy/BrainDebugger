@@ -27,6 +27,7 @@
  */
 
 import { resolveKey } from './chat.js';
+import { comparaisons, comparaisonBlock } from './comparer.js';
 
 let _sdk = null;
 
@@ -161,9 +162,25 @@ ${motifs.map(m => `${m.nom} — ${m.mecanisme} (${m.vues} fois)`).join('\n')}`);
 ${objectifs.map(o => `${o.quoi} — ${o.tenu ? 'tenu' : 'rompu'} depuis ${o.depuis}${o.reprises ? `, ${o.reprises} reprise(s)` : ''}`).join('\n')}`);
   }
 
+  /*
+   * LES COMPARAISONS. LE MODELE CHOISIT LE FAIT, LE SERVEUR POSSEDE LE NOMBRE.
+   *
+   * Elles sont calculees sur TOUTE la fenetre, pas sur les journees transmises :
+   * l'echantillon garde les plus ecrites, et une moyenne prise dessus dirait
+   * quelque chose des journees bavardes, pas des journees.
+   *
+   * Le modele n'en rendra qu'un identifiant. C'est le seul dispositif qui
+   * empeche vraiment un chiffre invente d'arriver a l'ecran : lui demander de
+   * n'ecrire que des chiffres vrais ne marche pas, il les formule trop bien.
+   */
+  const comps = comparaisons(fenetre, ev);
+  const bloc = comparaisonBlock(comps);
+  if (bloc) blocs.push(bloc);
+
   return {
     texte: blocs.join('\n\n———\n\n'),
     dates,
+    comparaisons: comps,
     jours: fenetre.filter(r => r.text?.trim()).length,
     depuis
   };
@@ -292,6 +309,12 @@ const OUTIL = {
               type: 'array',
               description: 'Les noms des autres thèmes qui vont avec celui-ci.',
               items: { type: 'string' }
+            },
+            chiffre: {
+              type: 'string',
+              description: "L'identifiant d'une comparaison de la liste (« c3 »), quand elle porte "
+                + "vraiment ce thème. Sinon la chaîne vide. Tu ne recopies jamais le nombre : "
+                + "l'application affichera la phrase exacte à la place."
             }
           },
           required: ['nom', 'quoi', 'intensite', 'serie', 'preuves']
@@ -350,7 +373,19 @@ const texte = (s, max) => String(s ?? '').trim().replace(/\s+/g, ' ').slice(0, m
  * disparait : la consigne dit qu'il ne tient pas sans ancrage, et une consigne
  * qui n'est pas appliquee n'est pas une regle.
  */
-export function valider(brut, dates) {
+export function valider(brut, dates, comps = []) {
+  /*
+   * Le chiffre ne traverse jamais le modele. Il rend « c3 » ; la phrase de c3
+   * est cherchee ici, dans la liste que le serveur a calculee. Un identifiant
+   * inconnu -- invente, ou survivant d'une lecture precedente -- disparait sans
+   * bruit, comme une date de preuve absente du corpus : le theme reste, le
+   * chiffre faux non.
+   *
+   * Un meme chiffre ne sert qu'UNE fois. Le meme nombre repete sous trois
+   * themes ne dit pas trois choses, il dit que le modele a rempli le champ.
+   */
+  const parId = new Map(comps.map(c => [c.id, c]));
+  const pris = new Set();
   const themes = [];
   for (const t of (brut?.themes ?? []).slice(0, 8)) {
     const preuves = (t.preuves ?? [])
@@ -368,7 +403,13 @@ export function valider(brut, dates) {
         .map(p => ({ periode: texte(p?.periode, 20), valeur: borne(Math.round(p?.valeur), 0, 3) }))
         .filter(p => p.periode),
       preuves,
-      liens: []
+      liens: [],
+      chiffre: (() => {
+        const id = String(t?.chiffre ?? '').trim();
+        if (!parId.has(id) || pris.has(id)) return null;
+        pris.add(id);
+        return parId.get(id).phrase;
+      })()
     });
   }
   // Les liens ne sont resolus qu'APRES : un lien vers un theme qui vient d'etre
@@ -477,7 +518,7 @@ export async function lire(horizon, corpus, settings) {
 
   const u = res.usage ?? {};
   return {
-    lecture: valider(appel.input, corpus.dates),
+    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? []),
     modele: res.model ?? settings.anthropicModel,
     usage: {
       input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),

@@ -939,6 +939,17 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 .tcorps { padding: 0 13px 14px 39px; }
 .tquoi { margin: 0 0 12px; font-size: 14px; color: var(--ink-dim); max-width: 40em; }
+/* Le chiffre comparé à la normale. Il se lit comme une remarque — « tiens,
+   ça » — et pas comme un verdict : chiffres en monospace pour qu'on voie tout
+   de suite que c'est mesuré, texte de la même taille que le reste pour qu'il ne
+   prenne pas plus d'importance que le thème qu'il illustre. */
+.tchiffre {
+  margin: -4px 0 13px; padding: 8px 12px; max-width: 40em;
+  font-size: 13px; line-height: 1.5; color: var(--ink);
+  background: var(--panel); border-radius: 9px;
+  border-left: 2px solid var(--accent-dk);
+  font-variant-numeric: tabular-nums;
+}
 .tpreuves { display: flex; flex-direction: column; gap: 2px; }
 .tpreuve {
   display: flex; align-items: baseline; gap: 11px; width: 100%; text-align: left;
