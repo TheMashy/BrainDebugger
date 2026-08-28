@@ -1331,6 +1331,36 @@ button.bignum {
 }
 button.bignum:hover { opacity: .82; }
 .jourstrip { margin: 4px 0 16px; max-width: 420px; }
+
+/* ---------------------------------------------------------------------
+   L'AMPLITUDE D'UNE JOURNÉE.
+
+   Le compagnon relève, pendant la conversation, où quelqu'un semble être quand
+   le ton bascule. On n'affiche jamais la moyenne de ces relevés : une moyenne
+   ressemblerait à une note, se lirait comme une note, et finirait comparée à
+   la vraie. On affiche l'ÉCART — « de 3 à 8 dans la même soirée » ne prononce
+   aucun verdict, c'est un fait sur son amplitude.
+
+   CONTOURÉ, JAMAIS REMPLI. Ces bornes sont dites par le compagnon ; la note de
+   la journée est mesurée par la personne. Les deux ne peuvent pas se confondre
+   à l'œil.
+   --------------------------------------------------------------------- */
+.amplitude {
+  display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 9px 0 0; border-top: 1px solid var(--line-soft);
+}
+.amplitude .k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; }
+.ampbar {
+  position: relative; flex: 1 1 130px; max-width: 220px; height: 8px;
+  border-radius: 999px; border: 1px solid var(--line);
+}
+.ampbar i {
+  position: absolute; top: -1px; bottom: -1px;
+  border: 1px solid hsl(272 55% 62%); border-radius: 999px;
+  background: hsl(272 55% 62% / .13);
+}
+.ampval { font-size: 12px; color: hsl(272 45% 76%); font-variant-numeric: tabular-nums; }
+.ampdit { font-size: 12px; color: var(--ink-faint); }
 .jourdenote {
   background: none; border: 0; color: var(--ink-faint);
   font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;

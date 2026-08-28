@@ -203,6 +203,42 @@ CREATE TABLE IF NOT EXISTS lectures (
   PRIMARY KEY (user_id, horizon)
 );
 
+/*
+ * LES RELEVES : OU QUELQU'UN SEMBLE ETRE, A UN INSTANT.
+ *
+ * CE N'EST PAS UNE NOTE, ET LA TABLE EXISTE POUR QUE CA RESTE VRAI.
+ *
+ * La note d'une journee est saisie a la main, une fois, par la personne. C'est
+ * la regle qui tient toute la valeur du journal : quatre ans de notes ne valent
+ * quelque chose que si c'est le meme jugement qui les a posees. Un modele qui
+ * noterait a sa place casserait la comparabilite de la serie entiere, et rien
+ * ne le signalerait -- les chiffres auraient l'air des memes chiffres.
+ *
+ * Ce qui est stocke ici est autre chose : ou quelqu'un semble etre A CE
+ * MOMENT-LA de la conversation, releve quand le ton bascule nettement. Trois
+ * releves dans une soiree ne font pas une note de la soiree ; ils font une
+ * AMPLITUDE, et c'est la seule chose qu'on en tire.
+ *
+ * D'ou une table a part, attachee a un MESSAGE et jamais a une journee, et
+ * l'invariant qui tient tout : aucune requete de « entries » ne la lit, aucune
+ * moyenne ne l'inclut, aucune reference ne bouge avec elle.
+ */
+CREATE TABLE IF NOT EXISTS releves (
+  id         INTEGER PRIMARY KEY,
+  user_id    TEXT NOT NULL DEFAULT '${OWNER}',
+  message_id INTEGER NOT NULL,
+  date       TEXT NOT NULL,          -- 'YYYY-MM-DD', le jour du message
+  ts         TEXT NOT NULL,          -- ISO 8601, l'instant du releve
+  valeur     INTEGER NOT NULL,       -- 0..10, DECLARE par le compagnon
+  quoi       TEXT NOT NULL           -- a quoi il l'a vu, dans ses mots
+);
+CREATE INDEX IF NOT EXISTS idx_releves_jour ON releves(user_id, date);
+
+-- LA COLONNE QU'ON N'AJOUTE JAMAIS ICI NON PLUS : rien qui permette de
+-- remonter un releve dans « entries ». Pas de cle etrangere vers une journee,
+-- pas de champ « appliquer ». L'absence de chemin rend la faute impossible,
+-- pas seulement deconseillee.
+
 CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
@@ -849,6 +885,50 @@ export function deleteMotif(id, userId = OWNER) {
   db.prepare('DELETE FROM motif_vues WHERE motif_id = ?').run(id);
   db.prepare('DELETE FROM motifs WHERE id = ?').run(id);
   return true;
+}
+
+/* ---------- releves ---------- */
+
+export function addReleve({ messageId, date, valeur, quoi, userId = OWNER,
+                            quand = new Date().toISOString() }) {
+  const v = Math.max(0, Math.min(10, Math.round(Number(valeur))));
+  if (!Number.isFinite(v)) return null;
+  const info = db.prepare(
+    'INSERT INTO releves(user_id, message_id, date, ts, valeur, quoi) VALUES(?,?,?,?,?,?)'
+  ).run(userId, messageId, date, quand, v, String(quoi).trim());
+  return { id: Number(info.lastInsertRowid), date, ts: quand, valeur: v, quoi };
+}
+
+export const relevesDuJour = (date, userId = OWNER) =>
+  db.prepare('SELECT id, message_id, ts, valeur, quoi FROM releves WHERE user_id = ? AND date = ? ORDER BY ts ASC')
+    .all(userId, date);
+
+/**
+ * L'AMPLITUDE D'UNE JOURNEE, ET RIEN D'AUTRE.
+ *
+ * On rend l'ecart entre le plus haut et le plus bas releve, pas leur moyenne.
+ * Une moyenne de releves ressemblerait a une note, se lirait comme une note, et
+ * finirait par etre comparee a la vraie -- alors qu'elles ne mesurent pas la
+ * meme chose et n'ont pas ete posees par le meme juge.
+ *
+ * Il en faut DEUX. Un seul releve n'est pas une amplitude, c'est un point : le
+ * publier comme « ta journee a bouge de 0 » serait faux dans les deux sens.
+ */
+export function amplitude(date, userId = OWNER) {
+  const r = relevesDuJour(date, userId);
+  if (r.length < 2) return null;
+  const v = r.map(x => x.valeur);
+  return { n: r.length, bas: Math.min(...v), haut: Math.max(...v), ecart: Math.max(...v) - Math.min(...v) };
+}
+
+/** Les journees a plusieurs releves, pour la lecture de fond. */
+export function amplitudes(userId = OWNER, depuis = null) {
+  const rows = db.prepare(`
+    SELECT date, COUNT(*) n, MIN(valeur) bas, MAX(valeur) haut
+    FROM releves WHERE user_id = ?${depuis ? ' AND date >= ?' : ''}
+    GROUP BY date HAVING n >= 2 ORDER BY date ASC
+  `).all(...(depuis ? [userId, depuis] : [userId]));
+  return rows.map(r => ({ ...r, ecart: r.haut - r.bas }));
 }
 
 /* ---------- anchors ---------- */

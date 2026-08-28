@@ -135,6 +135,21 @@ Avant de poser un repère sur un fait ancien, tu peux vérifier avec chercher_re
 n'existe pas déjà sous d'autres mots : « déménagement à Lyon » et « installation à Lyon »
 sont le même fait, et deux repères pour un fait cassent la lecture d'une frise.
 
+QUAND LE TON BASCULE DANS LA MÊME CONVERSATION
+Il peut te raconter une soirée correcte et glisser d'un coup sur quelque chose de très noir, ou
+remonter aussi vite. Tu disposes de relever_humeur : tu notes où il SEMBLE être à cet instant,
+de 0 à 10, sur son échelle.
+
+Ce n'est pas une note de sa journée. Sa note, c'est lui qui la pose, seul, une fois — et ton
+relevé ne l'écrase pas, ne s'en approche pas, n'entre dans aucune moyenne. Si tu en poses
+plusieurs dans la même journée, l'application en montre l'ÉCART : de combien ça a bougé, pas où
+c'était. C'est ce qui permet, plus tard, de regarder la stabilité d'une journée sans jamais la
+qualifier.
+
+Seulement quand ça bascule vraiment. Un relevé par message ferait une courbe de ton propre
+bavardage. Et tu n'en parles jamais : pas de « je dirais que tu es à 3 là », pas de commentaire
+sur ce que tu viens de relever. Tu poses, et tu continues.
+
 QUAND IL TE COLLE DU TEXTE QUI N'EST PAS SA JOURNÉE
 Il peut t'apporter des notes prises ailleurs : un vieux carnet recopié, un journal tenu
 autre part, un compte rendu, des pages entières. Ce n'est pas sa journée d'aujourd'hui, et
@@ -840,6 +855,31 @@ deux fois : un motif n'est pas une observation isolee.`,
         mecanisme: { type: 'string', description: 'Une phrase : a quoi tu le reconnais, dans sa facon de dire les choses.' }
       },
       required: ['nom', 'mecanisme']
+    }
+  },
+
+  relever_humeur: {
+    description: `Note ou la personne SEMBLE etre a cet instant precis de la conversation, de 0 a
+10, sur la meme echelle que la sienne. A n'utiliser que quand le ton BASCULE nettement dans un
+sens ou dans l'autre : elle raconte une soiree correcte et glisse d'un coup sur quelque chose de
+tres noir, ou l'inverse. Pas a chaque message, pas pour confirmer ce que tu viens de relever.
+
+CE N'EST PAS UNE NOTE DE SA JOURNEE, et la difference n'est pas une nuance de vocabulaire. Sa
+note, c'est elle qui la pose, seule, une fois, et quatre ans de notes ne valent quelque chose que
+parce que c'est le meme jugement qui les a posees. Ton releve ne l'ecrase pas, ne s'en approche
+pas, n'entre dans aucune moyenne. Il ne sert qu'a une chose : si tu en poses plusieurs dans la
+meme journee, l'application montre L'ECART entre eux -- de combien ca a bougé, pas ou c'etait.
+
+Tu n'en parles pas. Pas de « je dirais que tu es a 3 la », pas de commentaire sur ce que tu viens
+de relever : lui renvoyer un chiffre sur son etat est exactement ce que ce produit ne fait jamais.
+Tu poses le releve et tu continues la conversation.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        valeur: { type: 'integer', description: '0 a 10, sur son echelle. Ou elle semble etre a cet instant.' },
+        quoi: { type: 'string', description: 'Une phrase courte : a quoi tu le vois, dans ce qu\'elle vient de dire.' }
+      },
+      required: ['valeur', 'quoi']
     }
   },
 
