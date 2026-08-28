@@ -70,6 +70,13 @@ a { color: var(--accent); }
   max-width: 1180px; margin: 0 auto;
   height: 100dvh; display: grid; grid-template-columns: 218px minmax(0, 1fr);
 }
+/* Un enfant de grille vaut `min-height: auto` : il refuse de descendre sous la
+   hauteur de son contenu, et c'est la PAGE qui grandit a sa place. Le fil ne
+   defilait donc jamais sur un ecran large -- il poussait la coquille hors de la
+   fenetre, et le composeur passait sous le pli. Le meme piege qu'en flex, et la
+   regle existait deja plus bas, dans le bloc mobile : c'est pour ca que le
+   telephone allait bien et pas le bureau. */
+.shell > * { min-height: 0; }
 
 .rail {
   display: flex; flex-direction: column;
@@ -177,11 +184,33 @@ nav button[aria-current="true"] { color: var(--ink); background: none; }
    fenêtre trop courte pour la note, il vaut mieux un défilement qu'un bas de
    page coupé — un bouton « 0 » inatteignable le soir où il sert, ce n'est pas
    un défaut d'esthétique. */
-#view:has(> .tonight) { overflow: auto; padding-bottom: 20px; }
+#view:has(> .tonight) { overflow: hidden; padding-bottom: 20px; }
 .tonight { height: 100%; }
-.tonight .stack { height: 100%; min-height: 0; }
-.tonight .card:first-child { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.tonight .thread { flex: 1 1 auto; min-height: 108px; max-height: none; }
+
+/*
+ * ON ARRIVE PRET A ECRIRE.
+ *
+ * Le fil montait jusqu'en haut de la fenetre et poussait le composeur sous le
+ * pli : on ouvrait l'application pour ecrire, et le premier geste etait de
+ * descendre chercher le champ. Il est maintenant ancre EN BAS, replie sur sa
+ * fin, et ce qui deborde se fond vers le haut au lieu d'etre coupe net.
+ *
+ * `flex: 0 1 auto` : il se reduit si la fenetre est courte, il ne s'etire
+ * jamais. Une conversation de trois messages ne doit pas ouvrir une boite de
+ * quarante-six pour cent de hauteur a moitie vide.
+ */
+.tonight { justify-content: flex-end; }
+.tonight .thread { flex: 0 1 auto; min-height: 0; max-height: 46vh; }
+
+/* Le fondu ne se pose QUE si ca deborde vraiment : sur une conversation courte,
+   il effacerait le premier message sans rien cacher. */
+.thread.fondu {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 72px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 72px);
+}
+/* On remonte : le fil prend toute la place et le fondu se leve — on est venu
+   lire, plus repondre. */
+.tonight .thread.ouvert { flex: 1 1 auto; max-height: none; }
 
 .row { display: flex; gap: 30px 26px; flex-wrap: wrap; }
 .row > * { flex: 1 1 320px; min-width: 0; }

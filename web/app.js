@@ -405,9 +405,12 @@ function drawThread() {
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }<span class="tx">${esc(m.text)}</span>${marque}</div>`;
   }).join('') + gestesMarkup();
+  // On revient toujours en bas et replié : un rendu du fil est un retour à la
+  // conversation, pas une reprise de lecture.
+  th.classList.remove('ouvert', 'reading');
   th.scrollTop = th.scrollHeight;
-  th.classList.remove('reading');
   bindThreadReveal(th);
+  majFil(th);
   bindGestes(th);
   syncPetSay();
 }
@@ -521,6 +524,7 @@ function dessinerGestes() {
   th.querySelector('.gestes')?.remove();
   th.insertAdjacentHTML('beforeend', gestesMarkup());
   th.scrollTop = th.scrollHeight;
+  majFil(th);
 }
 
 const AURA_CLE = 'bd.aura';
@@ -578,13 +582,39 @@ function bindGestes(th) {
   });
 }
 
+/**
+ * Le fil : replié sur sa fin, ouvert quand on remonte.
+ *
+ * DEUX SEUILS, PAS UN. Ouvrir demande d'avoir remonté de quarante pixels ;
+ * refermer demande d'être revenu au bas exact. Avec un seuil unique, ouvrir
+ * fait grandir la boîte, ce qui rapproche mécaniquement du bas, ce qui referme,
+ * ce qui rétrécit — le fil clignote sous le curseur.
+ *
+ * Et on garde l'ancrage : `scrollHeight − scrollTop` avant, restauré après.
+ * Sans ça, la boîte grandit sous le texte qu'on était en train de lire et il
+ * saute de trois cents pixels au moment précis où on le lisait.
+ */
+function majFil(th) {
+  const deborde = th.scrollHeight > th.clientHeight + 4;
+  const duBas = th.scrollHeight - th.scrollTop - th.clientHeight;
+  const ouvert = th.classList.contains('ouvert');
+
+  if (!ouvert && duBas > 40) {
+    const ancre = th.scrollHeight - th.scrollTop;
+    th.classList.add('ouvert');
+    th.scrollTop = th.scrollHeight - ancre;
+  } else if (ouvert && duBas < 4) {
+    th.classList.remove('ouvert');
+    th.scrollTop = th.scrollHeight;
+  }
+  th.classList.toggle('fondu', deborde && !th.classList.contains('ouvert'));
+  th.classList.toggle('reading', duBas >= 24);
+}
+
 function bindThreadReveal(th) {
   if (th.dataset.reveal) return;      // un seul écouteur, pas un par rendu
   th.dataset.reveal = '1';
-  th.addEventListener('scroll', () => {
-    const enBas = th.scrollHeight - th.scrollTop - th.clientHeight < 24;
-    th.classList.toggle('reading', !enBas);
-  }, { passive: true });
+  th.addEventListener('scroll', () => majFil(th), { passive: true });
 }
 
 /** Lit un flux SSE renvoyé par fetch et appelle `on(event, data)` par trame. */
@@ -643,6 +673,7 @@ async function send() {
         el.innerHTML = '<span class="tx"></span>';
         th.appendChild(el);
         th.scrollTop = th.scrollHeight;
+        majFil(th);
         Blip.reset();
         typing = PetTalk.startStream($('#art'), el.querySelector('.tx'), { onChar: speakChar });
         return;
