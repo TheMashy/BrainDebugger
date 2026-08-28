@@ -266,26 +266,27 @@ async function renderTonight() {
   const note = hier ? null : (S.entry?.note ?? null);
   const s = S.settings;
   const manques = S.stats.aNoter ?? [];
-  // Un echec ici ne doit pas empecher d'ecrire : le trombone est un indicateur,
-  // la conversation est le produit.
-  try { OBJECTIFS = (await api('/api/objectifs')).objectifs ?? []; } catch { OBJECTIFS = []; }
-
   $('#view').innerHTML = `
     <div class="tonight">
       <div class="thread" id="thread"></div>
 
+      ${/* Ce qu'on s'apprete a joindre, au-dessus du champ : une piece qu'on
+             ne voit pas est une piece qu'on envoie sans le savoir. */''}
+      <div class="jointes" id="jointes" hidden></div>
+
       <div class="composer">
-        ${/* Le trombone. Il n'ouvre rien qu'on remplisse : c'est un indicateur,
-              et il n'apparait que s'il y a quelque chose a indiquer. */''}
-        <button class="clip" id="clip" aria-expanded="false" aria-label="Ce que tu tiens"
-                title="Ce que tu tiens" ${OBJECTIFS.length ? '' : 'hidden'}>
+        ${/* LE TROMBONE JOINT UN FICHIER. Il indiquait « ce que tu tiens » --
+              les objectifs -- et n'ouvrait rien : un bouton qui ne fait rien
+              occupait la seule place ou l'on cherche a joindre quelque chose. */''}
+        <button class="clip" id="clip" aria-label="Joindre un fichier"
+                data-tip="Une image, un PDF, un texte — lu pour cette réponse">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
                stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M20.4 11.6 12.3 19.7a5 5 0 0 1-7.1-7.1l8.1-8.1a3.3 3.3 0 0 1 4.7 4.7l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.5-7.5"/>
           </svg>
-          ${OBJECTIFS.some(o => !o.tenu) ? '<i class="clipdot"></i>' : ''}
         </button>
-        <div class="pop objpop" id="objpop" hidden>${objectifsMarkup()}</div>
+        <input type="file" id="fichiers" multiple hidden
+               accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,.md,.txt,.csv,.json">
         <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
         <button class="sendarrow" id="send" aria-label="Envoyer" title="Envoyer">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
@@ -410,26 +411,21 @@ async function renderTonight() {
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
 
-  const clip = $('#clip'), pop = $('#objpop');
-  clip.onclick = () => {
-    const ouvert = pop.hidden;
-    pop.hidden = !ouvert;
-    clip.setAttribute('aria-expanded', String(ouvert));
+  $('#clip').onclick = () => $('#fichiers').click();
+  $('#fichiers').onchange = async e => {
+    await joindre(e.target.files);
+    e.target.value = '';     // rejoindre deux fois le meme fichier reste possible
   };
-  pop.onclick = async e => {
-    const d = e.target.closest('[data-delobj]');
-    if (!d) return;
-    OBJECTIFS = (await api('/api/objectifs', { delete: Number(d.dataset.delobj) })).objectifs ?? [];
-    if (!OBJECTIFS.length) { pop.hidden = true; clip.hidden = true; return; }
-    pop.innerHTML = objectifsMarkup();
+  // Coller une capture d'ecran est le geste le plus courant, et il ne passe
+  // par aucun bouton : Ctrl+V dans le champ suffit.
+  input.onpaste = e => {
+    const fs = [...(e.clipboardData?.files ?? [])];
+    if (fs.length) { e.preventDefault(); joindre(fs); }
   };
-  // Un panneau flottant qui ne se ferme qu'en recliquant son bouton reste
-  // ouvert par-dessus la conversation qu'on est venu reprendre.
-  document.addEventListener('click', e => {
-    if (pop.hidden || e.target.closest('#objpop, #clip')) return;
-    pop.hidden = true;
-    clip.setAttribute('aria-expanded', 'false');
-  });
+  $('#jointes').onclick = e => {
+    const d = e.target.closest('[data-dejoindre]');
+    if (d) { JOINTES.splice(Number(d.dataset.dejoindre), 1); dessinerJointes(); }
+  };
 
   input.focus();
 }
@@ -637,54 +633,26 @@ function rembobMarkup(m) {
  * l'application et donne le moyen d'aller le voir. Elle disparaît au prochain
  * message -- l'endroit où un repère vit pour de bon, c'est la frise.
  */
-/* ===================== ce qu'il tient =====================
+/*
+ * LES OBJECTIFS ONT ETE RETIRES.
  *
- * C'EST UN INDICATEUR, PAS UN SUIVI.
+ * Le trombone « ce que tu tiens » n'ouvrait rien qu'on remplisse : il listait
+ * des resolutions posees dans la conversation, sans case a cocher ni rappel.
+ * L'idee etait juste -- et elle reste : ce dont on a du mal a se passer est
+ * maintenant un NOEUD de la carte, avec son genre « dependance », relie au
+ * reste. Un suivi separe disait « voila ce que tu as decide » ; la carte dit
+ * « voila a quoi ca tient », ce qui est la question qu'on se pose vraiment.
  *
- * Pas de case a cocher, pas de rappel, pas de pourcentage : la liste dit ce
- * qu'il a decide, depuis combien de jours ca tient, et si c'est rompu en ce
- * moment. Rien d'autre. Une resolution qu'on ne tient pas n'est pas un echec a
- * signaler, et une application qui la note transforme un appui en jugement.
- *
- * Les objectifs se posent et se mettent a jour dans la CONVERSATION -- c'est la
- * qu'on dit « il faudrait vraiment que j'arrete » et « j'ai craque samedi ».
- * Le seul geste ici est de retirer.
+ * Rien n'est efface en base : la table `objectifs` et sa route restent, et ce
+ * qui y a ete ecrit s'exporte toujours. On retire l'interface et l'outil, pas
+ * les donnees -- supprimer est irreversible, cacher ne l'est pas.
  */
-let OBJECTIFS = [];
-
-const joursTenus = d => Math.max(0, joursEntre(d, S.today) - 1);
-
-function objectifsMarkup() {
-  if (!OBJECTIFS.length) return '';
-  return `<div class="objliste">${OBJECTIFS.map(o => {
-    const n = joursTenus(o.depuis);
-    const duree = n === 0 ? "aujourd'hui" : `${n} jour${n > 1 ? 's' : ''}`;
-    return `<div class="objitem${o.tenu ? '' : ' rompu'}">
-      <span class="objico">${icone(o.genre, 18)}</span>
-      <div class="objtxt">
-        <b>${esc(o.quoi)}</b>
-        <span>${o.tenu ? `tenu · ${duree}` : `rompu · ${duree} avant`}${
-          o.reprises ? ` · ${o.reprises}<sup>e</sup> reprise` : ''}</span>
-      </div>
-      <button class="repdel" data-delobj="${o.id}" title="Retirer" aria-label="Retirer ${esc(o.quoi)}">×</button>
-    </div>`;
-  }).join('')}</div>`;
-}
 
 let GESTES = [];
 
 function gestesMarkup() {
   if (!GESTES.length) return '';
-  return `<div class="gestes">${GESTES.map(g => g.type === 'objectif'
-    ? `<div class="geste objectif${g.tenu ? '' : ' rompu'}">
-         <span class="gicone">${icone(g.genre, 20)}</span>
-         <div class="gtxt">
-           <b>${g.nouveau ? 'Objectif noté' : g.tenu ? 'Ça repart' : 'Rompu'}</b>
-           <span>${esc(g.quoi)}</span>
-         </div>
-         <button class="gbtn" data-clip="1">voir</button>
-       </div>`
-    : g.type === 'note'
+  return `<div class="gestes">${GESTES.filter(g => g.type !== 'objectif').map(g => g.type === 'note'
     ? `<div class="geste note">
          <span class="gicone">${icone('pensee', 20)}</span>
          <div class="gtxt">
@@ -823,13 +791,6 @@ function bindGestes(th) {
         ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
     }
-    // « voir » sur un objectif ouvre le trombone, pas une autre vue : ce qu'on
-    // vient de poser est a deux centimetres, sous le composeur.
-    const c = e.target.closest('[data-clip]');
-    if (c) {
-      const pop = $('#objpop');
-      if (pop) { pop.hidden = false; $('#clip')?.setAttribute('aria-expanded', 'true'); }
-    }
   });
 }
 
@@ -908,10 +869,84 @@ async function readSSE(res, on) {
   }
 }
 
+/* ---------------------------- les pièces jointes ----------------------------
+
+   Une image ou un PDF ne se résume pas en texte sans perdre ce qui compte : une
+   ordonnance, un compte rendu, une capture. Ils partent tels quels et le
+   compagnon les lit.
+
+   Ils ne sont PAS enregistrés. Le journal est un fichier SQLite qu'on exporte
+   et qu'on emporte ; y coller des mégaoctets de binaire le rendrait
+   intransportable pour rien -- ce qui compte dans un compte rendu, le compagnon
+   peut le RANGER dans le carnet avec l'outil qu'il a déjà, et c'est là, en
+   texte, que ça sert ensuite.
+
+   Les fichiers TEXTE, eux, sont lus ici et collés dans le message : ils sont
+   donc gardés comme tout ce qu'on écrit.                                     */
+
+let JOINTES = [];
+const PIECE_MAX = 8 * 1024 * 1024;
+const BINAIRES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf']);
+const estTexte = f => /^text\//.test(f.type) || f.type === 'application/json'
+  || /\.(md|txt|csv|json|log)$/i.test(f.name);
+
+const lireBase64 = f => new Promise((ok, ko) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(',')[1] ?? '');
+  r.onerror = () => ko(new Error(`« ${f.name} » n'a pas pu être lu.`));
+  r.readAsDataURL(f);
+});
+
+async function joindre(liste) {
+  for (const f of [...(liste ?? [])]) {
+    if (JOINTES.length >= 5) { toast('Cinq pièces au maximum.'); break; }
+    if (f.size > PIECE_MAX) { toast(`« ${f.name} » dépasse 8 Mo.`); continue; }
+    try {
+      if (estTexte(f)) {
+        JOINTES.push({ nom: f.name, media: 'texte', texte: (await f.text()).slice(0, 40000) });
+      } else if (BINAIRES.has(f.type)) {
+        JOINTES.push({ nom: f.name, media: f.type, donnees: await lireBase64(f) });
+      } else {
+        toast(`« ${f.name} » : format non lu (images, PDF, texte).`);
+      }
+    } catch (err) { toast(err.message); }
+  }
+  dessinerJointes();
+}
+
+function dessinerJointes() {
+  const el = $('#jointes');
+  if (!el) return;
+  el.hidden = !JOINTES.length;
+  el.innerHTML = JOINTES.map((p, i) => `<span class="jointe" data-t="${p.media === 'texte' ? 'texte' : p.media === 'application/pdf' ? 'pdf' : 'image'}">
+    <b>${esc(p.nom)}</b>
+    <button data-dejoindre="${i}" aria-label="Retirer ${esc(p.nom)}">×</button>
+  </span>`).join('');
+}
+
 async function send() {
   const input = $('#input');
-  const text = input.value.trim();
-  if (!text) return;
+  let text = input.value.trim();
+  if (!text && !JOINTES.length) return;
+
+  /*
+   * Le texte des fichiers texte est COLLE au message.
+   *
+   * C'est ce qui fait qu'un compte rendu reste lisible dans le fil six mois
+   * plus tard, alors qu'une image du meme compte rendu n'aurait laisse qu'un
+   * nom de fichier. Les fichiers texte n'ont aucune raison d'etre traites comme
+   * des pieces : ce sont des mots, et ce produit garde les mots.
+   */
+  const textes = JOINTES.filter(p => p.media === 'texte');
+  if (textes.length) {
+    text = [text, ...textes.map(p => `\n\n— ${p.nom} —\n${p.texte}`)].join('').trim();
+  }
+  const pieces = JOINTES.filter(p => p.media !== 'texte')
+    .map(p => ({ nom: p.nom, media: p.media, donnees: p.donnees }));
+  const noms = pieces.map(p => p.nom);
+  JOINTES = [];
+  dessinerJointes();
+
   input.value = '';
   input.style.height = 'auto';
   $('#send').disabled = true;
@@ -919,7 +954,8 @@ async function send() {
 
   GESTES = [];                        // les gestes du tour précédent ont fait leur temps
   // affichage optimiste : ce que tu écris apparaît tout de suite
-  S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user', text });
+  S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user',
+                    text: text || noms.map(n => `[${n}]`).join(' ') });
   drawThread();
 
   let typing = null;
@@ -928,7 +964,7 @@ async function send() {
     const res = await fetch('/api/message/stream', {
       method: 'POST',
       headers: enTetes(true),
-      body: JSON.stringify({ text, date: S.today })
+      body: JSON.stringify({ text, date: S.today, pieces })
     });
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
@@ -990,15 +1026,6 @@ async function send() {
       // après, où elle aurait l'air d'être tombée toute seule.
       if (ev === 'geste') {
         GESTES.push(data);
-        // Le trombone suit le geste immediatement : voir apparaitre « objectif
-        // note » et trouver un trombone vide en cliquant serait une panne.
-        if (data.type === 'objectif') {
-          OBJECTIFS = [data, ...OBJECTIFS.filter(o => o.id !== data.id)]
-            .sort((a, b) => (a.tenu - b.tenu) || b.depuis.localeCompare(a.depuis));
-          const clip = $('#clip'), pop = $('#objpop');
-          if (clip) clip.hidden = false;
-          if (pop) pop.innerHTML = objectifsMarkup();
-        }
         dessinerGestes();
         return;
       }
