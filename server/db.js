@@ -756,6 +756,36 @@ export function allMotifs(userId = OWNER) {
   ).all(userId);
 }
 
+/**
+ * LES OCCURRENCES D'UN MOTIF, MOIS PAR MOIS.
+ *
+ * Un motif portait un compte -- « 7 fois » -- et rien d'autre. Sept fois en un
+ * an et sept fois en un mois ne sont pas la meme chose, et le compte seul ne
+ * permet pas de les distinguer : c'est exactement l'information qui manque
+ * quand on se demande si quelque chose s'aggrave.
+ *
+ * Les dates viennent des MESSAGES ou le compagnon l'a reconnu, pas d'un champ
+ * a part : c'est la seule source qui ne puisse pas diverger de ce qui est
+ * affiche dans le fil.
+ */
+export function motifSeries(userId = OWNER) {
+  const rows = db.prepare(`
+    SELECT v.motif_id AS id, substr(m.date, 1, 7) AS mois, COUNT(*) AS n
+    FROM motif_vues v
+    JOIN messages m ON m.id = v.message_id
+    JOIN motifs f ON f.id = v.motif_id
+    WHERE f.user_id = ? AND m.user_id = ?
+    GROUP BY v.motif_id, mois
+    ORDER BY mois ASC
+  `).all(userId, userId);
+  const par = new Map();
+  for (const r of rows) {
+    if (!par.has(r.id)) par.set(r.id, []);
+    par.get(r.id).push({ periode: r.mois, n: r.n });
+  }
+  return par;
+}
+
 export function addMotif({ nom, mecanisme, userId = OWNER, quand = new Date().toISOString() }) {
   const deja = db.prepare('SELECT id FROM motifs WHERE user_id = ? AND nom = ?').get(userId, nom);
   if (deja) return { id: deja.id, existait: true };

@@ -170,10 +170,28 @@ async function saveSettings(patch) {
                                                                             */
 
 
+/*
+ * LE JOUR QUE LA CARTE DE NOTE VISE.
+ *
+ * Aujourd'hui, presque toujours. Mais on note le soir, et un soir on oublie :
+ * une semaine sautee restait sautee pour toujours -- la grille gardait ses
+ * trous, et la reference glissante comptait avec un mois de moins. Ce n'est pas
+ * une lacune d'interface, c'est la seule perte de donnees que ce produit ne
+ * savait pas reparer.
+ *
+ * Le curseur revient a aujourd'hui des qu'on quitte la vue : rattraper est un
+ * geste ponctuel, pas un mode dans lequel on reste.
+ */
+let NOTE_JOUR = null;
+
 async function renderTonight() {
-  const t = S.today;
-  const note = S.entry?.note ?? null;
+  const t = NOTE_JOUR ?? S.today;
+  const hier = t !== S.today;
+  // Un jour visé sort de `aNoter` : il est sans note par construction, et
+  // aller le demander au serveur serait un aller-retour pour apprendre `null`.
+  const note = hier ? null : (S.entry?.note ?? null);
   const s = S.settings;
+  const manques = S.stats.aNoter ?? [];
   // Un echec ici ne doit pas empecher d'ecrire : le trombone est un indicateur,
   // la conversation est le produit.
   try { OBJECTIFS = (await api('/api/objectifs')).objectifs ?? []; } catch { OBJECTIFS = []; }
@@ -203,13 +221,25 @@ async function renderTonight() {
         </button>
       </div>
 
-      <div class="notecard">
+      <div class="notecard${hier ? ' rattrape' : ''}">
         <div class="noteline">
-          <span class="k">Note avant de te coucher</span>
+          <span class="k">${hier ? `Tu notes le ${fmtDay(t)}` : 'Note avant de te coucher'}</span>
+          ${hier ? `<button class="retourjour" data-notejour="">revenir à aujourd'hui</button>` : ''}
           ${S.stats.reference !== null
             ? `<span class="ref">référence <b class="mono">${S.stats.reference}</b></span>` : ''}
           <button class="newchat" id="newChat" title="Repartir sur un fil vide. Rien n'est effacé : tes journées restent dans le journal.">Nouveau&nbsp;fil</button>
         </div>
+
+        ${/* Les jours manqués. Ils n'apparaissent que s'il y en a — une rangée
+              permanente de cases vides serait un reproche quotidien, et ce
+              produit ne relance pas les jours de silence. */''}
+        ${manques.length ? `<div class="manques">
+          <span class="k faint">non notés</span>
+          ${manques.map(m => `<button data-notejour="${m.date}"
+            aria-pressed="${t === m.date}"
+            title="${m.ecrit ? 'Tu as écrit ce jour-là, sans le noter.' : 'Rien pour ce jour-là.'}"
+            >${fmtJourCourt(m.date)}${m.ecrit ? '<i></i>' : ''}</button>`).join('')}
+        </div>` : ''}
 
         <div class="noteface">
           <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
@@ -261,8 +291,32 @@ async function renderTonight() {
     await api('/api/note', { date: t, note: n });
     S = await api('/api/state');
     syncHeader();
+    // Une journée rattrapée sort de la liste des manques : on repart sur celle
+    // d'après tant qu'il en reste, et sinon on revient à aujourd'hui. Rattraper
+    // une semaine devient six clics au lieu de six allers-retours.
+    if (hier) {
+      const reste = (S.stats.aNoter ?? []).filter(m => m.date !== t);
+      NOTE_JOUR = reste.length ? reste[0].date : null;
+    }
     renderTonight();
-    toast(`Journée notée ${n}/10`);
+    toast(`${hier ? fmtDay(t) : 'Journée'} notée ${n}/10`);
+  };
+
+  /*
+   * Choisir le jour que la carte vise.
+   *
+   * `.onclick` sur la CARTE, pas `addEventListener` sur `#view` : la carte est
+   * reconstruite a chaque rendu, `#view` non. Un `addEventListener` posé à
+   * chaque rendu empile les écouteurs, et au troisième clic la carte se
+   * redessine trois fois — le bouton qu'on venait de viser est détaché du DOM
+   * avant que son propre clic soit traité.
+   */
+  const carte = $('.notecard');
+  if (carte) carte.onclick = e => {
+    const j = e.target.closest('[data-notejour]');
+    if (!j) return;
+    NOTE_JOUR = j.dataset.notejour || null;
+    renderTonight();
   };
 
   $('#voiceBtn')?.addEventListener('click', async e => {
@@ -374,6 +428,18 @@ function noteSay(n) {
 /** Au-delà, on a quitté la conversation et on y est revenu : l'heure compte. */
 const PAUSE_MS = 12 * 60 * 1000;
 
+/** « lun. 24 » : de quoi reconnaître un jour de la semaine passée, sans plus. */
+const fmtJourCourt = d => new Date(d + 'T00:00:00')
+  .toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
+
+/** « 7 h », « 2 j » : une durée qu'on lit d'un coup d'œil, jamais à la minute. */
+function dureeCourte(ms) {
+  const h = Math.round(ms / 3600000);
+  if (h < 48) return `${h} h`;
+  const j = Math.round(h / 24);
+  return j < 14 ? `${j} jours` : `${Math.round(j / 7)} semaines`;
+}
+
 function drawThread() {
   const th = $('#thread');
   if (!th) return;
@@ -399,8 +465,23 @@ function drawThread() {
     // le même chiffre -- alors qu'un trou de vingt minutes en dit long, et c'est
     // exactement ce qu'on veut voir en relisant une soirée six mois plus tard.
     const ts = Date.parse(m.ts) || 0;
-    const pause = i === 0 || sep || (ts - dernierTs) >= PAUSE_MS;
+    const creux = i > 0 ? ts - dernierTs : 0;
+    const pause = i === 0 || sep || creux >= PAUSE_MS;
     dernierTs = ts;
+
+    /*
+     * LE SILENCE SE VOIT.
+     *
+     * Une heure de plus dans un horodatage ne se remarque pas ; « 7 h plus
+     * tard », si. Et c'est l'information qu'on cherche en relisant une soirée
+     * six mois après : est-ce que ces deux phrases se suivaient, ou est-ce
+     * qu'il y a eu une nuit entre les deux.
+     *
+     * Le seuil est de trois heures et le marqueur ne double jamais le
+     * séparateur de journée, qui dit déjà « on a changé de jour ».
+     */
+    const silence = !sep && creux >= 3 * 3600 * 1000
+      ? `<div class="creux"><span>${dureeCourte(creux)} plus tard</span></div>` : '';
 
     // Les motifs reconnus dans CE message le teintent, lui et pas la
     // conversation : c'est la phrase qui porte le mécanisme, pas la soirée.
@@ -411,7 +492,7 @@ function drawThread() {
           `<button class="motifchip" data-motif="${x.id}" style="--motif:${x.teinte}"
             title="Motif suivi par le compagnon">${esc(x.nom)}</button>`).join('')}</span>`
       : '';
-    return sep + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte} data-id="${m.id ?? ''}"
+    return sep + silence + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte} data-id="${m.id ?? ''}"
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }${reflexionMarkup(m)}<span class="tx">${esc(m.text)}</span>${marque}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
@@ -1200,9 +1281,18 @@ async function renderYear(year) {
     if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
     const cad = e.target.closest('[data-cadre]');
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
+    // Une note s'ouvre sur place : le repli est l'état par défaut, et ouvrir
+    // une note ne doit pas coûter un changement de page.
+    const cno = e.target.closest('[data-cnouvre]');
+    if (cno) {
+      const id = Number(cno.dataset.cnouvre);
+      if (CN_OUVERTES.has(id)) CN_OUVERTES.delete(id); else CN_OUVERTES.add(id);
+      return renderYear(year);
+    }
     const dcn = e.target.closest('[data-delcn]');
     if (dcn) {
       CARNET = await api('/api/carnet', { delete: Number(dcn.dataset.delcn) });
+      CN_OUVERTES.delete(Number(dcn.dataset.delcn));
       toast('Note retirée');
       return renderYear(year);
     }
@@ -1614,33 +1704,61 @@ function notesDuJourMarkup(notes) {
 }
 
 /*
+ * UNE NOTE EST REPLIEE JUSQU'A CE QU'ON L'OUVRE.
+ *
+ * Une note collee fait souvent trois mille signes. Deroulees, dix d'entre elles
+ * remplissent quinze ecrans, et l'on ne peut plus retrouver celle qu'on
+ * cherche : une liste ou rien ne se distingue n'est pas une liste, c'est un mur.
+ *
+ * Repliee, elle tient sur une pastille : l'icone de ce dont elle parle, sa
+ * date, et sa taille. Ce n'est pas un resume -- un resume serait une
+ * reformulation, et ses mots lui appartiennent. C'est de quoi savoir laquelle
+ * ouvrir.
+ *
  * Une note ne doit jamais pouvoir se lire comme une journee : lisere a gauche,
  * fond en retrait, et la date d'apport affichee quand elle differe du jour dont
  * la note parle. Une note ecrite quatre ans apres le jour qu'elle raconte n'a
  * pas le meme statut qu'une note du soir meme, et le cacher serait un
  * deplacement silencieux.
  */
+const CN_OUVERTES = new Set();
+
+/** « 3 200 signes » plutôt qu'un extrait : un extrait promet un résumé. */
+const tailleNote = n => n >= 1000 ? `${Math.round(n / 100) / 10} k signes` : `${n} signes`;
+
 function carnetItemMarkup(n) {
+  const ouvert = CN_OUVERTES.has(n.id);
   const apporte = n.cree_le?.slice(0, 10);
   const decale = n.jour && apporte && apporte !== n.jour;
   const situe = n.jour ? fmtDay(n.jour)
-              : n.quand ? `sans date · ${esc(n.quand)}`
+              : n.quand ? `sans date · ${n.quand}`
               : 'sans date';
-  return `<div class="cnitem">
-    <div class="cnmeta">
-      ${n.jour ? `<button class="cndate" data-goto="${n.jour}">${situe}</button>`
-               : `<span class="cndate faint">${situe}</span>`}
-      ${decale ? `<span class="faint">apportée le ${fmtDay(apporte)}</span>` : ''}
-      <button class="repdel" data-delcn="${n.id}" title="Retirer cette note"
-              aria-label="Retirer cette note">×</button>
-    </div>
-    <p class="cntexte">${esc(n.texte)}</p>
+  return `<div class="cnitem${ouvert ? ' ouverte' : ''}">
+    <button class="cnpuce" data-cnouvre="${n.id}" aria-expanded="${ouvert}">
+      <span class="cnicone">${icone(n.theme ?? 'jalon', 15)}</span>
+      <span class="cnquand">${esc(situe)}</span>
+      <span class="cntaille mono">${tailleNote(n.texte.length)}</span>
+    </button>
+    ${ouvert ? `<div class="cncorps">
+      <div class="cnmeta">
+        ${n.jour ? `<button class="cndate" data-goto="${n.jour}">ouvrir le ${fmtDay(n.jour)}</button>` : ''}
+        ${apporte ? `<span class="faint">${decale ? 'apportée le' : 'donnée le'} ${fmtDay(apporte)}</span>` : ''}
+        <button class="repdel" data-delcn="${n.id}" title="Retirer cette note"
+                aria-label="Retirer cette note">retirer</button>
+      </div>
+      ${n.termes?.length ? `<div class="cntermes">${n.termes.map(t =>
+        `<span>${esc(motLisible(t))}</span>`).join('')}</div>` : ''}
+      <p class="cntexte">${esc(n.texte)}</p>
+    </div>` : ''}
   </div>`;
 }
 
 /* ============================= vue : miroir ============================= */
 
 let MIRROR_DATE = null;
+/* L'échelle de la journée ouverte, repliée par défaut : on relit une journée
+   cent fois pour une fois qu'on la renote. */
+let DAY_NOTE_OUVERT = false;
 let MIRROR_CARNET = null;   // les notes du jour ouvert, pour le message de suppression
 /*
  * Le curseur du calendrier, distinct du jour ouvert.
@@ -1771,15 +1889,54 @@ function serieMarkup(serie) {
   ).join('')}</span>`;
 }
 
-function themeMarkup(t) {
-  const ouvert = MIR_THEME === t.nom;
-  return `<div class="theme${ouvert ? ' ouvert' : ''}" data-theme-nom="${esc(t.nom)}">
-    <button class="thead" aria-expanded="${ouvert}">
-      <span class="tpuce" data-i="${t.intensite}"></span>
-      <span class="tnom">${esc(t.nom)}</span>
-      ${serieMarkup(t.serie)}
+/*
+ * UNE SEULE LISTE DE MECANISMES, ET ELLE EST COLOREE.
+ *
+ * Il y en avait deux, l'une au-dessus de l'autre. Les MOTIFS -- ce que le
+ * compagnon reconnait en conversation, tout de suite, avec un compte -- en
+ * cartes colorees. Les THEMES -- ce qu'il tire d'une relecture de tout le
+ * corpus, avec des preuves datees et une evolution -- en lignes grises en
+ * dessous. Deux formes, deux couleurs, deux endroits, pour deux facons de
+ * repondre a la meme question : « qu'est-ce qui revient chez moi ? »
+ *
+ * Une seule liste maintenant, et une seule forme. Ce qui les distingue reste
+ * visible, mais dans le contenu et pas dans le decor : un motif s'ouvre sur les
+ * journees ou il a ete reconnu, un theme sur les extraits qui le montrent.
+ *
+ * LA COULEUR EST DECLAREE, ET ELLE LE DIT. Toutes les teintes viennent de la
+ * bande 232-336, disjointe de la rampe des notes. Un mecanisme est ce que le
+ * compagnon comprend, pas ce que les journees mesurent : il ne peut donc pas
+ * emprunter le vert d'une bonne journee, meme par accident.
+ */
+
+/** La teinte d'un thème : stable dans une lecture, prise dans la bande déclarée. */
+const teinteTheme = (t, i) => TEINTES_DECLAREES[i % TEINTES_DECLAREES.length];
+
+/**
+ * Un mécanisme, quelle que soit sa provenance.
+ *
+ * @param {object} m  { cle, nom, teinte, intensite, serie, quoi, compte, corps }
+ */
+function mecaMarkup(m) {
+  const ouvert = MIR_THEME === m.cle;
+  return `<div class="meca${ouvert ? ' ouvert' : ''}" style="--m:${m.teinte}"
+       data-meca="${esc(m.cle)}">
+    <button class="mhead" aria-expanded="${ouvert}">
+      <span class="tpuce" data-i="${m.intensite}"></span>
+      <span class="tnom">${esc(m.nom)}</span>
+      ${m.compte ? `<span class="mcompte mono">${m.compte}<small>×</small></span>` : ''}
+      ${serieMarkup(m.serie)}
     </button>
-    ${ouvert ? `<div class="tcorps">
+    ${ouvert ? `<div class="tcorps">${m.corps}</div>` : ''}
+  </div>`;
+}
+
+/** Un thème de la lecture : ses preuves datées, son chiffre, ses liens. */
+function themeMeca(t, i) {
+  return {
+    cle: t.nom, nom: t.nom, teinte: teinteTheme(t, i),
+    intensite: t.intensite, serie: t.serie, compte: null,
+    corps: `
       <p class="tquoi">${esc(t.quoi)}</p>
       ${/* Le chiffre. Il ne vient PAS du modèle : il a choisi lequel des faits
             déjà calculés porte ce thème, et le serveur a mis la phrase. C'est
@@ -1791,10 +1948,57 @@ function themeMarkup(t) {
         <span>${esc(p.extrait)}</span>
       </button>`).join('')}</div>
       ${t.liens?.length ? `<p class="tliens">avec ${t.liens.map(l =>
-        `<button data-theme-aller="${esc(l)}">${esc(l)}</button>`).join(' · ')}</p>` : ''}
-    </div>` : ''}
-  </div>`;
+        `<button data-theme-aller="${esc(l)}">${esc(l)}</button>`).join(' · ')}</p>` : ''}`
+  };
 }
+
+/**
+ * Un motif suivi par le compagnon.
+ *
+ * Son intensité vient de la HAUTEUR DE SA DERNIERE BARRE, pas de son compte
+ * total : la pastille dit « où il en est », la série dit « d'où il vient ».
+ * Un motif reconnu vingt fois il y a deux ans et plus jamais depuis ne doit pas
+ * s'afficher aussi gros que celui de la semaine dernière.
+ */
+function motifMeca(m) {
+  const lie = (carteCourante()?.noeuds ?? []).find(x => {
+    const a = x.nom.toLowerCase(), b = m.nom.toLowerCase();
+    return a === b || a.includes(b) || b.includes(a);
+  }) ?? null;
+  return {
+    cle: `motif:${m.id}`, nom: m.nom, teinte: m.teinte,
+    intensite: m.serie?.at(-1)?.valeur ?? 1,
+    serie: m.serie, compte: m.vues,
+    corps: `
+      <p class="tquoi">${esc(m.mecanisme)}</p>
+      <p class="mmeta">
+        Reconnu <b>${m.vues}</b> fois, la dernière le ${fmtDay(m.vu_le.slice(0, 10))}.
+        ${lie ? `Sur la carte : <b>${esc(lie.nom)}</b>.` : ''}
+      </p>
+      <div class="mpalette">
+        ${TEINTES_DECLAREES.map(t => `<button data-teinte="${t}" data-pour="${m.id}"
+          style="--t:${t}" aria-pressed="${m.teinte === t}" aria-label="Teinte ${t}"></button>`).join('')}
+        <button class="repdel" data-delmotif="${m.id}"
+                title="Ne plus suivre" aria-label="Ne plus suivre ${esc(m.nom)}">ne plus suivre</button>
+      </div>`
+  };
+}
+
+/**
+ * Les deux sources dans une seule liste, triées par ce qu'elles pèsent
+ * MAINTENANT — l'intensité d'abord, la longueur de la série ensuite. Un
+ * mécanisme qui vient d'être reconnu remonte donc au-dessus d'un thème calme,
+ * ce qui est l'ordre dans lequel on veut les lire.
+ */
+function mecanismes(lecture) {
+  const t = (lecture?.themes ?? []).map(themeMeca);
+  const m = (S.motifs?.liste ?? []).map(motifMeca);
+  return [...t, ...m].sort((a, b) =>
+    (b.intensite - a.intensite) || ((b.serie?.length ?? 0) - (a.serie?.length ?? 0)));
+}
+
+/** La carte de la lecture affichée, pour rapprocher un motif d'un nœud. */
+const carteCourante = () => LECTURE?.lecture?.carte ?? null;
 
 /**
  * La carte organique.
@@ -2019,7 +2223,6 @@ async function renderLecture() {
     LECTURE = await api(`/api/lecture?horizon=${MIR_HORIZON}`);
   }
   const L = LECTURE;
-  const themes = L.lecture?.themes ?? [];
 
   const curseur = `<div class="horizons" role="group" aria-label="Fenêtre">
     ${HORIZONS_UI.map(([id, nom]) => `<button data-horizon="${id}"
@@ -2056,10 +2259,9 @@ async function renderLecture() {
         <div class="lectcarte">${carteMarkup(L.lecture.carte)}</div>
         <div class="lectdit">
           <p class="synthese">${esc(L.lecture.synthese)}</p>
-          ${motifsMarkup({ carte: L.lecture.carte })}
+          <div class="themes">${mecanismes(L.lecture).map(mecaMarkup).join('')}</div>
         </div>
-      </div>
-      <div class="themes">${themes.map(themeMarkup).join('')}</div>`;
+      </div>`;
   } else if (LECTURE_EN_COURS) {
     corps = `<div class="lectvide"><span class="spin"></span>
       <p>Il relit ton journal.</p>
@@ -2146,24 +2348,16 @@ function wireLecture() {
   $('#view').onclick = async e => {
     // La palette d'un comportement : ouverte sur place, pas dans un panneau.
     // Cinq pastilles n'ont pas besoin d'une fenêtre pour se poser.
-    const tt = e.target.closest('[data-teinter]');
-    if (tt) {
-      const box = tt.closest('.motifitem').querySelector('.motifteintes');
-      const ouvert = !box.hidden;
-      for (const b of $('#view').querySelectorAll('.motifteintes')) b.hidden = true;
-      box.hidden = ouvert;
-      return;
-    }
     const tc = e.target.closest('[data-teinte][data-pour]');
     if (tc) {
-      const item = tc.closest('.motifitem');
+      e.stopPropagation();                    // sans ça le clic replierait le mécanisme
+      const item = tc.closest('.meca');
       // La couleur change à l'écran avant la réponse du serveur : c'est un
       // choix esthétique immédiat, pas une écriture qu'on attend.
-      item.style.setProperty('--motif', tc.dataset.teinte);
-      for (const b of item.querySelectorAll('.motifteintes button')) {
+      item.style.setProperty('--m', tc.dataset.teinte);
+      for (const b of item.querySelectorAll('.mpalette [data-teinte]')) {
         b.setAttribute('aria-pressed', String(b === tc));
       }
-      item.querySelector('.motifteintes').hidden = true;
       try {
         S.motifs = await api('/api/motifs', { id: Number(tc.dataset.pour), teinte: Number(tc.dataset.teinte) });
       } catch (err) { toast(err.message); }
@@ -2185,9 +2379,9 @@ function wireLecture() {
     if (j) return renderMirror(j.dataset.jour);
     const a = e.target.closest('[data-theme-aller]');
     if (a) { MIR_THEME = a.dataset.themeAller; return renderLecture(); }
-    const t = e.target.closest('[data-theme-nom]');
+    const t = e.target.closest('[data-meca]');
     if (t) {
-      MIR_THEME = MIR_THEME === t.dataset.themeNom ? null : t.dataset.themeNom;
+      MIR_THEME = MIR_THEME === t.dataset.meca ? null : t.dataset.meca;
       return renderLecture();
     }
   };
@@ -2303,13 +2497,40 @@ async function renderMirror(date, { garderCal = false } = {}) {
         <div class="dayhead">
           <div>
             <div class="k faint">${fmtDay(date)}${date === S.today ? " \u00b7 aujourd'hui" : ''}</div>
-            <div class="bignum${m.note !== null ? ' noted' : ''}"
+            <button class="bignum${m.note !== null ? ' noted' : ''}" id="dayNote"
+                 aria-expanded="${DAY_NOTE_OUVERT}"
+                 title="${m.note !== null ? 'Changer cette note' : 'Noter cette journée'}"
                  style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
               ${m.note ?? '\u2014'}<span class="sl">/10</span>
-            </div>
+            </button>
           </div>
           <button class="daydrop" data-erase="${date}" title="Effacer cette journée">effacer</button>
         </div>
+
+        ${/*
+           * ON PEUT CHANGER LA NOTE D'UNE JOURNEE, ICI ET NULLE PART AILLEURS.
+           *
+           * Elle ne se posait que sur aujourd'hui : une note mise trop vite le
+           * restait pour toujours, et une journee sautee gardait son trou. Sur
+           * une serie de quatre ans, une note fausse pese autant qu'une vraie.
+           *
+           * Le geste est ici parce qu'on y est deja : on relit la journee, on
+           * voit ce qu'on avait ecrit, et c'est le seul endroit ou l'on a de
+           * quoi juger. Un formulaire de rattrapage ailleurs demanderait de
+           * noter des journees qu'on ne relit pas.
+           *
+           * Il est REPLIE : on ouvre une journee pour la relire cent fois pour
+           * une fois qu'on la renote, et une echelle deployee en permanence
+           * invite a bouger ce qui n'a pas besoin de bouger.
+           */''}
+        ${DAY_NOTE_OUVERT ? `<div class="notestrip jourstrip" id="dayStrip">
+          ${Array.from({ length: 11 }, (_, n) => {
+            const c = noteScaleRGB(n);
+            return `<button data-jn="${n}" aria-pressed="${m.note === n}" style="background:rgb(${c})"
+              data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
+          }).join('')}
+          ${m.note !== null ? `<button class="jourdenote" data-jn="">retirer</button>` : ''}
+        </div>` : ''}
         ${m.jour?.text
           ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
           : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
@@ -2389,6 +2610,24 @@ function calendarMarkup(m, date) {
 
 function wireMirror() {
   $('#view').onclick = async e => {
+    // La note de la journée ouverte : l'échelle s'ouvre, puis se pose.
+    if (e.target.closest('#dayNote')) {
+      DAY_NOTE_OUVERT = !DAY_NOTE_OUVERT;
+      return renderMirror(MIRROR_DATE, { garderCal: true });
+    }
+    const jn = e.target.closest('[data-jn]');
+    if (jn) {
+      const v = jn.dataset.jn === '' ? null : Number(jn.dataset.jn);
+      await api('/api/note', { date: MIRROR_DATE, note: v });
+      // L'état global porte le compte de journées et la référence : les deux
+      // viennent de bouger, et le rail les affiche.
+      S = await api('/api/state');
+      syncHeader();
+      DAY_NOTE_OUVERT = false;
+      toast(v === null ? 'Note retirée' : `Journée notée ${v}/10`);
+      return renderMirror(MIRROR_DATE, { garderCal: true });
+    }
+
     // AVANT [data-goto] : une note datée porte les deux (sa date ouvre le
     // Miroir, sa croix la retire), et [data-goto] fait un return immédiat.
     const dcn = e.target.closest('[data-delcn]');
@@ -2458,76 +2697,6 @@ function wireMirror() {
 
 
 /* ============================= vue : réglages ============================= */
-
-/**
- * Les motifs, tels que le compagnon les a nommés.
- *
- * Ce panneau ne dit pas ce qu'ils veulent dire — c'est la même règle que
- * partout : on montre, on ne qualifie pas. Il montre le nom que le compagnon a
- * choisi, ce à quoi il dit le reconnaître, et combien de fois. Le compte est la
- * seule mesure honnête d'un motif : dix fois en un an et dix fois en un mois ne
- * sont pas la même chose, et c'est à la personne d'en faire quelque chose.
- *
- * Le bouton « retirer » n'est pas une politesse. Un mécanisme mal nommé, posé
- * sur quelqu'un par une machine, doit pouvoir disparaître d'un clic — sinon
- * c'est une étiquette, et ce produit n'en pose pas.
- */
-/*
- * LES COMPORTEMENTS SONT SORTIS DES REGLAGES.
- *
- * Ils y vivaient parce qu'on pouvait en retirer un, et « ce qu'on peut retirer »
- * avait fini par vouloir dire « reglage ». C'etait un classement par le geste
- * plutot que par le sens : un mecanisme repere dans la duree n'est pas une
- * preference d'application, c'est ce que le compagnon comprend -- exactement ce
- * que « Ma carte » sert a montrer. On les lisait donc dans l'onglet ou l'on ne
- * va que pour changer une couleur de compagnon ou coller une cle.
- *
- * Ici, ils sont a cote de la carte et de la synthese, qui parlent de la meme
- * chose. Et la couleur devient choisissable : elle etait posee dans l'ordre de
- * creation -- surement distincte, mais sans aucun rapport avec le sens. Deux
- * mecanismes qui vont ensemble se retrouvaient de deux couleurs etrangeres, et
- * rien ne permettait de les rapprocher a l'oeil.
- */
-function motifsMarkup({ carte = null } = {}) {
-  const liste = S.motifs?.liste ?? [];
-  if (!liste.length) return '';
-  // Ce qu'un motif rejoint sur la carte : meme nom, ou nom contenu dans un
-  // noeud. Le rapprochement n'est propose que quand il existe -- inventer un
-  // lien serait pire que de n'en montrer aucun.
-  const noeuds = carte?.noeuds ?? [];
-  const relie = m => {
-    const n = m.nom.toLowerCase();
-    return noeuds.find(x => {
-      const v = x.nom.toLowerCase();
-      return v === n || v.includes(n) || n.includes(v);
-    }) ?? null;
-  };
-  return `<div class="card motifcard">
-    <h2>Ce qu'il voit revenir</h2>
-    <p class="sub">Des mécanismes qu'il a repérés tout seul et suit dans la durée.
-    Ce sont ses mots, pas un diagnostic — et tu peux en retirer un à tout moment.</p>
-    <div class="motiflist">
-      ${liste.map(m => {
-        const lie = relie(m);
-        return `<div class="motifitem" style="--motif:${m.teinte}" data-motif-id="${m.id}">
-        <button class="motifpuce" data-teinter="${m.id}"
-                title="Changer sa couleur" aria-label="Changer la couleur de ${esc(m.nom)}"></button>
-        <div class="motiftxt">
-          <b>${esc(m.nom)}</b>
-          <span class="faint">${esc(m.mecanisme)}</span>
-          ${lie ? `<span class="motiflie">sur la carte : ${esc(lie.nom)}</span>` : ''}
-        </div>
-        <span class="motifn mono">${m.vues}<small>×</small></span>
-        <button class="repdel" data-delmotif="${m.id}" title="Ne plus suivre" aria-label="Ne plus suivre ${esc(m.nom)}">×</button>
-        <div class="motifteintes" hidden>
-          ${TEINTES_DECLAREES.map(t => `<button data-teinte="${t}" data-pour="${m.id}"
-            style="--t:${t}" aria-pressed="${m.teinte === t}" aria-label="Teinte ${t}"></button>`).join('')}
-        </div>
-      </div>`;
-      }).join('')}
-    </div>
-  </div>`;
-}
 
 async function renderSettings() {
   const s = S.settings;
@@ -2672,19 +2841,6 @@ async function renderSettings() {
   bind('floor', 'floor', 'change', el => Number(el.value));
   bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
   $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
-
-  // Retirer une note, ou ouvrir la journée dont elle parle. Réglages n'a pas de
-  // délégué global : chaque bloc branche ce qui le concerne.
-  $('#view').querySelector('.cnliste')?.addEventListener('click', async e => {
-    const d = e.target.closest('[data-delcn]');
-    if (d) {
-      await api('/api/carnet', { delete: Number(d.dataset.delcn) });
-      toast('Note retirée');
-      return renderSettings();
-    }
-    const g = e.target.closest('.cndate[data-goto]');
-    if (g) { view = 'mirror'; syncNav(); return renderMirror(g.dataset.goto); }
-  });
 
   $('#voicepick')?.addEventListener('click', async e => {
     const b = e.target.closest('[data-voice]');
@@ -3157,6 +3313,9 @@ function syncAmbianceRail() {
 
 async function go(v) {
   view = v;
+  // Rattraper est un geste ponctuel, pas un mode dans lequel on reste : le
+  // curseur de note revient à aujourd'hui dès qu'on change de vue.
+  NOTE_JOUR = null;
   syncNav();
   $('#view').onclick = null;
   PetTalk.stop();

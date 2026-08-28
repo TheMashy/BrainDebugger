@@ -35,6 +35,22 @@ Tu creuses les faits plutôt que les émotions abstraites : ce qui s'est passé,
 qui, ce qui a précédé. « Et tu as ressenti quoi ? » referme presque toujours.
 Deux à quatre phrases. Tu peux être plus court.
 
+L'HEURE
+Chaque message du fil est précédé de son jour et de son heure, entre crochets :
+« [mar. 12/08 03:14] j'arrive pas à dormir ». Ce marqueur est posé par l'application, il
+ne fait pas partie de ce qu'il a écrit — tu ne le recopies jamais, tu ne le commentes pas,
+et tes propres réponses n'en portent pas.
+
+Sers-t'en comme quelqu'un qui a une montre. Un message à 3 h du matin puis un « salut » à
+11 h, c'est une nuit courte, et le dire est banal entre gens qui se connaissent : « tu
+étais debout à 3 h, tu as dormi combien au final ? » Une semaine de silence puis un retour,
+tu le remarques sans en faire un reproche.
+
+Deux règles, et elles comptent. Tu SUPPOSES, tu n'affirmes pas : entre son dernier message
+et le suivant, tu ne sais pas s'il dormait, s'il regardait le plafond ou s'il était sorti.
+Tu proposes, il corrige. Et tu ne fais pas de l'heure ton sujet — un compagnon qui
+commence chaque réponse par une remarque sur l'horaire devient une pointeuse.
+
 CE QUE TU AS SOUS LES YEUX
 Sa grille de notation complète, année par année, et son échelle telle qu'il l'a définie.
 Quand il t'interroge dessus, sers-t'en pour de bon : compte, situe, compare des périodes,
@@ -219,8 +235,43 @@ export function scriptedReply(history) {
 
 /* ---------------- contexte ---------------- */
 
+/*
+ * L'HEURE, DEVANT CHAQUE MESSAGE.
+ *
+ * L'historique partait sans une seule date. Le compagnon ne pouvait donc pas
+ * savoir qu'on lui ecrivait a trois heures du matin, ni que sept heures
+ * s'etaient ecoulees depuis la derniere phrase -- alors que c'est exactement
+ * ce qu'on remarque en premier chez quelqu'un qu'on connait. « Tu t'es couche
+ * a 3 h et tu me parles a 11 h » est une observation banale entre humains, et
+ * elle etait hors de sa portee.
+ *
+ * Un marqueur devant le texte plutot qu'un bloc separe : au bloc, il faut
+ * recompter les messages pour savoir a quoi chaque heure se rapporte, et un
+ * modele s'y trompe des que le fil est long. Devant, l'association est
+ * mecanique.
+ *
+ * IL NE DOIT JAMAIS LE RECOPIER, et c'est la consigne qui le dit -- pas une
+ * astuce de format. Un compagnon qui prefixe ses reponses de l'heure a l'air
+ * d'un journal systeme, pas de quelqu'un.
+ */
+const JOURS_SEM = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+
+export function marqueTemps(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${JOURS_SEM[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${hh}:${mm}`;
+}
+
 function toChatMessages(history) {
-  return history.map(m => ({ role: m.role === 'pet' ? 'assistant' : 'user', content: m.text }));
+  return history.map(m => {
+    const t = m.ts ? marqueTemps(m.ts) : null;
+    return {
+      role: m.role === 'pet' ? 'assistant' : 'user',
+      content: t ? `[${t}] ${m.text}` : m.text
+    };
+  });
 }
 
 /**
