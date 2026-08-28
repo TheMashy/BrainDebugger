@@ -101,7 +101,7 @@ const fmtTok = n =>
 function drawGaugePanel() {
   const el = $('#gaugePanel'), u = S.usage;
   if (!el || !u) return;
-  const pct = u.allowance > 0 ? Math.min(100, Math.round(u.used / u.allowance * 100)) : 0;
+  const pct = u.illimitee ? 100 : Math.min(100, Math.round(u.used / u.allowance * 100));
   el.innerHTML = `
     <div class="head">
       ${S.user?.avatar ? `<img src="${esc(S.user.avatar)}" alt="">` : ''}
@@ -112,17 +112,29 @@ function drawGaugePanel() {
       <form method="post" action="/logout" style="margin-left:auto"><button class="btn" type="submit">Déconnexion</button></form>
     </div>
 
-    <div class="bar" data-level="${u.level}"><i style="width:${pct}%"></i></div>
-    <p class="nums">
-      <b>${fmtTok(u.remaining)}</b> jetons restants sur ${fmtTok(u.allowance)} ce mois-ci
-    </p>
-    <p class="sub" style="margin:0 0 12px">
-      Remise à zéro le ${fmtDay(u.resetsOn)}. ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois.
-    </p>
-    <p class="paid">Tu n'as rien à payer. C'est BrainDebugger qui règle.</p>
+    ${/* Sans enveloppe, la barre n'a plus rien à mesurer : elle deviendrait un
+          décor qui bouge sans rien vouloir dire. Reste ce qui se compte encore
+          — ce qui a été consommé — parce que le comptage, lui, ne s'arrête pas. */''}
+    ${u.illimitee ? `
+      <p class="nums"><b>${fmtTok(u.used)}</b> jetons ce mois-ci · <span class="sansenv">sans enveloppe</span></p>
+      <p class="sub" style="margin:0 0 12px">
+        ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois. Le plafond est retiré
+        dans Réglages ; le compte, lui, continue.
+      </p>` : `
+      <div class="bar" data-level="${u.level}"><i style="width:${pct}%"></i></div>
+      <p class="nums">
+        <b>${fmtTok(u.remaining)}</b> jetons restants sur ${fmtTok(u.allowance)} ce mois-ci
+      </p>
+      <p class="sub" style="margin:0 0 12px">
+        Remise à zéro le ${fmtDay(u.resetsOn)}. ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois.
+      </p>`}
+    ${/* Cette phrase suppose que c'est la clé de l'hébergeur qui règle. Sans
+          enveloppe, elle ne le suppose plus : c'est la clé de celui qui lit. */''}
+    ${u.illimitee ? '' : `<p class="paid">Tu n'as rien à payer. C'est BrainDebugger qui règle.</p>`}
     ${u.exhausted ? `<p class="sub" style="color:var(--warn);margin:12px 0 0">
       Enveloppe épuisée pour ce mois. Le compagnon continue de répondre, mais hors-ligne —
-      il ne se souvient plus de la conversation.</p>` : ''}`;
+      il ne se souvient plus de la conversation.
+      <br>Tu peux la retirer dans Réglages, section « Modèle ».</p>` : ''}`;
   el.querySelector('form')?.addEventListener('submit', () => { /* laisse le POST partir */ });
 }
 
@@ -2449,6 +2461,18 @@ async function renderBackendCfg() {
       Il peut aller chercher les autres lui-même quand la conversation y touche.
       Décocher les retire du contexte sans rien effacer.
       <br>Hors ligne, le compagnon n'a ni tes journées ni tes notes.
+    </p>
+    <label class="field" style="margin-top:14px"><span>
+      <input type="checkbox" id="sansEnveloppe" ${s.sansEnveloppe ? 'checked' : ''}
+             style="width:auto;margin-right:7px">
+      Retirer l'enveloppe de jetons</span></label>
+    <p class="sub" style="margin:0;font-size:12px">
+      L'enveloppe existe parce que d'habitude c'est la clé de l'hébergeur qui règle : à zéro,
+      le compagnon retombe hors-ligne au lieu de couper quelqu'un au milieu d'une phrase.
+      Sur ton propre journal, avec ta propre clé, elle ne protège de rien.
+      <br>Décochée, il n'y a plus de plafond et plus de repli.
+      <b>Le compte des jetons continue</b> — c'est même tout ce qu'il reste pour savoir
+      ce que ça coûte.
     </p>` + SORTIE_ANTHROPIC;
   } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
@@ -2501,6 +2525,12 @@ async function renderBackendCfg() {
     toast(e.target.checked ? 'Carnet transmis' : 'Carnet retiré du contexte — rien n\'est effacé');
   });
 
+  // L'état de l'enveloppe se lit dans la jauge, pas dans les réglages : elle est
+  // rafraîchie tout de suite, sinon on coche et rien ne bouge à l'écran.
+  $('#sansEnveloppe')?.addEventListener('change', async e => {
+    await saveSettings({ sansEnveloppe: e.target.checked });
+    try { S.usage = (await api('/api/state')).usage; syncGauge(); } catch { /* la jauge suivra */ }
+  });
   $('#memoryDays')?.addEventListener('change', async e => {
     await saveSettings({ memoryDays: Number(e.target.value) });
     renderSettings();

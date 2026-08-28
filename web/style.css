@@ -805,6 +805,13 @@ input[type=date] { color-scheme: dark; }
 
 .gaugepanel .nums { margin: 0 0 3px; font-size: 13.5px; color: var(--ink-dim); }
 .gaugepanel .nums b { color: var(--ink); font-family: var(--mono); font-size: 15px; }
+/* « sans enveloppe » n'est pas une alerte : c'est un état choisi. Il se signale
+   sans crier, à la façon d'une étiquette d'outil de développeur. */
+.gaugepanel .sansenv {
+  font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-faint); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 8px; margin-left: 2px;
+}
 .gaugepanel .paid {
   margin: 0; padding: 9px 11px; border-radius: 8px; font-size: 12.5px;
   background: #0e2018; border: 1px solid var(--accent-dk); color: var(--accent);
