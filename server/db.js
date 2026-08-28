@@ -253,6 +253,21 @@ export const DEFAULT_SETTINGS = {
   apiKey: '',                 // cle Anthropic ; repli sur ANTHROPIC_API_KEY
   anthropicModel: 'claude-opus-5',
   anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
+  /*
+   * L'enveloppe de jetons levee. UN OUTIL DE DEVELOPPEUR, ET RIEN D'AUTRE.
+   *
+   * L'enveloppe existe parce que c'est la cle de l'instance qui regle, pas la
+   * personne : elle dit ou on en est, et a zero le compagnon retombe hors-ligne
+   * plutot que de couper quelqu'un au milieu d'une phrase. Sur un journal
+   * personnel, ou celui qui ecrit est aussi celui qui paie, elle ne protege de
+   * rien -- elle empeche juste de travailler.
+   *
+   * Ce reglage la retire donc COMPLETEMENT : plus de plafond, plus de repli
+   * hors-ligne. Le comptage, lui, ne s'arrete pas -- on veut toujours savoir ce
+   * qu'on consomme, et c'est meme la seule chose qui reste quand la limite
+   * disparait.
+   */
+  sansEnveloppe: false,
   memoryDays: 14,             // journees passees transmises au compagnon (0 = aucune)
   carnetMemoire: true,        // le carnet est transmis au compagnon
                               // (coupe de toute facon quand memoryDays vaut 0 :

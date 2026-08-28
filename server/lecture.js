@@ -27,6 +27,7 @@
  */
 
 import { resolveKey } from './chat.js';
+import { comparaisons, comparaisonBlock } from './comparer.js';
 
 let _sdk = null;
 
@@ -161,9 +162,25 @@ ${motifs.map(m => `${m.nom} — ${m.mecanisme} (${m.vues} fois)`).join('\n')}`);
 ${objectifs.map(o => `${o.quoi} — ${o.tenu ? 'tenu' : 'rompu'} depuis ${o.depuis}${o.reprises ? `, ${o.reprises} reprise(s)` : ''}`).join('\n')}`);
   }
 
+  /*
+   * LES COMPARAISONS. LE MODELE CHOISIT LE FAIT, LE SERVEUR POSSEDE LE NOMBRE.
+   *
+   * Elles sont calculees sur TOUTE la fenetre, pas sur les journees transmises :
+   * l'echantillon garde les plus ecrites, et une moyenne prise dessus dirait
+   * quelque chose des journees bavardes, pas des journees.
+   *
+   * Le modele n'en rendra qu'un identifiant. C'est le seul dispositif qui
+   * empeche vraiment un chiffre invente d'arriver a l'ecran : lui demander de
+   * n'ecrire que des chiffres vrais ne marche pas, il les formule trop bien.
+   */
+  const comps = comparaisons(fenetre, ev);
+  const bloc = comparaisonBlock(comps);
+  if (bloc) blocs.push(bloc);
+
   return {
     texte: blocs.join('\n\n———\n\n'),
     dates,
+    comparaisons: comps,
     jours: fenetre.filter(r => r.text?.trim()).length,
     depuis
   };
@@ -236,6 +253,19 @@ Tu ne relies que ce que tu as vu se produire ensemble chez LUI. Deux choses qui 
 souvent ensemble en général ne sont pas un lien : c'est une généralité, et il en a déjà
 entendu assez.
 
+Chaque nœud porte SES JOURNÉES : toutes les dates du corpus où cette chose apparaît. Pas
+un échantillon, pas les trois plus parlantes — toutes celles que tu as vues. Ce sont elles
+qui donnent son épaisseur au nœud, et c'est ce qui fait la différence entre une carte et un
+schéma : sans ses dates, un nœud affirme (« le sommeil compte chez toi ») ; avec, il rend
+compte (« le sommeil, ces journées-là »). La première se croit sur parole, la seconde se
+vérifie. Une date qui n'est pas dans le corpus sera retirée en silence.
+
+Ne mets sur la carte que ce qui REVIENT. Une chose vue deux fois n'est pas un nœud, c'est
+un souvenir : elle appartient à une journée, pas à la forme de sa vie. Et pas de nœud
+générique — « le travail », « les émotions », « la famille » sont des rubriques, pas des
+choses. Ce qu'on cherche est spécifique et récurrent à la fois : le nœud qu'il
+reconnaîtrait immédiatement comme étant le sien.
+
 Huit à seize nœuds. En dessous ce n'est pas une carte ; au-dessus on n'y lit plus rien.
 
 COMBIEN
@@ -292,6 +322,12 @@ const OUTIL = {
               type: 'array',
               description: 'Les noms des autres thèmes qui vont avec celui-ci.',
               items: { type: 'string' }
+            },
+            chiffre: {
+              type: 'string',
+              description: "L'identifiant d'une comparaison de la liste (« c3 »), quand elle porte "
+                + "vraiment ce thème. Sinon la chaîne vide. Tu ne recopies jamais le nombre : "
+                + "l'application affichera la phrase exacte à la place."
             }
           },
           required: ['nom', 'quoi', 'intensite', 'serie', 'preuves']
@@ -308,9 +344,16 @@ const OUTIL = {
               properties: {
                 nom:   { type: 'string', description: 'Un à trois mots. Une chose, pas un mot : « Léa », « les nuits courtes », « le dimanche soir ».' },
                 genre: { type: 'string', description: 'personne | lieu | travail | corps | mecanisme | periode | activite.' },
-                poids: { type: 'integer', description: '0 à 3 : à quel point cette chose occupe de la place chez lui.' }
+                poids: { type: 'integer', description: '0 à 3 : à quel point cette chose occupe de la place chez lui.' },
+                jours: {
+                  type: 'array',
+                  description: "Les journées du corpus où cette chose apparaît — TOUTES celles que tu "
+                    + "as vues, pas un échantillon : ce sont elles qui donnent son épaisseur au nœud. "
+                    + "Des dates AAAA-MM-JJ présentes dans le corpus ; les autres seront retirées.",
+                  items: { type: 'string' }
+                }
               },
-              required: ['nom', 'genre', 'poids']
+              required: ['nom', 'genre', 'poids', 'jours']
             }
           },
           liens: {
@@ -350,7 +393,19 @@ const texte = (s, max) => String(s ?? '').trim().replace(/\s+/g, ' ').slice(0, m
  * disparait : la consigne dit qu'il ne tient pas sans ancrage, et une consigne
  * qui n'est pas appliquee n'est pas une regle.
  */
-export function valider(brut, dates) {
+export function valider(brut, dates, comps = []) {
+  /*
+   * Le chiffre ne traverse jamais le modele. Il rend « c3 » ; la phrase de c3
+   * est cherchee ici, dans la liste que le serveur a calculee. Un identifiant
+   * inconnu -- invente, ou survivant d'une lecture precedente -- disparait sans
+   * bruit, comme une date de preuve absente du corpus : le theme reste, le
+   * chiffre faux non.
+   *
+   * Un meme chiffre ne sert qu'UNE fois. Le meme nombre repete sous trois
+   * themes ne dit pas trois choses, il dit que le modele a rempli le champ.
+   */
+  const parId = new Map(comps.map(c => [c.id, c]));
+  const pris = new Set();
   const themes = [];
   for (const t of (brut?.themes ?? []).slice(0, 8)) {
     const preuves = (t.preuves ?? [])
@@ -368,7 +423,13 @@ export function valider(brut, dates) {
         .map(p => ({ periode: texte(p?.periode, 20), valeur: borne(Math.round(p?.valeur), 0, 3) }))
         .filter(p => p.periode),
       preuves,
-      liens: []
+      liens: [],
+      chiffre: (() => {
+        const id = String(t?.chiffre ?? '').trim();
+        if (!parId.has(id) || pris.has(id)) return null;
+        pris.add(id);
+        return parId.get(id).phrase;
+      })()
     });
   }
   // Les liens ne sont resolus qu'APRES : un lien vers un theme qui vient d'etre
@@ -380,7 +441,7 @@ export function valider(brut, dates) {
     t.liens = [...new Set((src?.liens ?? []).map(l => texte(l, 40).toLowerCase()))]
       .filter(l => l !== t.nom && noms.has(l)).slice(0, 4);
   }
-  return { synthese: texte(brut?.synthese, 700), themes, carte: validerCarte(brut?.carte) };
+  return { synthese: texte(brut?.synthese, 700), themes, carte: validerCarte(brut?.carte, dates) };
 }
 
 /**
@@ -394,15 +455,35 @@ export function valider(brut, dates) {
  * Un lien sans « quoi » est jete aussi : ce qui fait une carte n'est pas la
  * liste des noeuds, c'est ce qui les relie. « lie a » n'apprend rien.
  */
-export function validerCarte(brut) {
+export function validerCarte(brut, dates = null) {
   const vus = new Map();
   for (const n of (brut?.noeuds ?? []).slice(0, 20)) {
     const nom = texte(n?.nom, 40);
     if (!nom || vus.has(nom.toLowerCase())) continue;
+    /*
+     * LES JOURNEES D'UN NOEUD. C'est ce qui distingue cette carte d'un schema.
+     *
+     * Un noeud sans ses dates est une affirmation : « le sommeil compte chez
+     * toi ». Avec ses dates, c'est un compte rendu : « le sommeil, ces 34
+     * journees-la ». La premiere se croit sur parole, la seconde se verifie --
+     * et c'est la seule difference qui compte entre une lecture et une
+     * etiquette.
+     *
+     * Comme pour les preuves des themes, une date absente du corpus est retiree
+     * en silence. Un modele invente des dates ; un point pose sur une journee
+     * vide dirait a quelqu'un qu'il a ecrit quelque chose ce jour-la, et ce
+     * serait pire que pas de point du tout.
+     */
+    const jours = [...new Set((n?.jours ?? [])
+      .map(d => String(d))
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!dates || dates.has(d))))]
+      .sort()
+      .slice(0, 120);
     vus.set(nom.toLowerCase(), {
       nom,
       genre: GENRES.includes(String(n?.genre)) ? String(n.genre) : 'activite',
-      poids: borne(Math.round(n?.poids), 0, 3)
+      poids: borne(Math.round(n?.poids), 0, 3),
+      jours
     });
   }
   const noeuds = [...vus.values()];
@@ -446,10 +527,22 @@ export async function lire(horizon, corpus, settings) {
     fallbacks: 'default',
     model: settings.anthropicModel || 'claude-opus-5',
     max_tokens: 8000,
-    thinking: { type: 'adaptive' },
-    // Une lecture de fond n'a pas de latence a tenir : personne ne la regarde
-    // apparaitre mot a mot. C'est le seul endroit du produit ou l'effort haut
-    // se justifie, et c'est aussi celui ou le resultat compte le plus.
+    /*
+     * PAS DE `thinking` ICI, ET C'EST LA RAISON POUR LAQUELLE LA CARTE
+     * N'APPARAISSAIT PAS.
+     *
+     * On force l'outil (`tool_choice: { type: 'tool' }`) parce qu'on veut une
+     * structure et rien d'autre. L'API refuse ce forcage quand la reflexion
+     * etendue est active : l'appel partait, revenait en 400, et l'ecran
+     * retombait sur « Lancer la lecture » -- le meme ecran que si on n'avait
+     * jamais rien lance. La panne etait donc parfaitement invisible.
+     *
+     * `chat.js` garde `thinking` parce qu'il laisse le modele choisir ses
+     * outils. Ici la profondeur passe par l'effort, qui, lui, se cumule avec
+     * l'outil force. Une lecture de fond n'a pas de latence a tenir : personne
+     * ne la regarde apparaitre mot a mot. C'est le seul endroit du produit ou
+     * l'effort haut se justifie, et celui ou le resultat compte le plus.
+     */
     output_config: { effort: 'high' },
     system: [{ type: 'text', text: SYSTEME }],
     tools: [OUTIL],
@@ -465,7 +558,7 @@ export async function lire(horizon, corpus, settings) {
 
   const u = res.usage ?? {};
   return {
-    lecture: valider(appel.input, corpus.dates),
+    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? []),
     modele: res.model ?? settings.anthropicModel,
     usage: {
       input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),

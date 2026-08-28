@@ -252,3 +252,70 @@ test('chaque genre déclaré est utilisable', () => {
   assert.ok(GENRES.includes('personne') && GENRES.includes('mecanisme'));
   assert.equal(new Set(GENRES).size, GENRES.length);
 });
+
+/* ---------------------- le chiffre comparé à la normale ---------------------
+ *
+ * Un modèle à qui on demande « donne un chiffre » en invente un, et il le
+ * formule si bien qu'on ne peut pas le distinguer d'un vrai. Sur une
+ * application qui rend à quelqu'un sa propre vie, un chiffre faux se retient,
+ * se répète, et oriente ce qu'il croit savoir de lui. Ce qui est testé ici,
+ * c'est qu'aucun chemin ne mène d'un nombre écrit par le modèle jusqu'à
+ * l'écran : il ne rend qu'une étiquette.
+ */
+const COMPS = [
+  { id: 'c1', phrase: 'les dimanches sont à 4, contre 7 les autres jours', ecart: -3, n: 40 },
+  { id: 'c2', phrase: 'les journées où tu écris sont à 7, les autres à 5', ecart: 2, n: 90 }
+];
+const theme = (extra) => ({
+  nom: 'un thème', quoi: 'ce qu’il fait', intensite: 2, serie: [],
+  preuves: [{ date: '2024-03-12', extrait: 'x' }], ...extra
+});
+
+test('le thème porte la phrase du serveur, jamais celle du modèle', () => {
+  const r = valider({ themes: [theme({ chiffre: 'c1' })] }, DATES, COMPS);
+  assert.equal(r.themes[0].chiffre, COMPS[0].phrase);
+});
+
+test('un identifiant inventé disparaît, le thème reste', () => {
+  // Le cas qui compte : c'est exactement ce que fait un modèle qui a compris
+  // qu'on attend un chiffre et qui n'en a pas trouvé un qui colle.
+  for (const c of ['c99', '', 'les dimanches sont à 2', null, undefined, 42]) {
+    const r = valider({ themes: [theme({ chiffre: c })] }, DATES, COMPS);
+    assert.equal(r.themes.length, 1, `le thème a sauté avec ${JSON.stringify(c)}`);
+    assert.equal(r.themes[0].chiffre, null, `un chiffre est passé avec ${JSON.stringify(c)}`);
+  }
+});
+
+test('le même chiffre ne sert qu’une fois', () => {
+  // Le même nombre répété sous trois thèmes ne dit pas trois choses : il dit
+  // que le modèle a rempli le champ.
+  const r = valider({ themes: [
+    theme({ nom: 'premier', chiffre: 'c1' }),
+    theme({ nom: 'deuxième', chiffre: 'c1' }),
+    theme({ nom: 'troisième', chiffre: 'c2' })
+  ] }, DATES, COMPS);
+  assert.equal(r.themes[0].chiffre, COMPS[0].phrase);
+  assert.equal(r.themes[1].chiffre, null);
+  assert.equal(r.themes[2].chiffre, COMPS[1].phrase);
+});
+
+test('sans comparaisons calculées, aucun thème ne porte de chiffre', () => {
+  const r = valider({ themes: [theme({ chiffre: 'c1' })] }, DATES);
+  assert.equal(r.themes[0].chiffre, null);
+});
+
+test('le corpus transmet les comparaisons, et les calcule sur toute la fenêtre', () => {
+  // Sur l'échantillon transmis (les journées les plus écrites), une moyenne
+  // dirait quelque chose des journées bavardes, pas des journées.
+  const rows = Array.from({ length: 300 }, (_, i) => {
+    const d = new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10);
+    const dim = (new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay() + 6) % 7 === 6;
+    return { date: d, note: dim ? 3 : 7, text: 'x'.repeat(dim ? 20 : 400) };
+  });
+  const c = corpusPour('long', { rows }, '2024-10-27');
+  const dim = c.comparaisons.find(x => x.phrase.includes('dimanche'));
+  assert.ok(dim, 'le creux du dimanche n’est pas ressorti');
+  assert.ok(dim.n > c.dates.size / 6, 'les dimanches comptés sortent de l’échantillon, pas de la fenêtre');
+  assert.match(c.texte, /\[c\d+\]/);
+  assert.match(c.texte, /recopies PAS le nombre/);
+});

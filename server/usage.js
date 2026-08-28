@@ -1,4 +1,4 @@
-import { db, getUser } from './db.js';
+import { db, getUser, getSettings } from './db.js';
 
 /**
  * Comptage des jetons, par personne et par mois.
@@ -31,7 +31,16 @@ export function record(userId, model, input = 0, output = 0) {
   `).run(userId, new Date().toISOString(), currentMonth(), model ?? null, input | 0, output | 0);
 }
 
+/**
+ * L'enveloppe de quelqu'un, ou 0 s'il l'a retiree.
+ *
+ * ZERO VEUT DIRE « AUCUNE », JAMAIS « EPUISEE ». La nuance tient tout le
+ * reglage : `remaining = max(0, allowance - used)` donne 0 dans les deux cas,
+ * et sans distinction explicite lever l'enveloppe reviendrait a l'epuiser
+ * instantanement -- exactement l'inverse de ce qu'on demande.
+ */
 export function allowanceFor(userId) {
+  if (getSettings(userId)?.sansEnveloppe) return 0;
   return getUser(userId)?.allowance ?? DEFAULT_ALLOWANCE;
 }
 
@@ -51,7 +60,8 @@ export function usageFor(userId) {
 
   const used = row.i + row.o;
   const allowance = allowanceFor(userId);
-  const remaining = Math.max(0, allowance - used);
+  const illimitee = allowance <= 0;
+  const remaining = illimitee ? null : Math.max(0, allowance - used);
 
   const cost = db.prepare(`
     SELECT model, SUM(input_tokens) i, SUM(output_tokens) o
@@ -62,10 +72,10 @@ export function usageFor(userId) {
   }, 0);
 
   return {
-    month, used, allowance, remaining,
+    month, used, allowance, remaining, illimitee,
     inputTokens: row.i, outputTokens: row.o, calls: row.n,
-    level: level(remaining, allowance),
-    exhausted: remaining <= 0,
+    level: illimitee ? 'green' : level(remaining, allowance),
+    exhausted: !illimitee && remaining <= 0,
     costUsd: Math.round(cost * 100) / 100,
     resetsOn: nextMonthStart()
   };

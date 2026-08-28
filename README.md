@@ -124,6 +124,14 @@ date de remise à zéro. C'est une jauge, pas une facture.
 et le dit — mais la conversation continue et la journée s'enregistre. Interrompre
 quelqu'un en pleine phrase un mauvais soir serait exactement le contraire de ce produit.
 
+**Elle se retire.** L'enveloppe existe parce que, d'habitude, c'est la clé de l'hébergeur
+qui règle. Sur son propre journal, avec sa propre clé, elle ne protège de rien — une case
+dans Réglages (« Retirer l'enveloppe de jetons ») supprime le plafond et le repli. Le
+comptage, lui, continue : c'est tout ce qui reste pour savoir ce que ça coûte, et la jauge
+montre alors la consommation au lieu d'une barre qui n'a plus rien à mesurer. Côté code,
+zéro veut dire « aucune enveloppe », jamais « enveloppe épuisée » — sans cette distinction
+explicite, lever le plafond reviendrait à l'atteindre instantanément.
+
 **Ce que l'hébergement change vraiment.** En local, personne d'autre que toi ne peut lire
 la base. Hébergé, elle vit sur le disque de quelqu'un d'autre, et l'hébergeur y a un accès
 technique. Le verrou arrête les inconnus, pas l'infrastructure. Si tu héberges pour
@@ -165,6 +173,22 @@ serveur, en silence. Un thème qui n'en garde aucune disparaît. La lecture rest
 vérifiable et contredisable — c'est ce qui la sépare d'une étiquette. Elle décrit des
 motifs, jamais une personne, et ne pose aucun nom clinique : ce n'est pas un diagnostic
 et le mot n'apparaît nulle part dans l'interface.
+
+**Les chiffres viennent du serveur, jamais du modèle.** Un thème peut porter un petit fait
+comparé à la normale — les dimanches contre les autres jours, le lendemain d'une journée
+basse, les deux semaines qui suivent un repère. Le serveur calcule *toutes* les
+comparaisons possibles, les étiquette (`c1`, `c2`…), et le modèle ne rend qu'une étiquette :
+la phrase affichée est celle d'ici. Un modèle à qui on demande « donne un chiffre » en
+invente un, et il le formule si bien qu'on ne peut pas le distinguer d'un vrai ; sur une
+application qui rend à quelqu'un sa propre vie, un chiffre faux se retient, se répète, et
+oriente ce qu'il croit savoir de lui. Il n'y a donc aucun chemin par lequel un nombre
+inventé arrive à l'écran (`server/comparer.js`).
+
+Deux garde-fous : huit journées de chaque côté (en dessous, la moyenne d'un côté bouge d'un
+demi-point quand une seule journée change) et quatre dixièmes d'écart (en dessous, l'écart
+tient dans l'arrondi de la note). Et ces lignes disent « les dimanches sont plus bas que
+les autres jours », un fait sur des jours ; jamais « tu vas moins bien le dimanche », un
+fait sur quelqu'un.
 
 **La note reste toujours saisie à la main.** Un modèle qui scorerait les journées
 casserait la comparabilité avec tout l'historique : la valeur d'une série de plusieurs
@@ -320,7 +344,11 @@ refus serait pire.
   repères de vie (saisie et affichage en pointillés sur la courbe).
 - **Ma carte** — la lecture : la carte organique de ce qui revient, la synthèse, et les
   thèmes avec leur évolution, à trois distances. Une journée s'ouvre derrière une preuve,
-  un repère ou le calendrier, et garde les trois mécanismes.
+  un repère ou le calendrier : la note en grand, ce qui a été écrit, le repère de ce
+  jour-là s'il y en a un. Rien d'autre — le rapprochement avec les journées qui se
+  ressemblent existe toujours, mais c'est le compagnon qui le dit, dans Parler, quand il
+  juge que ça sert. Une colonne qui l'affiche à chaque ouverture n'est pas la même chose
+  que quelqu'un qui te le rappelle.
 - **Réglages** — compagnon, timbre des bips, backend, plancher, tenue du retour, import/export.
 
 ### La carte
@@ -343,9 +371,22 @@ apportées**. Coller trois ans de carnet est l'événement qui change le plus un
 c'était exactement celui qui ne comptait pas : une note n'est pas une journée, donc elle
 ne faisait pas vieillir la lecture.
 
-Les nœuds sont des **anneaux**, jamais des disques. « Ce qui est rempli est mesuré, ce qui
-est contouré est déclaré » : cette carte est une lecture, pas un calcul, et elle le dit
-dans sa forme.
+**Chaque nœud porte ses journées.** Un nœud sans ses dates est une affirmation (« le
+sommeil compte chez toi ») ; avec ses dates, c'est un compte rendu (« le sommeil, ces 34
+journées-là »). Elles se dessinent en couronne autour du nœud, un point par journée,
+chacun à la couleur de son écart — on voit qu'une chose pèse non pas parce qu'un cercle est
+gros, mais parce qu'il y a quarante jours autour. Comme pour les preuves des thèmes, une
+date absente du corpus est retirée en silence.
+
+Les nœuds sont des **anneaux**, jamais des disques ; les points, eux, sont **pleins**.
+« Ce qui est rempli est mesuré, ce qui est contouré est déclaré » : le nœud est une lecture
+du compagnon, chaque point est une journée réelle avec son écart. Des points mesurés dans
+un anneau déclaré — l'œil lit la différence sans qu'on la lui explique. Une journée jamais
+notée reste un point creux : elle existe, elle ne dit rien.
+
+Les écarts ne sont pas stockés avec la lecture : ils se calculent contre une référence
+glissante, et figés dans le JSON ils vaudraient ce qu'ils valaient le jour de la lecture.
+Le serveur les décore au moment de lire.
 
 Le calcul des mots n'est pas supprimé — `server/graph.js` et ses routes vivent toujours,
 testés, avec l'invariant du carnet qu'ils portent. Ce qui a disparu est l'onglet.

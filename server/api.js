@@ -198,6 +198,35 @@ const MIN_COMPARABLE = 5;   // SPEC 4.4 - aveu d'ignorance
 
 /* =====================  handlers  ===================== */
 
+/**
+ * Les journees d'un noeud, decorees de leur ecart.
+ *
+ * La lecture stocke des DATES, pas des ecarts : un ecart se calcule contre une
+ * reference glissante, et fige dans le JSON il vaudrait ce qu'il valait le jour
+ * de la lecture. Deux mois plus tard la carte afficherait une meteo perimee
+ * sans que rien ne le signale. On decore donc au moment de lire.
+ *
+ * L'ecart, et pas la note : la carte du Miroir dit des ECARTS partout ailleurs,
+ * et deux echelles differentes dans la meme page se lisent l'une pour l'autre.
+ */
+function decorerCarte(lecture, byDate) {
+  const c = lecture?.carte;
+  if (!c?.noeuds?.length) return lecture;
+  return {
+    ...lecture,
+    carte: {
+      ...c,
+      noeuds: c.noeuds.map(n => ({
+        ...n,
+        jours: (n.jours ?? []).map(d => {
+          const j = byDate.get(d);
+          return { d, e: j?.delta ?? null };
+        })
+      }))
+    }
+  };
+}
+
 export const routes = {
 
   'GET /api/state': ({ userId }) => {
@@ -879,7 +908,7 @@ export const routes = {
     const SEUIL = { court: 3, moyen: 14, long: 30 }[horizon] ?? 14;
     return {
       horizon,
-      lecture: l?.contenu ?? null,
+      lecture: l?.contenu ? decorerCarte(l.contenu, series(userId).byDate) : null,
       fait_le: l?.fait_le ?? null,
       jours: l?.jours ?? 0,
       modele: l?.modele ?? null,
@@ -919,7 +948,8 @@ export const routes = {
       horizon, contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
     });
-    return { horizon, lecture: l.contenu, fait_le: l.fait_le, jours: l.jours,
+    return { horizon, lecture: decorerCarte(l.contenu, series(userId).byDate),
+             fait_le: l.fait_le, jours: l.jours,
              modele: l.modele, possible: true, perime: false, retard: 0,
              arelire: false, cle: true, usage: usageFor(userId) };
   },

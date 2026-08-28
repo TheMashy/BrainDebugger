@@ -1,7 +1,7 @@
 import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
 import { disposer } from './carte.js';
-import { versGraphe, dessinerRelations, noeudAu, cadrer, NOM_GENRE, TEINTE_GENRE } from './relations.js';
+import { versGraphe, dessinerRelations, noeudAu, cadrer, NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -101,7 +101,7 @@ const fmtTok = n =>
 function drawGaugePanel() {
   const el = $('#gaugePanel'), u = S.usage;
   if (!el || !u) return;
-  const pct = u.allowance > 0 ? Math.min(100, Math.round(u.used / u.allowance * 100)) : 0;
+  const pct = u.illimitee ? 100 : Math.min(100, Math.round(u.used / u.allowance * 100));
   el.innerHTML = `
     <div class="head">
       ${S.user?.avatar ? `<img src="${esc(S.user.avatar)}" alt="">` : ''}
@@ -112,17 +112,29 @@ function drawGaugePanel() {
       <form method="post" action="/logout" style="margin-left:auto"><button class="btn" type="submit">Déconnexion</button></form>
     </div>
 
-    <div class="bar" data-level="${u.level}"><i style="width:${pct}%"></i></div>
-    <p class="nums">
-      <b>${fmtTok(u.remaining)}</b> jetons restants sur ${fmtTok(u.allowance)} ce mois-ci
-    </p>
-    <p class="sub" style="margin:0 0 12px">
-      Remise à zéro le ${fmtDay(u.resetsOn)}. ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois.
-    </p>
-    <p class="paid">Tu n'as rien à payer. C'est BrainDebugger qui règle.</p>
+    ${/* Sans enveloppe, la barre n'a plus rien à mesurer : elle deviendrait un
+          décor qui bouge sans rien vouloir dire. Reste ce qui se compte encore
+          — ce qui a été consommé — parce que le comptage, lui, ne s'arrête pas. */''}
+    ${u.illimitee ? `
+      <p class="nums"><b>${fmtTok(u.used)}</b> jetons ce mois-ci · <span class="sansenv">sans enveloppe</span></p>
+      <p class="sub" style="margin:0 0 12px">
+        ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois. Le plafond est retiré
+        dans Réglages ; le compte, lui, continue.
+      </p>` : `
+      <div class="bar" data-level="${u.level}"><i style="width:${pct}%"></i></div>
+      <p class="nums">
+        <b>${fmtTok(u.remaining)}</b> jetons restants sur ${fmtTok(u.allowance)} ce mois-ci
+      </p>
+      <p class="sub" style="margin:0 0 12px">
+        Remise à zéro le ${fmtDay(u.resetsOn)}. ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois.
+      </p>`}
+    ${/* Cette phrase suppose que c'est la clé de l'hébergeur qui règle. Sans
+          enveloppe, elle ne le suppose plus : c'est la clé de celui qui lit. */''}
+    ${u.illimitee ? '' : `<p class="paid">Tu n'as rien à payer. C'est BrainDebugger qui règle.</p>`}
     ${u.exhausted ? `<p class="sub" style="color:var(--warn);margin:12px 0 0">
       Enveloppe épuisée pour ce mois. Le compagnon continue de répondre, mais hors-ligne —
-      il ne se souvient plus de la conversation.</p>` : ''}`;
+      il ne se souvient plus de la conversation.
+      <br>Tu peux la retirer dans Réglages, section « Modèle ».</p>` : ''}`;
   el.querySelector('form')?.addEventListener('submit', () => { /* laisse le POST partir */ });
 }
 
@@ -405,9 +417,12 @@ function drawThread() {
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }<span class="tx">${esc(m.text)}</span>${marque}</div>`;
   }).join('') + gestesMarkup();
+  // On revient toujours en bas et replié : un rendu du fil est un retour à la
+  // conversation, pas une reprise de lecture.
+  th.classList.remove('ouvert', 'reading');
   th.scrollTop = th.scrollHeight;
-  th.classList.remove('reading');
   bindThreadReveal(th);
+  majFil(th);
   bindGestes(th);
   syncPetSay();
 }
@@ -521,6 +536,7 @@ function dessinerGestes() {
   th.querySelector('.gestes')?.remove();
   th.insertAdjacentHTML('beforeend', gestesMarkup());
   th.scrollTop = th.scrollHeight;
+  majFil(th);
 }
 
 const AURA_CLE = 'bd.aura';
@@ -578,13 +594,39 @@ function bindGestes(th) {
   });
 }
 
+/**
+ * Le fil : replié sur sa fin, ouvert quand on remonte.
+ *
+ * DEUX SEUILS, PAS UN. Ouvrir demande d'avoir remonté de quarante pixels ;
+ * refermer demande d'être revenu au bas exact. Avec un seuil unique, ouvrir
+ * fait grandir la boîte, ce qui rapproche mécaniquement du bas, ce qui referme,
+ * ce qui rétrécit — le fil clignote sous le curseur.
+ *
+ * Et on garde l'ancrage : `scrollHeight − scrollTop` avant, restauré après.
+ * Sans ça, la boîte grandit sous le texte qu'on était en train de lire et il
+ * saute de trois cents pixels au moment précis où on le lisait.
+ */
+function majFil(th) {
+  const deborde = th.scrollHeight > th.clientHeight + 4;
+  const duBas = th.scrollHeight - th.scrollTop - th.clientHeight;
+  const ouvert = th.classList.contains('ouvert');
+
+  if (!ouvert && duBas > 40) {
+    const ancre = th.scrollHeight - th.scrollTop;
+    th.classList.add('ouvert');
+    th.scrollTop = th.scrollHeight - ancre;
+  } else if (ouvert && duBas < 4) {
+    th.classList.remove('ouvert');
+    th.scrollTop = th.scrollHeight;
+  }
+  th.classList.toggle('fondu', deborde && !th.classList.contains('ouvert'));
+  th.classList.toggle('reading', duBas >= 24);
+}
+
 function bindThreadReveal(th) {
   if (th.dataset.reveal) return;      // un seul écouteur, pas un par rendu
   th.dataset.reveal = '1';
-  th.addEventListener('scroll', () => {
-    const enBas = th.scrollHeight - th.scrollTop - th.clientHeight < 24;
-    th.classList.toggle('reading', !enBas);
-  }, { passive: true });
+  th.addEventListener('scroll', () => majFil(th), { passive: true });
 }
 
 /** Lit un flux SSE renvoyé par fetch et appelle `on(event, data)` par trame. */
@@ -643,6 +685,7 @@ async function send() {
         el.innerHTML = '<span class="tx"></span>';
         th.appendChild(el);
         th.scrollTop = th.scrollHeight;
+        majFil(th);
         Blip.reset();
         typing = PetTalk.startStream($('#art'), el.querySelector('.tx'), { onChar: speakChar });
         return;
@@ -1478,6 +1521,19 @@ let MIR_HORIZON = 'moyen';
 let MIR_THEME = null;          // le theme deplie
 let LECTURE = null;
 let LECTURE_EN_COURS = false;
+/*
+ * LA DERNIERE ERREUR DE LECTURE, GARDEE A L'ECRAN.
+ *
+ * Elle partait en `toast()` : deux secondes, puis la page retombait sur
+ * « Lancer la lecture » -- exactement l'ecran qu'on voit quand on n'a jamais
+ * rien lance. Quelqu'un dont la lecture echoue a chaque fois voit donc un
+ * bouton qui ne fait rien, sans jamais savoir pourquoi, et finit par conclure
+ * qu'il n'a pas acces a la fonctionnalite. C'est ce qui s'est passe.
+ *
+ * Une panne qui ne se dit pas est pire qu'une panne : elle se lit comme une
+ * absence.
+ */
+let LECTURE_ERR = null;
 
 const HORIZONS_UI = [['court', 'court terme'], ['moyen', 'moyen terme'], ['long', 'long terme']];
 
@@ -1499,6 +1555,11 @@ function themeMarkup(t) {
     </button>
     ${ouvert ? `<div class="tcorps">
       <p class="tquoi">${esc(t.quoi)}</p>
+      ${/* Le chiffre. Il ne vient PAS du modèle : il a choisi lequel des faits
+            déjà calculés porte ce thème, et le serveur a mis la phrase. C'est
+            pour ça qu'on peut l'afficher tel quel — il n'a traversé personne
+            qui aurait pu l'arrondir. */''}
+      ${t.chiffre ? `<p class="tchiffre">${esc(t.chiffre)}</p>` : ''}
       <div class="tpreuves">${t.preuves.map(p => `<button class="tpreuve" data-jour="${p.date}">
         <span class="mono">${fmtDay(p.date)}</span>
         <span>${esc(p.extrait)}</span>
@@ -1531,6 +1592,11 @@ function carteMarkup(carte) {
     <div class="cartelegende">${
       [...new Set(carte.noeuds.map(n => n.genre))].map(g =>
         `<span><i style="--g:${TEINTE_GENRE[g]}"></i>${esc(NOM_GENRE[g] ?? g)}</span>`).join('')}
+      ${/* Sans cette ligne, la couronne se lit comme une décoration. Elle dit
+            aussi la règle de couleur en une phrase : le contour est déclaré, le
+            plein est mesuré. */''}
+      ${carte.noeuds.some(n => n.jours?.length)
+        ? `<span class="cartepoints">un point&nbsp;= une journée</span>` : ''}
     </div>
   </div>`;
 }
@@ -1560,7 +1626,7 @@ function monterCarte(carte) {
 
   cv.addEventListener('mousemove', e => {
     const r = cv.getBoundingClientRect();
-    const i = noeudAu(RELA_DISPO?.pts ?? [], RELA, e.clientX - r.left, e.clientY - r.top);
+    const i = noeudAu(RELA_DISPO?.pts ?? [], RELA, e.clientX - r.left, e.clientY - r.top, echelle(L, H));
     if (i === RELA_SURVOL) return;
     RELA_SURVOL = i;
     cv.style.cursor = i >= 0 ? 'pointer' : 'default';
@@ -1616,9 +1682,14 @@ async function renderLecture() {
   } else if (!L.cle) {
     corps = `<div class="lectvide">
       <p>Cette lecture demande une clé Claude.</p>
-      <p class="sub">Sans elle, l'application sait compter tes mots — elle le fait dans « Je remarque » —
-      mais elle ne sait pas te dire ce qui se répète sans se répéter dans les mêmes mots.</p>
+      <p class="sub">Compter des mots, l'application sait le faire seule. Reconnaître un fonctionnement
+      qui ne se dit jamais deux fois avec les mêmes mots, non.</p>
       <button class="btn" data-aller-reglages>Réglages</button></div>`;
+  } else if (LECTURE_ERR) {
+    corps = `<div class="lectvide">
+      <p>La lecture n'a pas abouti.</p>
+      <p class="sub lecterr">${esc(LECTURE_ERR)}</p>
+      <button class="btn primary" data-lire>Réessayer</button></div>`;
   } else {
     corps = `<div class="lectvide">
       <p>Rien de lu sur cette fenêtre.</p>
@@ -1634,6 +1705,11 @@ async function renderLecture() {
         ? `<span class="lecmeta faint"><span class="spin petit"></span> il relit</span>`
         : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus.">relire</button>`) : ''}
     </div>
+    ${/* Une relecture qui échoue par-dessus une lecture existante ne peut pas
+          prendre l'écran — l'ancienne vaut mieux que rien — mais elle ne peut
+          pas non plus se taire : sinon ce qu'on regarde est vieux sans qu'on le
+          sache, et « relire » a l'air de ne rien faire. */''}
+    ${L.lecture && LECTURE_ERR ? `<p class="sub lecterr lecterrhaut">La relecture n'a pas abouti — ceci est la lecture précédente. ${esc(LECTURE_ERR)}</p>` : ''}
     ${corps}
   </div>`;
 
@@ -1647,12 +1723,20 @@ async function renderLecture() {
   // relecture complète tous les soirs, pour un thème qui n'aura pas bougé.
   // L'ancienne reste affichée pendant ce temps : une lecture d'hier vaut mieux
   // qu'un écran d'attente.
-  if (!LECTURE_EN_COURS && L.possible && L.cle && L.arelire) lancerLecture();
+  //
+  // `!LECTURE_ERR` N'EST PAS UNE PRECAUTION, C'EST L'ARRET D'UNE BOUCLE.
+  // `lancerLecture()` re-rend en sortant, quoi qu'il arrive. Sans ce garde-fou,
+  // une lecture qui echoue re-rend, le re-rendu relance, la relance echoue :
+  // l'ecran tourne en rond et l'API est appelee en continu tant que l'onglet
+  // est ouvert. On ne relance donc jamais tout seul apres un echec -- le bouton
+  // « Réessayer » est la pour ca, et lui sait qu'on l'a demande.
+  if (!LECTURE_EN_COURS && !LECTURE_ERR && L.possible && L.cle && L.arelire) lancerLecture();
 }
 
 async function lancerLecture() {
   if (LECTURE_EN_COURS) return;
   LECTURE_EN_COURS = true;
+  LECTURE_ERR = null;
   const avait = !!LECTURE?.lecture;
   if (!avait) await renderLecture();       // l'attente ne s'affiche que s'il n'y a rien à montrer
   try {
@@ -1660,6 +1744,8 @@ async function lancerLecture() {
     LECTURE = r;
     if (r.usage) { S.usage = r.usage; syncGauge(); }
   } catch (err) {
+    // Le toast pour celui qui regarde, l'écran pour celui qui revient.
+    LECTURE_ERR = err.message;
     toast(err.message);
   } finally {
     LECTURE_EN_COURS = false;
@@ -1670,7 +1756,7 @@ async function lancerLecture() {
 function wireLecture() {
   $('#view').onclick = async e => {
     const h = e.target.closest('[data-horizon]');
-    if (h) { MIR_HORIZON = h.dataset.horizon; MIR_THEME = null; LECTURE = null; return renderLecture(); }
+    if (h) { MIR_HORIZON = h.dataset.horizon; MIR_THEME = null; LECTURE = null; LECTURE_ERR = null; return renderLecture(); }
     if (e.target.closest('[data-lire]')) return lancerLecture();
     if (e.target.closest('[data-aller-reglages]')) { view = 'settings'; syncNav(); return renderSettings(); }
     const j = e.target.closest('[data-jour]');
@@ -1759,66 +1845,23 @@ async function renderMirror(date, { garderCal = false } = {}) {
     return;
   }
 
-  const ep = m.episodes;
-  let epCard;
-  if (!ep || !ep.applicable) {
-    epCard = `<div class="card"><h2>Preuve de résolution</h2>
-      <p class="sub">${
-        !m.note && m.note !== 0 ? 'Note ta journée pour que cette section ait un sens.'
-        : `Tu es à ${m.note}/10, au niveau ou au-dessus de ta référence (${m.reference}). Il n'y a pas d'épisode à mesurer.`
-      }</p></div>`;
-  } else if (ep.insufficient) {
-    epCard = `<div class="card"><h2>Preuve de résolution</h2>
-      <p class="sub">Seulement ${ep.comparableCount} journée${ep.comparableCount > 1 ? 's' : ''} comparable${ep.comparableCount > 1 ? 's' : ''} dans ton historique.
-      En dessous de ${ep.minComparable}, je n'ai rien à en tirer.</p></div>`;
-  } else {
-    epCard = `<div class="card">
-      <h2>Preuve de résolution</h2>
-      <p class="sub">
-        <b>${ep.comparableCount}</b> épisodes à ${ep.note}/10 ou moins · retour au-dessus de la référence,
-        tenu ${ep.sustain} jour${ep.sustain > 1 ? 's' : ''}${ep.censoredCount ? ` · <span class="faint">épisode en cours non compté</span>` : ''}
-      </p>
-      <div class="statgrid">
-        <div class="s"><div class="k">Médiane</div><div class="v">${ep.medianDays}<span class="u"> jours</span></div></div>
-        <div class="s"><div class="k">Sous 4 jours</div><div class="v">${Math.round(ep.shareUnder4 * 100)}<span class="u">%</span></div></div>
-        <div class="s"><div class="k">Le plus long</div><div class="v">${ep.maxDays}<span class="u"> jours</span></div></div>
-        <div class="s"><div class="k">Jamais remonté à ${ep.horizon}j</div>
-          <div class="v" style="color:${ep.unresolvedCount ? 'var(--warn)' : 'var(--accent)'}">${ep.unresolvedCount}</div></div>
-      </div>
-      <p class="sub" style="margin:16px 0 0;font-size:12px">
-        ${ep.beyondHorizonDays?.length ? `Parmi elles, ${ep.beyondHorizonDays.length} sont finalement remontées, au bout de ${ep.beyondHorizonDays.join(', ')} jours.` : ''}
-      </p>
-    </div>`;
-  }
-
-  const sim = m.similar;
-  let simCard = '';
-  if (sim?.items?.length) {
-    simCard = `<div class="card">
-      <h2>${sim.mode === 'text' ? 'Tu as déjà écrit ça' : 'Les autres fois à ' + m.note + '/10'}</h2>
-      ${sim.mode === 'text' ? '' : `<p class="sub">${sim.reason === 'no_theme'
-        ? 'Rien de commun dans les mots — comparaison sur les notes.'
-        : 'Comparaison sur les notes.'}</p>`}
-      ${sim.items.map(it => `<div class="simitem">
-        <div class="hd">
-          <span class="d">${fmtDay(it.date)}</span>
-          <span class="pill">${it.note}/10</span>
-          ${it.terms?.length ? `<span class="faint" style="font-size:11.5px">${termesMarkup(it)}</span>` : ''}
-        </div>
-        ${it.text ? `<p class="q">${highlight(it.text.slice(0, 260), it.terms, it.forts)}${it.text.length > 260 ? '…' : ''}</p>` : ''}
-        ${bandMarkup(it.band)}
-      </div>`).join('')}
-    </div>`;
-  }
-
-  const y = m.yesterday;
-  const yCard = `<div class="card">
-    <h2>Hier</h2>
-    ${y.text
-      ? `<p class="serif" style="white-space:pre-wrap;font-size:15.5px;line-height:1.65;margin:0">${esc(y.text)}</p>`
-      : `<p class="sub" style="margin:0">${y.note !== null ? `Noté ${y.note}/10, sans texte.` : 'Rien pour hier.'}</p>`}
-  </div>`;
-
+  /*
+   * CE QUE LA JOURNEE OUVERTE NE MONTRE PLUS.
+   *
+   * Elle portait « Tu as deja ecrit ca » -- les journees qui ressemblent a
+   * celle-ci -- , une reference, un ecart, et une preuve de resolution. Quatre
+   * blocs de statistiques poses a cote d'un texte que quelqu'un vient de
+   * rouvrir pour le relire.
+   *
+   * Le rapprochement n'a pas disparu du produit : il a change de bouche. C'est
+   * le compagnon qui dit « ce n'est pas la premiere fois », dans Parler, quand
+   * il juge que ca sert -- pas une colonne qui l'affiche a chaque ouverture,
+   * qu'on ait demande ou non. La difference est celle entre quelqu'un qui te le
+   * rappelle et une machine qui te le ressort.
+   *
+   * Reste ce qu'on venait chercher : la note, ce qui a ete ecrit, et le repere
+   * de ce jour-la s'il y en a un.
+   */
   $('#view').innerHTML = `
     ${/* Le retour vers la lecture. Sans lui, ouvrir une journée depuis une
           preuve est un aller simple : la vue d'ensemble n'a plus de porte. */''}
@@ -1829,42 +1872,28 @@ async function renderMirror(date, { garderCal = false } = {}) {
       <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button data-goto="${S.today}">aujourd'hui</button>` : ''}
     </div>
-    <div class="mirror">
-      <div class="mcol">
-        ${calendarMarkup(m, date)}
+    <div class="jourseul">
+      ${calendarMarkup(m, date)}
 
-        ${reperesMarkup(m.reperes, date)}
+      ${reperesMarkup(m.reperes, date)}
 
-        <div class="card dayread">
-          <div class="dayhead">
-            <div>
-              <div class="k faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</div>
-              <div class="bignum${m.note !== null ? ' noted' : ''}"
-                   style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
-                ${m.note ?? '—'}<span class="sl">/10</span>
-              </div>
+      <div class="card dayread">
+        <div class="dayhead">
+          <div>
+            <div class="k faint">${fmtDay(date)}${date === S.today ? " \u00b7 aujourd'hui" : ''}</div>
+            <div class="bignum${m.note !== null ? ' noted' : ''}"
+                 style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
+              ${m.note ?? '\u2014'}<span class="sl">/10</span>
             </div>
-            <div class="statgrid tight">
-              <div class="s"><div class="k">Référence</div><div class="v">${m.reference ?? '—'}</div></div>
-              <div class="s"><div class="k">Écart</div><div class="v">${m.delta > 0 ? '+' : ''}${m.delta ?? '—'}</div></div>
-            </div>
-            <button class="daydrop" data-erase="${date}" title="Effacer cette journée">effacer</button>
           </div>
-          ${m.jour?.text
-            ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
-            : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
+          <button class="daydrop" data-erase="${date}" title="Effacer cette journée">effacer</button>
         </div>
+        ${m.jour?.text
+          ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
+          : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
+      </div>
 
       ${notesDuJourMarkup(m.carnet)}
-
-        ${epCard}
-      </div>
-
-      <div class="mcol">
-        ${simCard || `<div class="card"><h2>Tu as déjà écrit ça</h2>
-          <p class="sub" style="margin:0">Rien d'assez proche pour l'instant.</p></div>`}
-        ${yCard}
-      </div>
     </div>`;
   const form = $('#cnForm'); if (form) form.dataset.jour = date;
   wireMirror();
@@ -1883,38 +1912,30 @@ async function renderMirror(date, { garderCal = false } = {}) {
 const JOURS_COURT = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
 /**
- * Les repères de la journée ouverte.
+ * Le repère de la journée ouverte, s'il y en a un.
  *
- * Deux choses distinctes, et le bloc les sépare parce qu'elles ne répondent pas
- * à la même question. Ce qui est POSÉ CE JOUR-LÀ dit « voilà ce qui s'est passé ».
- * Le dernier repère AVANT dit « voilà où tu en étais » — c'est celui qu'on
- * cherche vraiment en rouvrant une journée d'il y a deux ans, et il n'apparaît
- * nulle part ailleurs dans l'application.
+ * Il y en avait deux sortes. Ce qui est POSE CE JOUR-LA, et le dernier repere
+ * AVANT -- « voila ou tu en etais ». Le second partait d'une bonne idee et
+ * donnait, sur une journee ordinaire, un encart permanent titre « Reperes »
+ * pour annoncer quelque chose d'il y a onze mois. Un bloc qui ne se tait jamais
+ * finit par ne plus rien dire, et il occupait la place au-dessus de la note.
+ *
+ * Le bloc ne parle donc plus que quand ce jour-la porte vraiment un repere.
+ * Pour retrouver le precedent, il y a la frise, dont c'est le metier.
  */
 function reperesMarkup(rep, date) {
   const jour = rep?.jour ?? [];
-  const avant = rep?.avant ?? null;
-  if (!jour.length && !avant) return '';
+  if (!jour.length) return '';
   const aura = prendreAura(date);
 
   return `<div class="card reperes${aura ? ' aura' : ''}">
-    <div class="k faint repk">Repères</div>
-    ${jour.length ? `<div class="repliste">
+    <div class="k faint repk">${jour.length > 1 ? 'Repères' : 'Repère'}</div>
+    <div class="repliste">
       ${jour.map(r => `<div class="rep pose">
         <span class="ricone-box">${icone(r.theme, 22)}</span>
         <div class="reptxt"><b>${esc(r.label)}</b><span class="faint">${esc(NOMS[r.theme] ?? 'jalon')}</span></div>
       </div>`).join('')}
-    </div>` : ''}
-    ${avant ? `<button class="rep avant" data-goto="${avant.date}">
-      <span class="ricone-box">${icone(avant.theme, 18)}</span>
-      <div class="reptxt">
-        <b>${esc(avant.label)}</b>
-        <span class="faint">${avant.jours === 0 ? 'le jour même'
-          : avant.jours === 1 ? 'la veille'
-          : avant.jours < 62 ? `${avant.jours} jours plus tôt`
-          : `${Math.round(avant.jours / 30.4)} mois plus tôt`}</span>
-      </div>
-    </button>` : ''}
+    </div>
   </div>`;
 }
 
@@ -2450,6 +2471,18 @@ async function renderBackendCfg() {
       Il peut aller chercher les autres lui-même quand la conversation y touche.
       Décocher les retire du contexte sans rien effacer.
       <br>Hors ligne, le compagnon n'a ni tes journées ni tes notes.
+    </p>
+    <label class="field" style="margin-top:14px"><span>
+      <input type="checkbox" id="sansEnveloppe" ${s.sansEnveloppe ? 'checked' : ''}
+             style="width:auto;margin-right:7px">
+      Retirer l'enveloppe de jetons</span></label>
+    <p class="sub" style="margin:0;font-size:12px">
+      L'enveloppe existe parce que d'habitude c'est la clé de l'hébergeur qui règle : à zéro,
+      le compagnon retombe hors-ligne au lieu de couper quelqu'un au milieu d'une phrase.
+      Sur ton propre journal, avec ta propre clé, elle ne protège de rien.
+      <br>Décochée, il n'y a plus de plafond et plus de repli.
+      <b>Le compte des jetons continue</b> — c'est même tout ce qu'il reste pour savoir
+      ce que ça coûte.
     </p>` + SORTIE_ANTHROPIC;
   } else if (s.chatBackend === 'ollama') {
     el.innerHTML = `<div class="row">
@@ -2502,6 +2535,12 @@ async function renderBackendCfg() {
     toast(e.target.checked ? 'Carnet transmis' : 'Carnet retiré du contexte — rien n\'est effacé');
   });
 
+  // L'état de l'enveloppe se lit dans la jauge, pas dans les réglages : elle est
+  // rafraîchie tout de suite, sinon on coche et rien ne bouge à l'écran.
+  $('#sansEnveloppe')?.addEventListener('change', async e => {
+    await saveSettings({ sansEnveloppe: e.target.checked });
+    try { S.usage = (await api('/api/state')).usage; syncGauge(); } catch { /* la jauge suivra */ }
+  });
   $('#memoryDays')?.addEventListener('change', async e => {
     await saveSettings({ memoryDays: Number(e.target.value) });
     renderSettings();

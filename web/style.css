@@ -70,6 +70,13 @@ a { color: var(--accent); }
   max-width: 1180px; margin: 0 auto;
   height: 100dvh; display: grid; grid-template-columns: 218px minmax(0, 1fr);
 }
+/* Un enfant de grille vaut `min-height: auto` : il refuse de descendre sous la
+   hauteur de son contenu, et c'est la PAGE qui grandit a sa place. Le fil ne
+   defilait donc jamais sur un ecran large -- il poussait la coquille hors de la
+   fenetre, et le composeur passait sous le pli. Le meme piege qu'en flex, et la
+   regle existait deja plus bas, dans le bloc mobile : c'est pour ca que le
+   telephone allait bien et pas le bureau. */
+.shell > * { min-height: 0; }
 
 .rail {
   display: flex; flex-direction: column;
@@ -177,11 +184,33 @@ nav button[aria-current="true"] { color: var(--ink); background: none; }
    fenêtre trop courte pour la note, il vaut mieux un défilement qu'un bas de
    page coupé — un bouton « 0 » inatteignable le soir où il sert, ce n'est pas
    un défaut d'esthétique. */
-#view:has(> .tonight) { overflow: auto; padding-bottom: 20px; }
+#view:has(> .tonight) { overflow: hidden; padding-bottom: 20px; }
 .tonight { height: 100%; }
-.tonight .stack { height: 100%; min-height: 0; }
-.tonight .card:first-child { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.tonight .thread { flex: 1 1 auto; min-height: 108px; max-height: none; }
+
+/*
+ * ON ARRIVE PRET A ECRIRE.
+ *
+ * Le fil montait jusqu'en haut de la fenetre et poussait le composeur sous le
+ * pli : on ouvrait l'application pour ecrire, et le premier geste etait de
+ * descendre chercher le champ. Il est maintenant ancre EN BAS, replie sur sa
+ * fin, et ce qui deborde se fond vers le haut au lieu d'etre coupe net.
+ *
+ * `flex: 0 1 auto` : il se reduit si la fenetre est courte, il ne s'etire
+ * jamais. Une conversation de trois messages ne doit pas ouvrir une boite de
+ * quarante-six pour cent de hauteur a moitie vide.
+ */
+.tonight { justify-content: flex-end; }
+.tonight .thread { flex: 0 1 auto; min-height: 0; max-height: 46vh; }
+
+/* Le fondu ne se pose QUE si ca deborde vraiment : sur une conversation courte,
+   il effacerait le premier message sans rien cacher. */
+.thread.fondu {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 72px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 72px);
+}
+/* On remonte : le fil prend toute la place et le fondu se leve — on est venu
+   lire, plus repondre. */
+.tonight .thread.ouvert { flex: 1 1 auto; max-height: none; }
 
 .row { display: flex; gap: 30px 26px; flex-wrap: wrap; }
 .row > * { flex: 1 1 320px; min-width: 0; }
@@ -776,6 +805,13 @@ input[type=date] { color-scheme: dark; }
 
 .gaugepanel .nums { margin: 0 0 3px; font-size: 13.5px; color: var(--ink-dim); }
 .gaugepanel .nums b { color: var(--ink); font-family: var(--mono); font-size: 15px; }
+/* « sans enveloppe » n'est pas une alerte : c'est un état choisi. Il se signale
+   sans crier, à la façon d'une étiquette d'outil de développeur. */
+.gaugepanel .sansenv {
+  font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-faint); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 8px; margin-left: 2px;
+}
 .gaugepanel .paid {
   margin: 0; padding: 9px 11px; border-radius: 8px; font-size: 12.5px;
   background: #0e2018; border: 1px solid var(--accent-dk); color: var(--accent);
@@ -857,6 +893,16 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .lectvide { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 40px 0; }
 .lectvide p { margin: 0; }
 .lectvide .btn { margin-top: 10px; }
+/* Le message d'erreur vient du serveur ou de l'API : il est technique, et c'est
+   voulu — il est là pour qu'on puisse le lire et le rapporter, pas pour être
+   joli. Le monospace le signale comme tel. */
+.lecterr {
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  color: var(--warn); max-width: 62ch;
+  border-left: 2px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  padding-left: 11px; margin: 2px 0 0;
+}
+.lecterrhaut { margin: -12px 0 22px; max-width: 720px; }
 .spin {
   width: 15px; height: 15px; border-radius: 50%; margin-bottom: 6px;
   border: 2px solid var(--line); border-top-color: var(--accent);
@@ -893,6 +939,17 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 .tcorps { padding: 0 13px 14px 39px; }
 .tquoi { margin: 0 0 12px; font-size: 14px; color: var(--ink-dim); max-width: 40em; }
+/* Le chiffre comparé à la normale. Il se lit comme une remarque — « tiens,
+   ça » — et pas comme un verdict : chiffres en monospace pour qu'on voie tout
+   de suite que c'est mesuré, texte de la même taille que le reste pour qu'il ne
+   prenne pas plus d'importance que le thème qu'il illustre. */
+.tchiffre {
+  margin: -4px 0 13px; padding: 8px 12px; max-width: 40em;
+  font-size: 13px; line-height: 1.5; color: var(--ink);
+  background: var(--panel); border-radius: 9px;
+  border-left: 2px solid var(--accent-dk);
+  font-variant-numeric: tabular-nums;
+}
 .tpreuves { display: flex; flex-direction: column; gap: 2px; }
 .tpreuve {
   display: flex; align-items: baseline; gap: 11px; width: 100%; text-align: left;
@@ -929,8 +986,18 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   width: 8px; height: 8px; border-radius: 50%;
   border: 1.5px solid hsl(var(--g) 58% 62%);
 }
+/* Détachée des genres : elle ne nomme pas une couleur, elle explique le grain. */
+.cartelegende .cartepoints {
+  margin-left: auto; padding-left: 16px; color: var(--ink-faint);
+  border-left: 1px solid var(--line-soft);
+}
+@media (max-width: 700px) { .cartelegende .cartepoints { margin-left: 0; border-left: 0; padding-left: 0; } }
 
 .mirror { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px 34px; }
+/* La journée ouverte tient désormais dans une colonne : le calendrier, le
+   repère s'il y en a un, la note et le texte. La largeur est celle qu'avait
+   déjà cette colonne — rien n'a bougé de place, deux blocs ont disparu. */
+.jourseul { display: flex; flex-direction: column; gap: 30px; max-width: 520px; }
 .mcol { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
 @media (max-width: 900px) { .mirror { grid-template-columns: 1fr; } }
 
@@ -939,14 +1006,47 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
    .calgrid, .calmois — et le second écrasait le premier depuis plus bas dans la
    feuille. Ici on ajoute seulement ce que le Miroir a en plus : la teinte des
    journées, qui n'a de sens que sur un journal. */
-.calcard .cal { width: 100%; }
+/* Le calendrier respire de sept pixels sur les cotes, et six sous les initiales
+   des jours : la case selectionnee grossit et porte un anneau, et sans cette
+   marge un dimanche ou un 1er du mois se faisait couper son anneau par le bord
+   de la carte. */
+.calcard .cal { width: 100%; padding: 0 7px; box-sizing: border-box; }
+.calcard .caldows { margin-bottom: 6px; }
 .calcard .calgrid button { height: 34px; }
 .calj.teinte { background: color-mix(in srgb, var(--jc) 62%, transparent); color: #08110c; font-weight: 500; }
 .calj.teinte.hors { opacity: .45; }
-/* La borne — le jour ouvert — passe devant la teinte : on doit toujours savoir
-   ce qu'on regarde, même sur une journée à 9/10 déjà claire. */
-.calj.borne.teinte { background: var(--accent); }
 .calj.teinte::after { background: #08110c; opacity: .55; }
+
+/* LA SÉLECTION EST UN CADRE, PAS UNE COULEUR.
+   Le jour ouvert était repeint en vert vif, par-dessus sa teinte. Dans une
+   grille dont c'est le seul métier de dire des notes, la case sélectionnée
+   mentait donc sur la sienne : une journée à 3/10 s'affichait comme une journée
+   à 10, et c'était exactement la case qu'on était en train de regarder.
+   Elle garde sa couleur. La sélection se lit à l'anneau, au relief et à la
+   taille — trois signaux qui ne coûtent aucune information. */
+.calcard .calj { transition: background .12s, scale .14s, box-shadow .14s; }
+.calcard .calj.borne {
+  background: none; color: var(--ink); font-weight: 620; border-radius: 8px;
+  /* Deux anneaux : un liseré de fond qui détache la case de ses voisines à 2 px,
+     puis l'anneau vert. Sans le premier, l'anneau colle au jour d'à côté. */
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--accent),
+              0 3px 12px color-mix(in srgb, var(--accent) 28%, transparent);
+  scale: 1.06; z-index: 2;
+}
+.calcard .calj.borne.teinte {
+  background: color-mix(in srgb, var(--jc) 78%, transparent); color: #08110c;
+}
+/* Le point « écrit » disparaît sous l'anneau : il est redondant là où on lit
+   déjà le texte de la journée juste en dessous. */
+.calcard .calj.borne::after { display: none; }
+/* Une plage n'existe pas dans le Miroir — on y ouvre une journée, pas un
+   intervalle — mais si elle revenait, les bouts arrondis restent justes. */
+.calcard .calj.borne.lo:not(.hi) { border-radius: 8px 3px 3px 8px; }
+.calcard .calj.borne.hi:not(.lo) { border-radius: 3px 8px 8px 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .calcard .calj { transition: none; }
+  .calcard .calj.borne { scale: 1; }
+}
 
 /* La ligne d'en-tête d'une journée : la note, la référence, l'écart, puis
    « effacer ». En flex avec wrap, la colonne du Miroir étant devenue plus
@@ -954,11 +1054,12 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
    « effacer » flottant entre les deux. Une grille explicite tient la ligne, et
    ne se casse qu'une fois — sous 420 px, où elle passe proprement à deux
    colonnes. */
+/* Deux enfants seulement depuis que la référence et l'écart sont partis : la
+   note, et « effacer » poussé au bout de la ligne. */
 .dayhead {
-  display: grid; grid-template-columns: auto auto auto 1fr;
+  display: grid; grid-template-columns: auto 1fr;
   align-items: end; gap: 8px 26px; margin-bottom: 14px;
 }
-@media (max-width: 420px) { .dayhead { grid-template-columns: auto 1fr; } }
 .dayhead .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .dayhead .bignum .sl { font-size: 16px; color: var(--ink-faint); }
 /* La note du jour ouvert est l'information la plus consultee de l'ecran, et
