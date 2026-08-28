@@ -2104,3 +2104,75 @@ button.amasrow:hover { background: var(--panel); }
 .pudbtn kbd { margin-left: auto; font-family: var(--mono); font-size: 10.5px;
               color: var(--ink-faint); border: 1px solid var(--line); border-radius: 4px;
               padding: 1px 5px; }
+
+/* ---- le bouton du mode pudique, dans la barre du haut ----
+
+   Il est la en permanence, a cote des onglets : on l'allume dans la seconde
+   qui precede un partage d'ecran, et un reglage qu'il faut aller chercher
+   arrive toujours trop tard. Une icone seule -- ecrit « mode pudique » a cote
+   des onglets et c'est le mot qu'un invite lit en premier. */
+.floubtn {
+  display: inline-grid; place-items: center; flex: none;
+  width: 30px; height: 30px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px;
+  background: none; color: var(--ink-faint); cursor: pointer;
+  transition: color .14s ease, border-color .14s ease;
+}
+.floubtn:hover { color: var(--ink-dim); background: none; border-color: var(--line-soft); }
+.floubtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* L'oeil est OUVERT au repos et BARRE quand le mode est actif : l'icone dit
+   l'etat courant, pas l'action -- c'est ce qu'on lit d'un coup d'oeil pour
+   verifier avant de partager. */
+.floubtn .barre { opacity: 0; transition: opacity .14s ease; }
+.floubtn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.floubtn[aria-pressed="true"] .barre { opacity: 1; }
+.floubtn[aria-pressed="true"] .iris { opacity: .35; }
+@media (prefers-reduced-motion: reduce) {
+  .floubtn, .floubtn .barre { transition: none; }
+}
+@media (max-width: 720px) { .floubtn { width: 28px; height: 28px; } }
+
+/* ---- l'heure telle que le SERVEUR la voit ---- */
+.fuseau {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px;
+  margin: 0 0 10px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 9px;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-dim);
+}
+.fuseau b { color: var(--ink); font-weight: 500; }
+.fuseau .horloge { font-size: 15px; color: var(--ink); }
+.fuseau .verdict { margin-left: auto; }
+.fuseau .verdict.ok { color: var(--accent); }
+.fuseau .verdict.ko { color: var(--warn); }
+
+/* ---- les barres de defilement ----
+
+   Celle du navigateur est un objet gris de seize pixels de large, avec ses
+   fleches et son rail, pose sur une application qui n'a ni gris ni fleches.
+   Sur la capture d'un ecran sombre elle saute aux yeux avant le contenu.
+
+   On la garde -- une barre dit OU ON EN EST dans une lecture, et la supprimer
+   partout rendrait « Ma carte » impossible a situer -- mais reduite a ce
+   qu'elle raconte : un trait fin dans la teinte des bords, sans rail, sans
+   fleches, qui s'affirme quand on le touche. Les deux syntaxes existent parce
+   qu'aucune ne couvre les deux familles de navigateurs. */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  /* Une bordure transparente rend le trait plus fin que la zone de saisie :
+     on garde une cible confortable au curseur sans l'epaisseur a l'oeil. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); background-clip: content-box; }
+/* Les fleches de bout : elles n'ont jamais servi a personne et elles sont le
+   morceau le plus « systeme » de l'objet. */
+::-webkit-scrollbar-button { display: none; }

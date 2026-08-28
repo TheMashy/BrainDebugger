@@ -28,10 +28,29 @@ const dayShift = (d, n) => {
   return new Date(Date.UTC(y, m - 1, dd) + n * 86400000).toISOString().slice(0, 10);
 };
 
+/*
+ * LE FUSEAU DE CETTE MACHINE, SUR CHAQUE REQUETE.
+ *
+ * Le serveur ne peut pas le deviner : heberge, il tourne en UTC, et « quel
+ * jour sommes-nous ? » y repond faux de deux heures pour quelqu'un a Paris --
+ * donc faux d'une JOURNEE entiere pour qui note apres minuit. Le navigateur,
+ * lui, le sait de source sure. Il le dit a chaque fois plutot qu'une fois pour
+ * toutes : on voyage, on change d'heure deux fois par an, et un fuseau
+ * enregistre une fois est un fuseau qui finit par mentir.
+ */
+const FUSEAU = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+})();
+
+const enTetes = (json = false) => ({
+  ...(json ? { 'Content-Type': 'application/json' } : {}),
+  ...(FUSEAU ? { 'X-Fuseau': FUSEAU } : {})
+});
+
 async function api(path, body) {
   const res = await fetch(path, body
-    ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-    : undefined);
+    ? { method: 'POST', headers: enTetes(true), body: JSON.stringify(body) }
+    : { headers: enTetes() });
   // session expirée ou déconnexion : on repasse par le verrou au lieu
   // d'empiler des erreurs dans la console
   if (res.status === 401) { location.href = '/login'; throw new Error('session expirée'); }
@@ -176,7 +195,7 @@ function appliquerPudique() {
   const on = !!S.settings?.pudique;
   if (on) document.documentElement.dataset.pudique = '';
   else document.documentElement.removeAttribute('data-pudique');
-  for (const b of document.querySelectorAll('.pudbtn')) {
+  for (const b of document.querySelectorAll('[data-bascule-pudique]')) {
     b.setAttribute('aria-pressed', String(on));
     // Le libelle suit l'etat sans re-rendre la vue : le panneau de la jauge
     // n'est redessine qu'a l'ouverture, et un bouton qui dit encore « actif »
@@ -204,7 +223,7 @@ async function basculerPudique(v = !S.settings?.pudique) {
 }
 
 /** Le bouton, identique dans la jauge et dans les réglages. */
-const pudMarkup = () => `<button class="pudbtn" aria-pressed="${!!S.settings?.pudique}">
+const pudMarkup = () => `<button class="pudbtn" data-bascule-pudique aria-pressed="${!!S.settings?.pudique}">
   <span class="pudpuce" aria-hidden="true"></span>
   <span class="pudlib">Mode pudique${S.settings?.pudique ? ' — actif' : ''}</span>
   <kbd>Ctrl+Maj+P</kbd>
@@ -903,7 +922,7 @@ async function send() {
   try {
     const res = await fetch('/api/message/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: enTetes(true),
       body: JSON.stringify({ text, date: S.today })
     });
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
@@ -2918,6 +2937,24 @@ async function renderSettings() {
         <div id="notesReport"></div>
       </div>
 
+      ${/* L'heure est un REGLAGE INVISIBLE : personne ne pense a la verifier, et
+             quand elle est fausse le symptome se lit des mois plus tard, sous la
+             forme d'un trou dans la grille. On la montre donc telle que le
+             SERVEUR la voit, a cote de l'horloge du navigateur. */''}
+      <div class="card">
+        <h2>L'heure</h2>
+        <p class="sub">
+          « Aujourd'hui » est ta journée à toi, pas celle du serveur. Ton navigateur annonce
+          ton fuseau à chaque requête ; voici ce que le serveur en fait.
+        </p>
+        <div class="fuseau" id="fuseau"><span>vérification…</span></div>
+        <p class="sub" style="margin:0;font-size:12.5px">
+          Si les deux heures ne concordent pas, une note posée après minuit tombe sur la veille.
+          Rien à régler à la main : c'est détecté tout seul, et ça suit tes voyages
+          comme le changement d'heure.
+        </p>
+      </div>
+
       ${/* Le mode pudique est un reglage de VUE, pas de donnees : rien n'est
              efface, rien n'est chiffre, rien ne quitte l'ecran autrement. Il
              tient donc juste au-dessus de « Tes donnees », la ou on vient
@@ -2967,6 +3004,7 @@ async function renderSettings() {
     </div>`;
 
   renderBackendCfg();
+  montrerFuseau();
 
   const bind = (id, key, ev = 'change', get = el => el.value) =>
     $('#' + id)?.addEventListener(ev, async e => { await saveSettings({ [key]: get(e.target) }); });
@@ -3258,6 +3296,37 @@ async function renderBackendCfg() {
   });
 }
 
+/**
+ * L'heure du serveur, mise face a celle du navigateur.
+ *
+ * On compare les deux HORLOGES, pas les deux fuseaux : deux identifiants
+ * differents peuvent dire la meme heure, et c'est l'heure qui decide sur
+ * quelle case de la grille tombe une note. On tolere une minute d'ecart --
+ * l'aller-retour reseau peut tomber pile sur un changement de minute.
+ */
+async function montrerFuseau() {
+  const el = $('#fuseau');
+  if (!el) return;
+  try {
+    const t = await api('/api/temps');
+    const ici = new Date();
+    const hhmm = `${String(ici.getHours()).padStart(2, '0')}:${String(ici.getMinutes()).padStart(2, '0')}`;
+    const ecart = Math.abs(
+      (Number(t.heure.slice(0, 2)) * 60 + Number(t.heure.slice(3))) -
+      (ici.getHours() * 60 + ici.getMinutes()));
+    const ok = Math.min(ecart, 1440 - ecart) <= 1;
+    el.innerHTML = `
+      <span class="horloge">${esc(t.heure)}</span>
+      <span>chez le serveur · <b>${esc(t.zone)}</b> ${esc(t.decalage)}</span>
+      <span>${hhmm} ici · <b>${esc(FUSEAU || 'fuseau inconnu')}</b></span>
+      <span class="verdict ${ok ? 'ok' : 'ko'}">${ok
+        ? '✓ à ton heure'
+        : "⚠ le serveur n'est pas à ton heure"}</span>`;
+  } catch {
+    el.innerHTML = '<span>l\'heure du serveur est injoignable</span>';
+  }
+}
+
 /* --------- import d'un historique tableur --------- */
 
 let IMPORT_CSV = null;
@@ -3518,7 +3587,7 @@ async function boot() {
     // On vise la CLASSE et pas l'attribut : `data-pudique` est pose sur la
     // racine quand le mode est actif, et un `closest('[data-pudique]')`
     // remontait jusqu'a elle -- le moindre clic dans la page rebasculait.
-    if (e.target.closest('.pudbtn')) { basculerPudique(); return; }
+    if (e.target.closest('[data-bascule-pudique]')) { basculerPudique(); return; }
     if (!$('#gaugePanel').hidden && !e.target.closest('#gaugePanel') && !e.target.closest('#gauge')) toggleGauge(false);
   });
   document.addEventListener('keydown', e => {

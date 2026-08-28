@@ -269,15 +269,17 @@ export function scriptedReply(history) {
  * astuce de format. Un compagnon qui prefixe ses reponses de l'heure a l'air
  * d'un journal systeme, pas de quelqu'un.
  */
-const JOURS_SEM = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
 
-export function marqueTemps(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return null;
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${JOURS_SEM[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${hh}:${mm}`;
-}
+
+/*
+ * Le marqueur mis devant chaque message.
+ *
+ * Il est LU dans la zone de celui qui ecrit, pas dans celle du processus :
+ * heberge, le serveur tourne en UTC et annoncait « 01:14 » au compagnon quand
+ * la personne ecrivait a trois heures du matin -- soit exactement l'heure
+ * tardive qu'il est cense remarquer. Voir server/temps.js.
+ */
+export { marqueTemps } from './temps.js';
 
 function toChatMessages(history) {
   return history.map(m => {
