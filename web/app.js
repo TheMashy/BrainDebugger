@@ -700,7 +700,7 @@ function prendreAura(date) {
 function bindGestes(th) {
   if (th.dataset.gestes) return;
   th.dataset.gestes = '1';
-  th.addEventListener('click', e => {
+  th.addEventListener('click', async e => {
     // Déplier ou replier une réflexion. Sur la bulle en cours, la boîte n'a pas
     // encore d'identifiant : on bascule la classe sur place.
     const pv = e.target.closest('[data-pensee-live]');
@@ -724,8 +724,32 @@ function bindGestes(th) {
       view = 'mirror'; syncNav();
       return renderMirror(v.dataset.voir);
     }
+    /*
+     * UN MECANISME MENE A « MA CARTE », PLUS AUX REGLAGES.
+     *
+     * Il y menait parce que les motifs y vivaient. Ils ont demenage -- ils sont
+     * maintenant a cote de la carte et de la synthese, avec les themes, dans la
+     * seule liste de mecanismes -- et ce lien-la etait reste en arriere. Cliquer
+     * « urgence a eteindre » sous une phrase qu'on vient d'ecrire ouvrait donc
+     * l'onglet des preferences : la reponse a « qu'est-ce qu'il entend par la ? »
+     * arrivait entre le timbre des bips et la cle d'API.
+     *
+     * Et il ne mene pas seulement a la vue : il OUVRE le mecanisme en question.
+     * Atterrir sur une liste de huit lignes en ayant clique sur l'une d'elles
+     * fait recommencer le geste.
+     */
     const m = e.target.closest('[data-motifs]') || e.target.closest('[data-motif]');
-    if (m) { view = 'settings'; syncNav(); return renderSettings(); }
+    if (m) {
+      MIR_THEME = m.dataset.motif ? `motif:${m.dataset.motif}` : null;
+      MIRROR_DATE = null;
+      view = 'mirror'; syncNav();
+      await renderLecture();
+      // Après le rendu : la liste peut être sous le pli sur un écran court, et
+      // un mécanisme déplié qu'on ne voit pas est un clic sans réponse.
+      $('#view').querySelector('.meca.ouvert')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
     // « voir » sur un objectif ouvre le trombone, pas une autre vue : ce qu'on
     // vient de poser est a deux centimetres, sous le composeur.
     const c = e.target.closest('[data-clip]');
