@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { valider, corpusPour, choisirJours, HORIZONS, GENRES } from '../server/lecture.js';
+import { valider, corpusPour, choisirJours, grainPour, GENRES } from '../server/lecture.js';
 
 const DATES = new Set(['2024-03-12', '2024-04-02', '2024-05-20']);
 
@@ -141,14 +141,18 @@ test('le budget est respecté et une journée courte passe encore après une lon
   assert.ok(g.length >= 2, 'le budget s’est arrêté au premier pavé');
 });
 
-test('la fenêtre borne le corpus, et « long » ne borne rien', () => {
+test('le corpus prend TOUT le journal, sans fenêtre', () => {
+  // Il y avait trois fenêtres — court, moyen, long. Ce qu'on cherche est ce qui
+  // REVIENT ; le découper, c'est poser trois fois la même question à trois
+  // morceaux de la réponse. Le budget de caractères fait déjà le tri, et il le
+  // fait sur la densité des journées, ce qui est un bien meilleur critère
+  // qu'une date de coupure.
   const opts = { rows: ROWS, events: [], carnet: [], motifs: [], objectifs: [] };
-  const court = corpusPour('court', opts, '2024-07-20');
-  for (const d of court.dates) assert.ok(d >= '2024-06-21', d);
-  const long = corpusPour('long', opts, '2024-07-20');
-  assert.ok(long.dates.size > court.dates.size);
-  // Un horizon inconnu ne casse pas : il retombe sur le plus large.
-  assert.equal(corpusPour('nimportequoi', opts, '2024-07-20').depuis, null);
+  const c = corpusPour(opts);
+  assert.equal(c.depuis, ROWS[0].date, 'le corpus ne part pas de la première journée');
+  assert.ok(c.dates.has(ROWS[0].date) || c.dates.size < ROWS.length,
+    'les vieilles journées ne sont écartées que par le budget');
+  assert.ok(c.etendue >= 1);
 });
 
 test('le corpus dit l’écart-type des mois, pas seulement la moyenne', () => {
@@ -156,17 +160,21 @@ test('le corpus dit l’écart-type des mois, pas seulement la moyenne', () => {
   // pas la même chose — et c'est exactement le signal d'une instabilité.
   const plat = Array.from({ length: 20 }, (_, i) => ({ date: `2024-01-${String(i + 1).padStart(2, '0')}`, note: 6, text: 'a' }));
   const agite = Array.from({ length: 20 }, (_, i) => ({ date: `2024-02-${String(i + 1).padStart(2, '0')}`, note: i % 2 ? 10 : 2, text: 'a' }));
-  const c = corpusPour('long', { rows: [...plat, ...agite] }, '2024-03-01');
+  const c = corpusPour({ rows: [...plat, ...agite] });
   const l1 = c.texte.split('\n').find(l => l.startsWith('2024-01'));
   const l2 = c.texte.split('\n').find(l => l.startsWith('2024-02'));
   assert.equal(Number(l1.split(' | ')[4]), 0);
   assert.ok(Number(l2.split(' | ')[4]) > 3, l2);
 });
 
-test('chaque horizon déclare un grain de découpe', () => {
-  for (const [nom, h] of Object.entries(HORIZONS)) {
-    assert.ok(h.nom && h.grain, nom);
-  }
+test('le grain de la série suit l’étendue réelle', () => {
+  // Une constante ne peut pas convenir aux deux bouts : sur trois semaines de
+  // journal une barre par année donne UNE barre ; sur cinq ans une barre par
+  // semaine en donne deux cent soixante, et le schéma borne la série à 24.
+  assert.equal(grainPour(21), 'semaine');
+  assert.equal(grainPour(365), 'mois');
+  assert.equal(grainPour(1800), 'année');
+  assert.equal(grainPour(0), 'semaine');
 });
 
 /* --------------------- quand faut-il relire --------------------- */
@@ -176,7 +184,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-lect-')), 'test.db');
 
-const { setLecture, addMessage, addCarnet, OWNER } = await import('../server/db.js');
+const { db, setLecture, addMessage, addCarnet, OWNER } = await import('../server/db.js');
 const api = await import('../server/api.js');
 
 // invalidate() comme le fait streamMessage : la série est mémoïsée, et sans ça
@@ -185,67 +193,69 @@ const ecrire = (date, texte) => {
   addMessage({ ts: `${date}T20:00:00Z`, date, role: 'user', text: texte });
   api.invalidate(OWNER);
 };
-const etat = h => api.routes['GET /api/lecture']({ query: { horizon: h }, userId: OWNER });
+const etat = () => api.routes['GET /api/lecture']({ userId: OWNER });
 
 test('sans assez de journées, la lecture n’est pas possible', () => {
   for (let i = 1; i <= 5; i++) ecrire(`2026-01-0${i}`, 'une journée');
-  const r = etat('moyen');
+  const r = etat();
   assert.equal(r.possible, false);
   assert.equal(r.ecrites, 5);
 });
 
 test('sans lecture, il faut la lancer ; avec, le retard décide', () => {
   for (let i = 6; i <= 25; i++) ecrire(`2026-01-${String(i).padStart(2, '0')}`, 'une journée');
-  assert.equal(etat('moyen').possible, true);
-  assert.equal(etat('moyen').arelire, true, 'aucune lecture : il faut la faire');
+  assert.equal(etat().possible, true);
+  assert.equal(etat().arelire, true, 'aucune lecture : il faut la faire');
 
-  setLecture({ horizon: 'moyen', contenu: { synthese: 'x', themes: [] },
+  setLecture({ contenu: { synthese: 'x', themes: [] },
                jusqu_au: '2026-01-25', jours: 25, modele: 'm', userId: OWNER });
-  const a = etat('moyen');
+  const a = etat();
   assert.deepEqual([a.retard, a.perime, a.arelire], [0, false, false]);
 
   // Écrire tous les soirs ne doit PAS relancer une relecture complète du corpus
   // tous les soirs, pour un thème qui n'aura pas bougé d'un cheveu.
   ecrire('2026-01-26', 'une journée');
   ecrire('2026-01-27', 'une journée');
-  const b = etat('moyen');
+  const b = etat();
   assert.deepEqual([b.retard, b.perime, b.arelire], [2, true, false]);
 
-  // Passé le seuil de la fenêtre, elle se relance seule.
+  // Passé le seuil, elle se relance seule.
   for (let i = 1; i <= 14; i++) ecrire(`2026-02-${String(i).padStart(2, '0')}`, 'une journée');
-  assert.equal(etat('moyen').arelire, true);
-});
-
-test('le seuil suit la fenêtre : trois journées suffisent sur trente jours', () => {
-  setLecture({ horizon: 'court', contenu: { synthese: 'x', themes: [] },
-               jusqu_au: '2026-01-25', jours: 25, modele: 'm', userId: OWNER });
-  // Sur trente jours, une poignée de journées est déjà une part du corpus ;
-  // sur quatre ans, elle ne change rien.
-  assert.equal(etat('court').arelire, true);
-  assert.equal(etat('long').arelire, true);   // aucune lecture longue enregistrée
-});
-
-test('un horizon inconnu retombe sur « moyen » plutôt que d’échouer', () => {
-  assert.equal(etat('nimportequoi').horizon, 'moyen');
+  assert.equal(etat().arelire, true);
 });
 
 test('les notes apportées font vieillir la carte, pas seulement les journées', () => {
   // Coller trois ans de carnet est l'événement qui change le plus une carte, et
   // c'était exactement celui qui ne comptait pas : une note n'est pas une
   // journée, donc elle ne bougeait pas le retard.
-  setLecture({ horizon: 'long', contenu: { synthese: 'x', themes: [] },
+  setLecture({ contenu: { synthese: 'x', themes: [] },
                jusqu_au: '2026-02-14', jours: 40, modele: 'm', userId: OWNER });
-  const avant = etat('long');
+  const avant = etat();
   assert.equal(avant.notes, 0);
   for (let i = 0; i < 30; i++) {
     addCarnet({ texte: `vieille note ${i}`, jour: null, userId: OWNER,
                 quandCree: new Date(Date.now() + 1000 + i).toISOString() });
   }
   api.invalidate(OWNER);
-  const apres = etat('long');
+  const apres = etat();
   assert.equal(apres.notes, 30);
   assert.ok(apres.retard >= 30);
   assert.equal(apres.arelire, true, 'trente notes collées n’ont pas rafraîchi la carte');
+});
+
+test('une lecture faite avant la bascule s’affiche encore, mais périmée', () => {
+  // Ce qu'une migration destructive aurait effacé : la seule lecture que
+  // quelqu'un possède. On la rend, marquée « ancienne », et l'interface propose
+  // de relire — un écran vide serait une régression pour qui met à jour.
+  db.prepare('DELETE FROM lectures').run();
+  db.prepare(`INSERT INTO lectures(user_id, horizon, fait_le, jusqu_au, jours, modele, contenu)
+              VALUES(?,?,?,?,?,?,?)`)
+    .run(OWNER, 'moyen', '2026-02-01T00:00:00Z', '2026-01-25', 25, 'm',
+         JSON.stringify({ synthese: 'la vieille', themes: [] }));
+  api.invalidate(OWNER);
+  const r = etat();
+  assert.equal(r.ancienne, true);
+  assert.equal(r.lecture.synthese, 'la vieille');
 });
 
 test('chaque genre déclaré est utilisable', () => {
@@ -312,7 +322,7 @@ test('le corpus transmet les comparaisons, et les calcule sur toute la fenêtre'
     const dim = (new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay() + 6) % 7 === 6;
     return { date: d, note: dim ? 3 : 7, text: 'x'.repeat(dim ? 20 : 400) };
   });
-  const c = corpusPour('long', { rows }, '2024-10-27');
+  const c = corpusPour({ rows });
   const dim = c.comparaisons.find(x => x.phrase.includes('dimanche'));
   assert.ok(dim, 'le creux du dimanche n’est pas ressorti');
   assert.ok(dim.n > c.dates.size / 6, 'les dimanches comptés sortent de l’échantillon, pas de la fenêtre');

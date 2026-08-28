@@ -14,7 +14,7 @@ import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMood, readEnergy } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
-import { corpusPour, lire, HORIZONS, MIN_JOURS as LECTURE_MIN } from './lecture.js';
+import { corpusPour, lire, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -990,10 +990,9 @@ export const routes = {
    * C'est aussi pour ca qu'ils s'affichent meme quand aucune lecture n'a
    * jamais tourne : ils ne coutent rien et ne dependent de personne.
    */
-  'GET /api/moi': ({ query, userId }) => {
-    const horizon = HORIZONS[query.horizon] ? query.horizon : 'moyen';
+  'GET /api/moi': ({ userId }) => {
     const { rows, series: ser } = series(userId);
-    const l = getLecture(horizon, userId);
+    const l = getLecture(userId);
     const ecarts = comparaisons(rows, allEvents(userId))
       // Les plus gros ecarts d'abord : une vue « simplifiee » qui rend
       // vingt-deux comparaisons dans l'ordre du calcul n'a rien simplifie.
@@ -1001,7 +1000,6 @@ export const routes = {
       .slice(0, 6);
     const dernier = ser.length ? ser[ser.length - 1] : null;
     return {
-      horizon,
       pistes: l?.contenu?.pistes ?? [],
       themes: (l?.contenu?.themes ?? []).map(t => ({ nom: t.nom, quoi: t.quoi, intensite: t.intensite })),
       synthese: l?.contenu?.synthese ?? null,
@@ -1017,12 +1015,11 @@ export const routes = {
     };
   },
 
-  'GET /api/lecture': ({ query, userId }) => {
-    const horizon = HORIZONS[query.horizon] ? query.horizon : 'moyen';
+  'GET /api/lecture': ({ userId }) => {
     const { rows } = series(userId);
     const ecrites = rows.filter(r => r.text && r.text.trim());
     const dernier = ecrites.at(-1)?.date ?? null;
-    const l = getLecture(horizon, userId);
+    const l = getLecture(userId);
     /*
      * Le RETARD : combien de journees ecrites depuis la derniere que la lecture
      * a vue. C'est ce qui decide de relancer toute seule, et pas le simple fait
@@ -1030,8 +1027,10 @@ export const routes = {
      * alors une relecture complete du corpus tous les soirs, pour un theme qui
      * n'aura pas bouge d'un cheveu.
      *
-     * Le seuil suit la fenetre : sur trente jours, une semaine de plus est un
-     * quart du corpus ; sur quatre ans, elle ne change rien.
+     * Le seuil ne suit plus une fenetre : il n'y en a plus qu'une, tout le
+     * journal. Sept journees ecrites de plus, c'est le moment ou une nouvelle
+     * lecture a une chance de dire autre chose -- en dessous, on paierait un
+     * appel pour retrouver les memes themes.
      */
     /*
      * Le retard compte les journees ecrites ET les notes apportees depuis.
@@ -1048,9 +1047,11 @@ export const routes = {
     const retard = (l?.jusqu_au
       ? ecrites.filter(r => r.date > l.jusqu_au).length
       : ecrites.length) + notes;
-    const SEUIL = { court: 3, moyen: 14, long: 30 }[horizon] ?? 14;
+    const SEUIL = 7;
     return {
-      horizon,
+      // Une lecture faite avant la bascule vers « tout le journal » : elle
+      // s'affiche, mais elle est perimee par construction.
+      ancienne: !!l?.ancienne,
       lecture: l?.contenu ? decorerCarte(l.contenu, series(userId).byDate) : null,
       fait_le: l?.fait_le ?? null,
       jours: l?.jours ?? 0,
@@ -1068,31 +1069,30 @@ export const routes = {
     };
   },
 
-  'POST /api/lecture': async ({ body, userId }) => {
-    const horizon = HORIZONS[body.horizon] ? body.horizon : 'moyen';
+  'POST /api/lecture': async ({ userId }) => {
     const s = getSettings(userId);
     const { rows, carnet } = series(userId);
     const ecrites = rows.filter(r => r.text && r.text.trim());
     if (ecrites.length < LECTURE_MIN) {
       return { error: `Il faut au moins ${LECTURE_MIN} journées écrites pour que ça veuille dire quelque chose.` };
     }
-    const corpus = corpusPour(horizon, {
+    const corpus = corpusPour({
       rows, events: allEvents(userId), carnet,
       motifs: allMotifs(userId), objectifs: allObjectifs(userId),
       amplitudes: amplitudes(userId)
-    }, today());
+    });
     if (!corpus.dates.size) {
-      return { error: "Rien d'écrit sur cette fenêtre. Essaie une fenêtre plus large." };
+      return { error: "Rien d'écrit dans ton journal — il n'y a rien à lire." };
     }
     let r;
-    try { r = await lire(horizon, corpus, s); }
+    try { r = await lire(corpus, s); }
     catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
     recordUsage(userId, r.modele, r.usage.input, r.usage.output);
     const l = setLecture({
-      horizon, contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
+      contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
     });
-    return { horizon, lecture: decorerCarte(l.contenu, series(userId).byDate),
+    return { ancienne: false, lecture: decorerCarte(l.contenu, series(userId).byDate),
              fait_le: l.fait_le, jours: l.jours,
              modele: l.modele, possible: true, perime: false, retard: 0,
              arelire: false, cle: true, usage: usageFor(userId) };

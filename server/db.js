@@ -723,15 +723,32 @@ export function countCarnet(userId = OWNER) {
 
 /* ---------- lectures ---------- */
 
-export function getLecture(horizon, userId = OWNER) {
-  const r = db.prepare('SELECT * FROM lectures WHERE user_id = ? AND horizon = ?').get(userId, horizon);
+/*
+ * LA LECTURE. Il n'y en a plus qu'une -- « tout le journal ».
+ *
+ * La colonne `horizon` reste, avec la valeur 'tout'. Pas par negligence : une
+ * migration qui renomme des lignes peut echouer, et ce qu'elle detruirait est
+ * la seule lecture que quelqu'un possede. On ecrit donc sous une cle unique, et
+ * les anciennes lignes ('court', 'moyen', 'long') restent la sans gener.
+ *
+ * Tant que la nouvelle n'existe pas, on rend la plus RECENTE des anciennes.
+ * Elle est perimee -- l'interface le dit et propose de relire -- mais un ecran
+ * vide a la place d'une lecture qui existe serait une regression pour quelqu'un
+ * qui vient de mettre a jour.
+ */
+export const CLE_LECTURE = 'tout';
+
+export function getLecture(userId = OWNER) {
+  const r = db.prepare('SELECT * FROM lectures WHERE user_id = ? AND horizon = ?').get(userId, CLE_LECTURE)
+    ?? db.prepare('SELECT * FROM lectures WHERE user_id = ? ORDER BY fait_le DESC LIMIT 1').get(userId);
   if (!r) return null;
-  try { return { ...r, contenu: JSON.parse(r.contenu) }; }
+  try { return { ...r, contenu: JSON.parse(r.contenu), ancienne: r.horizon !== CLE_LECTURE }; }
   catch { return null; }        // un JSON casse vaut une lecture absente
 }
 
-export function setLecture({ horizon, contenu, jusqu_au, jours, modele, userId = OWNER,
+export function setLecture({ contenu, jusqu_au, jours, modele, userId = OWNER,
                              quand = new Date().toISOString() }) {
+  const horizon = CLE_LECTURE;
   db.prepare(`
     INSERT INTO lectures(user_id, horizon, fait_le, jusqu_au, jours, modele, contenu)
     VALUES(?,?,?,?,?,?,?)
@@ -739,7 +756,7 @@ export function setLecture({ horizon, contenu, jusqu_au, jours, modele, userId =
       fait_le = excluded.fait_le, jusqu_au = excluded.jusqu_au,
       jours = excluded.jours, modele = excluded.modele, contenu = excluded.contenu
   `).run(userId, horizon, quand, jusqu_au, jours, modele ?? null, JSON.stringify(contenu));
-  return getLecture(horizon, userId);
+  return getLecture(userId);
 }
 
 export const deleteLectures = (userId = OWNER) =>
