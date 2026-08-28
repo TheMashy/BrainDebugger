@@ -2,7 +2,7 @@ import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, messagesForDate, recentMessages, allEvents, deleteEvent,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
-  addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif,
+  addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
   getLecture, setLecture, rembobiner, TEINTES
@@ -997,6 +997,7 @@ export const routes = {
    */
   'POST /api/motifs': ({ body, userId }) => {
     if (body.delete) deleteMotif(Number(body.delete), userId);
+    if (body.teinte) teinterMotif(Number(body.id), Number(body.teinte), userId);
     return motifsDuFil(userId);
   },
   'POST /api/events': ({ body, userId }) => {

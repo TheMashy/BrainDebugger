@@ -276,7 +276,14 @@ export const DEFAULT_SETTINGS = {
   floor: 2,                   // SPEC 4.1 - sous ce seuil, aucune statistique
   floorMode: 'fixed',         // 'fixed' | 'relative' (reference - 3)
   sustain: 2,                 // jours consecutifs >= reference pour valider un retour
-  etalon: 5.7,                // constante de calage du cumul (null = mediane globale)
+  /*
+   * L'etalon : la constante a laquelle chaque journee se compare dans le mode
+   * « etalon ». 5, et pas la moyenne reelle : c'est le milieu de l'echelle, ce
+   * que la personne a en tete quand elle note. Une constante calee sur SA
+   * moyenne rend le cumul plat par construction -- il ne dit plus rien, il
+   * decrit sa propre origine.
+   */
+  etalon: 5,
   // La naissance. Elle ne sert qu'a une chose : donner une origine a la frise,
   // pour qu'un repere d'enfance ait ou se poser. Aucun calcul ne s'en sert, et
   // surtout aucun ne calcule d'age -- ce serait une donnee sur la personne, pas
@@ -784,6 +791,26 @@ export function motifsDesMessages(ids, userId = OWNER) {
   const par = {};
   for (const r of rows) (par[r.message_id] ??= []).push({ id: r.id, nom: r.nom, teinte: r.teinte });
   return par;
+}
+
+/**
+ * La couleur d'un motif, choisie par la personne.
+ *
+ * Elle est posee a la creation dans l'ordre des TEINTES_DECLAREES -- deux
+ * motifs crees a la suite sont ainsi surement distincts. Mais l'ordre de
+ * creation n'a aucun rapport avec le sens : deux mecanismes qui vont ensemble
+ * se retrouvent de deux couleurs etrangeres, et rien ne permettait de les
+ * rapprocher a l'oeil.
+ *
+ * La bande reste celle des DECLAREES (232-336). Ce n'est pas une preference
+ * d'interface : ces teintes sont disjointes de la rampe des notes, et laisser
+ * choisir un vert de note ferait passer une declaration pour une mesure.
+ */
+export function teinterMotif(id, teinte, userId = OWNER) {
+  const t = Number(teinte);
+  if (!TEINTES.includes(t)) return false;
+  const info = db.prepare('UPDATE motifs SET teinte = ? WHERE id = ? AND user_id = ?').run(t, id, userId);
+  return info.changes > 0;
 }
 
 export function deleteMotif(id, userId = OWNER) {

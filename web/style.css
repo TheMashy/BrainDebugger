@@ -968,7 +968,40 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 /* La carte a besoin de largeur ; le texte n'en veut pas. Le conteneur suit donc
    la carte, et ce qui se lit en lignes garde sa colonne. */
 .lecture { max-width: 980px; }
-.lechead, .synthese, .themes, .lectvide { max-width: 720px; }
+.lechead, .lectvide { max-width: 720px; }
+.themes { max-width: 720px; }
+
+/* ---------------------------------------------------------------------
+   LA CARTE ET CE QU'ELLE DIT, CÔTE À CÔTE.
+
+   Ils se suivaient, et la seule question qu'on se pose devant un nœud —
+   « qu'est-ce qu'il en dit ? » — demandait de faire défiler. Sous 1080 px la
+   colonne passe dessous : deux colonnes de 300 px ne servent personne.
+   --------------------------------------------------------------------- */
+.lectgrille {
+  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 26px 30px; align-items: start; margin-bottom: 34px;
+}
+@media (max-width: 1080px) { .lectgrille { grid-template-columns: 1fr; } }
+.lectcarte .cartewrap { margin: 0; }
+/* Dans la colonne, le canvas est plus étroit : gardé à 52vh il laissait un
+   tiers de vide sous un graphe qui ne peut pas s'étaler davantage. */
+.lectcarte .cartewrap canvas { height: clamp(320px, 44vh, 480px); }
+.lectdit { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.lectdit .synthese { max-width: none; margin: 0; }
+.lectdit .motifcard { margin: 0; }
+
+/* La barre de fenêtre d'Année : un seul réglage, en tête des trois graphiques.
+   Il y en avait trois, à trois endroits, avec trois vocabulaires. */
+.fenetrebar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 0 0 4px;
+}
+.fenetrebar .k {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+}
+.fenmeta { font-size: 11.5px; margin-left: auto; }
+
 .lechead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 26px; }
 .lecmeta { font-size: 11.5px; }
 .lecmeta b { color: var(--warn); font-weight: 500; }
@@ -1069,7 +1102,38 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 /* Elle prend la largeur : c'est la forme qu'on vient reconnaitre, et une carte
    de trois cents pixels dans une colonne de texte n'est plus une carte. */
-.cartewrap { margin: 0 0 30px; }
+.cartewrap { margin: 0 0 30px; position: relative; }
+
+/* Les commandes de la carte. Posées dessus, en retrait, et elles s'affirment
+   au survol : ce sont des béquilles pour un geste qui se fait surtout à la
+   souris et au doigt — elles ne doivent pas se disputer l'attention avec ce
+   qu'elles servent à regarder. */
+/* En haut à droite, et pas en bas : la légende sous le canvas passe à deux
+   lignes dès que la colonne rétrécit, et les commandes se retrouvaient à
+   flotter au milieu du vide. Le haut du canvas, lui, ne bouge jamais. */
+.cartecmd {
+  position: absolute; right: 10px; top: 10px;
+  display: flex; flex-direction: column; gap: 1px;
+  border-radius: 9px; overflow: hidden;
+  border: 1px solid var(--line-soft); background: color-mix(in srgb, var(--panel) 88%, transparent);
+  opacity: .45; transition: opacity .16s ease;
+  backdrop-filter: blur(4px);
+}
+.cartewrap:hover .cartecmd, .cartecmd:focus-within { opacity: 1; }
+.cartecmd button {
+  width: 30px; height: 28px; padding: 0; border: 0; border-radius: 0;
+  background: none; color: var(--ink-dim);
+  font-size: 14px; line-height: 1; display: grid; place-items: center;
+}
+.cartecmd button:hover { background: var(--surface); color: var(--ink); }
+/* Le point du milieu : c'est le geste « je me suis perdu ». Un anneau plutôt
+   qu'un signe — la carte est faite d'anneaux, il en reprend la forme. */
+.cartecmd button[data-carte="centre"] i {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+.cartecmd button[data-carte="centre"]:hover i { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+@media (hover: none) { .cartecmd { opacity: 1; } .cartecmd button { width: 36px; height: 34px; } }
 .cartewrap canvas {
   display: block; width: 100%; height: clamp(340px, 52vh, 560px);
   border-radius: 3px;
@@ -1281,6 +1345,45 @@ body:has(#ambiance) { background: transparent; }
    fil n'en a plus, et en rajouter un ici recréerait la bulle qu'on vient
    d'enlever. */
 .msg.teinte { border-left-color: hsl(var(--motif) 68% 58% / .9); }
+
+/* ---------------------------------------------------------------------
+   LE CODE COULEUR DES COMPORTEMENTS.
+
+   La teinte était posée dans l'ordre de création : sûrement distincte, mais
+   sans aucun rapport avec le sens. Deux mécanismes qui vont ensemble se
+   retrouvaient de deux couleurs étrangères. La pastille devient donc un
+   bouton, et la palette reste celle des DÉCLARÉES (232–336) — disjointe de la
+   rampe des notes, pour qu'une déclaration ne puisse jamais passer pour une
+   mesure.
+   --------------------------------------------------------------------- */
+.motifitem { position: relative; flex-wrap: wrap; }
+button.motifpuce {
+  border: 0; padding: 0; cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+button.motifpuce:hover, button.motifpuce:focus-visible {
+  transform: scale(1.45);
+  box-shadow: 0 0 0 3px color-mix(in srgb, hsl(var(--motif) 68% 58%) 22%, transparent);
+}
+.motiflie {
+  display: block; margin-top: 3px; font-size: 11px;
+  color: hsl(var(--motif) 55% 66%);
+}
+/* `.motifitem` est une rangée flex : la palette doit passer à la ligne, pas
+   se glisser entre le compte et la croix. `flex-basis: 100%` avec le wrap du
+   parent, et elle prend sa propre ligne. */
+.motifteintes {
+  flex: 0 0 100%; display: flex; gap: 7px;
+  padding: 10px 0 2px; margin-left: 20px;
+}
+.motifteintes[hidden] { display: none; }
+.motifteintes button {
+  width: 17px; height: 17px; border-radius: 50%; padding: 0;
+  border: 1.5px solid hsl(var(--t) 58% 62%); background: none;
+  transition: background .12s ease;
+}
+.motifteintes button:hover { background: hsl(var(--t) 58% 62% / .4); }
+.motifteintes button[aria-pressed="true"] { background: hsl(var(--t) 58% 62%); }
 .msg.teinte .tx { color: var(--ink); }
 .msg .motifs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 /* Une puce de motif n'est pas un bouton d'action : c'est une note en marge.
