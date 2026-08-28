@@ -135,7 +135,11 @@ function drawGaugePanel() {
     ${u.exhausted ? `<p class="sub" style="color:var(--warn);margin:12px 0 0">
       Enveloppe épuisée pour ce mois. Le compagnon continue de répondre, mais hors-ligne —
       il ne se souvient plus de la conversation.
-      <br>Tu peux la retirer dans Réglages, section « Modèle ».</p>` : ''}`;
+      <br>Tu peux la retirer dans Réglages, section « Modèle ».</p>` : ''}
+    ${/* Le mode pudique se declenche ici, et pas seulement dans Reglages : on
+          l'allume dans la seconde qui precede un partage d'ecran, et traverser
+          trois vues pour le trouver, c'est trois vues de journal a l'ecran. */''}
+    ${pudMarkup()}`;
   el.querySelector('form')?.addEventListener('submit', () => { /* laisse le POST partir */ });
 }
 
@@ -158,8 +162,53 @@ function syncHeader() {
 async function saveSettings(patch) {
   const { settings } = await api('/api/settings', patch);
   S.settings = settings;
+  appliquerPudique();
   return settings;
 }
+
+/* --------------------------- le mode pudique ---------------------------
+
+   Un seul attribut sur la racine ; tout le reste est du CSS. La toile de la
+   carte, elle, ne sait pas lire une feuille de style : elle relit le reglage
+   au moment de peindre, donc il faut la repeindre nous-memes.              */
+
+function appliquerPudique() {
+  const on = !!S.settings?.pudique;
+  if (on) document.documentElement.dataset.pudique = '';
+  else document.documentElement.removeAttribute('data-pudique');
+  for (const b of document.querySelectorAll('.pudbtn')) {
+    b.setAttribute('aria-pressed', String(on));
+    // Le libelle suit l'etat sans re-rendre la vue : le panneau de la jauge
+    // n'est redessine qu'a l'ouverture, et un bouton qui dit encore « actif »
+    // apres l'avoir coupe est exactement le doute qu'on ne veut pas avoir.
+    const l = b.querySelector('.pudlib');
+    if (l) l.textContent = on ? 'Mode pudique — actif' : 'Mode pudique';
+  }
+  // Les noms des noeuds sont peints, pas ecrits : seule une nouvelle image les
+  // remplace. Le bouton de recentrage porte le redessin de la carte.
+  RELA_PEINDRE?.();
+}
+
+/**
+ * Basculer.
+ *
+ * On bascule d'abord a l'ecran, on enregistre ensuite : ce bouton sert dans la
+ * seconde qui precede un partage d'ecran, et attendre un aller-retour serveur
+ * pour effacer son journal est exactement le moment ou on ne veut pas attendre.
+ */
+async function basculerPudique(v = !S.settings?.pudique) {
+  S.settings = { ...S.settings, pudique: v };
+  appliquerPudique();
+  toast(v ? 'Mode pudique — les mots sont masqués' : 'Mode pudique désactivé');
+  try { await saveSettings({ pudique: v }); } catch { /* l'écran a déjà obéi */ }
+}
+
+/** Le bouton, identique dans la jauge et dans les réglages. */
+const pudMarkup = () => `<button class="pudbtn" aria-pressed="${!!S.settings?.pudique}">
+  <span class="pudpuce" aria-hidden="true"></span>
+  <span class="pudlib">Mode pudique${S.settings?.pudique ? ' — actif' : ''}</span>
+  <kbd>Ctrl+Maj+P</kbd>
+</button>`;
 
 /* ============================= vue : parler =============================
 
@@ -2080,6 +2129,9 @@ function carteMarkup(carte) {
  * temporel, un appui pose devient une glissade et le point ne s'ouvre jamais.
  */
 let RELA_VUE = null, RELA_JOUR = null;
+/* Le pinceau de la carte courante, garde a portee pour que le mode pudique
+   puisse redemander une image : les noms des noeuds sont peints, pas ecrits. */
+let RELA_PEINDRE = null;
 const GLISSE_MIN = 4;
 
 function monterCarte(carte) {
@@ -2104,6 +2156,10 @@ function monterCarte(carte) {
   };
   let attente = 0;
   const peindre = () => {
+    // La carte est redessinee a chaque passage dans « Ma carte » : sans cette
+    // sortie, un pinceau garde d'une vue precedente peindrait sur une toile
+    // detachee du document.
+    if (!cv.isConnected) { if (RELA_PEINDRE === peindre) RELA_PEINDRE = null; return; }
     if (!RELA_DISPO || attente) return;
     // Une image par rafraichissement : molette et glisse produisent plus
     // d'evenements que l'ecran n'a de trames, et repeindre a chaque evenement
@@ -2111,9 +2167,12 @@ function monterCarte(carte) {
     attente = requestAnimationFrame(() => {
       attente = 0;
       dessinerRelations(cv.getContext('2d'), RELA, RELA_DISPO,
-        { largeur: L, hauteur: H, survol: RELA_SURVOL, dpr, vue: RELA_VUE, jourSurvol: RELA_JOUR });
+        { largeur: L, hauteur: H, survol: RELA_SURVOL, dpr, vue: RELA_VUE, jourSurvol: RELA_JOUR,
+          pudique: !!S.settings?.pudique });
     });
   };
+
+  RELA_PEINDRE = peindre;
 
   const pos = e => {
     const r = cv.getBoundingClientRect();
@@ -2461,7 +2520,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
       ${reperesMarkup(m.reperes, date)}
       ${notesDuJourMarkup(m.carnet)}
 
-      ${m.yesterday.text ? `<div class="card">
+      ${m.yesterday.text ? `<div class="card hier">
         <h2>Hier</h2>
         <p class="serif" style="white-space:pre-wrap;font-size:15.5px;line-height:1.65;margin:0">${esc(m.yesterday.text)}</p>
       </div>` : ''}
@@ -2857,6 +2916,27 @@ async function renderSettings() {
           <span class="sub" style="margin:0">Rien n'est écrit avant que tu aies vu le résultat.</span>
         </div>
         <div id="notesReport"></div>
+      </div>
+
+      ${/* Le mode pudique est un reglage de VUE, pas de donnees : rien n'est
+             efface, rien n'est chiffre, rien ne quitte l'ecran autrement. Il
+             tient donc juste au-dessus de « Tes donnees », la ou on vient
+             quand on se demande qui voit quoi. */''}
+      <div class="card">
+        <h2>Montrer l'écran</h2>
+        <p class="sub">
+          Partager son écran, c'est montrer à quelqu'un d'autre un journal écrit pour soi.
+          Le mode pudique éteint les <b>mots</b> et garde les <b>formes</b> : tes messages,
+          tes journées, tes notes rangées, les noms des mécanismes et des repères deviennent
+          des traces illisibles ; les notes, la grille, les couleurs, les courbes et les amas
+          de ta carte restent. L'application se montre entière, sans que personne puisse la lire.
+        </p>
+        ${pudMarkup()}
+        <p class="sub" style="margin:0;font-size:12.5px">
+          Ça ne change rien à ce qui est enregistré — c'est un rideau, pas une gomme.
+          <b>Toi non plus</b> tu ne peux plus lire pendant ce temps : c'est ce qui fait
+          qu'il n'y a rien à oublier de recacher.
+        </p>
       </div>
 
       <div class="card">
@@ -3433,9 +3513,25 @@ async function boot() {
 
   $('#gauge')?.addEventListener('click', e => { e.stopPropagation(); toggleGauge(); });
   document.addEventListener('click', e => {
+    // Le bouton pudique vit dans le panneau de la jauge ET dans les reglages :
+    // un seul ecouteur a la racine, plutot qu'un par endroit qui le dessine.
+    // On vise la CLASSE et pas l'attribut : `data-pudique` est pose sur la
+    // racine quand le mode est actif, et un `closest('[data-pudique]')`
+    // remontait jusqu'a elle -- le moindre clic dans la page rebasculait.
+    if (e.target.closest('.pudbtn')) { basculerPudique(); return; }
     if (!$('#gaugePanel').hidden && !e.target.closest('#gaugePanel') && !e.target.closest('#gauge')) toggleGauge(false);
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleGauge(false); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') toggleGauge(false);
+    // Ctrl+Maj+P : le raccourci existe parce que le geste est urgent -- on
+    // partage son ecran dans la seconde, pas apres avoir cherche un bouton.
+    // Avec Maj, il ne peut pas partir d'une frappe dans la zone de saisie.
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
+      e.preventDefault();
+      basculerPudique();
+    }
+  });
+  appliquerPudique();
 
   go('tonight');
 }

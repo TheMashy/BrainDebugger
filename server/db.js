@@ -304,6 +304,21 @@ export const DEFAULT_SETTINGS = {
    * disparait.
    */
   sansEnveloppe: false,
+  /*
+   * Le mode pudique -- « je montre l'application, pas ma vie ».
+   *
+   * Partager son ecran, c'est montrer a quelqu'un d'autre un journal ecrit pour
+   * soi. Le reflexe serait de tout cacher ; ce serait montrer une coquille
+   * vide. On separe donc les MOTS des FORMES : le texte des messages, des
+   * journees, des reperes, des mecanismes, le nom du compte -- tout ce qui dit
+   * QUOI -- devient illisible ; les notes, les couleurs, les courbes, les
+   * amas de la carte -- tout ce qui dit COMBIEN et QUELLE FORME -- reste.
+   * L'application se demontre entiere, sans que personne puisse la lire.
+   *
+   * Le reglage est stocke comme les autres : quelqu'un qui partage son ecran
+   * tous les jeudis ne veut pas y repenser chaque jeudi.
+   */
+  pudique: false,
   memoryDays: 14,             // journees passees transmises au compagnon (0 = aucune)
   carnetMemoire: true,        // le carnet est transmis au compagnon
                               // (coupe de toute facon quand memoryDays vaut 0 :
