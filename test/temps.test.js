@@ -34,3 +34,44 @@ test('la consigne interdit de recopier le marqueur', () => {
   assert.match(SYSTEM_PROMPT, /ne le recopies jamais/);
   assert.match(SYSTEM_PROMPT, /tu ne sais pas s'il dormait/);
 });
+
+/* ------------------------------------------------------------------------
+   Le marqueur, LÀ OÙ IL SERT.
+
+   Ces tests-ci importaient `marqueTemps` depuis chat.js et le trouvaient : la
+   forme `export { x } from './y.js'` re-exporte parfaitement. Ce qu'elle ne
+   fait PAS, c'est créer une liaison locale — le nom traverse le module sans y
+   exister. `toChatMessages`, à l'intérieur, levait donc « marqueTemps is not
+   defined » à chaque message, et le compagnon retombait hors-ligne en pleine
+   conversation. On teste maintenant l'USAGE, pas seulement l'export.        */
+
+import { toChatMessages } from '../server/chat.js';
+
+test('chaque message part vers le modèle avec son jour et son heure', () => {
+  const out = toChatMessages([
+    { ts: new Date(2026, 7, 12, 3, 14).toISOString(), role: 'user', text: "j'arrive pas à dormir" },
+    { ts: new Date(2026, 7, 12, 3, 15).toISOString(), role: 'pet',  text: 'Depuis quand ?' }
+  ]);
+  assert.equal(out.length, 2);
+  assert.match(out[0].content, /^\[mer\. 12\/08 03:14\] j'arrive pas à dormir$/);
+  assert.equal(out[0].role, 'user');
+  // « pet » devient « assistant » : c'est le vocabulaire de l'API, pas le nôtre.
+  assert.equal(out[1].role, 'assistant');
+});
+
+test('un message sans horodatage part sans marqueur inventé', () => {
+  // Et surtout : sans lever. C'est le chemin qui cassait.
+  const out = toChatMessages([{ ts: null, role: 'user', text: 'salut' }]);
+  assert.equal(out[0].content, 'salut');
+});
+
+test('le compagnon hors-ligne répond, marqueur ou pas', async () => {
+  // Le bout en bout minimal : si un nom manque quelque part dans la chaîne,
+  // c'est ici que ça se voit, sans clé ni réseau.
+  const { reply } = await import('../server/chat.js');
+  const r = await reply(
+    [{ ts: new Date().toISOString(), role: 'user', text: "j'ai pas dormi" }],
+    { chatBackend: 'scripted' });
+  assert.equal(r.backend, 'scripted');
+  assert.ok(r.text && r.text.length > 0);
+});
