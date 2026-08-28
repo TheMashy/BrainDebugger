@@ -2332,3 +2332,31 @@ button.amasrow:hover { background: var(--panel); }
   border: 1px solid currentColor;
 }
 .mecagroupe.seuls .mecatitre { color: var(--ink-faint); }
+
+/* ---- les pièces jointes ----
+   Ce qu'on s'apprête à joindre, AU-DESSUS du champ : une pièce qu'on ne voit
+   pas est une pièce qu'on envoie sans le savoir. */
+.jointes { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 9px; }
+.jointe {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 11px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2);
+  font-size: 12.5px; color: var(--ink-dim); max-width: 260px;
+}
+.jointe b {
+  font-weight: 400; color: var(--ink); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+/* Le genre du fichier se lit à la pastille, pas à l'extension : trois formes
+   se distinguent d'un coup d'œil là où « .webp » demande à être lu. */
+.jointe::before {
+  content: ''; width: 7px; height: 7px; border-radius: 2px; flex: none;
+}
+.jointe[data-t="image"]::before { background: hsl(284 55% 62%); }
+.jointe[data-t="pdf"]::before   { background: hsl(336 55% 62%); }
+.jointe[data-t="texte"]::before { background: hsl(232 55% 62%); border-radius: 50%; }
+.jointe button {
+  padding: 0; width: 18px; height: 18px; flex: none; border: 0; border-radius: 50%;
+  background: none; color: var(--ink-faint); font-size: 15px; line-height: 1;
+}
+.jointe button:hover { color: var(--ink); background: var(--surface); }

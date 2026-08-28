@@ -26,7 +26,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
+import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, etatDuTemps } from './temps.js';
@@ -106,10 +106,6 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   if (jalons) morceaux.push(jalons);
   const motifs = motifBlock(allMotifs(userId));
   if (motifs) morceaux.push(motifs);
-  // Hors du `if (days)` : un objectif est un engagement pris AVEC lui, pas un
-  // souvenir de journee. A memoire zero il doit encore savoir ce qu'on tient.
-  const obj = objectifBlock(allObjectifs(userId), today());
-  if (obj) morceaux.push(obj);
 
   // Le carnet, sous le MEME `if (days)` que les journees : l'interface promet
   // qu'a zero le compagnon ne connait que la conversation du jour, et ca doit
@@ -1308,9 +1304,42 @@ function reperesDuJour(date, userId) {
 const joursEntre = (a, b) =>
   Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
 
+/*
+ * LES PIECES JOINTES D'UN MESSAGE.
+ *
+ * Elles valent pour CE tour : le fil garde la mention du fichier, le binaire
+ * ne touche jamais la base. Voir l'en-tete de blocsDePiece() dans chat.js --
+ * ce qui compte dans un compte rendu se range en note, en texte, et c'est la
+ * qu'il sert ensuite.
+ *
+ * Les fichiers TEXTE (.md, .txt, .csv...) ne passent pas par ici : le
+ * navigateur les lit et les colle dans le message. Ils sont donc enregistres
+ * avec lui, comme tout ce qu'on ecrit.
+ */
+const PIECES_MAX = 5;
+const PIECE_OCTETS = 8 * 1024 * 1024;
+
+function piecesDe(body) {
+  const out = [];
+  for (const p of (Array.isArray(body?.pieces) ? body.pieces : []).slice(0, PIECES_MAX)) {
+    const donnees = String(p?.donnees ?? '');
+    // La taille est verifiee ICI et pas seulement dans le navigateur : le
+    // client peut mentir, et un PDF de cent mega fait tomber la requete
+    // entiere -- avec le message qu'on venait d'ecrire.
+    if (!donnees || donnees.length * 0.75 > PIECE_OCTETS) continue;
+    out.push({ nom: String(p?.nom ?? 'pièce jointe').slice(0, 120),
+               media: String(p?.media ?? ''), donnees });
+  }
+  return out;
+}
+
 export async function streamMessage(body, send, userId = OWNER) {
-  const text = String(body.text ?? '').trim();
-  if (!text) { send('error', { error: 'texte vide' }); return; }
+  const pieces = piecesDe(body);
+  let text = String(body.text ?? '').trim();
+  if (!text && !pieces.length) { send('error', { error: 'texte vide' }); return; }
+  // Un message qui n'est QUE des pieces jointes reste un message : sans cette
+  // ligne il s'enregistrerait vide, et le fil montrerait une bulle blanche.
+  if (!text) text = pieces.map(p => `[${p.nom}]`).join(' ');
 
   const date = body.date ?? today();
   const messageId = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
@@ -1318,6 +1347,8 @@ export async function streamMessage(body, send, userId = OWNER) {
   send('user', { messages: recentMessages(80, userId) });
 
   const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
+  // Les pieces s'accrochent au message qu'on vient d'ecrire, pas a l'historique.
+  if (pieces.length && history.length) history[history.length - 1].pieces = pieces;
   const settings = getSettings(userId);
 
   const before = usageFor(userId);
@@ -1439,43 +1470,6 @@ export function outilsPour(userId, messageId, send = () => {}) {
       send('geste', fait);
       return { message: `Rangé dans ses notes${j ? ` (le ${j})` : q ? ` (« ${q} »)` : ''}. `
                       + `Ce texte ne compte plus comme sa journée.`, fait };
-    },
-
-    /*
-     * Un objectif n'est jamais pose sans accord : le prompt le dit, et le code
-     * ne peut pas le verifier -- seule la conversation sait si la personne a
-     * dit oui. Ce qui EST verifiable est ici : un libelle court, un genre
-     * connu, une date qui existe, et un plafond.
-     */
-    poser_objectif: ({ quoi, genre, depuis }) => {
-      const q = String(quoi ?? '').trim().replace(/\s+/g, ' ');
-      if (q.length < 3 || q.length > 70) return { erreur: 'Trois à huit mots, dans ses mots à elle.' };
-      const g = ICONES[String(genre ?? '')] ? String(genre) : 'jalon';
-      const d = depuis == null ? today() : String(depuis).trim();
-      if (!ISO_JOUR.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
-      if (d > today()) return { erreur: 'Cette date est dans le futur.' };
-      const liste = allObjectifs(userId);
-      // Huit, et pas douze comme les motifs : un objectif se REGARDE, et une
-      // liste ou rien ne ressort ne se regarde plus.
-      if (liste.length >= 8) return { erreur: 'Huit objectifs, c\'est le maximum. Au-delà, plus rien ne ressort.' };
-      if (liste.some(o => o.quoi.toLowerCase() === q.toLowerCase())) {
-        return { erreur: 'Cet objectif existe déjà.' };
-      }
-      const o = addObjectif({ quoi: q, genre: g, depuis: d, userId });
-      const fait = { type: 'objectif', nouveau: true, ...o };
-      send('geste', fait);
-      return { message: `Objectif noté : « ${q} », identifiant ${o.id}, depuis le ${d}.`, fait };
-    },
-
-    marquer_objectif: ({ id, tenu, date }) => {
-      const d = date == null ? today() : String(date).trim();
-      if (!ISO_JOUR.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
-      if (d > today()) return { erreur: 'Cette date est dans le futur.' };
-      const o = marquerObjectif(Number(id), { tenu: !!tenu, date: d }, userId);
-      if (!o) return { erreur: `Aucun objectif d'identifiant ${id}.` };
-      const fait = { type: 'objectif', nouveau: false, ...o };
-      send('geste', fait);
-      return { message: tenu ? `« ${o.quoi} » repart du ${d}.` : `« ${o.quoi} » marqué rompu.`, fait };
     },
 
     /*

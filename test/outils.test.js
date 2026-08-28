@@ -17,7 +17,7 @@ process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-outils-')), 'test.db');
 const { addMessage, recentMessages, allEvents, allMotifs, addMotif, marquerMotif, motifsDesMessages,
         deleteMotif, TEINTES, OWNER } = await import('../server/db.js');
 const { outilsPour } = await import('../server/api.js');
-const { OUTILS } = await import('../server/chat.js');
+const { OUTILS, SYSTEM_PROMPT } = await import('../server/chat.js');
 const { deltaColor } = await import('../web/charts.js');
 
 /* --------------------------- le catalogue --------------------------- */
@@ -273,66 +273,26 @@ test('chercher_repere trouve un fait déjà posé sous d’autres mots', () => {
   assert.match(outilsPour(OWNER, null).chercher_repere({ mot: 'zzzz' }).message, /Aucun repère/);
 });
 
-/* ------------------------- les objectifs ------------------------- */
+/* ------------------------- les objectifs, retirés -------------------------
 
-const { allObjectifs } = await import('../server/db.js');
-const { objectifBlock } = await import('../server/chat.js');
+   Le trombone « ce que tu tiens » n'ouvrait rien qu'on remplisse, et les deux
+   outils qui l'alimentaient ont disparu avec lui. Ce dont on a du mal à se
+   passer est maintenant un NŒUD de la carte, avec son genre « dependance » et
+   ce qui s'y relie : voir à quoi ça tient vaut mieux qu'un compteur.
 
-test('un objectif se pose avec une date de début, ou aujourd’hui', () => {
+   Rien n'est effacé en base — la table et sa route restent, et ce qui y a été
+   écrit s'exporte toujours. On retire l'interface et l'outil, pas les données.
+*/
+
+test('le compagnon n’a plus d’outil pour poser ou marquer un objectif', () => {
   const o = outilsPour(OWNER, null);
-  assert.ok(!o.poser_objectif({ quoi: 'arrêter la cigarette', genre: 'conso', depuis: '2026-08-15' }).erreur);
-  const p = allObjectifs(OWNER).find(x => x.quoi === 'arrêter la cigarette');
-  assert.deepEqual([p.genre, p.depuis, p.tenu, p.reprises], ['conso', '2026-08-15', 1, 0]);
-  // Un genre inconnu retombe sur le jalon plutôt que d'échouer : c'est une
-  // icône, pas une donnée.
-  assert.ok(!o.poser_objectif({ quoi: 'lire le soir', genre: 'nimportequoi' }).erreur);
-  assert.equal(allObjectifs(OWNER).find(x => x.quoi === 'lire le soir').genre, 'jalon');
+  assert.equal(o.poser_objectif, undefined);
+  assert.equal(o.marquer_objectif, undefined);
 });
 
-test('une rupture n’efface pas ce qui avait été tenu', () => {
-  // « rompu, après onze jours » doit rester lisible : remettre depuis à la date
-  // de rupture effacerait le seul chiffre qui compte.
-  const o = outilsPour(OWNER, null);
-  o.poser_objectif({ quoi: 'courir le matin', genre: 'sport', depuis: '2026-08-01' });
-  const id = allObjectifs(OWNER).find(x => x.quoi === 'courir le matin').id;
-  o.marquer_objectif({ id, tenu: false, date: '2026-08-12' });
-  const rompu = allObjectifs(OWNER).find(x => x.id === id);
-  assert.deepEqual([rompu.tenu, rompu.depuis, rompu.reprises], [0, '2026-08-01', 0]);
-  // La reprise, elle, redémarre la série et compte la reprise.
-  o.marquer_objectif({ id, tenu: true, date: '2026-08-20' });
-  const repris = allObjectifs(OWNER).find(x => x.id === id);
-  assert.deepEqual([repris.tenu, repris.depuis, repris.reprises], [1, '2026-08-20', 1]);
-});
-
-test('marquer « tenu » deux fois ne compte pas deux reprises', () => {
-  const o = outilsPour(OWNER, null);
-  o.poser_objectif({ quoi: 'écrire chaque soir', genre: 'jalon', depuis: '2026-08-01' });
-  const id = allObjectifs(OWNER).find(x => x.quoi === 'écrire chaque soir').id;
-  o.marquer_objectif({ id, tenu: true, date: '2026-08-10' });
-  o.marquer_objectif({ id, tenu: true, date: '2026-08-11' });
-  assert.equal(allObjectifs(OWNER).find(x => x.id === id).reprises, 0);
-});
-
-test('les dates inventées et les doublons sont refusés', () => {
-  const o = outilsPour(OWNER, null);
-  assert.ok(o.poser_objectif({ quoi: 'x', genre: 'conso' }).erreur, 'libellé trop court');
-  assert.ok(o.poser_objectif({ quoi: 'boire moins', genre: 'conso', depuis: 'un jour' }).erreur);
-  assert.ok(o.poser_objectif({ quoi: 'boire moins', genre: 'conso', depuis: '2099-01-01' }).erreur);
-  assert.ok(!o.poser_objectif({ quoi: 'boire moins', genre: 'conso' }).erreur);
-  assert.ok(o.poser_objectif({ quoi: 'BOIRE MOINS', genre: 'conso' }).erreur, 'doublon accepté');
-  assert.ok(o.marquer_objectif({ id: 9999, tenu: false }).erreur);
-});
-
-test('le bloc de contexte compte les jours à la place du modèle', () => {
-  // « tenu depuis 2026-08-15 » demande une soustraction de dates, et un modèle
-  // la rate assez souvent pour que ça vaille la peine de la faire ici.
-  const bloc = objectifBlock(
-    [{ id: 1, quoi: 'arrêter la cigarette', depuis: '2026-08-15', tenu: 1, reprises: 2 }],
-    '2026-08-27');
-  assert.match(bloc, /tenu depuis 12 jours/);
-  assert.match(bloc, /2 reprises/);
-  const rompu = objectifBlock(
-    [{ id: 2, quoi: 'courir', depuis: '2026-08-26', tenu: 0, reprises: 0 }], '2026-08-27');
-  assert.match(rompu, /rompu, apres 1 jour\b/);
-  assert.equal(objectifBlock([], '2026-08-27'), null);
+test('la consigne ne parle plus de noter ce qu’on veut arrêter', () => {
+  // Un prompt qui promet un suivi que l'application n'a plus fait dire au
+  // compagnon « je te le note » — et rien ne se passe.
+  assert.ok(!/poser_objectif|marquer_objectif/.test(SYSTEM_PROMPT));
+  assert.match(SYSTEM_PROMPT, /Tu ne notes rien et tu ne suis rien/);
 });
