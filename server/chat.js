@@ -279,9 +279,20 @@ export function scriptedReply(history) {
  * la personne ecrivait a trois heures du matin -- soit exactement l'heure
  * tardive qu'il est cense remarquer. Voir server/temps.js.
  */
-export { marqueTemps } from './temps.js';
+/*
+ * IMPORT PUIS EXPORT, ET PAS `export { x } from`.
+ *
+ * La forme courte re-exporte sans creer de liaison LOCALE : le nom traverse le
+ * module sans y exister. `toChatMessages`, juste en dessous, levait donc
+ * « marqueTemps is not defined » -- a chaque message, en pleine conversation,
+ * et l'interface le rattrapait en repli hors-ligne. Aucun test ne l'avait vu :
+ * ils importaient `marqueTemps` DEPUIS ce module, ce que la re-export fait
+ * tres bien ; c'est l'usage a l'interieur qui cassait.
+ */
+import { marqueTemps } from './temps.js';
+export { marqueTemps };
 
-function toChatMessages(history) {
+export function toChatMessages(history) {
   return history.map(m => {
     const t = m.ts ? marqueTemps(m.ts) : null;
     return {
