@@ -28,6 +28,8 @@ import { themeDe, ICONES } from '../web/reperes.js';
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
 import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock, objectifBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
+// L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
+import { jourLocal, etatDuTemps } from './temps.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -175,10 +177,17 @@ export function publicUser(userId) {
   return u ? { id: u.id, username: u.username, avatar: u.avatar } : { id: userId, username: null, avatar: null };
 }
 
-export function today() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+/**
+ * La journee de CELUI QUI ECRIT.
+ *
+ * Pas celle du processus : heberge, il tourne en UTC, et une note posee a
+ * 00h30 a Paris tombait sur la veille -- un trou dans la grille, et la
+ * journee d'avant notee deux fois. La zone vient du navigateur (en-tete
+ * « X-Fuseau », pose une fois pour toute la requete dans index.js) ; a
+ * defaut, celle du serveur, qui est la bonne quand tout tourne sur la meme
+ * machine -- le cas nominal de ce produit.
+ */
+export const today = () => jourLocal(Date.now());
 
 /**
  * SPEC 4.1 - Le plancher.
@@ -273,6 +282,17 @@ function aNoter(rows, aujourdhui) {
 
 export const routes = {
 
+  /*
+   * L'heure que le serveur retient, a la demande.
+   *
+   * Elle existe pour etre REGARDEE : si cet encart et l'horloge du navigateur
+   * ne disent pas la meme minute, c'est que l'en-tete « X-Fuseau » ne passe
+   * pas -- un proxy qui la coupe, une page servie depuis un cache d'avant.
+   * Sans ce point de controle, le symptome se lit six mois plus tard, sous la
+   * forme d'un trou dans la grille qu'on ne s'explique pas.
+   */
+  'GET /api/temps': () => etatDuTemps(),
+
   'GET /api/state': ({ userId }) => {
     const s = getSettings(userId);
     const { series: ser, byDate, textCount } = series(userId);
@@ -281,6 +301,10 @@ export const routes = {
     const last = ser.length ? ser[ser.length - 1] : null;
     return {
       today: t,
+      // De quoi verifier a l'ecran que la chaine tient : la zone que le serveur
+      // a retenue et l'heure qu'il en tire. Si ca ne colle pas avec l'horloge du
+      // navigateur, c'est que l'en-tete ne passe pas.
+      temps: etatDuTemps(),
       settings: publicSettings(s),
       entry,
       anchors: allAnchors(userId),

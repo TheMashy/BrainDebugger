@@ -5,6 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage } from './api.js';
+import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
 import { DB_PATH, db, upsertUser, countUsers, OWNER } from './db.js';
 import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
@@ -151,7 +152,7 @@ function announceRedirect(uri) {
               '  ton application › OAuth2 › Redirects.');
 }
 
-const server = createServer(async (req, res) => {
+async function traiter(req, res) {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
   const key = `${req.method} ${url.pathname}`;
 
@@ -305,7 +306,18 @@ const server = createServer(async (req, res) => {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('404');
   }
-});
+}
+
+/*
+ * TOUTE la requete est traitee dans la zone annoncee par le navigateur.
+ *
+ * Une seule enveloppe, ici, plutot qu'un parametre `zone` a trainer dans la
+ * trentaine d'endroits qui demandent « quel jour sommes-nous ? ». Un seul
+ * oubli, la-bas, redonnerait silencieusement la veille a quelqu'un qui note a
+ * minuit et demi -- et c'est le genre de bogue qu'on ne voit qu'en relisant sa
+ * grille six mois plus tard.
+ */
+const server = createServer((req, res) => dansLaZone(zoneDeRequete(req), () => traiter(req, res)));
 
 server.on('error', err => {
   // Sans ça, un port occupé ou interdit sort une stack Node brute, et sur un
