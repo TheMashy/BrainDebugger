@@ -219,8 +219,20 @@ export function cadrer(pts, largeur, hauteur, mx = 62, my = 38) {
  * @param {object} G      la sortie de versGraphe()
  * @param {object} dispo  la sortie de disposer()
  */
+/*
+ * MODE PUDIQUE, COTE TOILE.
+ *
+ * Le reste de l'interface eteint ses lettres en CSS ; une toile n'a pas de CSS.
+ * On remplace donc le mot avant de l'ecrire. La substitution garde le NOMBRE de
+ * signes -- donc la largeur du libelle, donc la forme de la carte -- et ne rend
+ * rien du mot lui-meme. Les dates, elles, ne passent pas par ici : une date ne
+ * raconte pas ce qu'on a vecu ce jour-la.
+ */
+const masquer = t => String(t).replace(/[^\s]/gu, '\u2022');
+
 export function dessinerRelations(ctx, G, dispo,
-    { largeur, hauteur, survol = -1, dpr = 1, vue = null, jourSurvol = null }) {
+    { largeur, hauteur, survol = -1, dpr = 1, vue = null, jourSurvol = null, pudique = false }) {
+  const mot = t => (pudique ? masquer(t) : t);
   const v = vue ?? vueNeutre();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, largeur, hauteur);
@@ -288,13 +300,14 @@ export function dessinerRelations(ctx, G, dispo,
       ctx.font = `500 ${(10.5 / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const w = ctx.measureText(l.quoi).width;
+      const quoi = mot(l.quoi);
+      const w = ctx.measureText(quoi).width;
       ctx.fillStyle = 'rgba(10,12,11,.88)';
       ctx.beginPath();
       ctx.roundRect(tx - w / 2 - 5 / v.k, ty - 8 / v.k, w + 10 / v.k, 16 / v.k, 4 / v.k);
       ctx.fill();
       ctx.fillStyle = couleur(G.noeuds[l.s].genre, 72);
-      ctx.fillText(l.quoi, tx, ty);
+      ctx.fillText(quoi, tx, ty);
     }
   }
 
@@ -372,14 +385,15 @@ export function dessinerRelations(ctx, G, dispo,
     if (i === survol) {
       // Peint en dernier, apres les verbes : c'est le seul libelle qui doit
       // gagner toutes les superpositions, puisque c'est celui qu'on vise.
-      survolLib = { texte: k ? `${n.nom} · ${k} jour${k > 1 ? 's' : ''}` : n.nom, x: p.x, y: ly };
+      survolLib = { texte: k ? `${mot(n.nom)} · ${k} jour${k > 1 ? 's' : ''}` : mot(n.nom), x: p.x, y: ly };
       continue;
     }
-    const lw = ctx.measureText(n.nom).width;
+    const nom = mot(n.nom);
+    const lw = ctx.measureText(nom).width;
     // Le bornage suit le CADRE VISIBLE, pas le canvas : sous zoom, « largeur »
     // n'est plus la limite droite de ce qu'on voit, et les libelles se
     // seraient tasses contre un bord invisible.
-    ctx.fillText(n.nom, Math.max(g0 + lw / 2 + 4, Math.min(g1 - lw / 2 - 4, p.x)), ly);
+    ctx.fillText(nom, Math.max(g0 + lw / 2 + 4, Math.min(g1 - lw / 2 - 4, p.x)), ly);
   }
 
   // La date de la journee visee. Sans elle, un point qui grossit sous le curseur
