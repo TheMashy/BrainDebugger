@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
-         K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+         contour, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
 
@@ -210,4 +210,84 @@ test('un point de la couronne se vise à l’écran, pas dans la carte', () => {
 test('un nœud sans journées ne piège pas la visée', () => {
   const G = versGraphe({ noeuds: [{ nom: 'a', genre: 'lieu', poids: 1, jours: [] }], liens: [] });
   assert.equal(journeeAu([{ x: 50, y: 50 }], G, 50, 50, 1, vueNeutre()), null);
+});
+
+/* ------------------------------- les îlots -------------------------------
+
+   Une piste nomme des nœuds ; ces nœuds deviennent un AMAS, et `disposer` les
+   range côte à côte sans rien savoir de plus. Le regroupement spatial tombe
+   tout seul — mais seulement si la traduction tient. */
+
+const PISTES = [
+  { nom: 'dépendance aux anxiolytiques', noeuds: ['Léa', 'les nuits courtes'] },
+  { nom: 'la peur de décevoir', noeuds: ['le dimanche soir'] }
+];
+
+test('les nœuds d’une piste forment un amas, les autres gardent leur genre', () => {
+  const G = versGraphe(CARTE, PISTES);
+  assert.equal(G.noeuds[0].amas, 'p0');
+  assert.equal(G.noeuds[1].amas, 'p0');
+  assert.equal(G.noeuds[0].ilot, 0);
+  // Le troisième est dans la piste 1 : il porte son amas à elle.
+  assert.equal(G.noeuds[2].amas, 'p1');
+});
+
+test('sans pistes, on retombe sur le regroupement par genre', () => {
+  // C'est le bon défaut, et le seul possible tant qu'aucune lecture n'a tourné :
+  // seize nœuds reliés dans tous les sens forment une pelote.
+  const G = versGraphe(CARTE);
+  assert.deepEqual(G.noeuds.map(n => n.amas), ['personne', 'corps', 'periode']);
+  assert.deepEqual(G.noeuds.map(n => n.ilot), [null, null, null]);
+  assert.deepEqual(G.ilots, []);
+});
+
+test('un nœud ne tombe que dans un seul îlot', () => {
+  // Deux enveloppes qui se traversent effacent exactement ce qu'on venait
+  // chercher sur la carte : des groupes qu'on distingue.
+  const G = versGraphe(CARTE, [
+    { nom: 'a', noeuds: ['Léa'] },
+    { nom: 'b', noeuds: ['Léa', 'le dimanche soir'] }
+  ]);
+  assert.equal(G.noeuds[0].ilot, 0, 'le premier îlot garde le nœud');
+  assert.equal(G.noeuds[2].ilot, 1);
+});
+
+test('une piste qui ne place aucun nœud ne devient pas un îlot vide', () => {
+  // Sinon la carte dessinerait une enveloppe autour de rien, avec un nom
+  // flottant au-dessus — le contraire d'un repère.
+  const G = versGraphe(CARTE, [{ nom: 'fantôme', noeuds: ['personne qui n’existe pas'] }]);
+  assert.deepEqual(G.ilots, []);
+});
+
+test('un nom de nœud se retrouve quelle que soit sa casse', () => {
+  // Le modèle rend « Léa » dans la carte et « léa » dans la piste : deux
+  // écritures du même nom ne doivent pas casser l'îlot.
+  const G = versGraphe(CARTE, [{ nom: 'x', noeuds: ['LÉA', 'LES NUITS COURTES'] }]);
+  assert.equal(G.noeuds[0].ilot, 0);
+  assert.equal(G.noeuds[1].ilot, 0);
+});
+
+test('l’enveloppe d’un îlot entoure tous ses nœuds', () => {
+  // Un cercle englobant paraissait plus simple — mais dès qu'un îlot s'étire,
+  // son cercle recouvre la moitié de la carte. Ce qu'on veut n'est pas « la
+  // zone qui contient », c'est « la forme de ce groupe-là ».
+  const membres = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 80 }, { x: 40, y: 40 }];
+  const b = contour(membres, 20);
+  assert.ok(b.length >= 3);
+  // Chaque nœud est à l'intérieur : on teste par le rayon depuis le centre,
+  // suffisant sur un convexe dilaté.
+  const cx = b.reduce((s, p) => s + p.x, 0) / b.length;
+  const cy = b.reduce((s, p) => s + p.y, 0) / b.length;
+  const rMax = Math.max(...b.map(p => Math.hypot(p.x - cx, p.y - cy)));
+  for (const m of membres) {
+    assert.ok(Math.hypot(m.x - cx, m.y - cy) <= rMax, `${m.x},${m.y} hors de l’enveloppe`);
+  }
+});
+
+test('deux nœuds seulement donnent quand même une enveloppe', () => {
+  // Pas de polygone possible à deux points : sans ce cas, un îlot de deux
+  // nœuds ne dessinait rien du tout.
+  const b = contour([{ x: 0, y: 0 }, { x: 60, y: 0 }], 20);
+  assert.ok(b.length >= 3);
+  assert.ok(b.every(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
 });

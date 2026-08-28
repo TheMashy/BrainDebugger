@@ -316,6 +316,16 @@ schéma : sans ses dates, un nœud affirme (« le sommeil compte chez toi ») ; 
 compte (« le sommeil, ces journées-là »). La première se croit sur parole, la seconde se
 vérifie. Une date qui n'est pas dans le corpus sera retirée en silence.
 
+LES DÉPENDANCES SONT DES NŒUDS COMME LES AUTRES. Le genre « dependance » est pour ce dont
+il a du mal à se passer, quelle qu'en soit la nature : une substance, un médicament, un
+écran, un jeu, quelqu'un. Tu le marques quand ce que tu lis le montre — un manque, un
+retour malgré l'intention d'arrêter, une soirée qui ne tient pas sans. La carte lui donne
+une allure à elle, et il se relie au reste comme n'importe quel nœud : c'est justement
+l'intérêt de le nommer, voir à quoi il tient.
+
+Ce n'est pas un suivi et il n'y a rien à cocher : tu le repères, l'application le montre,
+et c'est tout. Tu ne comptes pas les jours, tu ne félicites pas, tu ne mets pas en garde.
+
 Ne mets sur la carte que ce qui REVIENT. Une chose vue deux fois n'est pas un nœud, c'est
 un souvenir : elle appartient à une journée, pas à la forme de sa vie. Et pas de nœud
 générique — « le travail », « les émotions », « la famille » sont des rubriques, pas des
@@ -349,6 +359,11 @@ toute la différence est dans ce que tu fournis avec :
     ne la rends pas.
   — LES THÈMES qu'elle regroupe, par leur nom exact. Deux au minimum. Une piste qui ne
     tient qu'à un seul thème est ce thème, et rien de plus.
+  — LES NŒUDS de sa carte qu'elle englobe, par leur nom exact. C'est ce qui fait d'une piste
+    un ÎLOT : la carte regroupe ces nœuds côte à côte et écrit le nom de la piste au-dessus
+    d'eux. Un nœud n'appartient qu'à une piste — s'il pourrait aller dans deux, mets-le dans
+    celle qui l'explique le mieux. Un nœud qui n'appartient à aucune piste reste seul sur la
+    carte, et c'est très bien : tout n'a pas à entrer dans une case.
 
 Une à trois pistes. ZÉRO EST UNE RÉPONSE, et souvent la bonne : sur trois semaines de
 journal on ne voit pas de grande direction, on voit trois semaines. N'en fabrique pas pour
@@ -434,6 +449,13 @@ const OUTIL = {
               description: 'Les noms exacts des themes que cette piste regroupe. Deux au minimum.',
               items: { type: 'string' }
             },
+            noeuds: {
+              type: 'array',
+              description: "Les noms exacts des noeuds de la carte que cette piste englobe. C'est "
+                + "ce qui en fait un ILOT : la carte les regroupe et ecrit le nom de la piste "
+                + "au-dessus d'eux. Un noeud n'appartient qu'a une seule piste.",
+              items: { type: 'string' }
+            },
             force: { type: 'integer', description: '1 une direction possible, 2 nette, 3 partout.' }
           },
           required: ['nom', 'quoi', 'contre', 'themes', 'force']
@@ -449,7 +471,7 @@ const OUTIL = {
               type: 'object',
               properties: {
                 nom:   { type: 'string', description: 'Un à trois mots. Une chose, pas un mot : « Léa », « les nuits courtes », « le dimanche soir ».' },
-                genre: { type: 'string', description: 'personne | lieu | travail | corps | mecanisme | periode | activite.' },
+                genre: { type: 'string', description: "personne | lieu | travail | corps | mecanisme | periode | activite | dependance. « dependance » pour ce dont il a du mal a se passer, quelle qu'en soit la nature : une substance, un ecran, quelqu'un." },
                 poids: { type: 'integer', description: '0 à 3 : à quel point cette chose occupe de la place chez lui.' },
                 jours: {
                   type: 'array',
@@ -484,7 +506,7 @@ const OUTIL = {
 };
 
 /** Les genres reconnus. Un genre inconnu retombe sur « activite ». */
-export const GENRES = ['personne', 'lieu', 'travail', 'corps', 'mecanisme', 'periode', 'activite'];
+export const GENRES = ['personne', 'lieu', 'travail', 'corps', 'mecanisme', 'periode', 'activite', 'dependance'];
 
 /* ------------------------------ la validation ------------------------------ */
 
@@ -547,11 +569,15 @@ export function valider(brut, dates, comps = []) {
     t.liens = [...new Set((src?.liens ?? []).map(l => texte(l, 40).toLowerCase()))]
       .filter(l => l !== t.nom && noms.has(l)).slice(0, 4);
   }
+  // La carte AVANT les pistes : une piste nomme des noeuds de la carte, et un
+  // noeud jete la-bas ferait pointer l'ilot vers une chose qui ne s'affiche
+  // nulle part. Meme raison que les liens entre themes, meme ordre.
+  const carte = validerCarte(brut?.carte, dates);
   return {
     synthese: texte(brut?.synthese, 700),
     themes,
-    pistes: validerPistes(brut?.pistes, noms),
-    carte: validerCarte(brut?.carte, dates)
+    pistes: validerPistes(brut?.pistes, noms, new Set(carte.noeuds.map(n => n.nom.toLowerCase()))),
+    carte
   };
 }
 
@@ -576,9 +602,13 @@ export function valider(brut, dates, comps = []) {
  * un theme cite ici mais jete plus haut ferait pointer la piste vers un
  * fonctionnement que la personne ne verra nulle part.
  */
-export function validerPistes(brut, nomsThemes) {
+export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set()) {
   const out = [];
   const vus = new Set();
+  // Un noeud n'appartient qu'a UN ilot. Deux pistes qui se le disputent
+  // dessineraient deux enveloppes qui se traversent, et la carte perdrait
+  // exactement ce qu'on venait y chercher : des groupes qu'on distingue.
+  const pris = new Set();
   for (const p of (brut ?? []).slice(0, 6)) {
     const nom = texte(p?.nom, 48).toLowerCase();
     const contre = texte(p?.contre, 300);
@@ -586,12 +616,16 @@ export function validerPistes(brut, nomsThemes) {
     const themes = [...new Set((p?.themes ?? []).map(t => texte(t, 40).toLowerCase()))]
       .filter(t => nomsThemes.has(t));
     if (themes.length < 2) continue;
+    const noeuds = [...new Set((p?.noeuds ?? []).map(n => texte(n, 40).toLowerCase()))]
+      .filter(n => nomsNoeuds.has(n) && !pris.has(n));
+    for (const n of noeuds) pris.add(n);
     vus.add(nom);
     out.push({
       nom,
       quoi: texte(p?.quoi, 600),
       contre,
       themes,
+      noeuds,
       force: borne(Math.round(p?.force), 1, 3)
     });
     if (out.length === 3) break;
