@@ -5,7 +5,7 @@ import {
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
-  getLecture, setLecture, rembobiner, TEINTES
+  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -439,6 +439,7 @@ export const routes = {
       // elle-meme poses, pas une statistique calculee sur elle.
       return { date, note, jour, calendrier, floored: true, floor, yesterday, rawPast: past,
                episodes: null, similar: null, reperes: reperesDuJour(date, userId),
+             amplitude: amplitude(date, userId),
                carnet: carnetDuJour(date, userId) };
     }
 
@@ -496,6 +497,7 @@ export const routes = {
     return { date, note, jour, calendrier, reference, delta: cur?.delta ?? null,
              floored: false, floor, yesterday, episodes: ep, similar, textCount,
              reperes: reperesDuJour(date, userId),
+             amplitude: amplitude(date, userId),
              // Les notes apportees passent le plancher, pour la meme raison que
              // les reperes : ce sont des faits que la personne a poses
              // elle-meme, pas une statistique calculee sur elle.
@@ -1011,7 +1013,8 @@ export const routes = {
     }
     const corpus = corpusPour(horizon, {
       rows, events: allEvents(userId), carnet,
-      motifs: allMotifs(userId), objectifs: allObjectifs(userId)
+      motifs: allMotifs(userId), objectifs: allObjectifs(userId),
+      amplitudes: amplitudes(userId)
     }, today());
     if (!corpus.dates.size) {
       return { error: "Rien d'écrit sur cette fenêtre. Essaie une fenêtre plus large." };
@@ -1332,6 +1335,29 @@ export function outilsPour(userId, messageId, send = () => {}) {
      * range. Du texte genere qui se glisserait ici lui reviendrait ensuite,
      * dans « explorer un theme », comme si la personne l'avait ecrit.
      */
+    /*
+     * RELEVER OU QUELQU'UN SEMBLE ETRE, SANS RIEN NOTER.
+     *
+     * Le releve n'est PAS envoye en `geste` : les gestes s'affichent au pied de
+     * la conversation (« repere pose », « motif suivi »), et voir apparaitre
+     * « il t'a mis a 3 » pendant qu'on raconte sa soiree serait exactement le
+     * verdict que ce produit ne pose jamais. Le releve travaille en silence ;
+     * ce qui remonte a l'ecran, plus tard, est l'AMPLITUDE de la journee.
+     */
+    relever_humeur: ({ valeur, quoi }) => {
+      const v = Math.round(Number(valeur));
+      const q = String(quoi ?? '').trim().replace(/\s+/g, ' ');
+      if (!Number.isFinite(v) || v < 0 || v > 10) return { erreur: 'La valeur va de 0 à 10.' };
+      if (q.length < 8) return { erreur: 'Dis en une phrase à quoi tu le vois.' };
+      // Huit par jour : au-dela, ce n'est plus un basculement qu'on releve,
+      // c'est un commentaire continu, et l'ecart perd son sens.
+      if (relevesDuJour(today(), userId).length >= 8) {
+        return { erreur: 'Assez de relevés pour aujourd\'hui.' };
+      }
+      const r = addReleve({ messageId, date: today(), valeur: v, quoi: q, userId });
+      return { message: `Relevé posé (${v}/10). N'en parle pas.`, fait: null, silencieux: true, r };
+    },
+
     ranger_notes: ({ jour, quand }) => {
       if (!messageId) return { erreur: "Rien a ranger : aucun message en cours." };
       const j = jour == null ? null : String(jour).trim();

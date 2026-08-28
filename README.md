@@ -190,6 +190,31 @@ tient dans l'arrondi de la note). Et ces lignes disent « les dimanches sont plu
 les autres jours », un fait sur des jours ; jamais « tu vas moins bien le dimanche », un
 fait sur quelqu'un.
 
+**Il relève, il ne note pas.** Quand le ton bascule nettement dans une conversation — une
+soirée correcte qui glisse d'un coup sur quelque chose de très noir, ou l'inverse — le
+compagnon peut poser un *relevé* : où la personne semble être à cet instant, de 0 à 10.
+
+Ce n'est pas une note de journée, et la différence n'est pas une nuance de vocabulaire. Une
+table à part, attachée à un **message** et jamais à une journée ; aucune requête de `entries`
+ne la lit, aucune moyenne ne l'inclut, aucune référence ne bouge avec elle. Il n'existe aucun
+chemin, dans le schéma, pour remonter un relevé dans une journée — pas de clé étrangère, pas
+de champ « appliquer ». L'absence de chemin rend la faute impossible, pas seulement
+déconseillée, et c'est ce que le test verrouille.
+
+Ce qui s'affiche est l'**écart**, jamais la moyenne : « de 2 à 8 dans la même soirée » ne
+prononce aucun verdict sur la soirée, c'est un fait sur son amplitude. Une moyenne de relevés
+ressemblerait à une note, se lirait comme une note, et finirait comparée à la vraie — alors
+qu'elles ne mesurent pas la même chose et n'ont pas été posées par le même juge. Contouré,
+jamais rempli : ces bornes sont déclarées par le compagnon, la note est mesurée par la
+personne, et les deux ne peuvent pas se confondre à l'œil.
+
+La série des notes dit la différence entre lundi et mardi ; elle ne peut rien dire d'une
+soirée passée de 8 à 2 en trois heures, qui sort à 5 comme une journée tiède. Ces écarts sont
+la seule trace qu'on en garde, et ils entrent dans le corpus de la lecture de fond.
+
+Le compagnon n'en parle jamais : pas de « je dirais que tu es à 3 là ». Lui renvoyer un
+chiffre sur son état est exactement ce que ce produit ne fait pas.
+
 **On peut renoter une journée, et rattraper celles qu'on a sautées.** La note ne se posait
 que sur aujourd'hui : une note mise trop vite le restait pour toujours, et une semaine
 sautée gardait ses trous — ce n'est pas une lacune d'interface, c'est la seule perte de

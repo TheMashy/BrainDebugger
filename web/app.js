@@ -2531,6 +2531,8 @@ async function renderMirror(date, { garderCal = false } = {}) {
           }).join('')}
           ${m.note !== null ? `<button class="jourdenote" data-jn="">retirer</button>` : ''}
         </div>` : ''}
+        ${amplitudeMarkup(m.amplitude)}
+
         ${m.jour?.text
           ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
           : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
@@ -2566,6 +2568,35 @@ const JOURS_COURT = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
  * Le bloc ne parle donc plus que quand ce jour-la porte vraiment un repere.
  * Pour retrouver le precedent, il y a la frise, dont c'est le metier.
  */
+/*
+ * DE COMBIEN LA JOURNEE A BOUGE.
+ *
+ * Le compagnon releve, pendant la conversation, ou quelqu'un SEMBLE etre quand
+ * le ton bascule. Ce n'est pas une note et ca ne doit pas pouvoir se lire comme
+ * une : on n'affiche donc jamais la moyenne de ces releves -- une moyenne
+ * ressemblerait a une note, se lirait comme une note, et finirait comparee a la
+ * vraie, alors qu'elles ne mesurent pas la meme chose et n'ont pas ete posees
+ * par le meme juge.
+ *
+ * On affiche l'ECART. « De 3 a 8 dans la meme soiree » ne prononce aucun
+ * verdict sur la soiree : c'est un fait sur son amplitude, verifiable, et c'est
+ * exactement ce qu'on cherche quand on se demande si une journee a tenu.
+ *
+ * CONTOURE, JAMAIS REMPLI. « Ce qui est rempli est mesure, ce qui est contoure
+ * est declare » : ces bornes sont dites par le compagnon, la note de la journee
+ * est mesuree par la personne. Les deux ne peuvent pas se confondre a l'oeil.
+ */
+function amplitudeMarkup(a) {
+  if (!a) return '';
+  const g = (a.bas / 10) * 100, d = ((10 - a.haut) / 10) * 100;
+  return `<div class="amplitude" title="${a.n} relevés pendant la conversation">
+    <span class="k faint">dans la journée</span>
+    <span class="ampbar" aria-hidden="true"><i style="left:${g}%;right:${d}%"></i></span>
+    <span class="ampval mono">${a.bas} → ${a.haut}</span>
+    <span class="ampdit">${a.ecart >= 5 ? 'ça a beaucoup bougé' : a.ecart >= 3 ? 'ça a bougé' : 'assez stable'}</span>
+  </div>`;
+}
+
 function reperesMarkup(rep, date) {
   const jour = rep?.jour ?? [];
   if (!jour.length) return '';

@@ -102,7 +102,8 @@ function parMois(rows) {
  * Le corpus d'un horizon.
  * @returns {{texte: string, dates: Set<string>, jours: number, depuis: string|null}}
  */
-export function corpusPour(horizon, { rows, events = [], carnet = [], motifs = [], objectifs = [] },
+export function corpusPour(horizon, { rows, events = [], carnet = [], motifs = [], objectifs = [],
+                                     amplitudes = [] },
                            aujourdhui) {
   const h = HORIZONS[horizon] ?? HORIZONS.long;
   const depuis = h.jours ? decaler(aujourdhui, -(h.jours - 1)) : null;
@@ -173,6 +174,32 @@ ${objectifs.map(o => `${o.quoi} — ${o.tenu ? 'tenu' : 'rompu'} depuis ${o.depu
    * empeche vraiment un chiffre invente d'arriver a l'ecran : lui demander de
    * n'ecrire que des chiffres vrais ne marche pas, il les formule trop bien.
    */
+  /*
+   * CE QUI A BOUGE DANS LA JOURNEE, ET PAS SEULEMENT D'UN JOUR A L'AUTRE.
+   *
+   * La serie de notes dit la difference entre lundi et mardi. Elle ne peut rien
+   * dire de la soiree ou quelqu'un est passe de 8 a 2 en trois heures : la
+   * journee sort a 5, comme une journee tiede, et c'est le contraire de ce qui
+   * s'est passe. Ces ecarts-la sont la seule trace qu'on en garde.
+   *
+   * Ce ne sont PAS des notes, et le bloc le dit au modele, parce que c'est
+   * exactement la confusion qu'il ferait sinon.
+   */
+  const amp = (amplitudes ?? []).filter(a => dans(a.date));
+  if (amp.length) {
+    blocs.push(`CE QUI A BOUGE A L'INTERIEUR DE CERTAINES JOURNEES.
+
+Ce ne sont PAS ses notes. Ce sont des relevés que tu as posés toi-même pendant vos
+conversations, quand le ton basculait : où il semblait être à ce moment-là. Deux relevés ou
+plus dans la même journée donnent un écart, et c'est le seul chiffre qu'on en tire.
+
+Une journée à 5 de moyenne et une journée passée de 8 à 2 en trois heures ne racontent pas la
+même chose, et la série des notes ne sait pas les distinguer. Ces lignes, si.
+
+jour | relevés | du plus bas au plus haut | écart
+${amp.map(a => `${a.date} | ${a.n} | ${a.bas} → ${a.haut} | ${a.ecart}`).join('\n')}`);
+  }
+
   const comps = comparaisons(fenetre, ev);
   const bloc = comparaisonBlock(comps);
   if (bloc) blocs.push(bloc);
