@@ -185,7 +185,13 @@ async function saveSettings(patch) {
   return settings;
 }
 
-/* --------------------------- le mode pudique ---------------------------
+/* --------------------------- le mode prive ---------------------------
+
+   « pudique » est le nom de la cle en base et des selecteurs ; « mode prive »
+   est ce qui s'affiche. Renommer la cle demanderait une migration pour un mot,
+   et une migration qui rate coute un reglage ; le nom visible, lui, se change
+   en une ligne.
+
 
    Un seul attribut sur la racine ; tout le reste est du CSS. La toile de la
    carte, elle, ne sait pas lire une feuille de style : elle relit le reglage
@@ -201,7 +207,7 @@ function appliquerPudique() {
     // n'est redessine qu'a l'ouverture, et un bouton qui dit encore « actif »
     // apres l'avoir coupe est exactement le doute qu'on ne veut pas avoir.
     const l = b.querySelector('.pudlib');
-    if (l) l.textContent = on ? 'Mode pudique — actif' : 'Mode pudique';
+    if (l) l.textContent = on ? 'Mode privé — actif' : 'Mode privé';
   }
   // Les noms des noeuds sont peints, pas ecrits : seule une nouvelle image les
   // remplace. Le bouton de recentrage porte le redessin de la carte.
@@ -218,14 +224,14 @@ function appliquerPudique() {
 async function basculerPudique(v = !S.settings?.pudique) {
   S.settings = { ...S.settings, pudique: v };
   appliquerPudique();
-  toast(v ? 'Mode pudique — les mots sont masqués' : 'Mode pudique désactivé');
+  toast(v ? 'Mode privé — les mots sont masqués' : 'Mode privé désactivé');
   try { await saveSettings({ pudique: v }); } catch { /* l'écran a déjà obéi */ }
 }
 
 /** Le bouton, identique dans la jauge et dans les réglages. */
 const pudMarkup = () => `<button class="pudbtn" data-bascule-pudique aria-pressed="${!!S.settings?.pudique}">
   <span class="pudpuce" aria-hidden="true"></span>
-  <span class="pudlib">Mode pudique${S.settings?.pudique ? ' — actif' : ''}</span>
+  <span class="pudlib">Mode privé${S.settings?.pudique ? ' — actif' : ''}</span>
   <kbd>Ctrl+Maj+P</kbd>
 </button>`;
 
@@ -789,8 +795,7 @@ function bindGestes(th) {
     const v = e.target.closest('[data-voir]');
     if (v) {
       demanderAura(v.dataset.voir);
-      view = 'mirror'; syncNav();
-      return renderMirror(v.dataset.voir);
+      return ouvrirJour(v.dataset.voir);
     }
     /*
      * UN MECANISME MENE A « MA CARTE », PLUS AUX REGLAGES.
@@ -1370,7 +1375,7 @@ async function renderYear(year) {
     const w = e.target.closest('[data-win]');
     if (w) { CUMWIN = w.dataset.win; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
-    if (cell) { view = 'mirror'; syncNav(); return renderMirror(cell.dataset.date); }
+    if (cell) return ouvrirJour(cell.dataset.date);
     const cad = e.target.closest('[data-cadre]');
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
     // Une note s'ouvre sur place : le repli est l'état par défaut, et ouvrir
@@ -1390,7 +1395,7 @@ async function renderYear(year) {
     }
     // Une note datée ouvre sa journée dans le Miroir.
     const gto = e.target.closest('.cndate[data-goto]');
-    if (gto) { view = 'mirror'; syncNav(); return renderMirror(gto.dataset.goto); }
+    if (gto) return ouvrirJour(gto.dataset.goto);
   };
 
   wireFrise();
@@ -1738,9 +1743,7 @@ function wireFrise() {
   wrap.addEventListener('click', e => {
     const g = e.target.closest('[data-ev]');
     if (!g) return;
-    view = 'mirror';
-    syncNav();
-    renderMirror(g.dataset.date);
+    ouvrirJour(g.dataset.date);
   });
 }
 
@@ -1843,6 +1846,165 @@ function carnetItemMarkup(n) {
       <p class="cntexte">${esc(n.texte)}</p>
     </div>` : ''}
   </div>`;
+}
+
+/* ============================== vue : moi ==============================
+
+   Le tableau de bord. Il repond a « ou j'en suis », pas a « qu'est-ce que je
+   comprends de moi » -- cette question-la est celle de Ma carte, et elle
+   demande de lire. Ici on regarde.
+
+   Trois etages, du plus large au plus proche :
+     1. LES PISTES : les deux ou trois grandes directions que dessinent les
+        themes ensemble. Peu nombreuses par construction, et jamais un verdict.
+     2. LE MOIS : un calendrier ou l'on se balade de jour en jour, avec la
+        journee ouverte juste dessous. Annee montre quatre ans d'un coup ;
+        ici on voit UN mois, en grand, et on clique.
+     3. LES ECARTS : ce qui distingue une journee de sa propre moyenne. Mesures
+        par le serveur, phrase comprise -- aucun de ces nombres n'a traverse un
+        modele.
+                                                                            */
+
+let MOI = null;                 // la reponse de /api/moi
+let MOI_HORIZON = 'moyen';
+let MOI_PISTE = null;           // la piste depliee, par son nom
+let MOI_ECARTS = false;         // les ecarts, replies par defaut
+
+/*
+ * OU S'AFFICHE LA JOURNEE OUVERTE.
+ *
+ * Le meme rendu sert dans « Ma carte » (on ouvre une journee depuis une preuve)
+ * et dans « Moi » (on la choisit dans le calendrier). Ce qui change est ce
+ * qu'il y a AUTOUR et ou ramene le retour -- pas la journee elle-meme. Deux
+ * copies du meme ecran finiraient par diverger sur la note, et la note est ce
+ * qu'on ne peut pas se permettre de rendre deux fois differemment.
+ */
+let JOUR_DANS = 'mirror';
+
+/** La porte unique vers une journee, depuis n'importe ou dans l'application. */
+async function ouvrirJour(date) {
+  view = 'moi'; syncNav();
+  return renderMoi(date);
+}
+
+const FORCE_MOT = { 1: 'une direction possible', 2: 'net', 3: 'partout' };
+
+/**
+ * UNE PISTE. Le seul endroit de l'application ou un mot lourd peut s'ecrire.
+ *
+ * Ce qui l'empeche de devenir une etiquette n'est pas le ton, c'est la forme :
+ * le cadre dit « une piste, du cote de » AVANT le mot, chaque piste porte ce
+ * qui va CONTRE elle, et les themes qu'elle regroupe sont la, cliquables, avec
+ * leurs journees datees derriere. On peut donc toujours aller verifier.
+ *
+ * Le cadre est dans l'interface et pas dans la phrase du modele : une consigne
+ * de formulation s'oublie, une structure non.
+ */
+function pisteMarkup(p, i) {
+  const ouvert = MOI_PISTE === p.nom;
+  const teinte = TEINTES_DECLAREES[i % TEINTES_DECLAREES.length];
+  return `<div class="piste${ouvert ? ' ouvert' : ''}" style="--p:${teinte}">
+    <button class="ptete" data-piste="${esc(p.nom)}" aria-expanded="${ouvert}">
+      <span class="pcadre">une piste, du côté de</span>
+      <span class="pnom">${esc(p.nom)}</span>
+      <span class="pforce" data-f="${p.force}" title="${FORCE_MOT[p.force] ?? ''}">
+        <i></i><i></i><i></i></span>
+    </button>
+    ${ouvert ? `<div class="pcorps">
+      <p class="pquoi">${esc(p.quoi)}</p>
+      ${/* CE QUI VA CONTRE. Obligatoire, et affiche aussi visiblement que le
+            reste : une hypothese dont on cache ce qui l'affaiblit est un
+            verdict deguise. */''}
+      <p class="pcontre"><span class="k">ce qui va contre</span>${esc(p.contre)}</p>
+      <div class="pthemes">
+        ${p.themes.map(t => `<button data-piste-theme="${esc(t)}"
+          title="Voir ce mécanisme et ses journées">${esc(t)}</button>`).join('')}
+      </div>
+    </div>` : ''}
+  </div>`;
+}
+
+function pistesMarkup() {
+  if (!MOI) return '';
+  const p = MOI.pistes ?? [];
+  const sel = `<div class="moiwin">${['court', 'moyen', 'long'].map(h =>
+    `<button data-moi-horizon="${h}" aria-pressed="${h === MOI_HORIZON}">${h} terme</button>`).join('')}</div>`;
+
+  if (!p.length) {
+    return `<div class="card pistescard">
+      <div class="moihead"><h2>Ce vers quoi ça pointe</h2>${sel}</div>
+      <p class="sub" style="margin:0">${MOI.lue
+        ? `Sur cette fenêtre, aucune grande direction ne se dégage — et c'est une réponse,
+           pas une panne. Il y a ${MOI.themes?.length ?? 0} mécanisme${(MOI.themes?.length ?? 0) > 1 ? 's' : ''}
+           dans <b>Ma carte</b>, mais rien qui les regroupe assez pour porter un nom.`
+        : `Cette fenêtre n'a pas encore été lue. Les pistes viennent de la lecture — elles sont
+           dans <b>Ma carte</b>, bouton « relire ».`}</p>
+    </div>`;
+  }
+
+  return `<div class="card pistescard">
+    <div class="moihead"><h2>Ce vers quoi ça pointe</h2>${sel}</div>
+    <p class="sub">
+      Chacune regroupe plusieurs mécanismes de <b>Ma carte</b>. Ce sont des directions à
+      explorer, pas des états : clique pour voir ce qui va dans ce sens, ce qui va contre,
+      et les mécanismes qui les portent.
+    </p>
+    <div class="pistes">${p.map(pisteMarkup).join('')}</div>
+    ${/* Une fois, en bas du bloc, et pas sous chaque piste : repete trois fois
+          la phrase devient une decharge de responsabilite au lieu d'un conseil. */''}
+    <p class="prenvoi">
+      Un mot posé ici n'est pas un diagnostic — c'est une hypothèse tirée de ce que tu as
+      écrit. Trancher, c'est le métier d'un psychiatre ou d'un psychologue, et ça vaut la
+      peine de leur en parler.
+    </p>
+  </div>`;
+}
+
+/** L'en-tete de « Moi » : les pistes, et rien d'autre au-dessus du calendrier. */
+function moiEntete() {
+  const r = MOI?.resume;
+  return `<div class="moiresume">
+    ${r ? `<span><b>${r.jours}</b> journées notées</span>
+      <span><b>${r.ecrites}</b> avec du texte</span>
+      ${r.reference !== null ? `<span>référence <b>${r.reference}</b></span>` : ''}
+      ${r.serie ? `<span><b>${r.serie}</b> jour${r.serie > 1 ? 's' : ''} de suite</span>` : ''}` : ''}
+  </div>
+  ${pistesMarkup()}`;
+}
+
+/**
+ * LES ECARTS : ce qui distingue une journee de ta propre moyenne.
+ *
+ * Aucun de ces nombres n'a traverse un modele : le serveur les mesure et ecrit
+ * la phrase. C'est pour ca qu'ils s'affichent meme quand aucune lecture n'a
+ * tourne -- ils ne coutent rien et ne dependent de personne.
+ */
+function ecartsMarkup() {
+  const e = MOI?.ecarts ?? [];
+  if (!e.length) return '';
+  const montres = MOI_ECARTS ? e : e.slice(0, 3);
+  return `<div class="card ecartscard">
+    <h2>Ce qui te distingue de ta propre moyenne</h2>
+    <p class="sub">Mesuré sur tes notes, pas déduit. Il faut au moins huit journées de chaque côté pour qu'une comparaison s'affiche.</p>
+    <div class="ecarts">
+      ${montres.map(c => `<div class="ecart" data-signe="${c.ecart > 0 ? 'plus' : 'moins'}">
+        <span class="ebarre"><i style="width:${Math.min(100, Math.abs(c.ecart) / 2 * 100)}%"></i></span>
+        <span class="etxt">${esc(c.phrase)}</span>
+        <span class="enum mono">${c.ecart > 0 ? '+' : ''}${c.ecart}</span>
+      </div>`).join('')}
+    </div>
+    ${e.length > 3 ? `<button class="btn" data-moi-ecarts style="margin-top:12px">
+      ${MOI_ECARTS ? 'en montrer moins' : `voir les ${e.length - 3} autres`}</button>` : ''}
+  </div>`;
+}
+
+async function renderMoi(date, { garderCal = false, rafraichir = false } = {}) {
+  JOUR_DANS = 'moi';
+  if (!MOI || rafraichir) {
+    try { MOI = await api(`/api/moi?horizon=${MOI_HORIZON}`); }
+    catch { MOI = null; }
+  }
+  return renderMirror(date ?? MIRROR_DATE ?? S.today, { garderCal });
 }
 
 /* ============================= vue : miroir ============================= */
@@ -2243,7 +2405,7 @@ function monterCarte(carte) {
     if (bouge) { cv.style.cursor = 'grab'; return viser(p.x, p.y); }
     // Un vrai clic : on ouvre la journée visée.
     const j = journeeAu(RELA_DISPO?.pts ?? [], RELA, p.x, p.y, echelle(L, H), RELA_VUE);
-    if (j) { view = 'mirror'; syncNav(); renderMirror(j.date); }
+    if (j) ouvrirJour(j.date);
   };
   cv.addEventListener('pointerup', relacher);
   cv.addEventListener('pointercancel', () => { tire = null; cv.style.cursor = 'grab'; });
@@ -2320,6 +2482,8 @@ function monterCarte(carte) {
 }
 
 async function renderLecture() {
+  // La vue d'ensemble de « Ma carte » : ce qui s'ouvrira ensuite s'y encadre.
+  JOUR_DANS = 'mirror';
   MIRROR_DATE = null;
   if (!LECTURE || LECTURE.horizon !== MIR_HORIZON) {
     LECTURE = await api(`/api/lecture?horizon=${MIR_HORIZON}`);
@@ -2435,6 +2599,9 @@ async function lancerLecture() {
   try {
     const r = await api('/api/lecture', { horizon: MIR_HORIZON });
     LECTURE = r;
+    // Les pistes viennent de CETTE lecture : celles gardees pour « Moi »
+    // parlent d'une fenetre qui vient d'etre relue, et il faut les redemander.
+    MOI = null;
     if (r.usage) { S.usage = r.usage; syncGauge(); }
   } catch (err) {
     // Le toast pour celui qui regarde, l'écran pour celui qui revient.
@@ -2478,7 +2645,7 @@ function wireLecture() {
     if (e.target.closest('[data-lire]')) return lancerLecture();
     if (e.target.closest('[data-aller-reglages]')) { view = 'settings'; syncNav(); return renderSettings(); }
     const j = e.target.closest('[data-jour]');
-    if (j) return renderMirror(j.dataset.jour);
+    if (j) return ouvrirJour(j.dataset.jour);
     const a = e.target.closest('[data-theme-aller]');
     if (a) { MIR_THEME = a.dataset.themeAller; return renderLecture(); }
     const t = e.target.closest('[data-meca]');
@@ -2580,18 +2747,28 @@ async function renderMirror(date, { garderCal = false } = {}) {
    * Reste ce qu'on venait chercher : la note, ce qui a ete ecrit, et le repere
    * de ce jour-la s'il y en a un.
    */
-  $('#view').innerHTML = `
-    ${/* Le retour vers la lecture. Sans lui, ouvrir une journée depuis une
-          preuve est un aller simple : la vue d'ensemble n'a plus de porte. */''}
-    <div class="retourlect">
-      <button data-lecture>‹ ma carte</button>
+  const moi = JOUR_DANS === 'moi';
+  /*
+   * LA BARRE DE NAVIGATION D'UN JOUR A L'AUTRE.
+   *
+   * Dans « Ma carte » elle est EN TETE : on arrive d'une preuve, et la premiere
+   * chose dont on a besoin est la porte du retour. Dans « Moi » elle est SOUS
+   * LE CALENDRIER, collee a la journee qu'elle fait defiler -- posee en haut,
+   * elle annoncerait une date avant qu'on ait vu de quel mois on parle, et
+   * repeterait celle que la journee affiche deja trois lignes plus bas.
+   */
+  const barre = `<div class="retourlect${moi ? ' souscal' : ''}">
+      ${moi ? '' : '<button data-lecture>‹ ma carte</button>'}
       <span class="faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</span>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
       <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button data-goto="${S.today}">aujourd'hui</button>` : ''}
-    </div>
-    <div class="jourseul">
+    </div>`;
+  $('#view').innerHTML = `
+    ${moi ? moiEntete() : barre}
+    <div class="jourseul${moi ? ' dansmoi' : ''}">
       ${calendarMarkup(m, date)}
+      ${moi ? barre : ''}
 
       ${reperesMarkup(m.reperes, date)}
 
@@ -2641,7 +2818,8 @@ async function renderMirror(date, { garderCal = false } = {}) {
       </div>
 
       ${notesDuJourMarkup(m.carnet)}
-    </div>`;
+    </div>
+    ${moi ? ecartsMarkup() : ''}`;
   const form = $('#cnForm'); if (form) form.dataset.jour = date;
   wireMirror();
 }
@@ -2742,11 +2920,43 @@ function calendarMarkup(m, date) {
 }
 
 function wireMirror() {
+  // Rejouer la journee la ou l'on est. Sans ca, cliquer une case du calendrier
+  // depuis « Moi » renverrait la vue de « Ma carte », onglet inchange : la page
+  // change sous les pieds sans que rien ne dise pourquoi.
+  const rejouer = (d, o) => (JOUR_DANS === 'moi' ? renderMoi(d, o) : renderMirror(d, o));
+
   $('#view').onclick = async e => {
+    /* --- les pistes, propres a « Moi » --- */
+    const ph = e.target.closest('[data-moi-horizon]');
+    if (ph) {
+      MOI_HORIZON = ph.dataset.moiHorizon; MOI_PISTE = null;
+      return renderMoi(MIRROR_DATE, { garderCal: true, rafraichir: true });
+    }
+    const pi = e.target.closest('[data-piste]');
+    if (pi) {
+      MOI_PISTE = MOI_PISTE === pi.dataset.piste ? null : pi.dataset.piste;
+      return renderMoi(MIRROR_DATE, { garderCal: true });
+    }
+    // Un mecanisme cite par une piste mene a « Ma carte », deplie : c'est la
+    // qu'il porte ses journees, et une piste ne vaut que si on peut descendre
+    // jusqu'aux dates qui la portent.
+    const pt = e.target.closest('[data-piste-theme]');
+    if (pt) {
+      MIR_THEME = pt.dataset.pisteTheme; MIRROR_DATE = null;
+      view = 'mirror'; syncNav();
+      await renderLecture();
+      $('#view').querySelector('.meca.ouvert')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    if (e.target.closest('[data-moi-ecarts]')) {
+      MOI_ECARTS = !MOI_ECARTS;
+      return renderMoi(MIRROR_DATE, { garderCal: true });
+    }
+
     // La note de la journée ouverte : l'échelle s'ouvre, puis se pose.
     if (e.target.closest('#dayNote')) {
       DAY_NOTE_OUVERT = !DAY_NOTE_OUVERT;
-      return renderMirror(MIRROR_DATE, { garderCal: true });
+      return rejouer(MIRROR_DATE, { garderCal: true });
     }
     const jn = e.target.closest('[data-jn]');
     if (jn) {
@@ -2758,7 +2968,7 @@ function wireMirror() {
       syncHeader();
       DAY_NOTE_OUVERT = false;
       toast(v === null ? 'Note retirée' : `Journée notée ${v}/10`);
-      return renderMirror(MIRROR_DATE, { garderCal: true });
+      return rejouer(MIRROR_DATE, { garderCal: true });
     }
 
     // AVANT [data-goto] : une note datée porte les deux (sa date ouvre le
@@ -2767,20 +2977,20 @@ function wireMirror() {
     if (dcn) {
       await api('/api/carnet', { delete: Number(dcn.dataset.delcn) });
       toast('Note retirée');
-      return renderMirror(MIRROR_DATE);
+      return rejouer(MIRROR_DATE);
     }
 
     // Le calendrier : feuilleter ne change pas le jour ouvert ; cliquer une
     // case, si. Deux gestes, deux effets.
     const c = e.target.closest('[data-cal]');
     if (c) {
-      if (c.dataset.cal === 'jour') { MIR_CAL.curseur = c.dataset.d.slice(0, 7); return renderMirror(c.dataset.d); }
+      if (c.dataset.cal === 'jour') { MIR_CAL.curseur = c.dataset.d.slice(0, 7); return rejouer(c.dataset.d); }
       MIR_CAL = calClic({ ...MIR_CAL, debut: MIRROR_DATE }, c.dataset);
-      return renderMirror(MIRROR_DATE, { garderCal: true });
+      return rejouer(MIRROR_DATE, { garderCal: true });
     }
     if (e.target.closest('[data-lecture]')) { MIRROR_DATE = null; return renderLecture(); }
     const g = e.target.closest('[data-goto]');
-    if (g) return renderMirror(g.dataset.goto);
+    if (g) return rejouer(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
 
     const del = e.target.closest('[data-erase]');
@@ -2798,7 +3008,7 @@ function wireMirror() {
         S = await api('/api/state');
         SERIES = null;
         syncHeader();
-        renderMirror(d);
+        rejouer(d);
         toast('Journée effacée');
       } catch (err) { toast(err.message); }
     }
@@ -2963,7 +3173,7 @@ async function renderSettings() {
         <h2>Montrer l'écran</h2>
         <p class="sub">
           Partager son écran, c'est montrer à quelqu'un d'autre un journal écrit pour soi.
-          Le mode pudique éteint les <b>mots</b> et garde les <b>formes</b> : tes messages,
+          Le mode privé éteint les <b>mots</b> et garde les <b>formes</b> : tes messages,
           tes journées, tes notes rangées, les noms des mécanismes et des repères deviennent
           des traces illisibles ; les notes, la grille, les couleurs, les courbes et les amas
           de ta carte restent. L'application se montre entière, sans que personne puisse la lire.
@@ -3454,12 +3664,13 @@ function drawNotesPreview(p) {
 
 const VIEWS = {
   tonight: renderTonight,
+  moi: () => renderMoi(),
   year: () => renderYear(),
   mirror: () => renderMirror(),
   settings: renderSettings
 };
 
-const NOM_VUE = { tonight: 'Parler', year: 'Année', mirror: 'Ma carte', settings: 'Réglages' };
+const NOM_VUE = { tonight: 'Parler', moi: 'Moi', year: 'Année', mirror: 'Ma carte', settings: 'Réglages' };
 
 function syncNav() {
   for (const b of document.querySelectorAll('nav button')) {

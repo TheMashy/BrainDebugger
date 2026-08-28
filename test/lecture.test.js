@@ -75,7 +75,7 @@ test('les intensités hors échelle sont ramenées dedans', () => {
 
 test('rien d’exploitable rend une lecture vide, pas une exception', () => {
   assert.deepEqual(valider(null, DATES),
-    { synthese: '', themes: [], carte: { noeuds: [], liens: [] } });
+    { synthese: '', themes: [], pistes: [], carte: { noeuds: [], liens: [] } });
   assert.deepEqual(valider({ themes: 'pas un tableau' }, DATES).themes, []);
   assert.deepEqual(valider({ themes: [{}] }, DATES).themes, []);
 });
@@ -318,4 +318,85 @@ test('le corpus transmet les comparaisons, et les calcule sur toute la fenêtre'
   assert.ok(dim.n > c.dates.size / 6, 'les dimanches comptés sortent de l’échantillon, pas de la fenêtre');
   assert.match(c.texte, /\[c\d+\]/);
   assert.match(c.texte, /recopies PAS le nombre/);
+});
+
+/* -------------------------------- les pistes --------------------------------
+
+   Une piste peut nommer « dépression » là où un thème ne le peut pas. Ce
+   privilège tient à trois verrous, et ils sont dans le code, pas dans la
+   consigne : une consigne qu'on n'applique pas n'est pas une règle. */
+
+const THEME = (nom, date) => ({
+  nom, quoi: 'ce que ça donne', intensite: 2,
+  serie: [{ periode: '2024-03', valeur: 2 }],
+  preuves: [{ date, extrait: 'ce jour-là' }]
+});
+
+const AVEC_PISTES = pistes => ({
+  synthese: 'x',
+  themes: [THEME('les nuits courtes', '2024-03-12'), THEME('minimiser après coup', '2024-04-02')],
+  pistes,
+  carte: { noeuds: [], liens: [] }
+});
+
+test('une piste tient si elle regroupe au moins deux thèmes rendus', () => {
+  const p = valider(AVEC_PISTES([{
+    nom: 'Dépression', quoi: 'ce que tu décris', contre: 'mais tu sors, et souvent',
+    themes: ['les nuits courtes', 'minimiser après coup'], force: 2
+  }]), DATES).pistes;
+  assert.equal(p.length, 1);
+  // Le nom est normalisé en minuscules : c'est l'interface qui l'encadre, et
+  // une majuscule le ferait lire comme un titre de dossier médical.
+  assert.equal(p[0].nom, 'dépression');
+  assert.deepEqual(p[0].themes, ['les nuits courtes', 'minimiser après coup']);
+});
+
+test('une piste accrochée à un seul thème disparaît', () => {
+  // Sinon « dépression » serait ce thème-là, avec un mot plus lourd dessus.
+  const p = valider(AVEC_PISTES([{
+    nom: 'dépression', quoi: 'x', contre: 'y', themes: ['les nuits courtes'], force: 3
+  }]), DATES).pistes;
+  assert.deepEqual(p, []);
+});
+
+test('une piste qui cite un thème inexistant ne le compte pas', () => {
+  // Le thème a pu être jeté plus haut (aucune preuve datée) : la piste
+  // pointerait alors vers un fonctionnement affiché nulle part.
+  const p = valider(AVEC_PISTES([{
+    nom: 'dépression', quoi: 'x', contre: 'y',
+    themes: ['les nuits courtes', 'un thème qui n’existe pas'], force: 2
+  }]), DATES).pistes;
+  assert.deepEqual(p, []);
+});
+
+test('une piste sans « ce qui va contre » est jetée', () => {
+  // C'est le verrou qui sépare une hypothèse d'un verdict.
+  for (const contre of ['', '   ', undefined, null]) {
+    const p = valider(AVEC_PISTES([{
+      nom: 'dépression', quoi: 'x', contre,
+      themes: ['les nuits courtes', 'minimiser après coup'], force: 2
+    }]), DATES).pistes;
+    assert.deepEqual(p, [], `« ${contre} » a laissé passer une piste`);
+  }
+});
+
+test('jamais plus de trois pistes, et jamais deux fois la même', () => {
+  // Au-delà, ce n'est plus une lecture, c'est une liste de diagnostics.
+  const une = n => ({
+    nom: n, quoi: 'x', contre: 'y',
+    themes: ['les nuits courtes', 'minimiser après coup'], force: 2
+  });
+  const p = valider(AVEC_PISTES(
+    ['a', 'b', 'c', 'd', 'e'].map(une)), DATES).pistes;
+  assert.equal(p.length, 3);
+  const doubles = valider(AVEC_PISTES([une('dépression'), une('Dépression')]), DATES).pistes;
+  assert.equal(doubles.length, 1);
+});
+
+test('l’absence de piste est une réponse, pas une panne', () => {
+  // Sur trois semaines de journal on ne voit pas de grande direction : on voit
+  // trois semaines. La lecture doit pouvoir le dire.
+  assert.deepEqual(valider(AVEC_PISTES([]), DATES).pistes, []);
+  assert.deepEqual(valider(AVEC_PISTES(undefined), DATES).pistes, []);
+  assert.deepEqual(valider(AVEC_PISTES('pas un tableau'), DATES).pistes, []);
 });

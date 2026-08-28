@@ -30,6 +30,7 @@ import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, gridB
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, etatDuTemps } from './temps.js';
+import { comparaisons } from './comparer.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -976,6 +977,46 @@ export const routes = {
    * mois sur un journal auquel on n'a rien ajoute est toujours juste, et la
    * relancer couterait des jetons pour rendre exactement la meme chose.
    */
+  /*
+   * « MOI » : ce que la vue simplifiee a besoin de savoir en plus du calendrier.
+   *
+   * Le calendrier et la journee ouverte viennent deja de /api/mirror -- les
+   * redemander ici ferait deux sources pour la meme case de grille, et un jour
+   * elles divergeraient. Cette route ne rend donc que ce qui lui manque : les
+   * PISTES de la fenetre choisie, et les ECARTS que le serveur sait calculer.
+   *
+   * Les ecarts ne passent PAS par le modele. Ils sont mesures ici, phrase
+   * comprise -- « LE MODELE CHOISIT LE FAIT, LE SERVEUR POSSEDE LE NOMBRE ».
+   * C'est aussi pour ca qu'ils s'affichent meme quand aucune lecture n'a
+   * jamais tourne : ils ne coutent rien et ne dependent de personne.
+   */
+  'GET /api/moi': ({ query, userId }) => {
+    const horizon = HORIZONS[query.horizon] ? query.horizon : 'moyen';
+    const { rows, series: ser } = series(userId);
+    const l = getLecture(horizon, userId);
+    const ecarts = comparaisons(rows, allEvents(userId))
+      // Les plus gros ecarts d'abord : une vue « simplifiee » qui rend
+      // vingt-deux comparaisons dans l'ordre du calcul n'a rien simplifie.
+      .sort((a, b) => Math.abs(b.ecart) - Math.abs(a.ecart))
+      .slice(0, 6);
+    const dernier = ser.length ? ser[ser.length - 1] : null;
+    return {
+      horizon,
+      pistes: l?.contenu?.pistes ?? [],
+      themes: (l?.contenu?.themes ?? []).map(t => ({ nom: t.nom, quoi: t.quoi, intensite: t.intensite })),
+      synthese: l?.contenu?.synthese ?? null,
+      fait_le: l?.fait_le ?? null,
+      lue: !!l,
+      ecarts,
+      resume: {
+        jours: rows.length,
+        ecrites: rows.filter(r => r.text && r.text.trim()).length,
+        reference: dernier?.reference ?? null,
+        serie: streak(ser)
+      }
+    };
+  },
+
   'GET /api/lecture': ({ query, userId }) => {
     const horizon = HORIZONS[query.horizon] ? query.horizon : 'moyen';
     const { rows } = series(userId);
