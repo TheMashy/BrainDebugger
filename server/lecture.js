@@ -446,10 +446,22 @@ export async function lire(horizon, corpus, settings) {
     fallbacks: 'default',
     model: settings.anthropicModel || 'claude-opus-5',
     max_tokens: 8000,
-    thinking: { type: 'adaptive' },
-    // Une lecture de fond n'a pas de latence a tenir : personne ne la regarde
-    // apparaitre mot a mot. C'est le seul endroit du produit ou l'effort haut
-    // se justifie, et c'est aussi celui ou le resultat compte le plus.
+    /*
+     * PAS DE `thinking` ICI, ET C'EST LA RAISON POUR LAQUELLE LA CARTE
+     * N'APPARAISSAIT PAS.
+     *
+     * On force l'outil (`tool_choice: { type: 'tool' }`) parce qu'on veut une
+     * structure et rien d'autre. L'API refuse ce forcage quand la reflexion
+     * etendue est active : l'appel partait, revenait en 400, et l'ecran
+     * retombait sur « Lancer la lecture » -- le meme ecran que si on n'avait
+     * jamais rien lance. La panne etait donc parfaitement invisible.
+     *
+     * `chat.js` garde `thinking` parce qu'il laisse le modele choisir ses
+     * outils. Ici la profondeur passe par l'effort, qui, lui, se cumule avec
+     * l'outil force. Une lecture de fond n'a pas de latence a tenir : personne
+     * ne la regarde apparaitre mot a mot. C'est le seul endroit du produit ou
+     * l'effort haut se justifie, et celui ou le resultat compte le plus.
+     */
     output_config: { effort: 'high' },
     system: [{ type: 'text', text: SYSTEME }],
     tools: [OUTIL],

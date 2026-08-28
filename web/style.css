@@ -886,6 +886,16 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .lectvide { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 40px 0; }
 .lectvide p { margin: 0; }
 .lectvide .btn { margin-top: 10px; }
+/* Le message d'erreur vient du serveur ou de l'API : il est technique, et c'est
+   voulu — il est là pour qu'on puisse le lire et le rapporter, pas pour être
+   joli. Le monospace le signale comme tel. */
+.lecterr {
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  color: var(--warn); max-width: 62ch;
+  border-left: 2px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  padding-left: 11px; margin: 2px 0 0;
+}
+.lecterrhaut { margin: -12px 0 22px; max-width: 720px; }
 .spin {
   width: 15px; height: 15px; border-radius: 50%; margin-bottom: 6px;
   border: 2px solid var(--line); border-top-color: var(--accent);
@@ -960,6 +970,10 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 }
 
 .mirror { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px 34px; }
+/* La journée ouverte tient désormais dans une colonne : le calendrier, le
+   repère s'il y en a un, la note et le texte. La largeur est celle qu'avait
+   déjà cette colonne — rien n'a bougé de place, deux blocs ont disparu. */
+.jourseul { display: flex; flex-direction: column; gap: 30px; max-width: 520px; }
 .mcol { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
 @media (max-width: 900px) { .mirror { grid-template-columns: 1fr; } }
 
@@ -968,14 +982,47 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
    .calgrid, .calmois — et le second écrasait le premier depuis plus bas dans la
    feuille. Ici on ajoute seulement ce que le Miroir a en plus : la teinte des
    journées, qui n'a de sens que sur un journal. */
-.calcard .cal { width: 100%; }
+/* Le calendrier respire de sept pixels sur les cotes, et six sous les initiales
+   des jours : la case selectionnee grossit et porte un anneau, et sans cette
+   marge un dimanche ou un 1er du mois se faisait couper son anneau par le bord
+   de la carte. */
+.calcard .cal { width: 100%; padding: 0 7px; box-sizing: border-box; }
+.calcard .caldows { margin-bottom: 6px; }
 .calcard .calgrid button { height: 34px; }
 .calj.teinte { background: color-mix(in srgb, var(--jc) 62%, transparent); color: #08110c; font-weight: 500; }
 .calj.teinte.hors { opacity: .45; }
-/* La borne — le jour ouvert — passe devant la teinte : on doit toujours savoir
-   ce qu'on regarde, même sur une journée à 9/10 déjà claire. */
-.calj.borne.teinte { background: var(--accent); }
 .calj.teinte::after { background: #08110c; opacity: .55; }
+
+/* LA SÉLECTION EST UN CADRE, PAS UNE COULEUR.
+   Le jour ouvert était repeint en vert vif, par-dessus sa teinte. Dans une
+   grille dont c'est le seul métier de dire des notes, la case sélectionnée
+   mentait donc sur la sienne : une journée à 3/10 s'affichait comme une journée
+   à 10, et c'était exactement la case qu'on était en train de regarder.
+   Elle garde sa couleur. La sélection se lit à l'anneau, au relief et à la
+   taille — trois signaux qui ne coûtent aucune information. */
+.calcard .calj { transition: background .12s, scale .14s, box-shadow .14s; }
+.calcard .calj.borne {
+  background: none; color: var(--ink); font-weight: 620; border-radius: 8px;
+  /* Deux anneaux : un liseré de fond qui détache la case de ses voisines à 2 px,
+     puis l'anneau vert. Sans le premier, l'anneau colle au jour d'à côté. */
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--accent),
+              0 3px 12px color-mix(in srgb, var(--accent) 28%, transparent);
+  scale: 1.06; z-index: 2;
+}
+.calcard .calj.borne.teinte {
+  background: color-mix(in srgb, var(--jc) 78%, transparent); color: #08110c;
+}
+/* Le point « écrit » disparaît sous l'anneau : il est redondant là où on lit
+   déjà le texte de la journée juste en dessous. */
+.calcard .calj.borne::after { display: none; }
+/* Une plage n'existe pas dans le Miroir — on y ouvre une journée, pas un
+   intervalle — mais si elle revenait, les bouts arrondis restent justes. */
+.calcard .calj.borne.lo:not(.hi) { border-radius: 8px 3px 3px 8px; }
+.calcard .calj.borne.hi:not(.lo) { border-radius: 3px 8px 8px 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .calcard .calj { transition: none; }
+  .calcard .calj.borne { scale: 1; }
+}
 
 /* La ligne d'en-tête d'une journée : la note, la référence, l'écart, puis
    « effacer ». En flex avec wrap, la colonne du Miroir étant devenue plus
@@ -983,11 +1030,12 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
    « effacer » flottant entre les deux. Une grille explicite tient la ligne, et
    ne se casse qu'une fois — sous 420 px, où elle passe proprement à deux
    colonnes. */
+/* Deux enfants seulement depuis que la référence et l'écart sont partis : la
+   note, et « effacer » poussé au bout de la ligne. */
 .dayhead {
-  display: grid; grid-template-columns: auto auto auto 1fr;
+  display: grid; grid-template-columns: auto 1fr;
   align-items: end; gap: 8px 26px; margin-bottom: 14px;
 }
-@media (max-width: 420px) { .dayhead { grid-template-columns: auto 1fr; } }
 .dayhead .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .dayhead .bignum .sl { font-size: 16px; color: var(--ink-faint); }
 /* La note du jour ouvert est l'information la plus consultee de l'ecran, et
