@@ -2618,16 +2618,37 @@ button.amasrow:hover { background: var(--panel); }
    un seul code couleur, et un nom lu quelque part se retrouve ailleurs. */
 .mecagroupe { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
 .mecagroupe:last-child { margin-bottom: 0; }
+/* Le titre d'un groupe est un BOUTON : il renvoie à son îlot sur la carte,
+   parce que le geste évident quand on lit un nom en bas est de vouloir le voir
+   en haut. Il n'en a pas l'air pour autant — c'est un titre, pas une commande. */
 .mecatitre {
-  display: flex; align-items: center; gap: 9px;
+  display: flex; align-items: center; gap: 9px; text-align: left; width: 100%;
+  background: none; border: 0; padding: 0 0 3px;
   font-size: 11px; letter-spacing: .13em; text-transform: uppercase;
-  color: hsl(var(--p, 258) 55% 68%); margin-bottom: 3px;
+  color: hsl(var(--p, 258) 55% 68%);
+  transition: color .14s;
 }
+button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .mecatitre span {
   width: 6px; height: 6px; border-radius: 50%; flex: none;
   border: 1px solid currentColor;
 }
 .mecagroupe.seuls .mecatitre { color: var(--ink-faint); }
+
+/* ---------------------------------------------------------------------
+   LES DEUX MOITIÉS DE LA PAGE SE RÉPONDENT.
+
+   Elles avaient l'air de deux mondes : en haut des CHOSES — « Londres »,
+   « la weed » — en bas des MÉCANISMES, et rien qui montre que « dépendance »
+   écrit sur la toile et « dépendance » écrit sous la carte désignent le même
+   groupe. Même couleur, même nom, et pourtant deux listes.
+
+   Survoler l'un allume l'autre. C'est le seul geste qui prouve qu'ils parlent
+   de la même chose : on le voit, on n'a pas à le croire.
+   --------------------------------------------------------------------- */
+.mecagroupe { transition: opacity .18s ease; }
+.ilotvise .mecagroupe.eteint { opacity: .28; }
+@media (prefers-reduced-motion: reduce) { .mecagroupe { transition: none; } }
 
 /* ---- les pièces jointes ----
    Ce qu'on s'apprête à joindre, AU-DESSUS du champ : une pièce qu'on ne voit

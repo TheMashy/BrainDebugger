@@ -427,3 +427,44 @@ test('un nom absent de la carte ne rend rien plutôt qu’un objet vide', () => 
   assert.equal(poidsDuNoeud(LECT, 'fantôme'), null);
   assert.equal(poidsDuNoeud(null, 'Londres'), null);
 });
+
+/* ============ LA CARTE ET LA LISTE DÉSIGNENT LE MÊME ÎLOT ============ */
+
+test('l’index d’un îlot est celui de sa piste, filtrage compris', () => {
+  /*
+   * LE CONTRAT QUI TIENT LES DEUX MOITIÉS DE LA PAGE. Survoler un groupe de
+   * mécanismes allume son îlot sur la carte, et l'inverse — les deux se
+   * désignent par un NUMÉRO, celui de la piste. La liste le pose en
+   * `data-ilot` avec l'index du `forEach` sur les pistes ; la carte le pose en
+   * `ilot` sur chaque nœud et en `i` sur chaque enveloppe.
+   *
+   * `versGraphe` FILTRE les îlots qui n'ont aucun nœud. S'il renumérotait au
+   * passage, survoler « dépendance » en bas allumerait l'îlot d'à côté en
+   * haut — et personne ne verrait que c'est faux, puisque quelque chose
+   * s'allumerait quand même.
+   */
+  const pistes = [
+    { nom: 'sans le moindre nœud', noeuds: [] },            // celle qui sera filtrée
+    { nom: 'dépendance', noeuds: ['Léa', 'les nuits courtes'] },
+    { nom: 'vide au travail', noeuds: ['le dimanche soir'] }
+  ];
+  const G = versGraphe(CARTE, pistes);
+
+  // La première est absente des enveloppes, et les autres gardent LEUR index.
+  assert.deepEqual(G.ilots.map(a => [a.i, a.nom]),
+                   [[1, 'dépendance'], [2, 'vide au travail']]);
+  // Et chaque nœud pointe sur l'index de la piste qui le revendique.
+  assert.deepEqual(G.noeuds.map(n => n.ilot), [1, 1, 2]);
+  for (const n of G.noeuds) {
+    assert.ok(G.ilots.some(a => a.i === n.ilot),
+              `le nœud « ${n.nom} » vise un îlot que la carte ne dessine pas`);
+  }
+});
+
+test('le nom d’un îlot est celui de la piste, au caractère près', () => {
+  // C'est ce qui fait qu'on reconnaît le même groupe en haut et en bas. Une
+  // troncature, une majuscule ajoutée, et les deux moitiés se remettent à
+  // parler de deux choses.
+  const pistes = [{ nom: 'la peur d’être seul le soir', noeuds: ['Léa', 'les nuits courtes'] }];
+  assert.equal(versGraphe(CARTE, pistes).ilots[0].nom, 'la peur d’être seul le soir');
+});

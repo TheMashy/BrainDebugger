@@ -2606,8 +2606,16 @@ function mecaGroupes(lecture) {
     if (!dedans.length) return;
     for (const m of dedans) restant.delete(m.cle);
     const teinte = teintePiste(p, i);
-    bloc.push(`<div class="mecagroupe" style="--p:${teinte}">
-      <div class="mecatitre"><span></span>${esc(p.nom)}</div>
+    /*
+     * `data-ilot` : le NUMERO de la piste, celui que la carte emploie pour ses
+     * enveloppes. C'est le fil qui relie les deux moities de la page — survoler
+     * ce groupe allume son ilot sur la toile, et survoler un noeud de la toile
+     * allume ce groupe. Sans lui, la couleur commune est une coincidence qu'il
+     * faut croire sur parole.
+     */
+    bloc.push(`<div class="mecagroupe" style="--p:${teinte}" data-ilot="${i}">
+      <button class="mecatitre" data-ilot-voir="${i}"
+              title="Le montrer sur la carte"><span></span>${esc(p.nom)}</button>
       ${dedans.map(mecaMarkup).join('')}
     </div>`);
   });
@@ -2641,6 +2649,33 @@ let RELA = null, RELA_DISPO = null, RELA_SURVOL = -1;
 
 /** Le nœud dont on regarde le poids, ou null. Vidé en quittant « Ma carte ». */
 let NOEUD_OUVERT = null;
+
+/*
+ * L'ÎLOT VISÉ : ce qui rattache la carte à la liste d'en dessous.
+ *
+ * Elles avaient l'air de deux mondes. En haut des CHOSES — « Londres », « la
+ * weed » — en bas des MÉCANISMES, et rien qui montre que « dépendance » écrit
+ * sur la toile et « dépendance » écrit sous la carte désignent le même groupe.
+ * Même couleur, même nom, et pourtant deux listes.
+ *
+ * Survoler l'un allume l'autre, dans les deux sens. C'est le seul geste qui
+ * prouve qu'ils parlent de la même chose : on le voit, on n'a pas à le croire.
+ */
+let ILOT_VISE = null;
+
+function viserIlot(i) {
+  if (ILOT_VISE === i) return;
+  ILOT_VISE = i;
+  RELA_PEINDRE?.();
+  // La liste répond au même signal que la carte : le groupe visé garde son
+  // encre, les autres s'effacent — exactement ce que fait la toile au-dessus.
+  const v = $('#view');
+  if (!v) return;
+  v.classList.toggle('ilotvise', i != null);
+  for (const g of v.querySelectorAll('.mecagroupe')) {
+    g.classList.toggle('eteint', i != null && Number(g.dataset.ilot) !== i);
+  }
+}
 
 /*
  * CE QU'UN NOEUD PESE, quand on clique dessus.
@@ -2792,7 +2827,7 @@ function monterCarte(carte, pistes = []) {
       attente = 0;
       dessinerRelations(cv.getContext('2d'), RELA, RELA_DISPO,
         { largeur: L, hauteur: H, survol: RELA_SURVOL, dpr, vue: RELA_VUE, jourSurvol: RELA_JOUR,
-          pudique: !!S.settings?.pudique });
+          pudique: !!S.settings?.pudique, ilotVise: ILOT_VISE });
     });
   };
 
@@ -2811,6 +2846,9 @@ function monterCarte(carte, pistes = []) {
                   && (RELA_JOUR?.noeud ?? -1) === (j?.noeud ?? -1);
     if (i === RELA_SURVOL && memeJour) return;
     RELA_SURVOL = i; RELA_JOUR = j;
+    // Survoler une chose allume le groupe auquel elle appartient, en bas de
+    // page : c'est la même lecture, vue de deux façons.
+    viserIlot(i >= 0 ? (RELA?.noeuds?.[i]?.ilot ?? null) : null);
     // Le doigt sur une journee ET sur un noeud : les deux s'ouvrent maintenant.
     // Un noeud qui s'allume au survol sans rien promettre etait l'inverse du
     // probleme -- il avait l'air cliquable et ne l'etait pas.
@@ -2861,7 +2899,7 @@ function monterCarte(carte, pistes = []) {
   cv.addEventListener('pointercancel', () => { tire = null; cv.style.cursor = 'grab'; });
   cv.addEventListener('mouseleave', () => {
     if (tire) return;
-    RELA_SURVOL = -1; RELA_JOUR = null; peindre();
+    RELA_SURVOL = -1; RELA_JOUR = null; viserIlot(null); peindre();
   }, { passive: true });
 
   /* ---- la molette ---- */
@@ -3025,6 +3063,7 @@ async function renderLecture() {
   </div>`;
 
   wireLecture();
+  wireIlots();
   monterCarte(L.lecture?.carte, L.lecture?.pistes ?? []);
 
   // « elle doit toujours faire de l'analyse de fond » : si elle manque, on la
@@ -3067,6 +3106,31 @@ async function lancerLecture() {
   }
 }
 
+/**
+ * LES DEUX MOITIES DE LA PAGE SE REPONDENT.
+ *
+ * On survole un groupe de mecanismes : son ilot s'allume sur la carte, les
+ * autres s'eteignent. On survole un noeud de la carte : son groupe s'allume en
+ * bas. C'est le meme signal dans les deux sens, et c'est ce qui fait qu'on
+ * arrete de voir deux listes pour voir une seule lecture.
+ *
+ * Sur `#view` et non sur chaque groupe : la vue est reconstruite a chaque
+ * rendu, et poser un ecouteur par groupe a chaque fois les empile.
+ */
+function wireIlots() {
+  const v = $('#view');
+  if (!v) return;
+  const lire = e => {
+    const g = e.target.closest?.('.mecagroupe[data-ilot]');
+    viserIlot(g ? Number(g.dataset.ilot) : null);
+  };
+  v.addEventListener('pointerover', lire);
+  // Le clavier suit la souris : c'est la meme information, et une carte qu'on
+  // ne peut allumer qu'au survol n'existe pas pour qui navigue au clavier.
+  v.addEventListener('focusin', lire);
+  v.addEventListener('pointerleave', () => viserIlot(null));
+}
+
 function wireLecture() {
   $('#view').onclick = async e => {
     // Le panneau d'un nœud : le refermer, aller à un nœud voisin, ou descendre
@@ -3074,6 +3138,14 @@ function wireLecture() {
     if (e.target.closest('[data-noeud-fermer]')) { NOEUD_OUVERT = null; return renderLecture(); }
     const na = e.target.closest('[data-noeud-aller]');
     if (na) { NOEUD_OUVERT = na.dataset.noeudAller; return renderLecture(); }
+    const iv = e.target.closest('[data-ilot-voir]');
+    if (iv) {
+      // Le titre d'un groupe renvoie a la carte : c'est le meme ilot, et le
+      // geste evident quand on lit un nom en bas est de vouloir le voir en haut.
+      viserIlot(Number(iv.dataset.ilotVoir));
+      $('#view').querySelector('.cartewrap')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
     const pv = e.target.closest('[data-piste-voir]');
     if (pv) {
       // On ne referme PAS le panneau : on veut pouvoir lire les mécanismes en
