@@ -122,7 +122,30 @@ a { color: var(--accent); }
 /* Le nom du decor. Le plus petit texte de la page, en bas a gauche : on ne le
    lit pas, on le remarque -- ce qui est exactement le statut qu'on veut lui
    donner. */
+/* ---------------------------------------------------------------------
+   LE RAIL SE TAIT DANS PARLER.
+
+   Il était « constant d'une vue à l'autre », et c'était la bonne règle tant
+   qu'il ne portait qu'une identité. Il a fini par porter le nom du produit, le
+   compte de jours, la dernière phrase du compagnon RECOPIÉE sous son portrait,
+   et le nom du décor — quatre choses à lire à gauche d'un écran où l'on vient
+   écrire une phrase. Dans Parler il ne reste que la bestiole ; ailleurs, tout
+   revient : ce sont des vues qu'on lit, pas des vues où l'on parle.
+   --------------------------------------------------------------------- */
+.shell[data-vue="tonight"] .brand,
+.shell[data-vue="tonight"] .petsay { display: none; }
+
 .ambianceread { display: flex; flex-direction: column; gap: 3px; }
+/* Le nom du décor n'apparaît que quand il CHANGE : c'est le fond qu'on regarde,
+   sa légende affichée en permanence est une étiquette collée sur un tableau.
+   Elle sert une fois, au moment de la bascule, pour qu'on sache que ce n'est
+   pas le hasard. */
+.ambianceread.passager {
+  opacity: 0; pointer-events: none;
+  transition: opacity 1.2s ease;
+}
+.ambianceread.passager.la { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .ambianceread.passager { transition: none; } }
 .ambianceread .k {
   font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-faint);
 }
@@ -306,11 +329,14 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
 
 /* ---------- le fil ---------- */
 
+/* « Nouveau fil » n'est plus une ligne de tableau de bord : un mot, en retrait,
+   qui n'existe que s'il y a un fil à quitter. */
 .newchat {
-  background: none; border: 0; padding: 0; margin-left: auto;
+  flex: none; align-self: flex-end; background: none; border: 0; padding: 0 0 2px;
   font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
-  transition: color .14s;
+  opacity: .5; transition: color .14s, opacity .14s;
 }
+.newchat:hover:not(:disabled) { opacity: 1; }
 .newchat:hover:not(:disabled) { color: var(--ink-dim); background: none; }
 .newchat:disabled { opacity: .4; }
 
@@ -807,10 +833,60 @@ input[type=date] { color-scheme: dark; }
 .notecard .ritual { margin-left: auto; font-size: 12.5px; color: var(--ink-faint); }
 @media (max-width: 560px) { .notecard .ritual { margin-left: 0; flex-basis: 100%; } }
 
-/* La note du soir, en bas du panneau. Une ligne de titres minuscules, un
-   chiffre, une bande. Plus de carte autour : le fil et la note vivent sur la
-   meme page, separes par un filet et pas par deux cadres. */
-.notecard { flex: 0 0 auto; padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--line-soft); }
+/* ---------------------------------------------------------------------
+   LE PIED DE PARLER : trois états, dont deux sont vides ou presque.
+
+   Il portait en permanence « note avant de te coucher », la référence, la
+   rangée des journées non notées, « nouveau fil » et onze pastilles de
+   couleur — la chose la plus lumineuse de la page, sous une conversation
+   éventuellement difficile. Chaque élément se justifiait seul ; ensemble ils
+   formaient un tableau de bord autour de l'endroit où l'on vient parler.
+
+   La règle appliquée ici : rien ne reste à l'écran pour le cas où l'on en
+   aurait besoin. Ce qui a quelque chose à dire apparaît, puis s'en va.
+   --------------------------------------------------------------------- */
+.pied {
+  flex: 0 0 auto; display: flex; align-items: flex-end; gap: 18px;
+  min-height: 26px; margin-top: 14px;
+}
+.pied > .notecard { flex: 1 1 auto; }
+.pied > .notedite { flex: 1 1 auto; }
+
+/* Ce qui vient d'être noté, et où c'est parti. Sans cette phrase on n'aurait
+   pas simplifié l'écran, on aurait caché une commande. */
+/* UNE APPARITION NE DOIT JAMAIS POUVOIR CACHER CE QU'ELLE APPORTE.
+   Écrite en `animation: … both` depuis `from { opacity: 0 }`, elle laisse le
+   texte invisible dès qu'elle ne progresse pas — un rendu qui la relance, un
+   moteur qui la met en pause — et on obtient une phrase présente dans le DOM,
+   cliquable pour personne. On part donc de l'état LISIBLE et on anime vers lui :
+   au pire, la phrase apparaît sans transition. */
+.notedite {
+  margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-faint);
+  opacity: 1; animation: notedite-vient .32s ease-out;
+}
+.notedite b { color: var(--ink-dim); font-weight: 500; }
+.notedite.sen-va { opacity: 0; transition: opacity .6s ease-in; }
+@keyframes notedite-vient { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .notedite { animation: none; }
+  .notedite.sen-va { transition: none; }
+}
+/* Le mot « Année » avec son dessin : des journées en cases, ce qu'on va
+   littéralement y voir. L'icône n'a donc rien à apprendre à personne. */
+.versannee {
+  display: inline-flex; align-items: center; gap: 5px; vertical-align: -2px;
+  background: none; border: 0; padding: 0 1px;
+  font-size: 12.5px; color: var(--ink-dim);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink-dim) 35%, transparent);
+}
+.versannee:hover { color: var(--accent); background: none; border-bottom-color: var(--accent); }
+.versannee svg { opacity: .75; }
+
+/* La note du soir, quand elle est en retard. Une ligne de titre minuscule et
+   une bande — le grand chiffre et sa phrase ont disparu : on clique une
+   pastille, la carte s'en va, et l'ancrage est déjà dans chaque infobulle. */
+.notecard { padding-top: 16px; border-top: 1px solid var(--line-soft); opacity: 1; animation: notedite-vient .3s ease-out; }
+@media (prefers-reduced-motion: reduce) { .notecard { animation: none; } }
 .noteline { display: flex; align-items: baseline; gap: 14px; }
 .noteline .k {
   font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-faint);
@@ -829,7 +905,7 @@ input[type=date] { color-scheme: dark; }
 .noteface .say { font-size: 14px; color: var(--ink-dim); max-width: 34ch; }
 .noteface .say b { color: var(--ink); font-weight: 600; }
 
-.notestrip { display: flex; gap: 4px; max-width: 620px; }
+.notestrip { display: flex; gap: 4px; max-width: 620px; margin-top: 10px; }
 .notestrip button {
   flex: 1 1 0; min-width: 0; height: clamp(34px, 3.4vw, 42px); border-radius: 4px;
   border: 1px solid transparent; font-family: var(--mono); font-size: 15px; font-weight: 600;
@@ -1554,14 +1630,17 @@ button.bignum:hover { opacity: .82; }
    silence. Le point sous un jour dit qu'on a écrit ce jour-là sans le noter —
    c'est celui-là qu'on veut rattraper en premier.
    -------------------------------------------------------------------- */
-.manques { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -2px 0 10px; }
+/* Le retard, en une ligne de jours. Le fond plein en faisait une rangée de
+   boutons — sept pavés clairs sous une conversation. Contourés, ils disent la
+   même chose sans la réclamer : cette ligne constate, elle ne demande rien. */
+.manques { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; }
 .manques .k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; margin-right: 2px; }
 .manques button {
-  position: relative; background: var(--panel-2); border: 1px solid var(--line-soft);
-  color: var(--ink-dim); border-radius: 7px; padding: 3px 9px 4px;
-  font-size: 11.5px; white-space: nowrap;
+  position: relative; background: none; border: 1px solid var(--line-soft);
+  color: var(--ink-faint); border-radius: 7px; padding: 3px 9px 4px;
+  font-size: 11.5px; white-space: nowrap; transition: color .13s, border-color .13s;
 }
-.manques button:hover { border-color: var(--line); color: var(--ink); }
+.manques button:hover { border-color: var(--line); color: var(--ink); background: none; }
 .manques button[aria-pressed="true"] {
   border-color: var(--accent-dk); color: var(--accent); background: var(--surface);
 }

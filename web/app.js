@@ -258,6 +258,75 @@ const pudMarkup = () => `<button class="pudbtn" data-bascule-pudique aria-presse
  */
 let NOTE_JOUR = null;
 
+/*
+ * PARLER NE MONTRE QUE CE QU'IL FAUT MONTRER MAINTENANT.
+ *
+ * L'ecran portait en permanence : le fil, le composeur, « note avant de te
+ * coucher », la reference, la rangee des journees non notees, le bouton
+ * « nouveau fil », et une echelle de onze pastilles colorees en bas. Plus, dans
+ * le rail, le nom du produit, le compte de jours, la derniere phrase du
+ * compagnon recopiee sous son portrait, et le nom du decor.
+ *
+ * C'est un ecran ou l'on vient PARLER. Tout le reste est du mobilier : chaque
+ * element se justifiait seul, et ensemble ils formaient un tableau de bord
+ * autour d'une conversation. L'echelle de notes surtout -- onze pavés de
+ * couleur, la chose la plus lumineuse de la page, sous une conversation
+ * eventuellement difficile.
+ *
+ * La regle appliquee ici : rien ne reste a l'ecran pour le cas ou l'on en
+ * aurait besoin. Ce qui a quelque chose a dire APPARAIT, puis s'en va.
+ */
+
+/** L'heure a laquelle « avant de te coucher » commence a vouloir dire quelque chose. */
+const HEURE_DU_SOIR = 20;
+
+/*
+ * Combien de temps « c'est note » reste a l'ecran.
+ *
+ * Assez pour lire une phrase ET decider d'aller changer sa note : le lien
+ * qu'elle porte doit pouvoir etre clique, sinon autant ne pas le mettre. Six
+ * secondes suffisaient a la lire et pas a s'en servir.
+ */
+const DUREE_NOTEDITE = 11000;
+
+/*
+ * OU VA LA NOTE QUAND ELLE QUITTE CET ECRAN.
+ *
+ * Retirer l'echelle de Parler n'a de sens que si l'on dit ou elle se retrouve.
+ * Sans ca on ne l'a pas simplifie, on l'a cache -- et quelqu'un qui voudrait
+ * corriger sa note chercherait sans savoir ou.
+ *
+ * La grille est le dessin d'Annee : des journees en cases, chacune de la
+ * couleur de sa note. C'est litteralement ce qu'on va y voir, donc l'icone n'a
+ * rien a apprendre a personne.
+ */
+const GLYPHE_ANNEE = `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"
+  aria-hidden="true"><rect x="1" y="1" width="3.4" height="3.4" rx=".8"/><rect x="6.3" y="1" width="3.4" height="3.4" rx=".8"/><rect x="11.6" y="1" width="3.4" height="3.4" rx=".8" opacity=".45"/><rect x="1" y="6.3" width="3.4" height="3.4" rx=".8" opacity=".45"/><rect x="6.3" y="6.3" width="3.4" height="3.4" rx=".8"/><rect x="11.6" y="6.3" width="3.4" height="3.4" rx=".8"/><rect x="1" y="11.6" width="3.4" height="3.4" rx=".8"/><rect x="6.3" y="11.6" width="3.4" height="3.4" rx=".8" opacity=".45"/><rect x="11.6" y="11.6" width="3.4" height="3.4" rx=".8"/></svg>`;
+
+const lienAnnee = () =>
+  `<button class="versannee" data-vers-annee>${GLYPHE_ANNEE}Année</button>`;
+
+/**
+ * La note se demande quand elle est EN RETARD, pas en permanence.
+ *
+ * Trois cas, et un seul d'entre eux est frequent :
+ *   - on vise expressement une journee passee (on est venu pour ca) ;
+ *   - des journees passees n'ont pas ete notees -- c'est le vrai retard ;
+ *   - c'est le soir et aujourd'hui n'est pas notee.
+ *
+ * En dehors de ca, l'ecran ne demande rien. Une echelle de notes affichee tout
+ * l'apres-midi n'est pas un rappel, c'est un meuble.
+ */
+function noteEnRetard({ hier, manques, note, heure }) {
+  if (hier) return true;
+  if (manques.length) return true;
+  return note === null && heure >= HEURE_DU_SOIR;
+}
+
+/* Ce qui vient d'etre note : de quoi remplacer la carte par une phrase, le
+   temps qu'on la lise. Remis a zero a chaque rendu complet de la vue. */
+let NOTE_DITE = null;
+
 async function renderTonight() {
   const t = NOTE_JOUR ?? S.today;
   const hier = t !== S.today;
@@ -266,6 +335,7 @@ async function renderTonight() {
   const note = hier ? null : (S.entry?.note ?? null);
   const s = S.settings;
   const manques = S.stats.aNoter ?? [];
+  const demande = noteEnRetard({ hier, manques, note, heure: new Date().getHours() });
   $('#view').innerHTML = `
     <div class="tonight">
       <div class="thread" id="thread"></div>
@@ -296,41 +366,50 @@ async function renderTonight() {
         </button>
       </div>
 
-      <div class="notecard${hier ? ' rattrape' : ''}">
-        <div class="noteline">
-          <span class="k">${hier ? `Tu notes le ${fmtDay(t)}` : 'Note avant de te coucher'}</span>
-          ${hier ? `<button class="retourjour" data-notejour="">revenir à aujourd'hui</button>` : ''}
-          ${S.stats.reference !== null
-            ? `<span class="ref">référence <b class="mono">${S.stats.reference}</b></span>` : ''}
-          <button class="newchat" id="newChat" title="Repartir sur un fil vide. Rien n'est effacé : tes journées restent dans le journal.">Nouveau&nbsp;fil</button>
-        </div>
+      ${/* LE PIED : trois etats, et deux d'entre eux sont vides ou presque.
+             Il ne porte JAMAIS les trois en meme temps. */''}
+      <div class="pied">
+        ${NOTE_DITE ? `<p class="notedite">
+          <b>${esc(NOTE_DITE)}</b> — c'est noté. Pour la changer : ${lienAnnee()}
+        </p>` : demande ? `<div class="notecard${hier ? ' rattrape' : ''}">
+          ${/*
+             * TROIS CAS, ET L'ECHELLE N'APPARAIT QUE DANS DEUX.
+             *
+             * Elle s'affichait toujours, et sur une journee deja notee au
+             * milieu d'un rattrapage elle disait la note d'AUJOURD'HUI sous un
+             * titre qui parlait d'hier : onze pastilles pour un jour dont il
+             * n'etait pas question. Le retard se dit donc d'abord en journees,
+             * et l'echelle n'arrive qu'une fois qu'on a designe laquelle.
+             */''}
+          ${hier || !manques.length ? `<div class="noteline">
+            <span class="k">${hier ? `Tu notes le ${fmtDay(t)}` : 'Note avant de te coucher'}</span>
+            ${hier ? `<button class="retourjour" data-notejour="">revenir à aujourd'hui</button>` : ''}
+          </div>
 
-        ${/* Les jours manqués. Ils n'apparaissent que s'il y en a — une rangée
-              permanente de cases vides serait un reproche quotidien, et ce
-              produit ne relance pas les jours de silence. */''}
-        ${manques.length ? `<div class="manques">
-          <span class="k faint">non notés</span>
-          ${manques.map(m => `<button data-notejour="${m.date}"
-            aria-pressed="${t === m.date}"
-            title="${m.ecrit ? 'Tu as écrit ce jour-là, sans le noter.' : 'Rien pour ce jour-là.'}"
-            >${fmtJourCourt(m.date)}${m.ecrit ? '<i></i>' : ''}</button>`).join('')}
+          <div class="notestrip" id="notestrip">
+            ${Array.from({ length: 11 }, (_, n) => {
+              const c = noteScaleRGB(n);
+              const on = note === n;
+              return `<button data-n="${n}" aria-pressed="${on}" style="background:rgb(${c})"
+                data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
+            }).join('')}
+          </div>` : `<div class="manques">
+            ${/* Le retard, en une ligne de jours. On en designe un, l'echelle
+                  arrive dessous, et elle repart avec lui. Ce produit ne relance
+                  pas les jours de silence : la ligne dit ce qui manque, elle ne
+                  demande rien. */''}
+            <span class="k faint">non notés</span>
+            ${manques.map(m => `<button data-notejour="${m.date}"
+              title="${m.ecrit ? 'Tu as écrit ce jour-là, sans le noter.' : 'Rien pour ce jour-là.'}"
+              >${fmtJourCourt(m.date)}${m.ecrit ? '<i></i>' : ''}</button>`).join('')}
+          </div>`}
         </div>` : ''}
 
-        <div class="noteface">
-          <div class="val" id="noteVal" style="${noteFaceStyle(note)}">
-            ${note ?? '—'}<span class="sl">/10</span>
-          </div>
-          <div class="say" id="noteSay">${noteSay(note)}</div>
-        </div>
-
-        <div class="notestrip" id="notestrip">
-          ${Array.from({ length: 11 }, (_, n) => {
-            const c = noteScaleRGB(n);
-            const on = note === n;
-            return `<button data-n="${n}" aria-pressed="${on}" style="background:rgb(${c})"
-              data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
-          }).join('')}
-        </div>
+        ${/* « Nouveau fil » n'est plus une ligne de tableau de bord : c'est un
+              mot, en retrait, qui n'existe que s'il y a un fil a quitter. */''}
+        <button class="newchat" id="newChat"${S.messages?.length ? '' : ' hidden'}
+                title="Repartir sur un fil vide. Rien n'est effacé : tes journées restent dans le journal."
+        >nouveau fil</button>
       </div>
     </div>`;
 
@@ -359,7 +438,8 @@ async function renderTonight() {
     }
   });
 
-  $('#notestrip').onclick = async e => {
+  const strip = $('#notestrip');
+  if (strip) strip.onclick = async e => {
     const b = e.target.closest('button[data-n]');
     if (!b) return;
     const n = Number(b.dataset.n);
@@ -373,8 +453,33 @@ async function renderTonight() {
       const reste = (S.stats.aNoter ?? []).filter(m => m.date !== t);
       NOTE_JOUR = reste.length ? reste[0].date : null;
     }
+    /*
+     * LA NOTE POSEE, LA CARTE S'EN VA.
+     *
+     * Elle est remplacee par une phrase, le temps qu'on la lise, qui dit ou la
+     * note est allee et par ou la changer. Sans cette phrase on n'aurait pas
+     * simplifie l'ecran, on aurait cache une commande -- et il n'y a pas de
+     * pire simplification que celle qui laisse quelqu'un chercher.
+     *
+     * Elle ne s'affiche pas s'il reste des journees a rattraper : ce serait
+     * annoncer la fin d'un geste qu'on est en train de faire.
+     */
+    const reste = (S.stats.aNoter ?? []).length || (NOTE_JOUR !== null);
+    NOTE_DITE = reste ? null : `${hier ? fmtDay(t) : "Aujourd'hui"} · ${n}/10`;
     renderTonight();
-    toast(`${hier ? fmtDay(t) : 'Journée'} notée ${n}/10`);
+    if (!reste) {
+      // Puis elle part aussi. L'ecran redevient une conversation et rien d'autre.
+      setTimeout(() => {
+        if (NOTE_DITE === null || view !== 'tonight') return;
+        // On relit l'element au moment ou l'on s'en sert : celui capture avant
+        // le rendu appartient au DOM d'avant, et poser une classe dessus ne
+        // ferait rien du tout.
+        $('.notedite')?.classList.add('sen-va');
+        setTimeout(() => { NOTE_DITE = null; if (view === 'tonight') renderTonight(); }, 700);
+      }, DUREE_NOTEDITE);
+    } else {
+      toast(`${hier ? fmtDay(t) : 'Journée'} notée ${n}/10`);
+    }
   };
 
   /*
@@ -386,8 +491,9 @@ async function renderTonight() {
    * redessine trois fois — le bouton qu'on venait de viser est détaché du DOM
    * avant que son propre clic soit traité.
    */
-  const carte = $('.notecard');
-  if (carte) carte.onclick = e => {
+  const pied = $('.pied');
+  if (pied) pied.onclick = e => {
+    if (e.target.closest('[data-vers-annee]')) { NOTE_DITE = null; return go('year'); }
     const j = e.target.closest('[data-notejour]');
     if (!j) return;
     NOTE_JOUR = j.dataset.notejour || null;
@@ -4037,6 +4143,19 @@ function syncNav() {
   }
   const t = $('#viewName');
   if (t) t.innerHTML = `${esc(NOM_VUE[view] ?? '')}<span class="glyphe" id="viewGlyphe"></span>`;
+  /*
+   * LE RAIL SE TAIT DANS PARLER.
+   *
+   * Il était « constant d'une vue à l'autre », et c'était la bonne règle tant
+   * qu'il ne portait qu'une identité. Il a fini par porter le nom du produit,
+   * le compte de jours, la dernière phrase du compagnon RECOPIÉE sous son
+   * portrait, et le nom du décor — quatre choses à lire à gauche d'un écran où
+   * l'on vient écrire une phrase.
+   *
+   * Dans Parler il ne reste que la bestiole. Ailleurs, tout revient : ce sont
+   * des vues qu'on lit, pas des vues où l'on parle.
+   */
+  document.querySelector('.shell')?.setAttribute('data-vue', view);
   syncAmbianceRail();
 }
 
@@ -4048,6 +4167,9 @@ function syncNav() {
  * personne -- c'est la règle qui tient depuis le premier jour. La différence
  * n'est pas cosmétique : un décor, on le regarde ; une étiquette, on la porte.
  */
+/* La derniere scene affichee, et le minuteur qui la fait disparaitre. */
+let AMB_VUE = null, AMB_MINUTEUR = 0;
+
 const NOM_SCENE = {
   drift: 'Neutre', brume: 'Brume', abyss: 'Abysse', eclipse: 'Éclipse',
   voidwell: 'Vide', monolith: 'Monolithe', grain: 'Grain', mandel: 'Récursif'
@@ -4089,6 +4211,27 @@ function syncAmbianceRail() {
   const el = $('#ambianceRead');
   if (!el) return;
   el.hidden = false;
+  /*
+   * DANS PARLER, LE NOM DU DÉCOR N'APPARAÎT QUE QUAND IL CHANGE.
+   *
+   * C'est le fond lui-même qu'on est censé regarder ; sa légende affichée en
+   * permanence à côté est une étiquette collée sur un tableau. Elle sert
+   * pourtant, une fois : au moment où la scène bascule, pour qu'on sache que ce
+   * n'est pas le hasard. Elle se montre donc quelques secondes, puis s'en va —
+   * et reste affichée en clair dans les autres vues, où rien ne se joue.
+   */
+  if (view === 'tonight') {
+    const neuf = scene !== AMB_VUE;
+    AMB_VUE = scene;
+    el.classList.toggle('passager', true);
+    el.classList.toggle('la', neuf);
+    if (neuf) {
+      clearTimeout(AMB_MINUTEUR);
+      AMB_MINUTEUR = setTimeout(() => el.classList.remove('la'), 7000);
+    }
+  } else {
+    el.classList.remove('passager', 'la');
+  }
   const sens = S?.ambiance?.sens ?? null;
   el.innerHTML = `<span class="k">Ambiance</span>
     <span class="v">${esc(nom)}${glypheMarkup(scene)}</span>
