@@ -478,7 +478,8 @@ export function cadrer(pts, largeur, hauteur, mx = 62, my = 38) {
 const masquer = t => String(t).replace(/[^\s]/gu, '\u2022');
 
 export function dessinerRelations(ctx, G, dispo,
-    { largeur, hauteur, survol = -1, dpr = 1, vue = null, jourSurvol = null, pudique = false }) {
+    { largeur, hauteur, survol = -1, dpr = 1, vue = null, jourSurvol = null, pudique = false,
+      ilotVise = null }) {
   const mot = t => (pudique ? masquer(t) : t);
   const v = vue ?? vueNeutre();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -532,17 +533,40 @@ export function dessinerRelations(ctx, G, dispo,
     ilots.push({ ...a, bord, cx, haut });
   }
 
+  /*
+   * UN ILOT VISE : la carte et la liste d'en dessous sont le meme objet.
+   *
+   * Elles avaient l'air de deux mondes. En haut des choses -- « Londres », « la
+   * weed » -- en bas des mecanismes, et rien qui montre que « depend    ance »
+   * ecrit sur la toile et « depend  ance » ecrit sous la carte designent le
+   * meme groupe. Meme couleur, meme nom, et pourtant deux listes.
+   *
+   * Quand on survole un groupe de mecanismes, son ilot s'allume sur la carte et
+   * les autres s'eteignent -- et inversement. C'est le seul geste qui prouve
+   * que les deux parlent de la meme chose : on le voit, on n'a pas a le croire.
+   */
+  const focalise = ilotVise != null;
+  const eteint = a => focalise && a.i !== ilotVise;
+  // Un noeud EN DEHORS de l'ilot vise s'efface avec le reste : sans ca, la
+  // moitie de la carte reste a pleine encre autour d'un groupe qu'on vient de
+  // designer, et on ne voit pas ce qu'on a designe.
+  const dedans = i => !focalise || G.noeuds[i]?.ilot === ilotVise;
+
   /* --- l'enveloppe des ilots, sous tout le reste --- */
-  if (aIlot > 0.02) {
+  if (aIlot > 0.02 || focalise) {
     for (const a of ilots) {
+      // Un ilot vise reste a pleine encre quel que soit le zoom : on vient de
+      // le designer, l'effacer parce qu'on est proche serait repondre a cote.
+      const f = eteint(a) ? aIlot * 0.25 : (a.i === ilotVise ? 1 : aIlot);
+      if (f < 0.02) continue;
       tracer(ctx, a.bord);
-      ctx.fillStyle = `hsl(${a.teinte} 60% 58% / ${(0.085 * aIlot).toFixed(3)})`;
+      ctx.fillStyle = `hsl(${a.teinte} 60% 58% / ${(0.085 * f * (a.i === ilotVise ? 2.1 : 1)).toFixed(3)})`;
       ctx.fill();
       // CONTOUR POINTILLE, jamais plein : un ilot est DECLARE par le modele,
       // et la regle de couleur du produit tient jusqu'ici.
-      ctx.globalAlpha = 0.45 * aIlot;
+      ctx.globalAlpha = 0.45 * f;
       ctx.strokeStyle = `hsl(${a.teinte} 60% 62%)`;
-      ctx.lineWidth = 1 / v.k;
+      ctx.lineWidth = (a.i === ilotVise ? 1.6 : 1) / v.k;
       ctx.setLineDash([5 / v.k, 7 / v.k]);
       tracer(ctx, a.bord);
       ctx.stroke();
@@ -554,7 +578,8 @@ export function dessinerRelations(ctx, G, dispo,
   /* --- les liens --- */
   for (const l of G.liens) {
     const a = pts[l.s], b = pts[l.t];
-    const actif = survol < 0 || l.s === survol || l.t === survol;
+    const actif = (survol < 0 || l.s === survol || l.t === survol)
+      && (dedans(l.s) || dedans(l.t));
     // Une courbe et pas un segment : deux droites qui se croisent font un
     // schema, deux courbes font un tissu.
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -607,7 +632,7 @@ export function dessinerRelations(ctx, G, dispo,
   /* --- les noeuds : des anneaux, parce que tout ceci est declare --- */
   for (let i = 0; i < G.noeuds.length; i++) {
     const n = G.noeuds[i], p = pts[i];
-    const actif = survol < 0 || proches.has(i);
+    const actif = (survol < 0 || proches.has(i)) && dedans(i);
     const r = RAYON(n);
     const c = couleur(n.genre, actif ? 66 : 52);
 
@@ -786,14 +811,31 @@ export function dessinerRelations(ctx, G, dispo,
       const w = brut * k;
       const lo = g0 + w / 2 + marge, hi = g1 - w / 2 - marge;
       const cx = lo > hi ? (g0 + g1) / 2 : Math.max(lo, Math.min(hi, a.cx));
-      let y = a.haut - 12 / v.k;
-      for (let garde = 0; garde < 12; garde++) {
-        const heurte = poses.find(o => Math.abs(y - o.y) < ligne
-          && Math.abs(cx - o.cx) < (w + o.w) / 2 + 12 / v.k);
-        if (!heurte) break;
-        y = heurte.y - ligne;
+
+      /*
+       * ON EMPILE VERS LE HAUT, PUIS VERS LE BAS S'IL N'Y A PLUS DE PLACE.
+       *
+       * On n'empilait que vers le haut, et on ramenait ensuite chaque titre
+       * dans le cadre par un `Math.max`. Trois ilots dont les sommets arrivent
+       * pres du bord haut -- le cas normal, puisqu'ils partagent le cadre --
+       * remontaient donc tous les trois au-dela du bord, puis retombaient
+       * exactement sur la meme ligne : le rattrapage annulait l'empilement, et
+       * on lisait « VIDE AU TRAVAILSTRUCTIODEPENDANCE ».
+       *
+       * Le plancher est donc pris en compte PENDANT la recherche, pas apres :
+       * quand il n'y a plus de place au-dessus, on redescend.
+       */
+      const plafond = hautVu + ligne / 2 + marge;
+      const heurte = z => poses.find(o => Math.abs(z - o.y) < ligne
+        && Math.abs(cx - o.cx) < (w + o.w) / 2 + 12 / v.k);
+      let y = Math.max(a.haut - 12 / v.k, plafond);
+      for (let garde = 0; garde < 16; garde++) {
+        const h = heurte(y);
+        if (!h) break;
+        // Au-dessus tant qu'on peut, en dessous sinon.
+        y = h.y - ligne >= plafond ? h.y - ligne : h.y + ligne;
       }
-      poses.push({ t, w, k, y: Math.max(y, hautVu + ligne / 2 + marge), cx, teinte: a.teinte });
+      poses.push({ t, w, k, y, cx, teinte: a.teinte });
     }
 
     ctx.globalAlpha = aIlot;

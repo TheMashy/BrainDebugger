@@ -409,11 +409,37 @@ dit « les remontées ne tiennent pas trois jours » ; une piste dit ce vers quo
 cinq thèmes à la fois — et elle ne vaut d'être écrite que si elle regroupe VRAIMENT
 plusieurs d'entre eux.
 
+LE NOM D'UNE PISTE EST COURT ET IL NOMME LA CHOSE. Un à trois mots, pas une formule.
+C'est le titre écrit au-dessus d'un groupe sur sa carte : il doit se lire d'un coup d'œil
+et se reconnaître immédiatement.
+
+  BIEN : « dépendance ». « autodestruction ». « vide au travail ». « traumatisme
+  d'enfance ». « trouble du sommeil ». « la peur de décevoir ».
+
+  MAL : « dépendance chimique du fonctionnement social ». « vide de sens autour du
+  travail ». « instabilité émotionnelle et autodestruction ». Ce sont des phrases. Elles
+  décrivent au lieu de nommer, elles ne tiennent pas au-dessus d'un groupe, et à la
+  lecture on ne retient rien. Ce que la formule ajoutait, mets-le dans « quoi » — c'est
+  exactement à ça que ce champ sert.
+
 Ici, et seulement ici, tu peux employer le mot le plus juste même s'il est clinique :
-dépression, hyperactivité, dépendance, traumatisme d'enfance, trouble du sommeil, problème
-de libido, deuil. Employer un mot vague pour ne pas dire celui qu'on pense, c'est laisser
-quelqu'un chercher pendant des années ce qu'on aurait pu nommer. Une piste n'est pas
-forcément clinique, d'ailleurs : « la peur de décevoir » est une piste.
+dépression, dépendance, hyperactivité, traumatisme d'enfance, trouble du sommeil,
+autodestruction, deuil. Employer un mot vague pour ne pas dire celui qu'on pense, c'est
+laisser quelqu'un chercher pendant des années ce qu'on aurait pu nommer. Une piste n'est
+pas forcément clinique, d'ailleurs : « la peur de décevoir » est une piste.
+
+CE QUI FAIT UNE PISTE : un problème, ou un fonctionnement qui coince. Pas un thème de la
+vie. « le travail », « les amis », « le sommeil » sont des rubriques ; « vide au travail »,
+« isolement », « trouble du sommeil » sont des pistes, parce qu'on peut dire ce qui ne va
+pas dedans.
+
+LA DÉPENDANCE EST UNE PISTE À ELLE SEULE, dès qu'il y a plusieurs nœuds de genre
+« dependance » sur la carte. Elle s'appelle « dépendance », et elle les rassemble TOUS —
+l'alcool, le cannabis, les anxiolytiques, l'écran, le jeu, quelqu'un. Les répartir entre
+plusieurs pistes parce qu'ils servent à des choses différentes est l'erreur à ne pas faire :
+ce qui saute aux yeux d'une carte, c'est justement qu'ils sont plusieurs et qu'ils sont là
+ensemble. Ce qui les entoure — ce qu'ils éteignent, ce qui les déclenche — se dit par les
+LIENS, pas en les dispersant.
 
 Mais une piste est une DIRECTION À EXPLORER, pas un état. Ce n'est pas la même chose, et
 toute la différence est dans ce que tu fournis avec :
@@ -432,6 +458,12 @@ toute la différence est dans ce que tu fournis avec :
     d'eux. Un nœud n'appartient qu'à une piste — s'il pourrait aller dans deux, mets-le dans
     celle qui l'explique le mieux. Un nœud qui n'appartient à aucune piste reste seul sur la
     carte, et c'est très bien : tout n'a pas à entrer dans une case.
+
+    SOIS GÉNÉREUX ICI. La carte et la liste des thèmes sont la même lecture vue de deux
+    façons, et c'est l'appartenance des nœuds qui les tient ensemble : un îlot qui ne
+    contient que deux nœuds sur les quinze de la carte laisse treize choses flotter à côté
+    d'un titre qui devrait les expliquer. Si une chose relève clairement d'une piste, mets-la
+    dedans.
 
 Une à trois pistes. ZÉRO EST UNE RÉPONSE, et souvent la bonne : sur trois semaines de
 journal on ne voit pas de grande direction, on voit trois semaines. N'en fabrique pas pour
@@ -462,6 +494,12 @@ Tu as quatre gestes, et seulement quatre :
     qui y entrent. « suite » vaut « fusion ».
   — RENOMMER, seulement quand le nom d'avant est devenu FAUX. Pas maladroit : faux. Le nom
     d'avant va dans « avant », et « quoi » dit ce qui a changé. « suite » vaut « renomme ».
+
+    UNE EXCEPTION, et une seule : une piste dont le nom est une PHRASE et non un nom se
+    raccourcit, même si elle reste juste. « dépendance chimique du fonctionnement social »
+    devient « dépendance ». Ce n'est pas un changement d'avis, c'est le même îlot qui
+    reprend un titre lisible — l'ancien nom va dans « avant », et il reste affiché à côté
+    du nouveau, pour qu'on suive le fil.
   — RETIRER : tu ne le rends plus. Ne retire que ce qui a DISPARU du corpus, jamais ce qui
     est seulement moins présent. Une chose moins présente est une chose dont la série
     descend, et une série qui descend est exactement ce qu'on veut lui montrer ; la retirer
@@ -553,7 +591,7 @@ const OUTIL = {
         items: {
           type: 'object',
           properties: {
-            nom: { type: 'string', description: 'Un a quatre mots, minuscules. Le mot le plus juste, clinique ou non : « depression », « hyperactivite », « la peur de decevoir ».' },
+            nom: { type: 'string', description: "UN A TROIS MOTS, minuscules. Le nom de la chose, pas une phrase qui la decrit : « dependance », « autodestruction », « vide au travail », « la peur de decevoir ». Pas « dependance chimique du fonctionnement social » : ca, c'est le champ « quoi »." },
             quoi: { type: 'string', description: 'Deux a quatre phrases, deuxieme personne : ce qui, chez LUI, va dans ce sens. Des faits de son journal, pas la definition du mot.' },
             contre: { type: 'string', description: "OBLIGATOIRE. Une a deux phrases : ce qui, dans son journal, ne colle PAS avec cette piste. Sans ca la piste est jetee." },
             themes: {
