@@ -164,6 +164,124 @@ export function versGraphe(carte, pistes = []) {
  * lissage par les milieux. Le lissage est ce qui la rend organique : sans lui
  * on obtient un polygone, et un polygone se lit comme un schema.
  */
+/* ===================== CE QU'UN NOEUD PESE DANS LES PISTES =====================
+ *
+ * LE PROBLEME. La carte porte des CHOSES -- « Londres », « la weed », « le
+ * dimanche soir » -- et juste dessous s'affichent des MECANISMES : « la bascule
+ * dans la journee », « l'acte t'est retire ». Deux vocabulaires, deux listes,
+ * et rien qui dise comment l'un touche l'autre. On regarde « Londres » sans
+ * pouvoir savoir si ca compte dans ce qui a ete compris de soi, ou si c'est
+ * juste un endroit ou l'on est alle.
+ *
+ * LA FAUSSE SOLUTION serait de renommer les noeuds d'apres les mecanismes. On y
+ * perdrait tout : une carte de mecanismes n'est plus une carte, c'est la meme
+ * liste dessinee deux fois. Ce qui fait la valeur de « Londres » sur une carte,
+ * c'est justement que ce soit un lieu.
+ *
+ * CE QU'ON MESURE. Chaque noeud porte SES JOURNEES -- toutes les dates du
+ * corpus ou cette chose apparait. Chaque piste en porte aussi, par ses autres
+ * noeuds et par les journees citees en preuve de ses themes. L'intersection des
+ * deux est un fait verifiable : « sur les 51 journees ou Londres apparait, 34
+ * portent aussi cette piste ». On ne demande rien au modele, on compte.
+ *
+ * ET ON LA COMPARE. Une part brute ne dit pas grand-chose : une piste presente
+ * partout sera presente sur les journees de Londres aussi. Le RAPPORT le dit --
+ * la part sur les journees du noeud, divisee par la part sur tout le journal.
+ * Au-dessus de 1, cette chose et cette piste vont ensemble plus souvent que le
+ * hasard ne l'expliquerait. C'est la seule facon honnete de dire « ca pese ».
+ */
+
+/*
+ * LA DATE D'UNE JOURNEE DE NOEUD, quelle que soit sa forme.
+ *
+ * Le serveur rend les journees en clair -- « 2026-03-12 » -- puis les DECORE
+ * avant de les envoyer : chacune devient { d, e }, ou `e` est l'ecart de la
+ * journee, ce qui sert a colorer les points de la couronne. Les deux formes
+ * circulent donc, et comparer sans le savoir donne zero partout, en silence :
+ * toutes les intersections sont vides et le panneau conclut, tres poliment,
+ * qu'aucune piste ne partage rien.
+ */
+const dateDe = j => (typeof j === 'string' ? j : j?.d ?? null);
+
+/** Toutes les journees connues de la carte : la base de comparaison. */
+const joursDeLaCarte = carte =>
+  new Set((carte?.noeuds ?? []).flatMap(n => (n.jours ?? []).map(dateDe)).filter(Boolean));
+
+/** Les journees d'une piste : celles de ses noeuds, plus celles citees par ses themes. */
+function joursDeLaPiste(piste, carte, themes, sauf = null) {
+  const parNom = new Map((carte?.noeuds ?? []).map(n => [String(n.nom).toLowerCase(), n]));
+  const parTheme = new Map((themes ?? []).map(t => [String(t.nom).toLowerCase(), t]));
+  const out = new Set();
+  for (const nom of piste?.noeuds ?? []) {
+    const k = String(nom).toLowerCase();
+    // Le noeud qu'on interroge est EXCLU de sa propre piste : sinon il se
+    // compare a lui-meme et affiche 100 % sur son ilot, ce qui n'apprend rien.
+    if (k === sauf) continue;
+    for (const j of parNom.get(k)?.jours ?? []) { const d = dateDe(j); if (d) out.add(d); }
+  }
+  for (const nom of piste?.themes ?? []) {
+    for (const p of parTheme.get(String(nom).toLowerCase())?.preuves ?? []) out.add(p.date);
+  }
+  return out;
+}
+
+/**
+ * Ce qu'un noeud pese dans chaque piste, et ce qui le relie.
+ *
+ * @returns {{nom, genre, jours, ilot, liens, pesees}|null}
+ *   `pesees` est trie du plus lourd au plus leger, et ne contient que les
+ *   pistes qui partagent au moins une journee : une ligne a zero n'est pas une
+ *   information, c'est du remplissage.
+ */
+export function poidsDuNoeud(lecture, nom) {
+  const carte = lecture?.carte;
+  const cle = String(nom ?? '').toLowerCase();
+  const n = (carte?.noeuds ?? []).find(x => String(x.nom).toLowerCase() === cle);
+  if (!n) return null;
+
+  const jours = new Set((n.jours ?? []).map(dateDe).filter(Boolean));
+  const tout = joursDeLaCarte(carte);
+  const pistes = lecture?.pistes ?? [];
+  const themes = lecture?.themes ?? [];
+
+  const pesees = pistes.map((p, i) => {
+    const jp = joursDeLaPiste(p, carte, themes, cle);
+    let partage = 0;
+    for (const j of jours) if (jp.has(j)) partage++;
+    const part = jours.size ? partage / jours.size : 0;
+    // La part attendue si les deux n'avaient aucun rapport : celle de la piste
+    // sur l'ensemble du journal.
+    const base = tout.size ? jp.size / tout.size : 0;
+    return {
+      i, nom: p.nom, teinte: p.teinte ?? null,
+      sien: (p.noeuds ?? []).some(x => String(x).toLowerCase() === cle),
+      partage, sur: jours.size, part,
+      rapport: base > 0 ? part / base : 0
+    };
+  }).filter(x => x.partage > 0).sort((a, b) => b.part - a.part);
+
+  const liens = (carte?.liens ?? []).filter(l =>
+    String(l.de).toLowerCase() === cle || String(l.vers).toLowerCase() === cle
+  ).map(l => ({
+    autre: String(l.de).toLowerCase() === cle ? l.vers : l.de,
+    quoi: l.quoi, force: l.force,
+    // Le sens compte : « fait retomber » ne dit pas la meme chose selon qui
+    // fait retomber qui.
+    sortant: String(l.de).toLowerCase() === cle
+  })).sort((a, b) => b.force - a.force);
+
+  // L'ilot auquel il APPARTIENT, s'il en a un. C'est le titre ecrit au-dessus
+  // de lui sur la carte, et ce n'est pas la meme chose que ce qu'il pese
+  // ailleurs : on peut appartenir a une piste et peser plus lourd dans une autre.
+  const ilot = pistes.find(p => (p.noeuds ?? []).some(x => String(x).toLowerCase() === cle)) ?? null;
+
+  return {
+    nom: n.nom, genre: n.genre, jours: [...jours].sort(),
+    ilot: ilot ? { nom: ilot.nom, teinte: ilot.teinte ?? null } : null,
+    liens, pesees
+  };
+}
+
 export function contour(points, marge = 30) {
   const pts = points.map(p => ({ x: p.x, y: p.y }))
     .sort((a, b) => a.x - b.x || a.y - b.y);

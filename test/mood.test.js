@@ -13,7 +13,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readMood, readEnergy, DEFAUT, MOTS_MINIMUM, SCENES } from '../server/mood.js';
+import { readMood, readMoodFil, readEnergy, DEFAUT, MOTS_MINIMUM, SCENES, SENS } from '../server/mood.js';
 
 const T = {
   deuil: "Mon père est mort il y a trois semaines. L'enterrement était vendredi et depuis je n'arrive pas à réaliser que c'est définitif, que je ne le reverrai plus jamais.",
@@ -103,4 +103,84 @@ test('energie : elle vient de l\'ecart a la reference, pas de la note brute', ()
     assert.ok(e >= 0.05 && e <= 1, `energie hors bornes : ${e}`);
   }
   assert.equal(readEnergy(null, 6), 0.35);
+});
+
+
+/* ------------------- ce que chaque décor représente ------------------- */
+
+test('decor : « perdu » a sa scene, et ce n’est plus un repli', () => {
+  /*
+   * `drift` était la scène par DÉFAUT — celle qu'on affiche quand rien ne
+   * ressort — et elle n'avait donc aucun mot à elle. Mais son image est un
+   * champ d'étoiles, et être perdu n'est pas la même chose que n'avoir rien
+   * dit : c'est un état, il a ses mots, il mérite d'être reconnu comme les
+   * autres. Elle reste le repli ; elle est maintenant aussi une réponse.
+   */
+  const r = readMood(
+    "Je sais plus où j'en suis en ce moment, je sais pas quoi faire de mes journées, "
+    + "tout est flou, j'ai plus de repères depuis des semaines et je flotte complètement.",
+    null);
+  assert.equal(r.scene, 'drift');
+  assert.ok(r.force > 0, 'et avec une force : ce n’est pas le repli silencieux');
+});
+
+test('decor : toute scene du shader dit ce qu’elle porte', () => {
+  // La phrase s'affiche dans le rail. Un décor qui change sans qu'on puisse
+  // savoir ce qu'il représente reste une décoration ; nommé, il devient une
+  // lecture — qu'on peut contredire, et c'est ce qui la rend acceptable.
+  for (const s of SCENES) {
+    assert.ok(SENS[s], `« ${s} » n'a pas de sens écrit`);
+    // Il dit ce que la SCÈNE porte, jamais ce que la personne EST.
+    assert.doesNotMatch(SENS[s], /\btu\b|\bte\b|\bton\b|\bta\b/i, `« ${s} » s'adresse à la personne`);
+  }
+});
+
+/* ---------------------------- la récence ---------------------------- */
+
+test('decor : le fil récent pèse plus que le fil ancien', () => {
+  /*
+   * Tout le fil comptait à poids égal. Une soirée où l'on avait parlé d'un
+   * deuil gardait donc la pyramide à l'écran trois jours plus tard, en plein
+   * milieu d'une conversation sur autre chose — et rien de ce qu'on écrivait
+   * ensuite n'arrivait à la déloger, puisque le passé pesait toujours plus
+   * lourd que le présent.
+   */
+  const perdu = "Je sais plus où j'en suis, je sais pas quoi faire, tout est flou, "
+              + "j'ai plus de repères et je flotte complètement depuis des semaines.";
+  const fil = [T.deuil, T.deuil, T.deuil, perdu, perdu, perdu];
+  assert.equal(readMoodFil(fil).scene, 'drift', 'le deuil d’avant ne tient plus l’écran');
+
+  /*
+   * Et c'est bien la RÉCENCE qui déplace, pas une préférence pour l'une des
+   * deux scènes : on retourne le fil et on regarde la part de chacune bouger.
+   * Comparer les gagnants ne dirait rien ici — les deux registres n'ont pas le
+   * même poids brut dans le lexique, et le plus lourd gagnerait dans les deux
+   * sens sans que la récence y soit pour quoi que ce soit.
+   */
+  const part = f => { const s = readMoodFil(f).scores; return s.abyss / (s.abyss + s.drift); };
+  assert.ok(part([...fil].reverse()) > part(fil) * 1.5,
+            'le deuil doit peser bien plus quand c’est lui qu’on vient de dire');
+});
+
+test('decor : un fil vide ne lève pas et reste neutre', () => {
+  assert.equal(readMoodFil([]).scene, DEFAUT);
+  assert.equal(readMoodFil(null).scene, DEFAUT);
+  assert.equal(readMoodFil(['', '   ']).scene, DEFAUT);
+});
+
+test('decor : les faux positifs les plus prévisibles du français', () => {
+  /*
+   * Trois mots qui déclenchaient à tort : « tombé » (une chute n'est pas une
+   * tombe), « pas grave » (qui dit l'inverse de grave), et « je me sens »
+   * (« sens » était dans le lexique de la pensée qui tourne).
+   */
+  const chute = readMood(
+    "Je suis tombé de vélo ce matin, c'est pas grave du tout, juste une éraflure "
+    + "au genou, mais du coup j'ai dû rentrer et j'ai raté mon rendez-vous.", null);
+  assert.notEqual(chute.scene, 'abyss');
+
+  const calme = readMood(
+    "Journée vraiment tranquille aujourd'hui, j'ai bien dormi cette nuit, je me sens "
+    + "apaisé et plutôt content d'avoir avancé, ça va nettement mieux que la semaine dernière.", null);
+  assert.equal(calme.scene, 'brume', 'le calme ne doit pas partir dans la pensée qui tourne');
 });

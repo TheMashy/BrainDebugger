@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
-         contour, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+         contour, poidsDuNoeud, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
 
@@ -304,4 +304,126 @@ test('deux nœuds seulement donnent quand même une enveloppe', () => {
   const b = contour([{ x: 0, y: 0 }, { x: 60, y: 0 }], 20);
   assert.ok(b.length >= 3);
   assert.ok(b.every(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
+});
+
+/* ================= CE QU'UN NŒUD PÈSE DANS LES PISTES ================= */
+
+/*
+ * LE PROBLÈME que ça résout : la carte porte des CHOSES — « Londres », « la
+ * weed » — et juste dessous s'affichent des MÉCANISMES. Deux vocabulaires,
+ * deux listes, et rien qui dise comment l'un touche l'autre. On regardait
+ * « Londres » sans pouvoir savoir si ça comptait dans ce qui avait été compris,
+ * ou si c'était juste un endroit où l'on était allé.
+ *
+ * La fausse solution aurait été de renommer les nœuds d'après les mécanismes :
+ * une carte de mécanismes n'est plus une carte, c'est la même liste dessinée
+ * deux fois. Ce qui fait la valeur de « Londres » sur une carte, c'est
+ * justement que ce soit un lieu.
+ */
+
+const j = (a, b) => Array.from({ length: b - a + 1 },
+  (_, i) => `2026-01-${String(a + i).padStart(2, '0')}`);
+
+const LECT = {
+  themes: [
+    { nom: 'la bascule', preuves: [{ date: '2026-01-03', extrait: 'x' }] },
+    { nom: 'la nuit', preuves: [{ date: '2026-01-04', extrait: 'x' }] },
+    { nom: 'le retrait', preuves: [{ date: '2026-01-20', extrait: 'x' }] }
+  ],
+  pistes: [
+    { nom: 'instabilité', teinte: 232, themes: ['la bascule', 'la nuit'],
+      noeuds: ['le sommeil', 'les nuits blanches'] },
+    { nom: 'vide au travail', teinte: 284, themes: ['le retrait'], noeuds: ['le doc'] }
+  ],
+  carte: {
+    noeuds: [
+      // Londres tombe sur les mêmes journées que le sommeil, pas sur celles du doc.
+      { nom: 'Londres', genre: 'lieu', poids: 2, jours: j(1, 10) },
+      { nom: 'le sommeil', genre: 'corps', poids: 3, jours: j(1, 10) },
+      { nom: 'les nuits blanches', genre: 'periode', poids: 2, jours: j(5, 12) },
+      { nom: 'le doc', genre: 'travail', poids: 3, jours: j(20, 28) }
+    ],
+    liens: [
+      { de: 'Londres', vers: 'le sommeil', quoi: 'fait retomber', force: 3 },
+      { de: 'les nuits blanches', vers: 'le doc', quoi: 'précède', force: 2 }
+    ]
+  }
+};
+
+test('un nœud dit ce qu’il pèse dans chaque piste, en journées partagées', () => {
+  const p = poidsDuNoeud(LECT, 'Londres');
+  assert.equal(p.nom, 'Londres');
+  assert.equal(p.jours.length, 10);
+  // Londres partage ses dix journées avec « instabilité » (le sommeil, 1→10)
+  // et aucune avec « vide au travail » (le doc, 20→28), qui disparaît donc.
+  assert.deepEqual(p.pesees.map(x => x.nom), ['instabilité']);
+  assert.equal(p.pesees[0].partage, 10);
+  assert.equal(p.pesees[0].sur, 10);
+  assert.equal(p.pesees[0].part, 1);
+  // Et ça vaut plus que le hasard : la piste ne couvre pas tout le journal.
+  assert.ok(p.pesees[0].rapport > 1);
+});
+
+test('une ligne à zéro n’est pas affichée : ce n’est pas une information', () => {
+  const p = poidsDuNoeud(LECT, 'le doc');
+  assert.deepEqual(p.pesees.map(x => x.nom), ['vide au travail']);
+});
+
+test('un nœud ne se compare pas à lui-même dans sa propre piste', () => {
+  // Sans cette exclusion, « le sommeil » afficherait 100 % sur son propre îlot
+  // parce qu'il y est — ce qui n'apprend rien à personne.
+  const p = poidsDuNoeud(LECT, 'le sommeil');
+  const sien = p.pesees.find(x => x.nom === 'instabilité');
+  assert.ok(sien.sien, 'il appartient bien à cette piste');
+  /*
+   * Ses journées 1→10 croisent « les nuits blanches » (5→12) sur 5→10 : six.
+   * Plus les deux journées citées en preuve par ses thèmes, le 03 et le 04 —
+   * une piste ne se réduit pas à ses nœuds, elle porte aussi ce sur quoi
+   * reposent les mécanismes qu'elle regroupe. Huit, donc.
+   */
+  assert.equal(sien.partage, 8);
+});
+
+test('un nœud porte son îlot et ce qui le relie, avec le sens du lien', () => {
+  const p = poidsDuNoeud(LECT, 'Londres');
+  assert.equal(p.ilot, null, 'Londres n’appartient à aucune piste, et c’est très bien');
+  assert.deepEqual(p.liens, [{ autre: 'le sommeil', quoi: 'fait retomber', force: 3, sortant: true }]);
+
+  const s = poidsDuNoeud(LECT, 'le sommeil');
+  assert.equal(s.ilot.nom, 'instabilité');
+  assert.equal(s.ilot.teinte, 232);
+  // Vu depuis « le sommeil », le lien est ENTRANT : « Londres fait retomber le
+  // sommeil » ne se lit pas dans l'autre sens.
+  assert.equal(s.liens[0].sortant, false);
+  assert.equal(s.liens[0].autre, 'Londres');
+});
+
+test('les journées décorées comptent comme les journées en clair', () => {
+  /*
+   * LE PIÈGE, ET IL EST MUET. Le serveur rend les journées en clair —
+   * « 2026-03-12 » — puis les DÉCORE avant de les envoyer : chacune devient
+   * { d, e }, où `e` est l'écart de la journée, ce qui sert à colorer les
+   * points de la couronne. Les deux formes circulent donc, et comparer sans le
+   * savoir donne zéro partout, sans lever : toutes les intersections sont
+   * vides et le panneau conclut, très poliment, qu'aucune piste ne partage
+   * rien. C'est exactement ce que l'application affichait.
+   */
+  const decore = {
+    ...LECT,
+    carte: {
+      ...LECT.carte,
+      noeuds: LECT.carte.noeuds.map(n => ({ ...n, jours: n.jours.map(d => ({ d, e: -1.2 })) }))
+    }
+  };
+  const clair = poidsDuNoeud(LECT, 'Londres');
+  const orne = poidsDuNoeud(decore, 'Londres');
+  assert.deepEqual(orne.jours, clair.jours);
+  assert.deepEqual(orne.pesees.map(x => [x.nom, x.partage]),
+                   clair.pesees.map(x => [x.nom, x.partage]));
+  assert.ok(orne.pesees.length, 'et surtout : pas zéro partout');
+});
+
+test('un nom absent de la carte ne rend rien plutôt qu’un objet vide', () => {
+  assert.equal(poidsDuNoeud(LECT, 'fantôme'), null);
+  assert.equal(poidsDuNoeud(null, 'Londres'), null);
 });
