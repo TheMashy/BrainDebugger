@@ -1007,29 +1007,83 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 /* ---------- la lecture ---------- */
 
 /* La carte a besoin de largeur ; le texte n'en veut pas. Le conteneur suit donc
-   la carte, et ce qui se lit en lignes garde sa colonne. */
-.lecture { max-width: 980px; }
+   la carte — il prend toute la page — et ce qui se lit en lignes garde sa
+   colonne, imposée là où elle est écrite et nulle part ailleurs. */
+.lecture { max-width: none; }
 .lechead, .lectvide { max-width: 720px; }
 .themes { max-width: 720px; }
 
 /* ---------------------------------------------------------------------
-   LA CARTE ET CE QU'ELLE DIT, CÔTE À CÔTE.
+   LA CARTE AU CENTRE, LE TEXTE SUR LE CÔTÉ.
 
-   Ils se suivaient, et la seule question qu'on se pose devant un nœud —
-   « qu'est-ce qu'il en dit ? » — demandait de faire défiler. Sous 1080 px la
-   colonne passe dessous : deux colonnes de 300 px ne servent personne.
+   Elles étaient à parité, carte à gauche et texte à droite — et la synthèse,
+   posée en haut de sa colonne, repoussait sous la ligne de flottaison ce qu'on
+   vient réellement voir : les îlots détectés et ce qu'ils contiennent.
+
+   Ce qui se regarde et ce qui se lit ne demandent pas la même place. Une carte
+   a besoin de surface : c'est une forme, elle se reconnaît d'un coup d'œil ou
+   pas du tout. Un paragraphe a besoin d'une colonne étroite — au-delà de
+   soixante caractères par ligne, l'œil perd sa ligne en revenant à gauche, et
+   l'élargir ne le rend pas plus lisible, seulement plus encombrant.
+
+   Sous 1180 px le rail passe dessous : une colonne de texte de 200 px ne sert
+   personne.
    --------------------------------------------------------------------- */
 .lectgrille {
-  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  gap: 26px 30px; align-items: start; margin-bottom: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  grid-template-areas: "carte  dit"
+                       "ilots  dit";
+  gap: 26px 34px; align-items: start; margin-bottom: 34px;
 }
-@media (max-width: 1080px) { .lectgrille { grid-template-columns: 1fr; } }
+.lectcarte { grid-area: carte; min-width: 0; }
+.lectmeca  { grid-area: ilots; min-width: 0; }
+.lectdit   { grid-area: dit;   min-width: 0; }
+
 .lectcarte .cartewrap { margin: 0; }
-/* Dans la colonne, le canvas est plus étroit : gardé à 52vh il laissait un
-   tiers de vide sous un graphe qui ne peut pas s'étaler davantage. */
-.lectcarte .cartewrap canvas { height: clamp(320px, 44vh, 480px); }
-.lectdit { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
-.lectdit .synthese { max-width: none; margin: 0; }
+/* La carte prend la hauteur qu'elle peut : c'est le centre de la page, et un
+   graphe de seize nœuds dans 320 px est une pelote, pas une carte. */
+.lectcarte .cartewrap canvas { height: clamp(380px, 60vh, 720px); }
+
+/* LES ÎLOTS SE RANGENT EN COLONNES sous la carte. Empilés en une seule, ils
+   font défiler la page sur trois écrans alors qu'il n'y a jamais plus de trois
+   groupes : ce qui manquait n'était pas de la hauteur, c'était de la largeur.
+   `auto-fill` plutôt qu'un nombre fixe — deux groupes ne doivent pas s'étirer
+   pour occuper trois colonnes. */
+.lectmeca {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 18px 20px; align-items: start;
+}
+.lectmeca .mecagroupe { margin-bottom: 0; }
+/* En colonne étroite, un nom de mécanisme se coupe — « se mesurer à la
+   trajectoire de… ». Il passe donc à la ligne : trois mots de plus valent mieux
+   qu'une hauteur parfaitement régulière, parce qu'un nom tronqué est un nom
+   qu'on ne peut pas lire. */
+.lectmeca .tnom { white-space: normal; overflow: visible; line-height: 1.32; }
+
+/* Le rail. Il suit le défilement : la synthèse est ce qui commente tout le
+   reste, et elle ne peut pas commenter depuis le haut d'une page qu'on a
+   quittée. */
+.lectdit {
+  position: sticky; top: 4px;
+  display: flex; flex-direction: column; gap: 22px;
+}
+/* Plus petite qu'avant, et c'est le but : elle dit la carte, elle ne la
+   remplace pas. `ch` et pas `px` — la mesure de la lisibilité est le nombre de
+   caractères par ligne, pas la largeur physique. */
+.lectdit .synthese {
+  max-width: 46ch; margin: 0;
+  font-size: 15.5px; line-height: 1.62;
+  color: var(--ink-dim);
+}
+@media (max-width: 1180px) {
+  .lectgrille {
+    grid-template-columns: 1fr;
+    grid-template-areas: "carte" "dit" "ilots";
+  }
+  .lectdit { position: static; }
+  .lectdit .synthese { max-width: 62ch; }
+}
 
 /* La barre de fenêtre d'Année : un seul réglage, en tête des trois graphiques.
    Il y en avait trois, à trois endroits, avec trois vocabulaires. */
@@ -2233,6 +2287,20 @@ button.amasrow:hover { background: var(--panel); }
      un titre de dossier médical. */
   text-transform: none;
 }
+/* CE QUI A CHANGÉ DEPUIS LA DERNIÈRE LECTURE. Contouré, discret, à côté du nom
+   et jamais à sa place : la piste est ce qu'on vient lire, son historique est
+   une note de bas de page. Il ne s'affiche que sur les pistes qui ont bougé —
+   « repris » est le cas normal, et l'annoncer partout ferait du bruit là où on
+   veut du calme. */
+.psuite {
+  margin-left: 10px; padding: 2px 8px; border-radius: 999px;
+  font-size: 10.5px; letter-spacing: .06em; vertical-align: 3px;
+  color: hsl(var(--p) 45% 74%);
+  border: 1px solid color-mix(in srgb, hsl(var(--p) 55% 60%) 34%, transparent);
+  white-space: nowrap;
+}
+.psuite.neuf { color: var(--ink-dim); border-color: var(--line-soft); }
+
 .pforce { display: inline-flex; gap: 3px; margin-left: auto; align-self: center; }
 .pforce i {
   width: 5px; height: 5px; border-radius: 50%;

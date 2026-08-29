@@ -97,8 +97,24 @@ export function versGraphe(carte, pistes = []) {
   });
   const utilises = new Set([...ilotDe.values()]);
   return {
-    ilots: pistes.map((p, i) => ({ i, nom: p.nom, teinte: TEINTES_DECLAREES[i % TEINTES_DECLAREES.length] }))
-                 .filter(a => utilises.has(a.i)),
+    /*
+     * LA TEINTE VIENT DE LA PISTE, PLUS DE SON RANG.
+     *
+     * Elle etait prise a l'index : premiere piste en bleu, deuxieme en violet.
+     * Une piste inseree en tete repeignait donc toutes les autres, et sur la
+     * carte la couleur est ce qu'on reconnait avant le titre -- tout repeindre,
+     * c'est presenter une carte inconnue alors que pas un nom n'a bouge.
+     *
+     * Le serveur l'attribue maintenant a la validation et la fait suivre d'une
+     * lecture a la suivante. Le repli sur l'index reste pour les lectures
+     * enregistrees avant ce changement : elles n'ont pas de teinte, et un ilot
+     * sans couleur ne se dessine pas du tout.
+     */
+    ilots: pistes.map((p, i) => ({
+      i, nom: p.nom,
+      teinte: TEINTES_DECLAREES.includes(p.teinte)
+        ? p.teinte : TEINTES_DECLAREES[i % TEINTES_DECLAREES.length]
+    })).filter(a => utilises.has(a.i)),
     /*
      * `jours` est le nom que `disposer()` donne a la MASSE d'un noeud, et c'est
      * aussi le nom que le serveur donne a la LISTE de ses journees. Les deux se
@@ -117,7 +133,16 @@ export function versGraphe(carte, pistes = []) {
         occurrences: n.jours ?? [],
         jours: n.jours?.length || n.poids,
         ilot: pi ?? null,
-        amas: pi != null ? `p${pi}` : n.genre
+        /*
+         * L'AMAS EST NOMME, PAS NUMEROTE.
+         *
+         * C'etait `p${pi}` -- l'index de la piste. Or `disposer()` pose chaque
+         * amas a l'endroit que son nom lui donne : avec un numero, une piste
+         * qui passe de la deuxieme a la premiere place emmene tout son groupe
+         * a l'autre bout du cadre, sans qu'un seul noeud ait change. Le nom,
+         * lui, ne bouge pas tant que la piste s'appelle pareil.
+         */
+        amas: pi != null ? `piste:${pistes[pi]?.nom ?? pi}` : n.genre
       };
     }),
     liens: (carte?.liens ?? []).map(l => ({
@@ -596,25 +621,77 @@ export function dessinerRelations(ctx, G, dispo,
      Peints en dernier et non bornes au cadre : ce sont les seuls libelles qu'on
      doit pouvoir lire de loin, et de loin, le cadre EST la carte entiere. */
   if (aIlot > 0.06) {
-    for (const a of ilots) {
+    const corps = 13 * Math.max(0.85, ech) / v.k;
+    const police = t => `600 ${t.toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.font = police(corps);
+    ctx.letterSpacing = `${(1.4 / v.k).toFixed(2)}px`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    /*
+     * LES TITRES NE SE SUPERPOSENT PAS.
+     *
+     * Chacun se posait au sommet de son enveloppe. Trois ilots dont les hauts
+     * arrivent a la meme latitude -- le cas normal, puisqu'ils partagent le
+     * meme cadre -- ecrivaient donc leurs trois noms l'un sur l'autre, et on
+     * ne lisait aucun des trois. C'est le pire endroit ou perdre du texte :
+     * ces titres sont ce qui se lit EN PREMIER, avant meme les noeuds.
+     *
+     * On les empile donc vers le haut. Du plus haut au plus bas, chaque titre
+     * qui heurte un deja pose remonte d'une ligne, jusqu'a etre libre. Le
+     * garde-fou borne la boucle : sur des ilots parfaitement empiles, mieux
+     * vaut deux titres proches qu'une page figee.
+     */
+    const ligne = 22 / v.k;
+    /*
+     * ET ILS RESTENT DANS LE CADRE. Le titre se centre sur son ilot ; un ilot
+     * colle au bord gauche faisait donc commencer son nom hors du canvas, et on
+     * lisait « NCE CHIMIQUE DU FONCTIONNEMENT SOCIAL ». Un titre decale de
+     * quelques dizaines de pixels reste juste au-dessus de sa forme -- un titre
+     * coupe ne veut plus rien dire.
+     */
+    const marge = 14 / v.k;
+    const hautVu = -v.y / v.k;
+    const dispo = Math.max(1, g1 - g0 - 2 * marge);
+    const poses = [];
+    for (const a of [...ilots].sort((p, q) => p.haut - q.haut)) {
       const t = mot(a.nom).toUpperCase();
-      ctx.globalAlpha = aIlot;
-      ctx.font = `600 ${(13 * Math.max(0.85, ech) / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.letterSpacing = `${(1.4 / v.k).toFixed(2)}px`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const y = a.haut - 12 / v.k;
-      const w = ctx.measureText(t).width;
+      /*
+       * Sur telephone, « instabilite emotionnelle et autodestruction » est plus
+       * large que le canvas entier : le centrer ne suffit pas, il deborde des
+       * deux cotes. Le titre RETRECIT donc jusqu'a tenir, avec un plancher --
+       * en dessous il ne se lirait plus, et un titre illisible ne vaut pas
+       * mieux qu'un titre coupe.
+       */
+      const brut = ctx.measureText(t).width;
+      const k = Math.max(0.62, Math.min(1, dispo / brut));
+      const w = brut * k;
+      const lo = g0 + w / 2 + marge, hi = g1 - w / 2 - marge;
+      const cx = lo > hi ? (g0 + g1) / 2 : Math.max(lo, Math.min(hi, a.cx));
+      let y = a.haut - 12 / v.k;
+      for (let garde = 0; garde < 12; garde++) {
+        const heurte = poses.find(o => Math.abs(y - o.y) < ligne
+          && Math.abs(cx - o.cx) < (w + o.w) / 2 + 12 / v.k);
+        if (!heurte) break;
+        y = heurte.y - ligne;
+      }
+      poses.push({ t, w, k, y: Math.max(y, hautVu + ligne / 2 + marge), cx, teinte: a.teinte });
+    }
+
+    ctx.globalAlpha = aIlot;
+    for (const o of poses) {
+      ctx.font = police(corps * o.k);
+      ctx.letterSpacing = `${(1.4 * o.k / v.k).toFixed(2)}px`;
       // Une pastille sous le mot : sans elle, un nom d'ilot pose sur un lien
       // devient illisible des que deux ilots se touchent.
       ctx.fillStyle = 'rgba(10,12,11,.82)';
       ctx.beginPath();
-      ctx.roundRect(a.cx - w / 2 - 9 / v.k, y - 10 / v.k, w + 18 / v.k, 20 / v.k, 10 / v.k);
+      ctx.roundRect(o.cx - o.w / 2 - 9 / v.k, o.y - 10 / v.k, o.w + 18 / v.k, 20 / v.k, 10 / v.k);
       ctx.fill();
-      ctx.fillStyle = `hsl(${a.teinte} 62% 74%)`;
-      ctx.fillText(t, a.cx, y);
-      ctx.letterSpacing = '0px';
+      ctx.fillStyle = `hsl(${o.teinte} 62% 74%)`;
+      ctx.fillText(o.t, o.cx, o.y);
     }
+    ctx.letterSpacing = '0px';
     ctx.globalAlpha = 1;
   }
 

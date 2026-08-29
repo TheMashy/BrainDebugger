@@ -225,11 +225,25 @@ const PISTES = [
 
 test('les nœuds d’une piste forment un amas, les autres gardent leur genre', () => {
   const G = versGraphe(CARTE, PISTES);
-  assert.equal(G.noeuds[0].amas, 'p0');
-  assert.equal(G.noeuds[1].amas, 'p0');
+  assert.equal(G.noeuds[0].amas, 'piste:dépendance aux anxiolytiques');
+  assert.equal(G.noeuds[1].amas, 'piste:dépendance aux anxiolytiques');
   assert.equal(G.noeuds[0].ilot, 0);
   // Le troisième est dans la piste 1 : il porte son amas à elle.
-  assert.equal(G.noeuds[2].amas, 'p1');
+  assert.equal(G.noeuds[2].amas, 'piste:la peur de décevoir');
+});
+
+test('l’amas d’une piste est son NOM, pas son rang', () => {
+  /*
+   * `disposer()` pose chaque amas à l'endroit que son nom lui donne. Avec un
+   * numéro d'ordre, une piste qui passe de la deuxième à la première place
+   * emmène tout son groupe à l'autre bout du cadre alors qu'aucun nœud n'a
+   * changé — le défaut même qu'on répare : une carte qui se réorganise
+   * entièrement pour trois soirs d'écriture de plus.
+   */
+  const inverse = versGraphe(CARTE, [PISTES[1], PISTES[0]]);
+  const direct = versGraphe(CARTE, PISTES);
+  const par = g => Object.fromEntries(g.noeuds.map(n => [n.nom, n.amas]));
+  assert.deepEqual(par(inverse), par(direct));
 });
 
 test('sans pistes, on retombe sur le regroupement par genre', () => {
