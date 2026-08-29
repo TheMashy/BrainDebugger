@@ -12,7 +12,7 @@ import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays
 import { inspectCSV, applyImport } from './import-csv.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
-import { readMood, readEnergy } from './mood.js';
+import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 import { corpusPour, lire, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
@@ -158,14 +158,24 @@ export function recentMemory(date, userId = OWNER, texte = null) {
  * decor revient a commenter l'humeur.
  */
 export function ambiance(userId = OWNER) {
-  const msgs = recentMessages(80, userId).filter(m => m.role === 'user');
-  const texte = msgs.map(m => m.text).join(' ');
+  // Du plus ancien au plus recent : `readMoodFil` fait decroitre le poids en
+  // remontant, et l'ordre est ce qui le lui dit.
+  const msgs = recentMessages(80, userId).filter(m => m.role === 'user').map(m => m.text);
   const t = today();
   const note = getEntry(t, userId)?.note ?? null;
   const { series: ser } = series(userId);
   const ref = ser.length ? ser[ser.length - 1].reference : null;
-  const m = readMood(texte, note);
-  return { scene: m.scene, force: m.force, energie: readEnergy(note, ref) };
+  const m = readMoodFil(msgs, note);
+  /*
+   * `drift` a deux vies, et il ne faut pas les confondre. C'est la scene par
+   * DEFAUT -- celle qu'on affiche quand rien ne ressort -- et c'est aussi
+   * celle d'un etat, etre perdu, qui a maintenant ses mots a elle. La force
+   * les separe : a zero, on n'a rien compris et on ne pretend rien ; au-dessus,
+   * c'est une reponse, et elle a le droit de se dire.
+   */
+  return { scene: m.scene, force: m.force,
+           sens: m.force > 0 ? (SENS[m.scene] ?? null) : null,
+           energie: readEnergy(note, ref) };
 }
 
 /** Ce que le navigateur a le droit de savoir de la personne connectée. */
@@ -1392,6 +1402,16 @@ export async function streamMessage(body, send, userId = OWNER) {
   send('done', {
     messages: recentMessages(80, userId),
     motifs: motifsDuFil(userId),
+    /*
+     * LE DECOR CHANGE PENDANT LA CONVERSATION, PAS AU RECHARGEMENT.
+     *
+     * Il n'etait calcule que dans `/api/state`, c'est-a-dire une seule fois,
+     * a l'ouverture de la page. On pouvait donc parler d'un deuil pendant une
+     * heure devant le meme fond neutre, et decouvrir la pyramide le lendemain
+     * en revenant -- sur une conversation qui n'avait plus rien a voir. Le
+     * mecanisme entier existait et ne servait a rien.
+     */
+    ambiance: ambiance(userId),
     usage: usageFor(userId),
     backend: r.backend,
     model: r.model ?? null,

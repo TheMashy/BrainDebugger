@@ -2,7 +2,7 @@ import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
 import { disposer } from './carte.js';
 import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
-         vueNeutre, zoomer, NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
+         vueNeutre, zoomer, poidsDuNoeud, NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -1088,6 +1088,11 @@ async function send() {
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
         if (data.motifs) S.motifs = data.motifs;
+        // Le décor suit la conversation. Il ne changeait qu'au rechargement de
+        // la page : on pouvait parler d'un deuil pendant une heure devant le
+        // même fond neutre, et découvrir la pyramide le lendemain, sur une
+        // conversation qui n'avait plus rien à voir.
+        if (data.ambiance) { S.ambiance = data.ambiance; syncAmbiance(); }
 
         if (data.refused) {
           toast('Le modèle a décliné — le compagnon hors-ligne a pris la main.');
@@ -2528,6 +2533,74 @@ const carteCourante = () => LECTURE?.lecture?.carte ?? null;
  */
 let RELA = null, RELA_DISPO = null, RELA_SURVOL = -1;
 
+/** Le nœud dont on regarde le poids, ou null. Vidé en quittant « Ma carte ». */
+let NOEUD_OUVERT = null;
+
+/*
+ * CE QU'UN NOEUD PESE, quand on clique dessus.
+ *
+ * La carte porte des CHOSES -- « Londres », « la weed », « le dimanche soir » --
+ * et juste dessous s'affichent des MECANISMES. Deux vocabulaires, deux listes,
+ * et rien qui disait comment l'un touche l'autre : on regardait « Londres »
+ * sans pouvoir savoir si ca comptait dans ce qui avait ete compris de soi, ou
+ * si c'etait juste un endroit ou l'on etait alle.
+ *
+ * On aurait pu renommer les noeuds d'apres les mecanismes. On y aurait tout
+ * perdu : une carte de mecanismes n'est plus une carte, c'est la meme liste
+ * dessinee deux fois -- et ce qui fait la valeur de « Londres » sur une carte,
+ * c'est justement que ce soit un lieu.
+ *
+ * Le lien passe donc par les JOURNEES, qui sont deja la des deux cotes. « Sur
+ * les 51 journees ou Londres apparait, 34 portent aussi cette piste » est un
+ * fait, pas une interpretation -- et le rapport a cote dit si c'est plus que ce
+ * que le hasard expliquerait, sans quoi une piste presente partout paraitrait
+ * peser sur tout.
+ */
+const RAPPORT_MOT = r => r >= 1.6 ? 'bien plus souvent qu’ailleurs'
+                       : r >= 1.15 ? 'plus souvent qu’ailleurs'
+                       : r <= 0.7 ? 'moins souvent qu’ailleurs' : 'autant qu’ailleurs';
+
+function noeudMarkup() {
+  if (!NOEUD_OUVERT) return '';
+  const p = poidsDuNoeud(LECTURE?.lecture, NOEUD_OUVERT);
+  if (!p) return '';
+  const t = p.ilot?.teinte;
+  return `<aside class="noeudcarte"${t != null ? ` style="--p:${t}"` : ''}>
+    <div class="ncdessus">
+      <span class="ncgenre" style="--g:${TEINTE_GENRE[p.genre] ?? TEINTE_GENRE.activite}">${
+        esc(NOM_GENRE[p.genre] ?? p.genre)}</span>
+      <button class="ncfermer" data-noeud-fermer aria-label="Fermer">×</button>
+    </div>
+    <h3 class="ncnom">${esc(p.nom)}</h3>
+    <p class="ncjours">${p.jours.length} journée${p.jours.length > 1 ? 's' : ''}${
+      p.ilot ? ` · dans <b>${esc(p.ilot.nom)}</b>` : ' · hors des pistes'}</p>
+
+    ${p.pesees.length ? `<div class="ncbloc">
+      <span class="nck">Ce que ça pèse</span>
+      ${p.pesees.map(x => `<button class="ncpese" data-piste-voir="${esc(x.nom)}"
+          style="--p:${x.teinte ?? 258}" title="Voir ce que cette piste regroupe">
+        <span class="ncligne">
+          <span class="ncnomp">${esc(x.nom)}${x.sien ? '<i>son îlot</i>' : ''}</span>
+          <span class="ncpart mono">${Math.round(x.part * 100)}<small>%</small></span>
+        </span>
+        ${/* La barre dit la part, le texte dit ce qu'elle vaut. Une part seule
+              ferait passer une piste présente partout pour une piste qui pèse. */''}
+        <span class="ncbarre"><i style="width:${Math.round(x.part * 100)}%"></i></span>
+        <span class="ncsous">${x.partage} de ses ${x.sur} journées — ${RAPPORT_MOT(x.rapport)}</span>
+      </button>`).join('')}
+    </div>` : `<p class="ncrien">Aucune piste ne partage ses journées. Ça arrive, et ça
+      veut dire quelque chose : cette chose-là revient sans entrer dans ce qui a été compris.</p>`}
+
+    ${p.liens.length ? `<div class="ncbloc">
+      <span class="nck">Ce qui le relie</span>
+      ${p.liens.map(l => `<button class="nclien" data-noeud-aller="${esc(l.autre)}">
+        ${l.sortant ? '' : `<b>${esc(l.autre)}</b> `}<span>${esc(l.quoi)}</span>${
+          l.sortant ? ` <b>${esc(l.autre)}</b>` : ''}
+      </button>`).join('')}
+    </div>` : ''}
+  </aside>`;
+}
+
 function carteMarkup(carte) {
   if (!carte?.noeuds?.length) return '';
   return `<div class="cartewrap">
@@ -2632,10 +2705,10 @@ function monterCarte(carte, pistes = []) {
                   && (RELA_JOUR?.noeud ?? -1) === (j?.noeud ?? -1);
     if (i === RELA_SURVOL && memeJour) return;
     RELA_SURVOL = i; RELA_JOUR = j;
-    // La main ouverte partout, le doigt UNIQUEMENT sur une journee. Un noeud
-    // survole s'allume mais ne s'ouvre pas : lui donner le curseur du clic
-    // promet quelque chose qui n'arrive pas.
-    cv.style.cursor = j ? 'pointer' : 'grab';
+    // Le doigt sur une journee ET sur un noeud : les deux s'ouvrent maintenant.
+    // Un noeud qui s'allume au survol sans rien promettre etait l'inverse du
+    // probleme -- il avait l'air cliquable et ne l'etait pas.
+    cv.style.cursor = (j || i >= 0) ? 'pointer' : 'grab';
     peindre();
   };
 
@@ -2667,9 +2740,16 @@ function monterCarte(carte, pistes = []) {
     cv.releasePointerCapture?.(tire.id);
     tire = null;
     if (bouge) { cv.style.cursor = 'grab'; return viser(p.x, p.y); }
-    // Un vrai clic : on ouvre la journée visée.
-    const j = journeeAu(RELA_DISPO?.pts ?? [], RELA, p.x, p.y, echelle(L, H), RELA_VUE);
-    if (j) ouvrirJour(j.date);
+    // Un vrai clic. Une journée d'abord : c'est la cible la plus fine, et celle
+    // qu'on vise expressément quand on tombe dessus.
+    const ech = echelle(L, H);
+    const j = journeeAu(RELA_DISPO?.pts ?? [], RELA, p.x, p.y, ech, RELA_VUE);
+    if (j) return ouvrirJour(j.date);
+    // Sinon le nœud : il ouvre ce qu'il pèse dans les pistes d'en dessous.
+    const i = noeudAu(RELA_DISPO?.pts ?? [], RELA, p.x, p.y, ech, RELA_VUE);
+    const nom = i >= 0 ? RELA?.noeuds?.[i]?.nom : null;
+    NOEUD_OUVERT = nom && nom !== NOEUD_OUVERT ? nom : null;
+    renderLecture();
   };
   cv.addEventListener('pointerup', relacher);
   cv.addEventListener('pointercancel', () => { tire = null; cv.style.cursor = 'grab'; });
@@ -2791,7 +2871,10 @@ async function renderLecture() {
         <div class="lectcarte">${carteMarkup(L.lecture.carte)}</div>
         <div class="lectmeca">${mecaGroupes(L.lecture)}</div>
         <aside class="lectdit">
-          <p class="synthese">${esc(L.lecture.synthese)}</p>
+          ${/* Le nœud ouvert prend la place de la synthèse : c'est une réponse à
+                un geste qu'on vient de faire, elle passe devant un texte qui,
+                lui, ne bouge pas. La synthèse revient dès qu'on referme. */''}
+          ${NOEUD_OUVERT ? noeudMarkup() : `<p class="synthese">${esc(L.lecture.synthese)}</p>`}
         </aside>
       </div>`;
   } else if (LECTURE_EN_COURS) {
@@ -2880,6 +2963,24 @@ async function lancerLecture() {
 
 function wireLecture() {
   $('#view').onclick = async e => {
+    // Le panneau d'un nœud : le refermer, aller à un nœud voisin, ou descendre
+    // sur la piste dont il vient de dire le poids.
+    if (e.target.closest('[data-noeud-fermer]')) { NOEUD_OUVERT = null; return renderLecture(); }
+    const na = e.target.closest('[data-noeud-aller]');
+    if (na) { NOEUD_OUVERT = na.dataset.noeudAller; return renderLecture(); }
+    const pv = e.target.closest('[data-piste-voir]');
+    if (pv) {
+      // On ne referme PAS le panneau : on veut pouvoir lire les mécanismes en
+      // gardant sous les yeux le chiffre qui vient de nous y envoyer.
+      const nom = pv.dataset.pisteVoir.toLowerCase();
+      const g = [...$('#view').querySelectorAll('.mecagroupe')]
+        .find(x => x.querySelector('.mecatitre')?.textContent.trim().toLowerCase() === nom);
+      g?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      g?.classList.add('vise');
+      setTimeout(() => g?.classList.remove('vise'), 1600);
+      return;
+    }
+
     // La palette d'un comportement : ouverte sur place, pas dans un panneau.
     // Cinq pastilles n'ont pas besoin d'une fenêtre pour se poser.
     const tc = e.target.closest('[data-teinte][data-pour]');
@@ -3973,19 +4074,38 @@ function glypheMarkup(scene) {
 
 function syncAmbianceRail() {
   const scene = S?.ambiance?.scene ?? 'drift';
+  /*
+   * « drift » a deux vies. C'est la scène par DÉFAUT — celle qu'on affiche
+   * quand rien ne ressort — et c'est aussi celle d'un état, être perdu, qui a
+   * ses mots à lui. La force les sépare, et le nom doit suivre : « Neutre »
+   * posé sur « être perdu — des étoiles, aucun cap » se contredisait à voix
+   * haute.
+   */
+  const nom = scene === 'drift' && (S?.ambiance?.force ?? 0) > 0
+    ? 'Dérive' : (NOM_SCENE[scene] ?? 'Neutre');
   const g = $('#viewGlyphe');
   if (g) g.innerHTML = glypheMarkup(scene);
 
   const el = $('#ambianceRead');
   if (!el) return;
   el.hidden = false;
+  const sens = S?.ambiance?.sens ?? null;
   el.innerHTML = `<span class="k">Ambiance</span>
-    <span class="v">${esc(NOM_SCENE[scene] ?? 'Neutre')}${glypheMarkup(scene)}</span>`;
+    <span class="v">${esc(nom)}${glypheMarkup(scene)}</span>
+    ${/* CE QUE LE DÉCOR REPRÉSENTE. Sans ça, le fond change et personne ne sait
+          pourquoi : c'est une décoration. Nommé, ça devient une lecture — mais
+          une lecture qu'on peut contredire, et c'est ce qui la rend acceptable.
+          La phrase dit ce que la SCÈNE porte, jamais ce que la personne est. */''}
+    ${sens ? `<span class="sens">${esc(sens)}</span>` : ''}`;
   el.title = "Le décor du fond, pas une lecture de ta journée : l'application ne qualifie jamais une journée.";
 }
 
 async function go(v) {
   view = v;
+  // Le panneau d'un nœud répond à un geste fait dans « Ma carte » : le garder
+  // ouvert en revenant plus tard afficherait une réponse à une question qu'on
+  // ne se souvient pas d'avoir posée.
+  if (v !== 'mirror') NOEUD_OUVERT = null;
   // Rattraper est un geste ponctuel, pas un mode dans lequel on reste : le
   // curseur de note revient à aujourd'hui dès qu'on change de vue.
   NOTE_JOUR = null;

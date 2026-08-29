@@ -131,6 +131,15 @@ a { color: var(--accent); }
   font-size: 12.5px; color: var(--ink-dim);
 }
 .ambianceread .v svg { opacity: .8; }
+/* CE QUE LE DÉCOR REPRÉSENTE. Un fond qui change sans qu'on puisse savoir ce
+   qu'il porte reste une décoration ; nommé, il devient une lecture — et une
+   lecture qu'on peut contredire, ce qui est la seule forme acceptable ici.
+   Petit et pâle : c'est une note en marge, pas une annonce. */
+.ambianceread .sens {
+  font-size: 10.5px; line-height: 1.4; color: var(--ink-faint);
+  max-width: 165px; text-wrap: pretty;
+}
+@media (max-width: 860px) { .ambianceread .sens { display: none; } }
 
 .panel { display: flex; flex-direction: column; min-width: 0; padding: 0 24px 0 26px; }
 
@@ -1090,6 +1099,107 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   font-size: 15.5px; line-height: 1.62;
   color: var(--ink-dim);
 }
+/* ---------------------------------------------------------------------
+   CE QU'UN NŒUD PÈSE.
+
+   La carte porte des CHOSES — « Londres », « la weed » — et juste dessous
+   s'affichent des MÉCANISMES. Deux vocabulaires, deux listes, et rien qui
+   disait comment l'un touche l'autre : on regardait « Londres » sans pouvoir
+   savoir si ça comptait dans ce qui avait été compris de soi.
+
+   Le panneau prend la place de la synthèse dans le rail, et pas celle de la
+   carte : la réponse doit s'afficher à côté de la chose qu'on vient de
+   toucher, pas par-dessus.
+   --------------------------------------------------------------------- */
+.noeudcarte {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 15px 16px 17px; border-radius: 12px;
+  background: color-mix(in srgb, hsl(var(--p, 258) 40% 40%) 7%, var(--panel));
+  border: 1px solid color-mix(in srgb, hsl(var(--p, 258) 50% 55%) 16%, var(--line-soft));
+  animation: ncvient .22s cubic-bezier(.22, .9, .3, 1) both;
+}
+@keyframes ncvient { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .noeudcarte { animation: none; } }
+
+.ncdessus { display: flex; align-items: center; gap: 10px; }
+/* Le genre est CONTOURÉ, comme le nœud sur la carte : ce qui est déclaré ne se
+   remplit pas. Même règle des deux côtés, sinon la couleur ment. */
+.ncgenre {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: hsl(var(--g) 45% 66%);
+}
+.ncgenre::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%;
+  border: 1.5px solid hsl(var(--g) 58% 62%);
+}
+.ncfermer {
+  margin-left: auto; background: none; border: 0; padding: 0 2px;
+  font-size: 17px; line-height: 1; color: var(--ink-faint);
+}
+.ncfermer:hover { color: var(--ink); background: none; }
+.ncnom { margin: 0; font: 400 21px/1.2 var(--serif, inherit); letter-spacing: -.01em; }
+.ncjours { margin: -8px 0 0; font-size: 12px; color: var(--ink-faint); }
+.ncjours b { color: hsl(var(--p, 258) 45% 74%); font-weight: 500; }
+
+.ncbloc { display: flex; flex-direction: column; gap: 7px; }
+.nck {
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* Une pesée. La barre dit la part, la ligne du bas dit ce qu'elle vaut — une
+   part seule ferait passer une piste présente partout pour une piste qui pèse,
+   et c'est exactement le contresens qu'on veut éviter ici. */
+.ncpese {
+  display: flex; flex-direction: column; gap: 5px; width: 100%;
+  padding: 9px 11px; border-radius: 9px; text-align: left;
+  background: color-mix(in srgb, hsl(var(--p) 45% 45%) 8%, transparent);
+  border: 1px solid color-mix(in srgb, hsl(var(--p) 50% 55%) 14%, transparent);
+  transition: background .13s, border-color .13s;
+}
+.ncpese:hover {
+  background: color-mix(in srgb, hsl(var(--p) 45% 48%) 15%, transparent);
+  border-color: color-mix(in srgb, hsl(var(--p) 50% 58%) 32%, transparent);
+}
+.ncligne { display: flex; align-items: baseline; gap: 10px; }
+.ncnomp { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); line-height: 1.3; }
+.ncnomp i {
+  display: block; font-style: normal; font-size: 9.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: hsl(var(--p) 45% 62%); margin-top: 2px;
+}
+.ncpart { flex: none; font-size: 14px; color: hsl(var(--p) 45% 76%); }
+.ncpart small { font-size: .7em; opacity: .7; }
+.ncbarre {
+  display: block; height: 3px; border-radius: 2px;
+  background: color-mix(in srgb, hsl(var(--p) 50% 55%) 18%, transparent);
+}
+.ncbarre i { display: block; height: 100%; border-radius: 2px; background: hsl(var(--p) 50% 60%); }
+.ncsous { font-size: 11px; color: var(--ink-faint); line-height: 1.4; }
+.ncrien { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-faint); }
+
+/* Les liens. Le sens compte : « fait retomber » ne dit pas la même chose selon
+   qui fait retomber qui — le nom se place donc avant ou après le verbe. */
+.nclien {
+  display: block; width: 100%; text-align: left; padding: 6px 0;
+  background: none; border: 0; border-top: 1px solid var(--line-soft);
+  font-size: 12.5px; line-height: 1.45; color: var(--ink-faint);
+}
+.nclien:first-of-type { border-top: 0; }
+.nclien b { color: var(--ink-dim); font-weight: 500; }
+.nclien span { color: hsl(var(--p, 258) 42% 62%); }
+.nclien:hover { background: none; }
+.nclien:hover b { color: var(--ink); }
+
+/* Le groupe visé depuis une pesée : il s'allume une fois et retombe. Sans ça,
+   on arrive au milieu d'une liste sans savoir lequel on venait chercher. */
+.mecagroupe.vise .mecatitre { animation: viser 1.6s ease-out both; }
+@keyframes viser {
+  0%, 60% { color: hsl(var(--p) 60% 76%); }
+  100%    { color: inherit; }
+}
+@media (prefers-reduced-motion: reduce) { .mecagroupe.vise .mecatitre { animation: none; } }
+
 @media (max-width: 1180px) {
   .lectgrille {
     grid-template-columns: 1fr;
