@@ -59,6 +59,49 @@ test('chaque message part vers le modèle avec son jour et son heure', () => {
   assert.equal(out[1].role, 'assistant');
 });
 
+test('le compagnon ne se voit jamais horodater lui-même', () => {
+  /*
+   * LE DÉFAUT : le marqueur allait sur TOUS les messages, réponses comprises.
+   * Le modèle voyait donc, dans son propre rôle, une centaine de répliques
+   * commençant par « [sam. 29/08 07:07] » — et un modèle imite ce qu'il voit
+   * de lui-même bien plus sûrement qu'il n'obéit à une consigne. Il s'est mis à
+   * poser le crochet en tête de réponse, où il s'affichait tel quel dans la
+   * bulle, en double avec l'horodatage que la bulle porte déjà.
+   *
+   * La consigne le lui interdisait, et ne suffisait pas : ce n'était pas une
+   * question de compréhension, c'était un exemple répété à chaque tour.
+   */
+  const out = toChatMessages([
+    { ts: new Date(2026, 7, 12, 3, 14).toISOString(), role: 'user', text: 'coucou' },
+    { ts: new Date(2026, 7, 12, 3, 15).toISOString(), role: 'pet',  text: 'Depuis quand ?' }
+  ]);
+  assert.match(out[0].content, /^\[/, 'ce que la personne écrit garde son heure');
+  assert.equal(out[1].content, 'Depuis quand ?');
+});
+
+test('un marqueur déjà enregistré est retiré de l’historique relu', async () => {
+  // Les tours où il l'a recopié sont dans la base pour toujours. Les relire tels
+  // quels ferait repartir l'imitation au tour suivant.
+  const out = toChatMessages([
+    { ts: null, role: 'pet', text: '[sam. 29/08 07:08]Pas de souci, laisse tomber.' }
+  ]);
+  assert.equal(out[0].content, 'Pas de souci, laisse tomber.');
+
+  const { sansMarqueur } = await import('../server/chat.js');
+  // Un crochet que la personne aurait écrit elle-même n'est pas un marqueur.
+  assert.equal(sansMarqueur('[note] un truc'), '[note] un truc');
+  assert.equal(sansMarqueur('rien à retirer'), 'rien à retirer');
+});
+
+test('une réponse ne s’enregistre jamais avec un marqueur en tête', async () => {
+  // Le nettoyage est dans `reply()`, pas dans chaque appelant : il y a deux
+  // routes qui enregistrent une réponse, et quatre backends qui en produisent.
+  const { reply } = await import('../server/chat.js');
+  const r = await reply([{ ts: new Date().toISOString(), role: 'user', text: 'salut' }],
+                        { chatBackend: 'scripted' });
+  assert.doesNotMatch(r.text, /^\[\p{L}{2,4}\.?\s+\d{2}\/\d{2}/u);
+});
+
 test('un message sans horodatage part sans marqueur inventé', () => {
   // Et surtout : sans lever. C'est le chemin qui cassait.
   const out = toChatMessages([{ ts: null, role: 'user', text: 'salut' }]);

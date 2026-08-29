@@ -881,13 +881,47 @@ export function marquerMotif(motifId, messageId, userId = OWNER, quand = new Dat
 export function motifsDesMessages(ids, userId = OWNER) {
   if (!ids?.length) return {};
   const trous = ids.map(() => '?').join(',');
+  /*
+   * LE RANG, PAS LE TOTAL.
+   *
+   * La puce sous un message dit maintenant combien de fois ce mecanisme avait
+   * ete reconnu A CE MOMENT-LA. Le total aurait ete plus simple a calculer et
+   * faux a lire : en remontant le fil, chaque puce d'un meme motif afficherait
+   * le meme chiffre, celui d'aujourd'hui, sur des phrases separees de six mois.
+   * Le rang, lui, raconte l'accumulation -- c'est exactement ce qu'on vient
+   * chercher en remontant.
+   *
+   * Il se compte sur TOUTES les vues du motif, pas sur celles de la fenetre
+   * demandee : sinon le premier message affiche remettrait le compteur a un.
+   *
+   * L'ordre est celui du TEMPS, pas des identifiants. Les deux coincident tant
+   * qu'on ecrit au fil de l'eau, et divergent des qu'on ne le fait pas -- une
+   * conversation importee, un journal restaure. Compter sur l'identifiant
+   * donnerait alors « 3x » avant « 1x » dans un fil qu'on remonte, ce qui n'a
+   * aucun sens a lire. L'identifiant ne sert plus qu'a departager deux messages
+   * de la meme seconde.
+   */
   const rows = db.prepare(`
-    SELECT v.message_id, m.id, m.nom, m.teinte
-    FROM motif_vues v JOIN motifs m ON m.id = v.motif_id
-    WHERE m.user_id = ? AND v.message_id IN (${trous})
+    WITH rangs AS (
+      SELECT v.message_id, v.motif_id,
+             ROW_NUMBER() OVER (PARTITION BY v.motif_id ORDER BY msg.ts, v.message_id) AS rang
+      FROM motif_vues v
+      JOIN motifs m ON m.id = v.motif_id
+      JOIN messages msg ON msg.id = v.message_id
+      WHERE m.user_id = ?
+    )
+    SELECT r.message_id, m.id, m.nom, m.mecanisme, m.teinte, r.rang
+    FROM rangs r JOIN motifs m ON m.id = r.motif_id
+    WHERE r.message_id IN (${trous})
   `).all(userId, ...ids);
   const par = {};
-  for (const r of rows) (par[r.message_id] ??= []).push({ id: r.id, nom: r.nom, teinte: r.teinte });
+  for (const r of rows) {
+    // Le mecanisme voyage avec : c'est ce qui repond a « qu'est-ce qu'il entend
+    // par la ? » au survol, sans quitter le fil ni ouvrir quoi que ce soit.
+    (par[r.message_id] ??= []).push({
+      id: r.id, nom: r.nom, mecanisme: r.mecanisme, teinte: r.teinte, vues: r.rang
+    });
+  }
   return par;
 }
 

@@ -309,6 +309,23 @@ function blocsDePiece(p) {
     : { type: 'image', source: { type: 'base64', media_type: media, data } };
 }
 
+/*
+ * « [sam. 29/08 07:07] » en tete d'une reponse : le marqueur que le modele a
+ * recopie alors qu'il n'avait pas a le faire.
+ *
+ * On le retire des DEUX cotes -- de ce qu'on renvoie au modele, et de ce qu'on
+ * affiche -- parce que les deux entretiennent le defaut : a l'ecran c'est une
+ * horodatage en double (la bulle a deja le sien), et dans l'historique c'est
+ * l'exemple qui lui apprend a recommencer.
+ *
+ * Le motif est celui que `marqueTemps` produit, et rien d'autre : jour de
+ * semaine abrege, jour/mois, heure. Une expression plus large mangerait un
+ * crochet que la personne aurait ecrit elle-meme.
+ */
+const MARQUEUR = /^\s*\[\p{L}{2,4}\.?\s+\d{2}\/\d{2}\s+\d{2}:\d{2}\]\s*/u;
+
+export const sansMarqueur = t => String(t ?? '').replace(MARQUEUR, '');
+
 /**
  * @param {boolean} blocs  true : les pieces deviennent des blocs de contenu
  *   (Anthropic). false : elles restent une mention dans le texte -- c'est le
@@ -317,9 +334,31 @@ function blocsDePiece(p) {
  */
 export function toChatMessages(history, { blocs = false } = {}) {
   return history.map(m => {
-    const t = m.ts ? marqueTemps(m.ts) : null;
     const role = m.role === 'pet' ? 'assistant' : 'user';
-    const texte = t ? `[${t}] ${m.text}` : m.text;
+    /*
+     * LE MARQUEUR NE VA QUE SUR CE QUE LA PERSONNE ECRIT.
+     *
+     * Il allait sur tous les messages, y compris les reponses passees du
+     * compagnon. Le modele voyait donc, dans son PROPRE role, une centaine de
+     * repliques commencant par « [sam. 29/08 07:07] » -- et un modele imite ce
+     * qu'il voit de lui-meme bien plus surement qu'il n'obeit a une consigne.
+     * Il s'est mis a poser le crochet lui-meme, en tete de reponse, ou il
+     * s'affichait tel quel dans la bulle.
+     *
+     * La consigne le lui interdisait deja, et ne suffisait pas : ce n'etait pas
+     * une question de comprehension, c'etait un exemple repete a chaque tour.
+     * On retire l'exemple.
+     *
+     * Rien n'est perdu : l'information qu'on veut lui donner est l'heure a
+     * laquelle LUI ecrit, et les creux entre deux de ses messages. Les
+     * reponses, elles, tombent a la seconde ou elles sont demandees.
+     */
+    const t = role === 'user' && m.ts ? marqueTemps(m.ts) : null;
+    // Et on nettoie ce qui a deja ete enregistre : les tours passes ou le
+    // modele a recopie le marqueur sont dans la base, et les relui ferait
+    // repartir l'imitation aussitot.
+    const brut = role === 'assistant' ? sansMarqueur(m.text) : m.text;
+    const texte = t ? `[${t}] ${brut}` : brut;
 
     const pieces = blocs ? (m.pieces ?? []).map(blocsDePiece).filter(Boolean) : [];
     if (!pieces.length) return { role, content: texte };
@@ -1081,7 +1120,11 @@ export async function reply(history, settings, { memory = null, onText = null, o
       return { text, backend: 'scripted', refused: true };
     }
     if (!r.text) throw new Error('réponse vide');
-    return r;
+    // Un marqueur en tete de reponse ne s'enregistre pas. Il n'a plus de raison
+    // d'apparaitre -- le modele ne voit plus le sien dans l'historique -- mais
+    // ce qui est ecrit dans la base y reste pour toujours, et il suffit d'un
+    // tour ou il recommence pour que la conversation entiere reparte dessus.
+    return { ...r, text: sansMarqueur(r.text) };
   } catch (err) {
     const text = scriptedReply(history);
     onText?.(text);
