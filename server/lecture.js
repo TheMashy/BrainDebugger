@@ -28,6 +28,7 @@
 
 import { resolveKey } from './chat.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
+import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
 
 let _sdk = null;
 
@@ -125,11 +126,66 @@ function parMois(rows) {
 }
 
 /**
+ * CE QU'IL A DEJA LU. Le bloc qui empeche la carte de se refaire a neuf.
+ *
+ * Une lecture n'est pas un calcul qu'on relance : c'est un vocabulaire qu'on a
+ * donne a quelqu'un. Il a lu « les remontees courtes », il s'y est reconnu, il
+ * l'a peut-etre repete a quelqu'un d'autre. La relecture suivante, faite a
+ * froid, rendait « l'euphorie qui retombe » -- la meme chose, un autre nom, et
+ * pour lui la sensation que rien de ce qu'il avait compris ne tenait.
+ *
+ * On lui rend donc son propre texte, en entier : les pistes avec ce qu'elles
+ * regroupent, les themes, les noeuds, les liens. Pas comme un acquis -- la
+ * consigne lui donne explicitement le droit de fusionner, renommer, retirer --
+ * mais comme le point de depart, au lieu de la page blanche.
+ */
+function blocPrecedente(p, quand = null) {
+  if (!p) return null;
+  const parties = [];
+
+  if (p.pistes?.length) {
+    parties.push(`SES PISTES\n${p.pistes.map(x =>
+      `« ${x.nom} » — regroupe : ${(x.themes ?? []).join(', ') || '—'}` +
+      ((x.noeuds ?? []).length ? ` — englobe : ${x.noeuds.join(', ')}` : '')
+    ).join('\n')}`);
+  }
+  if (p.themes?.length) {
+    parties.push(`SES THÈMES\n${p.themes.map(t =>
+      `« ${t.nom} » — ${t.quoi ?? ''} (intensité ${t.intensite ?? '?'})`).join('\n')}`);
+  }
+  const nds = p.carte?.noeuds ?? [];
+  if (nds.length) {
+    parties.push(`SES NŒUDS\n${nds.map(n => `« ${n.nom} » (${n.genre})`).join(' · ')}`);
+  }
+  const lns = p.carte?.liens ?? [];
+  if (lns.length) {
+    parties.push(`SES LIENS\n${lns.map(l => `${l.de} → ${l.vers} : ${l.quoi}`).join('\n')}`);
+  }
+  if (!parties.length) return null;
+
+  return `CE QUE TU AVAIS COMPRIS LA DERNIÈRE FOIS${quand ? `, le ${String(quand).slice(0, 10)}` : ''}.
+
+Ce n'est pas un acquis, et tu as le droit d'en changer — mais c'est le vocabulaire dans
+lequel il se pense MAINTENANT : il a lu ces noms, il s'y est reconnu. Lis la section
+LA CONTINUITÉ de ta consigne avant de décider quoi en faire.
+
+${parties.join('\n\n')}`;
+}
+
+/**
  * Le corpus : tout le journal, borne par le budget de caracteres.
+ *
+ * `precedente` est la lecture deja enregistree, si elle existe. Elle est
+ * transmise au modele comme le RESTE du corpus : une donnee de plus, la
+ * derniere, celle qui dit dans quel vocabulaire cette personne se pense
+ * aujourd'hui. Sans elle, chaque relecture repart de zero et rebaptise tout --
+ * ce qui, vu de l'ecran, ressemble a une vie qui se reorganise entierement
+ * parce qu'on a ecrit trois soirs de plus.
+ *
  * @returns {{texte: string, dates: Set<string>, jours: number, depuis: string|null}}
  */
 export function corpusPour({ rows, events = [], carnet = [], motifs = [], objectifs = [],
-                             amplitudes = [] }) {
+                             amplitudes = [], precedente = null }) {
   // Tout, sans borne. Le budget de caracteres fait deja le tri -- et il le fait
   // sur la DENSITE des journees, ce qui est un bien meilleur critere qu'une
   // date de coupure : ce qui revient depuis quatre ans compte autant que ce qui
@@ -231,10 +287,22 @@ ${amp.map(a => `${a.date} | ${a.n} | ${a.bas} → ${a.haut} | ${a.ecart}`).join(
   const bloc = comparaisonBlock(comps);
   if (bloc) blocs.push(bloc);
 
+  /*
+   * EN DERNIER, ET C'EST VOLONTAIRE. Le modele lit d'abord le journal, puis ce
+   * qu'il en avait tire. Dans l'autre sens il partirait de ses propres
+   * conclusions et relirait le corpus pour les confirmer -- on aurait de la
+   * continuite, mais une continuite aveugle, qui ne verrait plus rien de neuf.
+   */
+  const avant = blocPrecedente(precedente, precedente?.fait_le);
+  if (avant) blocs.push(avant);
+
   return {
     texte: blocs.join('\n\n———\n\n'),
     dates,
     comparaisons: comps,
+    // Elle voyage avec le corpus : `lire()` la repasse a `valider()`, qui en a
+    // besoin pour reconnaitre les noms repris et garder les couleurs.
+    precedente,
     jours: fenetre.filter(r => r.text?.trim()).length,
     // L'etendue reelle, en jours : c'est elle qui decide du grain de la serie.
     etendue: fenetre.length
@@ -369,6 +437,44 @@ Une à trois pistes. ZÉRO EST UNE RÉPONSE, et souvent la bonne : sur trois sem
 journal on ne voit pas de grande direction, on voit trois semaines. N'en fabrique pas pour
 remplir la case. Quatre pistes, c'est qu'aucune ne regroupe rien.
 
+LA CONTINUITÉ
+Si le corpus se termine par CE QUE TU AVAIS COMPRIS LA DERNIÈRE FOIS, tu ne relis pas ce
+journal pour la première fois, et ça change tout.
+
+Ces noms ne sont plus les tiens. Il les a lus, il s'y est reconnu, il les a peut-être
+répétés à quelqu'un. Les remplacer par des synonymes parce que tu relis à froid, c'est lui
+reprendre ce qu'il avait compris — et de son côté, ça ne ressemble pas à une lecture plus
+fine, ça ressemble à une vie qui se réorganise entièrement parce qu'il a écrit trois soirs
+de plus.
+
+Alors REPRENDS LES NOMS EXACTEMENT, au caractère près, pour tout ce qui est encore là.
+Thème, piste ou nœud : si ça décrit la même chose qu'avant, ça garde le nom qu'avant, même
+si tu l'aurais formulé autrement aujourd'hui. Ce n'est pas ton texte, c'est le sien.
+
+Tu as quatre gestes, et seulement quatre :
+
+  — GARDER, et c'est le cas normal, de très loin. Quelques journées de plus ne changent
+    pas un mécanisme, elles l'appuient. Tu affines la description, tu ajoutes des preuves,
+    tu prolonges la série, tu fais monter ou descendre l'intensité — le nom, lui, ne bouge
+    pas. « suite » vaut « repris ».
+  — FUSIONNER : deux choses que tu distinguais, et que le journal montre maintenant comme
+    une seule. Tu rends UNE entrée, et tu mets dans « avant » les noms exacts de celles
+    qui y entrent. « suite » vaut « fusion ».
+  — RENOMMER, seulement quand le nom d'avant est devenu FAUX. Pas maladroit : faux. Le nom
+    d'avant va dans « avant », et « quoi » dit ce qui a changé. « suite » vaut « renomme ».
+  — RETIRER : tu ne le rends plus. Ne retire que ce qui a DISPARU du corpus, jamais ce qui
+    est seulement moins présent. Une chose moins présente est une chose dont la série
+    descend, et une série qui descend est exactement ce qu'on veut lui montrer ; la retirer
+    efface la seule trace qu'elle s'apaise.
+
+Ce qui est vraiment neuf est neuf, et « suite » vaut « nouveau ». Mais si tu rends une
+lecture où tout est neuf, c'est presque toujours que tu as relu à froid — pas que sa vie a
+changé en quatre journées.
+
+Les ÎLOTS surtout. Une piste est ce qu'il voit en premier, c'est le titre écrit au-dessus
+d'un groupe sur sa carte, et c'est ce qui doit bouger le moins. Deux pistes ne fusionnent
+que si tu peux dire en une phrase pourquoi c'est la même direction.
+
 COMBIEN
 Trois à six thèmes. Deux, c'est que tu n'as pas cherché ; huit, c'est que tu as découpé le
 même en morceaux.
@@ -424,6 +530,12 @@ const OUTIL = {
               description: 'Les noms des autres thèmes qui vont avec celui-ci.',
               items: { type: 'string' }
             },
+            suite: { type: 'string', description: "repris | nouveau | renomme | fusion. Voir LA CONTINUITE. « repris » est le cas normal quand une lecture precedente t'est donnee." },
+            avant: {
+              type: 'array',
+              description: "Pour « renomme » et « fusion » seulement : les noms EXACTS d'avant, tels qu'ils apparaissent dans CE QUE TU AVAIS COMPRIS LA DERNIERE FOIS.",
+              items: { type: 'string' }
+            },
             chiffre: {
               type: 'string',
               description: "L'identifiant d'une comparaison de la liste (« c3 »), quand elle porte "
@@ -456,6 +568,12 @@ const OUTIL = {
                 + "au-dessus d'eux. Un noeud n'appartient qu'a une seule piste.",
               items: { type: 'string' }
             },
+            suite: { type: 'string', description: "repris | nouveau | renomme | fusion. Voir LA CONTINUITE. « repris » est le cas normal quand une lecture precedente t'est donnee." },
+            avant: {
+              type: 'array',
+              description: "Pour « renomme » et « fusion » seulement : les noms EXACTS d'avant, tels qu'ils apparaissent dans CE QUE TU AVAIS COMPRIS LA DERNIERE FOIS.",
+              items: { type: 'string' }
+            },
             force: { type: 'integer', description: '1 une direction possible, 2 nette, 3 partout.' }
           },
           required: ['nom', 'quoi', 'contre', 'themes', 'force']
@@ -473,6 +591,12 @@ const OUTIL = {
                 nom:   { type: 'string', description: 'Un à trois mots. Une chose, pas un mot : « Léa », « les nuits courtes », « le dimanche soir ».' },
                 genre: { type: 'string', description: "personne | lieu | travail | corps | mecanisme | periode | activite | dependance. « dependance » pour ce dont il a du mal a se passer, quelle qu'en soit la nature : une substance, un ecran, quelqu'un." },
                 poids: { type: 'integer', description: '0 à 3 : à quel point cette chose occupe de la place chez lui.' },
+                suite: { type: 'string', description: "repris | nouveau | renomme | fusion. Voir LA CONTINUITE." },
+                avant: {
+                  type: 'array',
+                  description: "Pour « renomme » et « fusion » : les noms EXACTS qu'avait ce noeud dans la lecture precedente.",
+                  items: { type: 'string' }
+                },
                 jours: {
                   type: 'array',
                   description: "Les journées du corpus où cette chose apparaît — TOUTES celles que tu "
@@ -514,6 +638,104 @@ const borne = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : 
 const texte = (s, max) => String(s ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
 
 /**
+ * Comme `texte`, mais la coupe tombe sur une FIN DE PHRASE.
+ *
+ * Une borne dure coupe au caractere, et sur un paragraphe elle finit par
+ * produire « ... parce que le vide, s » -- une phrase amputee en plein mot, que
+ * la personne lit comme un bug de l'application plutot que comme une limite.
+ * On recule donc jusqu'au dernier point, et on ne rend rien de tronque : soit
+ * le texte entier, soit un texte qui se termine.
+ *
+ * Le repli sur la coupe dure existe quand meme : un modele peut rendre mille
+ * caracteres sans un seul point, et mieux vaut un texte coupe que pas de texte.
+ */
+function phrase(s, max) {
+  const t = texte(s, max * 2);
+  if (t.length <= max) return t;
+  const coupe = t.slice(0, max);
+  const fin = Math.max(coupe.lastIndexOf('. '), coupe.lastIndexOf('! '), coupe.lastIndexOf('? '));
+  return fin > max * 0.4 ? coupe.slice(0, fin + 1) : coupe.trimEnd() + '…';
+}
+
+/* ------------------------------ la continuite ------------------------------ */
+
+/**
+ * CE QU'ON SAIT DEJA, sous une forme comparable.
+ *
+ * Le modele a recu la lecture precedente en toutes lettres et la consigne lui
+ * demande d'en reprendre les noms. Ici, on VERIFIE qu'il l'a fait -- et
+ * surtout, on s'en sert pour que la couleur d'un ilot ne change pas : c'est
+ * elle qu'on reconnait avant meme d'avoir lu le titre.
+ */
+function memoire(precedente) {
+  const bas = x => texte(x, 60).toLowerCase();
+  const pistes = precedente?.pistes ?? [];
+  return {
+    themes: new Set((precedente?.themes ?? []).map(t => bas(t.nom)).filter(Boolean)),
+    pistes: new Set(pistes.map(p => bas(p.nom)).filter(Boolean)),
+    noeuds: new Set((precedente?.carte?.noeuds ?? []).map(n => bas(n.nom)).filter(Boolean)),
+    teintes: new Map(pistes.filter(p => TEINTES.includes(p.teinte)).map(p => [bas(p.nom), p.teinte]))
+  };
+}
+
+/**
+ * Ce qu'est devenu un nom : repris, renomme, fusionne, ou neuf.
+ *
+ * Le modele rend son propre « suite », et on ne le croit pas : il annonce
+ * volontiers « repris » sur un nom qu'il vient d'inventer. Le verdict se
+ * DEDUIT des faits -- ce nom existait-il ? les noms cites dans « avant »
+ * existaient-ils ? -- et le champ du schema ne sert qu'a lui faire poser le
+ * geste consciemment au moment de repondre.
+ *
+ * `pris` empeche deux entrees de se reclamer du meme ancetre : sans lui, deux
+ * themes peuvent tous les deux se dire le nouveau nom de l'ancien, et l'ancien
+ * aurait alors deux successeurs, ce qui n'est pas une histoire lisible.
+ */
+function reprise(nom, brut, connus, pris) {
+  if (!connus.size) return { suite: 'nouveau', avant: [] };
+  if (connus.has(nom)) { pris.add(nom); return { suite: 'repris', avant: [] }; }
+  const avant = [...new Set((brut ?? []).map(a => texte(a, 60).toLowerCase()))]
+    .filter(a => connus.has(a) && a !== nom && !pris.has(a))
+    .slice(0, 4);
+  for (const a of avant) pris.add(a);
+  if (avant.length > 1) return { suite: 'fusion', avant };
+  if (avant.length === 1) return { suite: 'renomme', avant };
+  return { suite: 'nouveau', avant: [] };
+}
+
+/**
+ * LA COULEUR D'UN ILOT NE CHANGE PAS TANT QUE L'ILOT EST LA.
+ *
+ * Elle etait prise a l'index -- la premiere piste en bleu, la deuxieme en
+ * violet -- ce qui veut dire qu'une piste inseree en tete repeignait toutes les
+ * autres. Sur la carte, la couleur est ce qu'on reconnait AVANT le titre : tout
+ * repeindre revient a redessiner une carte inconnue, meme quand pas un seul nom
+ * n'a bouge.
+ *
+ * La teinte suit donc le NOM, a travers la lecture precedente, et elle traverse
+ * meme un renommage ou une fusion : ce qui compte est que la chose garde sa
+ * couleur, pas son etiquette. Elle est ecrite dans la lecture enregistree --
+ * c'est le seul moyen qu'elle survive a un rechargement.
+ */
+function teinterPistes(pistes, mem) {
+  const restantes = new Set(TEINTES);
+  for (const p of pistes) {
+    const t = mem.teintes.get(p.nom)
+      ?? p.avant.map(a => mem.teintes.get(a)).find(x => x != null);
+    if (t != null && restantes.has(t)) { p.teinte = t; restantes.delete(t); }
+  }
+  let i = 0;
+  for (const p of pistes) {
+    if (p.teinte != null) continue;
+    // Plus de pistes que de teintes ne devrait pas arriver (trois au plus, cinq
+    // teintes), mais un tour de roue vaut mieux qu'un `undefined` a l'ecran.
+    const t = restantes.size ? [...restantes][0] : TEINTES[i++ % TEINTES.length];
+    p.teinte = t; restantes.delete(t);
+  }
+  return pistes;
+}
+
+/**
  * Ce que le modele rend n'est pas ce qu'on affiche.
  *
  * Les dates sont verifiees contre le corpus, les intensites bornees, les liens
@@ -521,7 +743,7 @@ const texte = (s, max) => String(s ?? '').trim().replace(/\s+/g, ' ').slice(0, m
  * disparait : la consigne dit qu'il ne tient pas sans ancrage, et une consigne
  * qui n'est pas appliquee n'est pas une regle.
  */
-export function valider(brut, dates, comps = []) {
+export function valider(brut, dates, comps = [], precedente = null) {
   /*
    * Le chiffre ne traverse jamais le modele. Il rend « c3 » ; la phrase de c3
    * est cherchee ici, dans la liste que le serveur a calculee. Un identifiant
@@ -534,6 +756,7 @@ export function valider(brut, dates, comps = []) {
    */
   const parId = new Map(comps.map(c => [c.id, c]));
   const pris = new Set();
+  const mem = memoire(precedente);
   const themes = [];
   for (const t of (brut?.themes ?? []).slice(0, 8)) {
     const preuves = (t.preuves ?? [])
@@ -564,19 +787,32 @@ export function valider(brut, dates, comps = []) {
   // retire tracerait une arete vers un noeud absent, et la carte se dessinerait
   // avec un trait qui part dans le vide.
   const noms = new Set(themes.map(t => t.nom));
+  // La continuite se resout en deux temps, comme les liens : tous les noms
+  // REPRIS d'abord, les renommages ensuite. Dans l'autre ordre, un theme
+  // pretendant renommer « les nuits courtes » raflerait ce nom avant que le
+  // theme qui s'appelle vraiment « les nuits courtes » ne se presente.
+  const ancetres = new Set();
+  for (const t of themes) if (mem.themes.has(t.nom)) ancetres.add(t.nom);
   for (const t of themes) {
     const src = (brut.themes ?? []).find(x => texte(x.nom, 40).toLowerCase() === t.nom);
     t.liens = [...new Set((src?.liens ?? []).map(l => texte(l, 40).toLowerCase()))]
       .filter(l => l !== t.nom && noms.has(l)).slice(0, 4);
+    Object.assign(t, reprise(t.nom, src?.avant, mem.themes, ancetres));
   }
   // La carte AVANT les pistes : une piste nomme des noeuds de la carte, et un
   // noeud jete la-bas ferait pointer l'ilot vers une chose qui ne s'affiche
   // nulle part. Meme raison que les liens entre themes, meme ordre.
-  const carte = validerCarte(brut?.carte, dates);
+  const carte = validerCarte(brut?.carte, dates, mem);
   return {
-    synthese: texte(brut?.synthese, 700),
+    /*
+     * La synthese se coupe sur une FIN DE PHRASE, et plus loin qu'avant.
+     * La borne dure de 700 caracteres tombait au milieu d'un mot -- « parce que
+     * le vide, s » -- ce qui se lit comme une panne, pas comme une limite.
+     */
+    synthese: phrase(brut?.synthese, 1100),
     themes,
-    pistes: validerPistes(brut?.pistes, noms, new Set(carte.noeuds.map(n => n.nom.toLowerCase()))),
+    pistes: validerPistes(brut?.pistes, noms,
+      new Set(carte.noeuds.map(n => n.nom.toLowerCase())), mem),
     carte
   };
 }
@@ -602,7 +838,8 @@ export function valider(brut, dates, comps = []) {
  * un theme cite ici mais jete plus haut ferait pointer la piste vers un
  * fonctionnement que la personne ne verra nulle part.
  */
-export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set()) {
+export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
+                              mem = memoire(null)) {
   const out = [];
   const vus = new Set();
   // Un noeud n'appartient qu'a UN ilot. Deux pistes qui se le disputent
@@ -626,11 +863,20 @@ export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set()) {
       contre,
       themes,
       noeuds,
-      force: borne(Math.round(p?.force), 1, 3)
+      force: borne(Math.round(p?.force), 1, 3),
+      avantBrut: p?.avant
     });
     if (out.length === 3) break;
   }
-  return out;
+  // Comme pour les themes : les noms REPRIS sont reserves avant qu'un renommage
+  // ne puisse les revendiquer.
+  const ancetres = new Set();
+  for (const p of out) if (mem.pistes.has(p.nom)) ancetres.add(p.nom);
+  for (const p of out) {
+    Object.assign(p, reprise(p.nom, p.avantBrut, mem.pistes, ancetres));
+    delete p.avantBrut;
+  }
+  return teinterPistes(out, mem);
 }
 
 /**
@@ -644,7 +890,7 @@ export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set()) {
  * Un lien sans « quoi » est jete aussi : ce qui fait une carte n'est pas la
  * liste des noeuds, c'est ce qui les relie. « lie a » n'apprend rien.
  */
-export function validerCarte(brut, dates = null) {
+export function validerCarte(brut, dates = null, mem = memoire(null)) {
   const vus = new Map();
   for (const n of (brut?.noeuds ?? []).slice(0, 20)) {
     const nom = texte(n?.nom, 40);
@@ -672,10 +918,17 @@ export function validerCarte(brut, dates = null) {
       nom,
       genre: GENRES.includes(String(n?.genre)) ? String(n.genre) : 'activite',
       poids: borne(Math.round(n?.poids), 0, 3),
-      jours
+      jours,
+      avantBrut: n?.avant
     });
   }
   const noeuds = [...vus.values()];
+  const ancetres = new Set();
+  for (const n of noeuds) if (mem.noeuds.has(n.nom.toLowerCase())) ancetres.add(n.nom.toLowerCase());
+  for (const n of noeuds) {
+    Object.assign(n, reprise(n.nom.toLowerCase(), n.avantBrut, mem.noeuds, ancetres));
+    delete n.avantBrut;
+  }
 
   const arretes = new Map();
   for (const l of (brut?.liens ?? []).slice(0, 40)) {
@@ -747,7 +1000,7 @@ export async function lire(corpus, settings) {
 
   const u = res.usage ?? {};
   return {
-    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? []),
+    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? [], corpus.precedente),
     modele: res.model ?? settings.anthropicModel,
     usage: {
       input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),

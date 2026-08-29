@@ -2018,13 +2018,35 @@ const FORCE_MOT = { 1: 'une direction possible', 2: 'net', 3: 'partout' };
  * Le cadre est dans l'interface et pas dans la phrase du modele : une consigne
  * de formulation s'oublie, une structure non.
  */
-function pisteMarkup(p, i) {
+/**
+ * CE QUI A CHANGE DEPUIS LA DERNIERE LECTURE, dit sur la piste elle-meme.
+ *
+ * Chaque relecture rendait des pistes differentes et rien ne disait lesquelles
+ * etaient nouvelles : il fallait se souvenir de l'ecran d'avant pour savoir si
+ * quelque chose avait bouge, et de memoire, tout parait avoir bouge.
+ *
+ * Le marqueur ne s'affiche QUE s'il y avait une lecture avant. A la premiere,
+ * tout est neuf par construction, et coller « nouveau » sur chaque piste ne
+ * dirait rien -- ce serait juste du bruit sur l'ecran le plus important.
+ */
+function suiteMarkup(p, suivi) {
+  if (!suivi) return '';
+  if (p.suite === 'nouveau') return `<span class="psuite neuf">nouveau</span>`;
+  if (p.avant?.length) {
+    return `<span class="psuite" title="${p.suite === 'fusion'
+      ? 'Deux pistes que ta relecture a réunies.' : 'La même piste, sous un autre nom.'}">${
+      p.suite === 'fusion' ? 'réunit' : 'avant'} ${p.avant.map(esc).join(' + ')}</span>`;
+  }
+  return '';
+}
+
+function pisteMarkup(p, i, suivi = false) {
   const ouvert = MOI_PISTE === p.nom;
-  const teinte = TEINTES_DECLAREES[i % TEINTES_DECLAREES.length];
+  const teinte = teintePiste(p, i);
   return `<div class="piste${ouvert ? ' ouvert' : ''}" style="--p:${teinte}">
     <button class="ptete" data-piste="${esc(p.nom)}" aria-expanded="${ouvert}">
       <span class="pcadre">une piste, du côté de</span>
-      <span class="pnom">${esc(p.nom)}</span>
+      <span class="pnom">${esc(p.nom)}${suiteMarkup(p, suivi)}</span>
       <span class="pforce" data-f="${p.force}" title="${FORCE_MOT[p.force] ?? ''}">
         <i></i><i></i><i></i></span>
     </button>
@@ -2064,7 +2086,12 @@ function pistesMarkup() {
       explorer, pas des états : clique pour voir ce qui va dans ce sens, ce qui va contre,
       et les mécanismes qui les portent.
     </p>
-    <div class="pistes">${p.map(pisteMarkup).join('')}</div>
+    ${/* « suivi » : une lecture precedente existait. Si toutes les pistes sont
+          neuves, c'est la premiere -- et « nouveau » partout ne dit rien. */''}
+    <div class="pistes">${(() => {
+      const suivi = p.some(x => x.suite && x.suite !== 'nouveau');
+      return p.map((x, i) => pisteMarkup(x, i, suivi)).join('');
+    })()}</div>
     ${/* Une fois, en bas du bloc, et pas sous chaque piste : repete trois fois
           la phrase devient une decharge de responsabilite au lieu d'un conseil. */''}
     <p class="prenvoi">
@@ -2276,8 +2303,39 @@ function serieMarkup(serie) {
  * emprunter le vert d'une bonne journee, meme par accident.
  */
 
-/** La teinte d'un thème : stable dans une lecture, prise dans la bande déclarée. */
-const teinteTheme = (t, i) => TEINTES_DECLAREES[i % TEINTES_DECLAREES.length];
+/**
+ * LA TEINTE SUIT LE NOM, PAS LE RANG.
+ *
+ * Elle etait prise a l'index. Une piste qui passait de la deuxieme a la
+ * premiere place changeait donc de couleur, et avec elle son ilot sur la carte
+ * et tous ses mecanismes en dessous -- alors que rien de ce qu'elle disait
+ * n'avait bouge. Sur la carte, la couleur est ce qu'on reconnait AVANT d'avoir
+ * lu le titre : la faire tourner revient a rendre la carte etrangere.
+ *
+ * Une piste porte maintenant SA teinte, posee par le serveur et reconduite
+ * d'une lecture a l'autre. L'index ne sert plus que de repli pour les lectures
+ * enregistrees avant ce changement.
+ */
+const teintePiste = (p, i) => TEINTES_DECLAREES.includes(p?.teinte)
+  ? p.teinte : TEINTES_DECLAREES[i % TEINTES_DECLAREES.length];
+
+/**
+ * La teinte d'un thème : celle de la piste qui le regroupe.
+ *
+ * Trois vues, un seul code couleur — l'îlot sur la carte, son titre dans
+ * « Moi », ses mécanismes dans « Année » — sinon la même chose se présente en
+ * trois couleurs et il faut la rechercher à chaque écran. Un thème hors de
+ * toute piste tire la sienne de son propre nom : rien à quoi la rattacher,
+ * mais au moins elle ne bouge plus quand un autre thème apparaît avant lui.
+ */
+function teinteTheme(t, i, pistes = []) {
+  const nom = String(t?.nom ?? '').toLowerCase();
+  const j = pistes.findIndex(p => (p.themes ?? []).some(x => String(x).toLowerCase() === nom));
+  if (j >= 0) return teintePiste(pistes[j], j);
+  let h = 2166136261;
+  for (let k = 0; k < nom.length; k++) { h ^= nom.charCodeAt(k); h = Math.imul(h, 16777619); }
+  return TEINTES_DECLAREES[(h >>> 0) % TEINTES_DECLAREES.length];
+}
 
 /**
  * Un mécanisme, quelle que soit sa provenance.
@@ -2299,9 +2357,9 @@ function mecaMarkup(m) {
 }
 
 /** Un thème de la lecture : ses preuves datées, son chiffre, ses liens. */
-function themeMeca(t, i) {
+function themeMeca(t, i, pistes = []) {
   return {
-    cle: t.nom, nom: t.nom, teinte: teinteTheme(t, i),
+    cle: t.nom, nom: t.nom, teinte: teinteTheme(t, i, pistes),
     intensite: t.intensite, serie: t.serie, compte: null,
     corps: `
       <p class="tquoi">${esc(t.quoi)}</p>
@@ -2358,7 +2416,7 @@ function motifMeca(m) {
  * ce qui est l'ordre dans lequel on veut les lire.
  */
 function mecanismes(lecture) {
-  const t = (lecture?.themes ?? []).map(themeMeca);
+  const t = (lecture?.themes ?? []).map((x, i) => themeMeca(x, i, lecture?.pistes ?? []));
   const m = (S.motifs?.liste ?? []).map(motifMeca);
   return [...t, ...m].sort((a, b) =>
     (b.intensite - a.intensite) || ((b.serie?.length ?? 0) - (a.serie?.length ?? 0)));
@@ -2390,7 +2448,7 @@ function mecaGroupes(lecture) {
     const dedans = tous.filter(m => restant.has(m.cle) && noms.has(String(m.nom).toLowerCase()));
     if (!dedans.length) return;
     for (const m of dedans) restant.delete(m.cle);
-    const teinte = TEINTES_DECLAREES[i % TEINTES_DECLAREES.length];
+    const teinte = teintePiste(p, i);
     bloc.push(`<div class="mecagroupe" style="--p:${teinte}">
       <div class="mecatitre"><span></span>${esc(p.nom)}</div>
       ${dedans.map(mecaMarkup).join('')}
@@ -2662,24 +2720,33 @@ async function renderLecture() {
     // dit en mots, les themes la detaillent -- l'ordre va du coup d'oeil au
     // detail, et pas l'inverse.
     /*
-     * LA CARTE ET CE QU'ELLE DIT, COTE A COTE.
+     * LA CARTE AU CENTRE, LE TEXTE SUR LE COTE.
      *
-     * Ils se suivaient : la carte, puis la synthese sous elle, puis les
-     * comportements dans un autre onglet. Trois vues d'une meme lecture, qu'on
-     * ne pouvait jamais regarder ensemble -- alors que la seule question qu'on
-     * se pose devant un noeud est « qu'est-ce qu'il en dit ? », et qu'il fallait
-     * faire defiler pour le savoir.
+     * Ils etaient a parite : la carte dans une colonne, et dans l'autre la
+     * synthese POSEE SUR les ilots. Un paragraphe de dix lignes prenait donc le
+     * haut de la moitie droite, et ce qu'on venait voir -- les groupes detectes
+     * et ce qu'ils contiennent -- commencait sous la ligne de flottaison.
      *
-     * Sous 1080 px la colonne passe dessous : deux colonnes de 300 px ne
-     * servent personne.
+     * Or ce qui se regarde et ce qui se lit ne demandent pas la meme place. Une
+     * carte a besoin de surface : c'est une forme, elle se reconnait d'un coup
+     * d'oeil ou pas du tout. Un paragraphe a besoin d'une colonne etroite et de
+     * rien d'autre -- au-dela de soixante caracteres par ligne, l'oeil perd sa
+     * ligne en revenant a gauche.
+     *
+     * La carte prend donc toute la largeur utile, les ilots se rangent juste en
+     * dessous, et la synthese passe en rail a droite, ou elle suit le defilement
+     * sans jamais disputer la place a ce qu'elle commente.
+     *
+     * Sous 1180 px le rail passe dessous : une colonne de texte de 200 px ne
+     * sert personne.
      */
     corps = `
       <div class="lectgrille">
         <div class="lectcarte">${carteMarkup(L.lecture.carte)}</div>
-        <div class="lectdit">
+        <div class="lectmeca">${mecaGroupes(L.lecture)}</div>
+        <aside class="lectdit">
           <p class="synthese">${esc(L.lecture.synthese)}</p>
-          <div class="themes">${mecaGroupes(L.lecture)}</div>
-        </div>
+        </aside>
       </div>`;
   } else if (LECTURE_EN_COURS) {
     corps = `<div class="lectvide"><span class="spin"></span>

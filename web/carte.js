@@ -12,10 +12,13 @@
  * journées basses — même échelle que la grille et que l'écart quotidien. Des
  * teintes décoratives feraient une image ; celles-ci font une lecture.
  *
- * La disposition est déterministe. Les positions de départ viennent d'un tirage
- * à graine fixe, pas de Math.random : deux ouvertures de la même carte donnent
- * la même image. Un journal qui se réorganise à chaque visite ne se reconnaît
- * pas, et c'est précisément la reconnaissance qu'on cherche ici.
+ * La disposition est déterministe, et elle l'est PAR NOM. Chaque nœud part de
+ * la place que son propre nom lui donne — pas d'un Math.random, mais pas non
+ * plus de son rang dans la liste. Deux ouvertures de la même carte donnent la
+ * même image ; et une carte à qui on ajoute deux nœuds reste la même carte,
+ * avec deux nœuds de plus. Un journal qui se réorganise entièrement à chaque
+ * relecture ne se reconnaît pas, et c'est précisément la reconnaissance qu'on
+ * cherche ici.
  */
 
 import { deltaColor } from './charts.js';
@@ -27,25 +30,112 @@ const AMAS_RAPPEL = 0.010;
 const CENTRE_RAPPEL = 0.0016;
 const FROTTEMENT = 0.86;
 
-/* Tirage a graine : la meme carte doit se redessiner identique. */
-function graine(n) {
-  let s = 20260827 ^ n;
-  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+/**
+ * Un flottant entre 0 et 1, tire d'une chaine. FNV-1a, puis normalisation.
+ *
+ * Le meme nom rend toujours le meme nombre, et deux noms proches rendent des
+ * nombres sans rapport -- c'est exactement ce qu'on demande a une place de
+ * depart : stable, et repartie.
+ */
+function hache(cle) {
+  let h = 2166136261;
+  for (let i = 0; i < cle.length; i++) { h ^= cle.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) / 4294967296;
 }
 
+/**
+ * LA PLACE DE DEPART VIENT DU NOM, PLUS DE L'INDEX.
+ *
+ * Elle venait d'une spirale indexee : le premier noeud au centre, puis chacun
+ * un cran plus loin. Deterministe, oui -- mais seulement a liste identique. Un
+ * noeud insere en troisieme position decalait tous les suivants d'un cran, et
+ * la simulation, partie d'ailleurs, arrivait ailleurs. D'une relecture a la
+ * suivante, quelqu'un qui n'avait rien change de sa vie retrouvait une carte
+ * entierement redisposee -- et c'est la reconnaissance qu'on venait chercher
+ * ici, pas la nouveaute.
+ *
+ * Chaque noeud tire donc sa place de SON NOM. Ceux qui restent repartent d'ou
+ * ils etaient ; ceux qui arrivent se posent ailleurs, sans pousser personne. Le
+ * `sqrt` garde la repartition uniforme dans le disque : sans lui, tout
+ * s'entasse au centre.
+ */
 export function disposer(G, largeur, hauteur) {
   const n = G.noeuds.length;
   if (!n) return { pts: [], centres: new Map() };
-  const r = graine(n);
 
-  // Depart en spirale plutot qu'au hasard pur : la simulation converge plus
-  // vite et surtout de facon reproductible.
+  const R = Math.min(largeur, hauteur);
+
+  /*
+   * LES POINTS D'ANCRAGE DES AMAS : d'ou part chaque groupe.
+   *
+   * L'angle vient du nom -- c'est ce qui rend la carte stable d'une relecture a
+   * l'autre. Mais trois hachages tirés au hasard tombent volontiers dans le
+   * meme quart de cercle, et les trois ilots se posent alors les uns sur les
+   * autres, dans un coin d'un canvas aux trois quarts vide.
+   *
+   * On les ECARTE donc, sans les reordonner : quelques passes qui poussent
+   * chaque voisin jusqu'a une separation minimale. L'ordre autour du cercle
+   * reste celui des noms, et un amas de plus deplace ses voisins d'un cran au
+   * lieu de tout redistribuer -- c'est exactement le compromis qu'on veut entre
+   * « ca se reconnait » et « ca se lit ».
+   */
+  const cles = [...new Set(G.noeuds.map(nd => String(nd.amas ?? 'seul')))];
+  const angles = new Map(cles.map(k => [k, hache(k) * Math.PI * 2]));
+  const ecart = (Math.PI * 2 / cles.length) * 0.85;
+  for (let t = 0; t < 60; t++) {
+    const ordre = [...cles].sort((a, b) => angles.get(a) - angles.get(b));
+    for (let i = 0; i < ordre.length; i++) {
+      const a = ordre[i], b = ordre[(i + 1) % ordre.length];
+      if (a === b) continue;
+      let d = angles.get(b) - angles.get(a);
+      if (d < 0) d += Math.PI * 2;
+      if (d >= ecart) continue;
+      const c = (ecart - d) / 2;
+      angles.set(a, angles.get(a) - c);
+      angles.set(b, angles.get(b) + c);
+    }
+  }
+
+  const ancres = new Map();
+  const ancre = cle => {
+    if (!ancres.has(cle)) {
+      const a = angles.get(cle) ?? hache(cle) * Math.PI * 2;
+      // Une ELLIPSE, pas un cercle : les amas se repartissent dans la forme du
+      // cadre. Sur un canvas large, un depart circulaire donne un graphe rond
+      // que le recadrage ne peut qu'agrandir jusqu'a la hauteur -- et il reste
+      // un tiers de largeur vide de chaque cote. Le recadrage ne deforme pas
+      // (les angles mentiraient) : c'est ici que la forme se decide.
+      const u = 0.72 + 0.28 * hache(cle + '·rayon');
+      ancres.set(cle, {
+        x: largeur / 2 + Math.cos(a) * 0.34 * largeur * u,
+        y: hauteur / 2 + Math.sin(a) * 0.34 * hauteur * u
+      });
+    }
+    return ancres.get(cle);
+  };
+
   const pts = G.noeuds.map((nd, i) => {
-    const a = i * 2.399963;                        // angle d'or
-    const d = 0.42 * Math.min(largeur, hauteur) * Math.sqrt(i / n);
+    /*
+     * DEUX HACHAGES, ET C'EST DELIBERE : celui de l'AMAS pose le groupe, celui
+     * du NOM place le noeud dedans.
+     *
+     * Un seul -- le nom -- suffisait a la stabilite, mais pas au reste : les
+     * quatre noeuds d'un meme ilot partaient alors aux quatre coins du cadre, et
+     * le rappel d'amas passait la simulation entiere a les ramener. Les
+     * enveloppes finissaient etirees et se traversaient toutes, ce qui efface
+     * exactement ce qu'on venait chercher : des groupes qu'on distingue.
+     *
+     * Ancres par amas, donc : les ilots partent deja separes, la simulation n'a
+     * plus qu'a les detendre. Et comme l'ancre vient du NOM de l'ilot, un noeud
+     * de plus dans un groupe ne deplace ni le groupe ni ses voisins.
+     */
+    const cle = String(nd.nom ?? nd.mot ?? i);
+    const c = ancre(String(nd.amas ?? 'seul'));
+    const a = hache(cle) * Math.PI * 2;
+    const d = 0.13 * R * Math.sqrt(hache(cle + '·rayon'));
     return {
-      x: largeur / 2 + Math.cos(a) * d + (r() - 0.5) * 8,
-      y: hauteur / 2 + Math.sin(a) * d + (r() - 0.5) * 8,
+      x: c.x + Math.cos(a) * d,
+      y: c.y + Math.sin(a) * d,
       vx: 0, vy: 0,
       poids: 1 + Math.log2(1 + nd.jours)
     };

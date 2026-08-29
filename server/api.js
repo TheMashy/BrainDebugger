@@ -277,6 +277,35 @@ function aNoter(rows, aujourdhui) {
   return out;
 }
 
+/**
+ * TOUT CE QUE LE MODELE VOIT QUAND IL RELIT LE JOURNAL.
+ *
+ * Extrait de la route pour une raison precise : la LECTURE PRECEDENTE en fait
+ * partie, et c'est le genre de branchement qui tombe en panne sans bruit. Sans
+ * elle, chaque relecture repart de zero -- les memes journees, relues a froid,
+ * ressortent sous d'autres noms et dans d'autres groupes. Vu de l'ecran, ce
+ * n'est pas une lecture plus fine : c'est toute la carte qui se reorganise
+ * parce qu'on a ecrit trois soirs de plus, et plus rien de ce qu'on avait
+ * compris ne s'y retrouve.
+ *
+ * Rien ici ne peut se verifier depuis la route, qui s'arrete au modele. En
+ * appelant CETTE fonction, un test lit le corpus lui-meme et voit si la lecture
+ * d'avant y est.
+ */
+export function corpusDuJournal(userId, rows = series(userId).rows,
+                                carnet = series(userId).carnet) {
+  const avant = getLecture(userId);
+  return corpusPour({
+    rows, events: allEvents(userId), carnet,
+    motifs: allMotifs(userId), objectifs: allObjectifs(userId),
+    amplitudes: amplitudes(userId),
+    // La consigne lui demande d'en reprendre les noms ; la validation, elle, ne
+    // se contente pas de le demander : elle verifie ce qui a ete repris et fait
+    // suivre les couleurs.
+    precedente: avant?.contenu ? { ...avant.contenu, fait_le: avant.fait_le } : null
+  });
+}
+
 export const routes = {
 
   /*
@@ -1072,11 +1101,7 @@ export const routes = {
     if (ecrites.length < LECTURE_MIN) {
       return { error: `Il faut au moins ${LECTURE_MIN} journées écrites pour que ça veuille dire quelque chose.` };
     }
-    const corpus = corpusPour({
-      rows, events: allEvents(userId), carnet,
-      motifs: allMotifs(userId), objectifs: allObjectifs(userId),
-      amplitudes: amplitudes(userId)
-    });
+    const corpus = corpusDuJournal(userId, rows, carnet);
     if (!corpus.dates.size) {
       return { error: "Rien d'écrit dans ton journal — il n'y a rien à lire." };
     }
