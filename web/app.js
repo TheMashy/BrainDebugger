@@ -510,6 +510,27 @@ function dureeCourte(ms) {
   return j < 14 ? `${j} jours` : `${Math.round(j / 7)} semaines`;
 }
 
+/*
+ * « [sam. 29/08 07:07] » en tete d'une reponse du compagnon.
+ *
+ * Le marqueur est pose par l'application sur ce que la PERSONNE ecrit, pour
+ * que le modele sache l'heure qu'il est. Il n'a jamais eu a le recopier -- et
+ * il le faisait, parce qu'il voyait le sien dans tout son historique. Le
+ * defaut est repare a la source, mais les tours ou il l'a recopie sont dans la
+ * base : sans ce nettoyage a l'affichage, ils gardent leur crochet pour
+ * toujours, en double avec l'horodatage que la bulle porte deja.
+ */
+const MARQUEUR = /^\s*\[\p{L}{2,4}\.?\s+\d{2}\/\d{2}\s+\d{2}:\d{2}\]\s*/u;
+const sansMarqueur = t => String(t ?? '').replace(MARQUEUR, '');
+
+/*
+ * Les motifs reconnus PENDANT ce tour-ci. Ce sont les seuls dont la puce
+ * s'anime : une apparition qui rejoue a chaque rendu du fil n'annonce plus
+ * rien, elle scintille. L'ensemble se vide au message suivant, comme les
+ * gestes.
+ */
+let FRAIS = new Set();
+
 function drawThread() {
   const th = $('#thread');
   if (!th) return;
@@ -557,14 +578,36 @@ function drawThread() {
     // conversation : c'est la phrase qui porte le mécanisme, pas la soirée.
     const mots = parMsg[m.id] ?? [];
     const teinte = mots.length ? ` style="--motif:${mots[0].teinte}"` : '';
+    /*
+     * LA RECONNAISSANCE SE DIT UNE FOIS, ET LA OU ELLE A LIEU.
+     *
+     * Elle se disait deux fois : une puce sous la phrase, et un bandeau
+     * « MOTIF RECONNU · 2 fois » au-dessus du composeur. Le bandeau etait le
+     * plus visible des deux et le moins utile -- il annoncait, detache de la
+     * phrase, un mecanisme qu'on ne pouvait pas relier a ce qui venait d'etre
+     * ecrit. Il est parti ; la puce reste, et c'est elle qui s'anime.
+     *
+     * Ce qui vient d'etre reconnu apparait : le nom d'abord, le compte juste
+     * apres. Les deux d'un coup feraient une etiquette qui tombe ; en deux
+     * temps, on lit ce qui a ete reconnu, puis depuis combien de fois. Les
+     * anciennes puces, elles, sont deja la et ne bougent pas -- une animation
+     * qui rejoue a chaque rendu du fil devient un tic.
+     */
     const marque = mots.length
-      ? `<span class="motifs">${mots.map(x =>
-          `<button class="motifchip" data-motif="${x.id}" style="--motif:${x.teinte}"
-            title="Motif suivi par le compagnon">${esc(x.nom)}</button>`).join('')}</span>`
+      ? `<span class="motifs">${mots.map(x => {
+          const frais = FRAIS.has(x.id) ? ' frais' : '';
+          return `<button class="motifchip${frais}" data-motif="${x.id}" style="--motif:${x.teinte}"
+            title="${esc(x.mecanisme ?? 'Motif suivi par le compagnon')}${
+              x.vues > 1 ? ` — reconnu ${x.vues} fois` : ''}"
+            >${esc(x.nom)}${x.vues > 1
+              ? `<span class="mvues">${x.vues}<small>×</small></span>` : ''}</button>`;
+        }).join('')}</span>`
       : '';
     return sep + silence + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte} data-id="${m.id ?? ''}"
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
-      }${reflexionMarkup(m)}<span class="tx">${esc(m.text)}</span>${marque}${rembobMarkup(m)}</div>`;
+      }${reflexionMarkup(m)}<span class="tx">${esc(
+        m.role === 'pet' ? sansMarqueur(m.text) : m.text
+      )}</span>${marque}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
@@ -652,7 +695,14 @@ let GESTES = [];
 
 function gestesMarkup() {
   if (!GESTES.length) return '';
-  return `<div class="gestes">${GESTES.filter(g => g.type !== 'objectif').map(g => g.type === 'note'
+  /*
+   * PAS DE BANDEAU POUR UN MOTIF : il se dit sur la phrase, pas au-dessus du
+   * composeur. Detache de ce qui vient d'etre ecrit, « MOTIF RECONNU · 2 fois »
+   * annoncait un mecanisme sans dire lequel de ses mots l'avait declenche --
+   * alors que la puce, elle, est posee exactement dessous. Deux annonces pour
+   * un seul fait, et la plus voyante etait la moins situee.
+   */
+  return `<div class="gestes">${GESTES.filter(g => g.type !== 'objectif' && g.type !== 'motif').map(g => g.type === 'note'
     ? `<div class="geste note">
          <span class="gicone">${icone('pensee', 20)}</span>
          <div class="gtxt">
@@ -664,22 +714,13 @@ function gestesMarkup() {
          </div>
          ${g.jour ? `<button class="gbtn" data-voir="${g.jour}">voir</button>` : ''}
        </div>`
-    : g.type === 'repere'
-    ? `<div class="geste repere">
+    : `<div class="geste repere">
          <span class="gicone">${icone(g.theme, 20)}</span>
          <div class="gtxt">
            <b>Repère posé</b>
            <span>${esc(g.label)} · ${fmtDay(g.date)}</span>
          </div>
          <button class="gbtn" data-voir="${g.date}">voir</button>
-       </div>`
-    : `<div class="geste motif" style="--motif:${g.teinte}">
-         <span class="gpuce"></span>
-         <div class="gtxt">
-           <b>${g.nouveau ? 'Nouveau motif suivi' : 'Motif reconnu'}</b>
-           <span>${esc(g.nom)}${g.nouveau ? ` — ${esc(g.mecanisme)}` : ` · ${g.vues} fois`}</span>
-         </div>
-         ${g.nouveau ? '<button class="gbtn" data-motifs="1">les voir</button>' : ''}
        </div>`).join('')}</div>`;
 }
 
@@ -779,7 +820,7 @@ function bindGestes(th) {
      * Atterrir sur une liste de huit lignes en ayant clique sur l'une d'elles
      * fait recommencer le geste.
      */
-    const m = e.target.closest('[data-motifs]') || e.target.closest('[data-motif]');
+    const m = e.target.closest('[data-motif]');
     if (m) {
       MIR_THEME = m.dataset.motif ? `motif:${m.dataset.motif}` : null;
       MIRROR_DATE = null;
@@ -953,6 +994,7 @@ async function send() {
   PetTalk.stop();
 
   GESTES = [];                        // les gestes du tour précédent ont fait leur temps
+  FRAIS = new Set();                  // et les motifs qu'il avait reconnus aussi
   // affichage optimiste : ce que tu écris apparaît tout de suite
   S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user',
                     text: text || noms.map(n => `[${n}]`).join(' ') });
@@ -1025,6 +1067,9 @@ async function send() {
       // en même temps que la phrase qui la mentionne, pas plusieurs secondes
       // après, où elle aurait l'air d'être tombée toute seule.
       if (ev === 'geste') {
+        // Un motif reconnu ne pose plus de bandeau : il marque sa puce, qui
+        // apparaitra sur la phrase au rendu du fil, en fin de tour.
+        if (data.type === 'motif') { if (data.id) FRAIS.add(data.id); return; }
         GESTES.push(data);
         dessinerGestes();
         return;
@@ -1094,6 +1139,7 @@ async function rembobiner(id) {
     const r = await api('/api/message/rembobiner', { id });
     S = await api('/api/state');
     GESTES = [];
+    FRAIS = new Set();
     drawThread();
     syncHeader();
     syncGauge();

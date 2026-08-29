@@ -109,6 +109,43 @@ test('une occurrence ne compte qu’une fois par message', () => {
   assert.equal(allMotifs().find(x => x.id === m.id).vues, 1);
 });
 
+test('chaque occurrence porte son rang, pas le total du jour', () => {
+  /*
+   * La puce sous un message dit combien de fois ce mécanisme avait été reconnu
+   * À CE MOMENT-LÀ. Le total aurait été plus simple et faux à lire : en
+   * remontant le fil, chaque puce d'un même motif afficherait le chiffre
+   * d'aujourd'hui, sur des phrases séparées de six mois. Le rang raconte
+   * l'accumulation — c'est ce qu'on vient chercher en remontant.
+   */
+  const m = addMotif({ nom: 'rangs', mecanisme: 'il revient sur le même sujet' });
+  const ids = ['un', 'deux', 'trois'].map((t, i) => addMessage({
+    ts: new Date(Date.now() + i * 1000).toISOString(), date: '2026-08-28', role: 'user', text: t
+  }));
+  for (const id of ids) marquerMotif(m.id, id);
+
+  // Toute la fenêtre : les rangs se suivent.
+  const tous = motifsDesMessages(ids);
+  assert.deepEqual(ids.map(id => tous[id].find(x => x.id === m.id).vues), [1, 2, 3]);
+
+  // Le rang se compte sur TOUTES les vues, pas sur la fenêtre demandée : sinon
+  // le premier message affiché remettrait le compteur à un.
+  const dernier = motifsDesMessages([ids[2]]);
+  assert.equal(dernier[ids[2]].find(x => x.id === m.id).vues, 3);
+
+  /*
+   * Et l'ordre est celui du TEMPS, pas des identifiants. Les deux coïncident
+   * tant qu'on écrit au fil de l'eau, et divergent dès qu'on ne le fait pas —
+   * une conversation importée, un journal restauré. Compter sur l'identifiant
+   * donnerait alors « 3× » avant « 1× » dans un fil qu'on remonte.
+   */
+  const vieux = addMessage({ ts: new Date(Date.now() - 86400000).toISOString(),
+                             date: '2026-08-27', role: 'user', text: 'plus ancien, écrit plus tard' });
+  marquerMotif(m.id, vieux);
+  const apres = motifsDesMessages([vieux, ...ids]);
+  assert.equal(apres[vieux].find(x => x.id === m.id).vues, 1, 'le plus ancien passe premier');
+  assert.deepEqual(ids.map(id => apres[id].find(x => x.id === m.id).vues), [2, 3, 4]);
+});
+
 test('marquer un motif inexistant ne fait rien', () => {
   assert.equal(marquerMotif(999999, 1), null);
 });

@@ -366,8 +366,22 @@ label.field > span { display: block; font-size: 12px; color: var(--ink-dim); mar
   background: var(--panel); color: var(--ink-dim);
   border: 1px solid transparent;
 }
-.msg.pet  { align-self: flex-start; }
+/* LA RÉPONSE SE LIT MIEUX QUE LE RESTE.
+   Elle était la plus pâle des deux : `--ink-dim` du côté du compagnon, `--ink`
+   du côté de la personne. À l'écran, ça mettait en avant ce qu'on venait
+   d'écrire soi-même et laissait en retrait la seule chose qu'on est venu lire.
+   C'est la voix posée du fil — elle prend l'encre pleine, et un fond à peine
+   plus net pour la détacher du noir. */
+.msg.pet {
+  align-self: flex-start; color: var(--ink);
+  background: color-mix(in srgb, var(--panel) 78%, var(--surface));
+}
 .msg.user { align-self: flex-end; color: var(--ink); }
+
+/* Et elle s'efface moins en remontant : le passé reste en retrait, mais une
+   réponse d'il y a trois jours doit encore pouvoir se relire sans plisser. */
+.msg.past { opacity: .42; }
+.msg.pet.past { opacity: .58; }
 .msg .tx { display: block; white-space: pre-wrap; }
 .msg { position: relative; }
 
@@ -1553,17 +1567,7 @@ body:has(#ambiance) { background: transparent; }
 }
 .geste .gbtn:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 
-/* Un motif porte SA couleur, jamais celle de l'échelle des notes : la teinte
-   dit « ceci revient », pas « ceci va mal ». Voir TEINTES dans server/db.js. */
-.geste.motif { border-color: hsl(var(--motif) 42% 32% / .55); }
 .geste.objectif.rompu .gicone { color: var(--warn); }
-
-.geste.motif .gpuce {
-  flex: none; width: 10px; height: 10px; border-radius: 50%;
-  background: hsl(var(--motif) 70% 62%);
-  box-shadow: 0 0 12px -1px hsl(var(--motif) 70% 62% / .8);
-}
-.geste.motif .gbtn:hover { color: hsl(var(--motif) 70% 68%); border-color: hsl(var(--motif) 50% 42%); }
 
 /* --- un message teinté par un motif --- */
 
@@ -1590,6 +1594,41 @@ body:has(#ambiance) { background: transparent; }
   background: hsl(var(--motif) 60% 55%);
 }
 .motifchip:hover { color: hsl(var(--motif) 60% 76%); background: none; }
+
+/* LE COMPTE, EN SECOND. Un motif reconnu pour la première fois n'en porte pas :
+   « 1× » sous une phrase ne dit rien que la puce ne dise déjà. À partir de la
+   deuxième, c'est l'accumulation qu'on lit — et c'est le rang au moment de CE
+   message, pas le total d'aujourd'hui : en remontant le fil, un même motif doit
+   raconter qu'il montait, pas répéter le même chiffre. */
+.mvues {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  color: hsl(var(--motif) 40% 52%); letter-spacing: 0;
+}
+.mvues small { font-size: .84em; opacity: .7; margin-left: .5px; }
+
+/* CE QUI VIENT D'ÊTRE RECONNU APPARAÎT.
+   Le nom d'abord, le compte un peu après : les deux d'un coup font une
+   étiquette qui tombe ; en deux temps, on lit ce qui a été reconnu, puis depuis
+   combien de fois. Seules les puces du tour en cours portent `.frais` — une
+   apparition qui rejoue à chaque rendu du fil n'annonce plus rien, elle
+   scintille. */
+.motifchip.frais { animation: motifvient .5s cubic-bezier(.22, .9, .3, 1) both; }
+.motifchip.frais::before { animation: motifpoint .62s ease-out both; }
+.motifchip.frais .mvues { animation: motifvient .42s ease-out .46s both; }
+@keyframes motifvient {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+/* Le point s'allume une fois et retombe : c'est le seul éclat de l'écran, et il
+   ne dure pas — il dit « là », pas « regarde-moi ». */
+@keyframes motifpoint {
+  0%   { transform: scale(.2); box-shadow: 0 0 0 0 hsl(var(--motif) 70% 60% / .55); }
+  45%  { transform: scale(1.25); box-shadow: 0 0 0 4px hsl(var(--motif) 70% 60% / .22); }
+  100% { transform: scale(1); box-shadow: 0 0 0 7px hsl(var(--motif) 70% 60% / 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .motifchip.frais, .motifchip.frais::before, .motifchip.frais .mvues { animation: none; }
+}
 
 /* --- le bloc du Miroir --- */
 
