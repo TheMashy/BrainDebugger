@@ -21,14 +21,28 @@ const PRICES = {
   'claude-haiku-4-5':{ in: 1,  out: 5 }
 };
 
+/*
+ * CE QUE LE CACHE CHANGE AU PRIX.
+ *
+ * Un jeton relu du cache coute un DIXIEME du prix d'entree ; l'ecrire coute un
+ * quart de plus. Compter les trois ensemble ferait mentir le seul chiffre qui
+ * dit ce que ce produit coute : sur une conversation ou 85 % de l'entree est
+ * relue, le total afficherait presque dix fois la depense reelle, et on
+ * conclurait que le cache n'a rien change.
+ */
+const LECTURE_CACHE = 0.1;
+const ECRITURE_CACHE = 1.25;
+
 export const currentMonth = () => new Date().toISOString().slice(0, 7);
 
-export function record(userId, model, input = 0, output = 0) {
-  if (!input && !output) return;
+export function record(userId, model, input = 0, output = 0, cacheLu = 0, cacheEcrit = 0) {
+  if (!input && !output && !cacheLu && !cacheEcrit) return;
   db.prepare(`
-    INSERT INTO usage(user_id, ts, month, model, input_tokens, output_tokens)
-    VALUES(?,?,?,?,?,?)
-  `).run(userId, new Date().toISOString(), currentMonth(), model ?? null, input | 0, output | 0);
+    INSERT INTO usage(user_id, ts, month, model, input_tokens, output_tokens,
+                      cache_read_tokens, cache_write_tokens)
+    VALUES(?,?,?,?,?,?,?,?)
+  `).run(userId, new Date().toISOString(), currentMonth(), model ?? null,
+         input | 0, output | 0, cacheLu | 0, cacheEcrit | 0);
 }
 
 /**
@@ -54,26 +68,43 @@ export function level(remaining, allowance) {
 export function usageFor(userId) {
   const month = currentMonth();
   const row = db.prepare(`
-    SELECT COALESCE(SUM(input_tokens),0) i, COALESCE(SUM(output_tokens),0) o, COUNT(*) n
+    SELECT COALESCE(SUM(input_tokens),0) i, COALESCE(SUM(output_tokens),0) o,
+           COALESCE(SUM(cache_read_tokens),0) cl, COALESCE(SUM(cache_write_tokens),0) ce,
+           COUNT(*) n
     FROM usage WHERE user_id = ? AND month = ?
   `).get(userId, month);
 
-  const used = row.i + row.o;
+  /*
+   * L'ENVELOPPE COMPTE TOUS LES JETONS, CACHE COMPRIS.
+   *
+   * Elle mesure ce qui a traverse le modele, pas ce que ca a coute : un jeton
+   * relu est un jeton lu. Le prix, lui, tient compte du cache juste en dessous
+   * -- ce sont deux questions differentes, et les melanger donnerait une jauge
+   * qui bouge quand le tarif change.
+   */
+  const used = row.i + row.o + row.cl + row.ce;
   const allowance = allowanceFor(userId);
   const illimitee = allowance <= 0;
   const remaining = illimitee ? null : Math.max(0, allowance - used);
 
   const cost = db.prepare(`
-    SELECT model, SUM(input_tokens) i, SUM(output_tokens) o
+    SELECT model, SUM(input_tokens) i, SUM(output_tokens) o,
+           COALESCE(SUM(cache_read_tokens),0) cl, COALESCE(SUM(cache_write_tokens),0) ce
     FROM usage WHERE user_id = ? AND month = ? GROUP BY model
   `).all(userId, month).reduce((sum, r) => {
     const p = PRICES[r.model] ?? PRICES['claude-opus-5'];
-    return sum + (r.i / 1e6) * p.in + (r.o / 1e6) * p.out;
+    return sum + (r.i / 1e6) * p.in + (r.o / 1e6) * p.out
+               + (r.cl / 1e6) * p.in * LECTURE_CACHE
+               + (r.ce / 1e6) * p.in * ECRITURE_CACHE;
   }, 0);
 
   return {
     month, used, allowance, remaining, illimitee,
     inputTokens: row.i, outputTokens: row.o, calls: row.n,
+    // Ce que le cache a evite de repayer. Sans ce chiffre, on ne peut pas
+    // savoir si le cache fonctionne -- et un cache qui ne prend jamais coute
+    // un quart de plus que pas de cache du tout.
+    cacheLu: row.cl, cacheEcrit: row.ce,
     level: illimitee ? 'green' : level(remaining, allowance),
     exhausted: !illimitee && remaining <= 0,
     costUsd: Math.round(cost * 100) / 100,

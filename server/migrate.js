@@ -138,6 +138,17 @@ export function ensureUserTables(db) {
 }
 
 const AJOUTS = [
+  /*
+   * LES JETONS SERVIS PAR LE CACHE, COMPTES A PART.
+   *
+   * Ils coutent un dixieme du prix d'entree, et les compter avec les autres
+   * ferait mentir le seul chiffre qui dit ce que ce produit coute : sur une
+   * conversation ou 85 % de l'entree est relue du cache, le total afficherait
+   * dix fois la depense reelle. NULL sur les lignes d'avant, ce qui est
+   * exactement leur sens -- il n'y avait pas de cache.
+   */
+  ['usage', 'cache_read_tokens',  'INTEGER'],
+  ['usage', 'cache_write_tokens', 'INTEGER'],
   ['events', 'fin',    'TEXT'],     // NULL = un instant, sinon une periode
   ['events', 'ouvert', 'INTEGER'],  // 1 = periode en cours. INVARIANT : ouvert=1 => fin IS NULL
   ['events', 'theme',  'TEXT'],     // NULL = deduit du libelle

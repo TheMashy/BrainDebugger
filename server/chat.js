@@ -697,12 +697,25 @@ async function anthropicClient(settings) {
   return { client: new _sdk({ apiKey: key }), source };
 }
 
-/** Jetons reellement factures, y compris ceux du repli serveur le cas echeant. */
+/**
+ * Jetons reellement factures, y compris ceux du repli serveur le cas echeant.
+ *
+ * LES TROIS SORTES D'ENTREE SONT SEPAREES, parce qu'elles ne coutent pas la
+ * meme chose : un jeton relu du cache vaut un dixieme d'un jeton neuf, un
+ * jeton ecrit dans le cache en vaut un quart de plus. Additionnes, ils
+ * donneraient un cout qui ne bouge pas quand le cache prend -- et on ne
+ * saurait jamais s'il prend.
+ *
+ * `input_tokens` est le RESTE non mis en cache : le total d'un appel est bien
+ * la somme des trois, pas `input_tokens` seul.
+ */
 function readUsage(final) {
   const u = final?.usage ?? {};
   return {
-    input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
-    output: u.output_tokens ?? 0
+    input: u.input_tokens ?? 0,
+    output: u.output_tokens ?? 0,
+    cacheLu: u.cache_read_input_tokens ?? 0,
+    cacheEcrit: u.cache_creation_input_tokens ?? 0
   };
 }
 
@@ -754,14 +767,68 @@ export const ANTHROPIC_MODELS = [
  * @param {(chunk: string) => void} onText
  * @returns {Promise<{text: string, backend: string, refused?: boolean, model?: string}>}
  */
-export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null) {
+/*
+ * =====================================================================
+ * LE CACHE DE PROMPT, ET POURQUOI IL SE PLACE ICI PRECISEMENT.
+   *
+   * Un echange avec outils coute deux ou trois appels, et chacun renvoyait
+   * l'integralite du prompt : le systeme, les schemas des huit outils, la
+   * memoire, et tout l'historique. Le meme bloc, plein tarif, trois fois de
+   * suite, pour une reponse de deux phrases.
+   *
+   * Le cache est un ACCORD DE PREFIXE : un octet qui change quelque part
+   * invalide tout ce qui suit. L'ordre de rendu est outils -> systeme ->
+   * messages, donc ce qui ne bouge jamais doit passer en premier.
+   *
+   * Deux points de reprise :
+   *   1. sur le PROMPT SYSTEME, qui ne bouge jamais. Il attrape avec lui les
+   *      schemas des outils, rendus juste avant -- cinq mille jetons qui ne
+   *      changent pas d'une conversation a l'autre, ni d'une personne a
+   *      l'autre.
+   *   2. sur la MEMOIRE STABLE : les journees passees, les reperes, la grille,
+   *      les motifs. Elle change une fois par jour, pas a chaque message.
+   *
+   * Ce qui varie a chaque message -- les echos, ce qu'il a deja ecrit de
+   * proche de ce qu'il vient de dire -- ne peut PAS rester ici : place avant
+   * l'historique, il invaliderait la conversation entiere a chaque phrase. Il
+   * part dans le dernier tour, ou il ne coute que lui-meme (voir
+ * `toChatMessages` et l'appel dans api.js).
+ *
+ * L'assemblage est SORTI de l'appel reseau pour pouvoir etre teste : une
+ * regression sur l'ordre de stabilite ne casse rien, ne leve rien, et ne se
+ * voit que sur une facture a la fin du mois.
+ * =====================================================================
+ */
+export function assemblerPrompt({ memory = null, echos = null, history = [] } = {}) {
+  const system = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
+  if (memory) system.push({ type: 'text', text: memory, cache_control: { type: 'ephemeral' } });
+
+  const messages = toChatMessages(history, { blocs: true });
+  /*
+   * LES ECHOS SE POSENT DANS LE DERNIER TOUR, PAS DANS LE SYSTEME.
+   *
+   * Ils dependent de ce qui vient d'etre ecrit : places avant l'historique,
+   * ils invalideraient a chaque phrase le cache de toute la conversation, et
+   * on paierait en plus le quart de surcout de l'ecriture pour un cache qui
+   * ne prend jamais. Ici, ils ne coutent qu'eux-memes.
+   *
+   * DEVANT le texte de la personne dans le meme tour : c'est du contexte pour
+   * lire ce qu'elle vient de dire, pas une remarque apres coup.
+   */
+  const dernier = messages[messages.length - 1];
+  if (echos && dernier?.role === 'user') {
+    const corps = Array.isArray(dernier.content)
+      ? dernier.content : [{ type: 'text', text: String(dernier.content) }];
+    dernier.content = [{ type: 'text', text: echos }, ...corps];
+  }
+  return { system, messages };
+}
+
+export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null, echos = null) {
   const { client, source } = await anthropicClient(s);
 
-  const system = [{ type: 'text', text: SYSTEM_PROMPT }];
-  if (memory) system.push({ type: 'text', text: memory });
-
+  const { system, messages } = assemblerPrompt({ memory, echos, history });
   const boite = outils ? outilsDispo(outils) : [];
-  const messages = toChatMessages(history, { blocs: true });
   const faits = [];              // ce que les outils ont reellement change
 
   let text = '';
@@ -771,7 +838,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
   // appels ; ne compter que le dernier ferait payer a l'enveloppe le tiers de
   // ce qu'elle depense vraiment, et la jauge mentirait d'autant plus que le
   // compagnon agit.
-  const usage = { input: 0, output: 0 };
+  const usage = { input: 0, output: 0, cacheLu: 0, cacheEcrit: 0 };
 
   // Un tour par appel d'outil. La borne n'est pas theorique : sans elle, un
   // modele qui se trompe d'argument peut reessayer indefiniment, et chaque
@@ -786,10 +853,37 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
         // pas une option acceptable.
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
-        model: s.anthropicModel || 'claude-opus-5',
+        /*
+         * LE COMPAGNON ET LA LECTURE N'ONT PAS BESOIN DE LA MEME TETE.
+         *
+         * Ce produit a deux couches : la bestiole PARLE (capture), le miroir NE
+         * PARLE JAMAIS (restitution). Elles n'ont pas la meme exigence. Tenir
+         * une conversation du soir -- « qu'est-ce que tu as fait apres ? » --
+         * demande de la justesse et de la vitesse ; relire quatre ans de
+         * journal pour en tirer des mecanismes demande de l'intelligence, et
+         * c'est la seule tache ou ca se voit.
+         *
+         * Le compagnon tourne donc sur `anthropicModelChat` (Sonnet 5 par
+         * defaut, deux fois et demie moins cher) et la lecture garde
+         * `anthropicModel`. Deux reglages, parce que c'est deux metiers.
+         */
+        model: s.anthropicModelChat || 'claude-sonnet-5',
         max_tokens: 2048,
         thinking: { type: 'adaptive' },
         output_config: { effort: s.anthropicEffort || 'low' },
+        /*
+         * LA MISE EN CACHE AUTOMATIQUE, POUR LA QUEUE DE CONVERSATION.
+         *
+         * Elle pose son point de reprise sur le dernier bloc utilisable et
+         * l'avance a mesure que le fil grandit : au tour suivant, tout ce qui
+         * precede est relu du cache. C'est exactement la forme d'une
+         * conversation, et ca evite de tenir a la main un marqueur qui devrait
+         * se deplacer a chaque message.
+         *
+         * Elle se cumule avec les deux marqueurs explicites au-dessus : quatre
+         * points de reprise au maximum, on en utilise trois.
+         */
+        cache_control: { type: 'ephemeral' },
         system,
         ...(boite.length ? { tools: boite } : {}),
         messages
@@ -837,6 +931,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
 
     const u = readUsage(final);
     usage.input += u.input; usage.output += u.output;
+    usage.cacheLu += u.cacheLu; usage.cacheEcrit += u.cacheEcrit;
 
     if (final.stop_reason === 'refusal') {
       return { text: '', backend: 'anthropic', refused: true, model: final.model, usage };
@@ -1089,7 +1184,7 @@ export async function ollamaReply(history, s, memory, onText) {
  * Tout echec d'un backend distant retombe sur `scripted` ET LE DIT. Une panne
  * silencieuse serait un mensonge sur l'endroit ou partent les donnees.
  */
-export async function reply(history, settings, { memory = null, onText = null, onPense = null, exhausted = false, outils = null } = {}) {
+export async function reply(history, settings, { memory = null, echos = null, onText = null, onPense = null, exhausted = false, outils = null } = {}) {
   const backend = settings.chatBackend ?? 'scripted';
 
   // Enveloppe epuisee : on ne coupe pas la parole a quelqu'un. Le compagnon
@@ -1109,7 +1204,7 @@ export async function reply(history, settings, { memory = null, onText = null, o
 
   try {
     const r = backend === 'anthropic'
-      ? await anthropicReply(history, settings, memory, onText, outils, onPense)
+      ? await anthropicReply(history, settings, memory, onText, outils, onPense, echos)
       : await ollamaReply(history, settings, memory, onText);
 
     if (r.refused) {

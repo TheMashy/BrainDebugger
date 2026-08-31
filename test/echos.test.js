@@ -33,21 +33,26 @@ ecrire('2026-01-19', "encore une crise d'angoisse avant de partir au boulot, la 
 ecrire('2026-02-02', "j'ai repeint la cuisine, ça m'a occupé tout le week-end", 7);
 
 test('un écho remonte quand c’est la même chose, pas quand ça se ressemble vaguement', () => {
+  // Les échos sortent SÉPARÉS du reste de la mémoire : ils changent à chaque
+  // phrase, alors que les journées passées, les repères et la grille tiennent
+  // la journée. Mélangés, ils invalidaient le cache de toute la conversation.
   const proche = api.recentMemory('2026-03-01', OWNER,
     "crise d'angoisse ce matin, la boule au ventre est revenue avant le boulot");
-  assert.match(proche, /déjà écrit ceci/);
-  assert.match(proche, /2026-01-05|2026-01-19/);
+  assert.match(proche.echos ?? '', /déjà écrit ceci/);
+  assert.match(proche.echos, /2026-01-05|2026-01-19/);
+  assert.doesNotMatch(proche.stable ?? '', /déjà écrit ceci/,
+                      'un écho dans la partie stable invalide le cache à chaque phrase');
 
   // Un message sans rapport ne doit rien déclencher : présent à chaque tour, le
   // bloc deviendrait du bruit et le compagnon le citerait pour meubler.
   const loin = api.recentMemory('2026-03-01', OWNER,
     "je me demande quel film regarder ce soir, peut-être un vieux western");
-  assert.doesNotMatch(loin ?? '', /déjà écrit ceci/);
+  assert.doesNotMatch(loin.echos ?? '', /déjà écrit ceci/);
 });
 
 test('un message trop court ne déclenche rien', () => {
   const r = api.recentMemory('2026-03-01', OWNER, 'crise');
-  assert.doesNotMatch(r ?? '', /déjà écrit ceci/);
+  assert.doesNotMatch(r.echos ?? '', /déjà écrit ceci/);
 });
 
 test('à mémoire zéro, aucun écho ne passe par une autre porte', () => {
@@ -57,7 +62,7 @@ test('à mémoire zéro, aucun écho ne passe par une autre porte', () => {
   setSettings({ memoryDays: 0 }, OWNER);
   const r = api.recentMemory('2026-03-01', OWNER,
     "crise d'angoisse ce matin, la boule au ventre est revenue avant le boulot");
-  assert.doesNotMatch(r ?? '', /déjà écrit ceci/);
+  assert.doesNotMatch(r.echos ?? '', /déjà écrit ceci/);
   setSettings({ memoryDays: 14 }, OWNER);
 });
 
