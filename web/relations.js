@@ -77,25 +77,106 @@ const couleur = (g, l = 62, a = 1) => `hsl(${teinte(g)} 58% ${l}% / ${a})`;
  * tout seul. Sans piste, on retombe sur le regroupement par genre, qui reste le
  * bon defaut : seize noeuds relies dans tous les sens forment une pelote.
  */
-export function versGraphe(carte, pistes = []) {
+/**
+ * QUEL ILOT POUR QUEL NOEUD. Une seule fonction, deux usages.
+ *
+ * La carte dessinait ses enveloppes d'un cote et la liste d'en dessous se
+ * groupait de l'autre. Deux calculs pour une seule verite, et il suffit qu'ils
+ * divergent d'un noeud pour que la zone « dependance » sur la toile et la liste
+ * « dependance » sous elle ne contiennent plus les memes choses -- ce qui est
+ * exactement ce qu'on ne peut pas se permettre ici, puisque c'est la meme
+ * lecture regardee de deux facons.
+ *
+ * Elle est donc calculee UNE fois et partagee. Les deux ne peuvent plus
+ * diverger, par construction plutot que par vigilance.
+ *
+ * @returns {Map<string, number>} nom en minuscules -> index de sa piste
+ */
+/**
+ * D'ou partent les index des grappes sans nom.
+ *
+ * Assez haut pour ne jamais croiser un index de piste (il y en a trois au
+ * plus), parce que ce numero est ce qui relie une enveloppe sur la toile a son
+ * groupe dans la liste : deux choses differentes portant le meme numero
+ * allumeraient la mauvaise, sans que rien ne le signale.
+ */
+export const LIBRE = 1000;
+
+export function ilotDesNoeuds(carte, pistes = []) {
   const noeuds = carte?.noeuds ?? [];
-  const index = new Map(noeuds.map((n, i) => [n.nom, i]));
-  // Quel ilot pour quel noeud. Le serveur garantit deja l'exclusivite ; on la
-  // retient ici aussi, parce que deux enveloppes qui se traversent effacent
-  // exactement ce qu'on venait chercher.
-  const parCasse = new Map(noeuds.map((n, i) => [String(n.nom).toLowerCase(), i]));
+  const surLaCarte = new Set(noeuds.map(n => String(n.nom).toLowerCase()));
   const ilotDe = new Map();
   pistes.forEach((p, i) => {
     for (const nom of p?.noeuds ?? []) {
       const k = String(nom).toLowerCase();
-      // Un nom qui n'est PAS sur la carte est ignore ici aussi, meme si le
-      // serveur le filtre deja : une lecture enregistree avant un changement de
-      // carte peut nommer un noeud disparu, et l'ilot dessinerait alors une
-      // enveloppe autour de rien, avec un titre flottant au-dessus.
-      if (parCasse.has(k) && !ilotDe.has(k)) ilotDe.set(k, i);
+      // Un nom qui n'est PAS sur la carte est ignore : une lecture enregistree
+      // avant un changement de carte peut nommer un noeud disparu, et l'ilot
+      // dessinerait alors une enveloppe autour de rien, avec un titre flottant
+      // au-dessus. Le premier arrive garde le noeud : deux enveloppes qui se
+      // traversent effacent ce qu'on venait chercher.
+      if (surLaCarte.has(k) && !ilotDe.has(k)) ilotDe.set(k, i);
     }
   });
+  return ilotDe;
+}
+
+export function versGraphe(carte, pistes = []) {
+  const noeuds = carte?.noeuds ?? [];
+  const index = new Map(noeuds.map((n, i) => [n.nom, i]));
+  const ilotDe = ilotDesNoeuds(carte, pistes);
   const utilises = new Set([...ilotDe.values()]);
+
+  /*
+   * CE QUI N'A PAS ENCORE DE NOM SE GROUPE QUAND MEME.
+   *
+   * Un noeud qui n'appartient a aucune piste restait seul, disperse au milieu
+   * des ilots. Or il n'est pas isole pour autant : il est souvent relie a deux
+   * ou trois autres orphelins, et ces petits paquets sont exactement ce qui
+   * n'a pas encore de nom -- pas ce qui n'a pas de rapport.
+   *
+   * On les groupe donc par COMPOSANTE CONNEXE, entre orphelins seulement. Ils
+   * recoivent une enveloppe, plus pale et sans titre : on voit qu'ils vont
+   * ensemble sans pretendre savoir comment ca s'appelle. Un orphelin sans
+   * voisin orphelin reste seul, et c'est juste.
+   */
+  /*
+   * ET SEULEMENT QUAND QUELQUE CHOSE A DEJA ETE IDENTIFIE.
+   *
+   * Sans aucune piste, tout est « libre » et la carte entiere ne fait souvent
+   * qu'une seule composante : on tracerait une enveloppe grise autour de tout,
+   * ce qui ne dit rien. Le regroupement par genre reste alors le bon defaut --
+   * seize noeuds relies dans tous les sens forment une pelote, et le genre est
+   * la seule structure disponible tant qu'aucune lecture n'a rien nomme.
+   *
+   * Les grappes sont ce qui RESTE a cote de ce qui a ete nomme. Sans rien de
+   * nomme, il n'y a pas de reste.
+   */
+  const enGrappes = utilises.size > 0;
+  const libre = n => enGrappes && !ilotDe.has(String(n.nom).toLowerCase());
+  const voisins = new Map(noeuds.map(n => [n.nom, []]));
+  for (const l of carte?.liens ?? []) {
+    voisins.get(l.de)?.push(l.vers);
+    voisins.get(l.vers)?.push(l.de);
+  }
+  const grappeDe = new Map();
+  let grappes = 0;
+  for (const n of noeuds) {
+    if (!libre(n) || grappeDe.has(n.nom)) continue;
+    const pile = [n.nom], membres = [];
+    while (pile.length) {
+      const nom = pile.pop();
+      if (grappeDe.has(nom)) continue;
+      const cible = noeuds.find(x => x.nom === nom);
+      if (!cible || !libre(cible)) continue;
+      grappeDe.set(nom, grappes);
+      membres.push(nom);
+      for (const v of voisins.get(nom) ?? []) if (!grappeDe.has(v)) pile.push(v);
+    }
+    // Un seul membre n'est pas un groupe : c'est un noeud qui flotte, et
+    // l'entourer d'une forme lui donnerait une importance qu'il n'a pas.
+    if (membres.length < 2) for (const m of membres) grappeDe.delete(m);
+    else grappes++;
+  }
   return {
     /*
      * LA TEINTE VIENT DE LA PISTE, PLUS DE SON RANG.
@@ -110,11 +191,20 @@ export function versGraphe(carte, pistes = []) {
      * enregistrees avant ce changement : elles n'ont pas de teinte, et un ilot
      * sans couleur ne se dessine pas du tout.
      */
-    ilots: pistes.map((p, i) => ({
-      i, nom: p.nom,
-      teinte: TEINTES_DECLAREES.includes(p.teinte)
-        ? p.teinte : TEINTES_DECLAREES[i % TEINTES_DECLAREES.length]
-    })).filter(a => utilises.has(a.i)),
+    ilots: [
+      ...pistes.map((p, i) => ({
+        i, nom: p.nom,
+        teinte: TEINTES_DECLAREES.includes(p.teinte)
+          ? p.teinte : TEINTES_DECLAREES[i % TEINTES_DECLAREES.length]
+      })).filter(a => utilises.has(a.i)),
+      // Les grappes sans nom, apres les pistes. Leur index part de 1000 pour ne
+      // jamais croiser celui d'une piste : c'est ce numero qui relie une
+      // enveloppe a son groupe dans la liste d'en dessous, et deux choses
+      // differentes portant le meme numero allumeraient la mauvaise.
+      ...Array.from({ length: grappes }, (_, k) => ({
+        i: LIBRE + k, nom: null, teinte: TEINTE_GENRE.mecanisme
+      }))
+    ],
     /*
      * `jours` est le nom que `disposer()` donne a la MASSE d'un noeud, et c'est
      * aussi le nom que le serveur donne a la LISTE de ses journees. Les deux se
@@ -128,11 +218,12 @@ export function versGraphe(carte, pistes = []) {
      */
     noeuds: noeuds.map(n => {
       const pi = ilotDe.get(String(n.nom).toLowerCase());
+      const gr = grappeDe.get(n.nom);
       return {
         ...n,
         occurrences: n.jours ?? [],
         jours: n.jours?.length || n.poids,
-        ilot: pi ?? null,
+        ilot: pi ?? (gr != null ? LIBRE + gr : null),
         /*
          * L'AMAS EST NOMME, PAS NUMEROTE.
          *
@@ -142,7 +233,9 @@ export function versGraphe(carte, pistes = []) {
          * a l'autre bout du cadre, sans qu'un seul noeud ait change. Le nom,
          * lui, ne bouge pas tant que la piste s'appelle pareil.
          */
-        amas: pi != null ? `piste:${pistes[pi]?.nom ?? pi}` : n.genre
+        amas: pi != null ? `piste:${pistes[pi]?.nom ?? pi}`
+            : gr != null ? `grappe:${[...grappeDe].filter(([, g]) => g === gr).map(([nm]) => nm).sort()[0]}`
+            : n.genre
       };
     }),
     liens: (carte?.liens ?? []).map(l => ({
@@ -277,6 +370,11 @@ export function poidsDuNoeud(lecture, nom) {
 
   return {
     nom: n.nom, genre: n.genre, jours: [...jours].sort(),
+    // Ce que cette chose est CHEZ LUI, et ses journees en toutes lettres. Les
+    // deux viennent du serveur ; les lectures d'avant n'en ont pas, et le
+    // panneau s'en passe sans rien casser.
+    quoi: n.quoi ?? null,
+    extraits: (n.extraits ?? []).filter(x => x?.date && x?.extrait),
     ilot: ilot ? { nom: ilot.nom, teinte: ilot.teinte ?? null } : null,
     liens, pesees
   };
@@ -451,7 +549,12 @@ export function cadrer(pts, largeur, hauteur, mx = 62, my = 38) {
   // d'un canvas aux trois quarts vide -- le defaut se voyait sur telephone, et
   // seulement la. On ne prend jamais plus du huitieme du cadre.
   const mh = Math.min(mx, largeur / 8);
-  const mv = Math.min(my, hauteur / 8);
+  // Le plafond vertical est plus haut que l'horizontal parce que ce qui deborde
+  // en haut n'est pas le noeud : c'est son halo, l'enveloppe qui passe 34 px
+  // au-dessus de lui, et le TITRE de l'ilot pose encore au-dessus. Un huitieme
+  // du cadre ne suffisait pas, et le nom du groupe le plus haut se retrouvait
+  // coupe par le bord — le seul mot qui disait de quoi parlait cette zone.
+  const mv = Math.min(my, hauteur / 5);
   const k = Math.min(1.6, (largeur - mh * 2) / l, (hauteur - mv * 2) / h);
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   for (const p of pts) {
@@ -527,7 +630,14 @@ export function dessinerRelations(ctx, G, dispo,
     const membres = [];
     G.noeuds.forEach((n, i) => { if (n.ilot === a.i && pts[i]) membres.push(pts[i]); });
     if (membres.length < 2) continue;   // un ilot d'un seul noeud est ce noeud
-    const bord = contour(membres, 34 * Math.max(0.7, ech));
+    /*
+     * UNE GRAPPE SANS NOM PREND PLUS LARGE. Ses membres ne sont retenus par
+     * rien d'autre que leurs liens : trois d'entre eux tombent souvent en
+     * chaine, et l'enveloppe serree devient un fil le long du trait — on ne
+     * voit plus un groupe, on voit un lien un peu epais. La marge elargie lui
+     * rend sa forme de poche.
+     */
+    const bord = contour(membres, (a.nom == null ? 54 : 34) * Math.max(0.7, ech));
     const cx = bord.reduce((s, p) => s + p.x, 0) / bord.length;
     const haut = bord.reduce((m, p) => Math.min(m, p.y), Infinity);
     ilots.push({ ...a, bord, cx, haut });
@@ -557,17 +667,28 @@ export function dessinerRelations(ctx, G, dispo,
     for (const a of ilots) {
       // Un ilot vise reste a pleine encre quel que soit le zoom : on vient de
       // le designer, l'effacer parce qu'on est proche serait repondre a cote.
-      const f = eteint(a) ? aIlot * 0.25 : (a.i === ilotVise ? 1 : aIlot);
+      /*
+       * UNE GRAPPE SANS NOM SE DESSINE PLUS BAS QU'UN ILOT.
+       *
+       * Elle dit « ces choses vont ensemble » sans pretendre savoir comment ca
+       * s'appelle. Si elle avait le meme trait qu'un ilot nomme, elle
+       * annoncerait une lecture qui n'existe pas -- et c'est exactement la
+       * chose que ce produit ne fait pas.
+       */
+      const anonyme = a.nom == null;
+      const f = (eteint(a) ? aIlot * 0.25 : (a.i === ilotVise ? 1 : aIlot)) * (anonyme ? 0.75 : 1);
       if (f < 0.02) continue;
       tracer(ctx, a.bord);
-      ctx.fillStyle = `hsl(${a.teinte} 60% 58% / ${(0.085 * f * (a.i === ilotVise ? 2.1 : 1)).toFixed(3)})`;
+      ctx.fillStyle = `hsl(${a.teinte} 60% 58% / ${
+        (0.085 * f * (a.i === ilotVise ? 2.1 : 1) * (anonyme ? 0.6 : 1)).toFixed(3)})`;
       ctx.fill();
       // CONTOUR POINTILLE, jamais plein : un ilot est DECLARE par le modele,
-      // et la regle de couleur du produit tient jusqu'ici.
-      ctx.globalAlpha = 0.45 * f;
+      // et la regle de couleur du produit tient jusqu'ici. Une grappe sans nom
+      // l'est encore plus : pointille plus court, plus espace, plus pale.
+      ctx.globalAlpha = (anonyme ? 0.44 : 0.45) * f;
       ctx.strokeStyle = `hsl(${a.teinte} 60% 62%)`;
       ctx.lineWidth = (a.i === ilotVise ? 1.6 : 1) / v.k;
-      ctx.setLineDash([5 / v.k, 7 / v.k]);
+      ctx.setLineDash(anonyme ? [2 / v.k, 6 / v.k] : [5 / v.k, 7 / v.k]);
       tracer(ctx, a.bord);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -797,7 +918,8 @@ export function dessinerRelations(ctx, G, dispo,
     const hautVu = -v.y / v.k;
     const dispo = Math.max(1, g1 - g0 - 2 * marge);
     const poses = [];
-    for (const a of [...ilots].sort((p, q) => p.haut - q.haut)) {
+    // Les grappes sans nom n'ont rien a ecrire : c'est tout leur propos.
+    for (const a of ilots.filter(x => x.nom != null).sort((p, q) => p.haut - q.haut)) {
       const t = mot(a.nom).toUpperCase();
       /*
        * Sur telephone, « instabilite emotionnelle et autodestruction » est plus
