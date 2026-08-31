@@ -8,7 +8,8 @@ import { routes, streamMessage, ambiance } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle } from './passerelle.js';
 import { analyser, apercuDe } from './mesures.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
-import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi } from './db.js';
+import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi,
+         poserActiviteJour, activiteJours } from './db.js';
 import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
 import * as discord from './discord.js';
@@ -238,6 +239,61 @@ async function traiter(req, res) {
       noterEnvoi({ userId, statut: 400, refus: pourquoi });
       return json(res, 400, { error: pourquoi });
     }
+  }
+
+  /* ---------- le journal d'activité que Machi Tool POUSSE ----------
+   *
+   * Même passerelle, même clé, mais un contenu à la forme propre : le digest
+   * d'une journée de travail — temps par application, bascules, plage de
+   * réveil à coucher, trous. Ce n'est pas une série de mesures numériques, ça
+   * ne passe donc pas par le tuyau `mesures` ; on le range tel quel, une ligne
+   * par jour, réécrite à chaque envoi puisque la journée grossit.
+   *
+   * L'ENVELOPPE, JAMAIS LE CONTENU. Pas une phrase tapée n'arrive ici : Machi
+   * Tool ne mesure que la fenêtre au premier plan, comme ActivityWatch.
+   */
+  if (req.method === 'POST'
+      && (url.pathname === '/api/machitool/activite' || url.pathname === '/api/passerelle/activite')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      const digest = await readBody(req);
+      // La date vient du digest ; à défaut, la journée de la personne, pas
+      // celle du serveur — un envoi passé minuit appartient à SON jour.
+      const zone = zoneDeRequete(req);
+      const dateDefaut = dansLaZone(zone, () => new Date().toISOString().slice(0, 10));
+      const date = String(digest?.date ?? dateDefaut).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        noterEnvoi({ userId, source: 'machitool', statut: 400, refus: 'date du digest illisible' });
+        return json(res, 400, { error: 'date du digest illisible' });
+      }
+      poserActiviteJour(userId, date, digest);
+      noterEnvoi({ userId, source: 'machitool:activite', statut: 200, recues: 1, gardees: 1,
+                   apercu: Object.keys(digest ?? {}).slice(0, 8).join(', ') });
+      return json(res, 200, { ok: true, date, jours: activiteJours(userId).length });
+    } catch (err) {
+      const pourquoi = String(err.message ?? err).slice(0, 200);
+      noterEnvoi({ userId, source: 'machitool:activite', statut: 400, refus: pourquoi });
+      return json(res, 400, { error: pourquoi });
+    }
+  }
+
+  /* ---------- ce que la console Quantified Self RELIT ----------
+   *
+   * L'autre sens : la même clé rend les digests déjà rangés, du plus récent au
+   * plus ancien, pour que la console les consolide sans reparcourir un fichier.
+   */
+  if (req.method === 'GET'
+      && (url.pathname === '/api/machitool/activite' || url.pathname === '/api/passerelle/activite')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    return json(res, 200, { jours: activiteJours(userId) });
   }
 
   /* ---------- verrou ---------- */

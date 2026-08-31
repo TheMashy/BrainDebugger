@@ -812,7 +812,13 @@ export const routes = {
               * s'y etait PASSE. Une journee notee 8 peut contenir « juste envie
               * de mourir » ecrit le soir, et c'est la bascule qui la raconte.
               */
-             journee: journee(date, userId),
+             /*
+              * LA RÉFÉRENCE VOYAGE AVEC LA JOURNÉE. Les estimations des moments
+              * se lisent par rapport à la normale DE LA PERSONNE : chez
+              * quelqu'un qui tourne à 4, une journée à 5 est une bonne journée,
+              * et la caler sur le milieu de l'échelle la peindrait en médiocre.
+              */
+             journee: journee(date, userId, { reference }),
              /*
               * CE QU'UNE MACHINE A MESURE CE JOUR-LA. Une journée notée 4 avec
               * quatre heures de sommeil derrière n'est pas la même journée

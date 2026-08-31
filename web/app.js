@@ -3472,8 +3472,14 @@ async function renderMirror(date, { garderCal = false } = {}) {
           }).join('')}
           ${m.note !== null ? `<button class="jourdenote" data-jn="">${ico('moins', 12)}retirer</button>` : ''}
         </div>` : ''}
-        ${amplitudeMarkup(m.amplitude)}
-
+        ${/* LA BARRE « DANS LA JOURNÉE » A ÉTÉ RETIRÉE.
+              Elle disait « 1 → 8, ça a beaucoup bougé » ; le graphe de la
+              fenêtre de volatilité, deux colonnes plus loin, dit la même chose
+              en montrant QUAND ça a bougé et il porte déjà le même « 1 → 8 »
+              sous lui. Deux affichages du même fait, dont le plus voyant était
+              le moins situé. La fonction qui la dessinait est partie avec :
+              c'était son seul appel, et une fonction gardée « au cas où » est
+              du code mort qu'on relit à chaque passage. */''}
         ${journeeMarkup(m)}
       </div>
 
@@ -3559,12 +3565,37 @@ const TEINTE_SCENE = {
 };
 
 /** Un moment : son heure, son point, sa phrase. Cliquer ouvre le fil à ce moment. */
+/**
+ * L'ESTIMATION D'UN MOMENT — ET CE QUI LA DISTINGUE D'UNE NOTE.
+ *
+ * Le produit ne note personne à sa place. Une estimation lue dans des mots
+ * n'est donc pas affichée comme une note : elle porte un « ≈ », elle est en
+ * trait et non pleine, et le survol dit d'où elle vient. Un relevé posé à la
+ * main, lui, est une MESURE — il s'affiche plein, sans tilde, et il l'emporte
+ * sur la déduction. « Ce qui est rempli est mesuré, ce qui est contouré est
+ * déclaré » : la règle du produit tient jusqu'ici.
+ *
+ * Rien du tout quand le lexique n'a rien à dire. Afficher la référence « par
+ * défaut » sur la moitié des moments ferait passer un chiffre constant pour
+ * une lecture, ce qui est pire que le silence.
+ */
+function estimeMarkup(e) {
+  if (!e) return '';
+  const mesure = e.dApres === 'releve';
+  const v = String(e.valeur).replace('.', ',');
+  return `<span class="jest ${mesure ? 'mesure' : 'lu'}"
+    style="--c:${noteColor(e.valeur, 6)}"
+    title="${mesure ? 'relevé à la main, à ce moment-là' : 'estimation lue dans tes mots — personne ne l’a posée'}"
+    >${mesure ? '' : '≈'}${v}</span>`;
+}
+
 function momentMarkup(m) {
   return `<li class="jmoment" data-moment="${esc(m.ts)}"
       title="${esc(m.sens ?? NOM_SCENE[m.scene] ?? '')}">
     <span class="jheure mono">${esc(m.heure)}</span>
     <span class="jpoint" ${pointMoment(m)}></span>
     <span class="jcoeur">${esc(m.coeur)}</span>
+    ${estimeMarkup(m.estime)}
   </li>`;
 }
 
@@ -3601,6 +3632,12 @@ function volatiliteMarkup(v) {
     ? `<span class="jvchiffre mono">${v.bas} <span class="faint">→</span> ${v.haut}</span>` : '';
   return `<div class="jvol">
     <div class="k faint">Ce qui a bougé</div>
+    ${/* MINIMALISTE, ET LE CADRE EST PARTI AVEC. La courbe était posée dans une
+          boîte à fond et bordure, ce qui en faisait un petit graphe encadré au
+          milieu d'une colonne de texte. Il ne reste que la médiane pointillée,
+          la ligne et les points — c'est tout ce qui porte l'information, et
+          c'est cette fenêtre qui remplace maintenant la barre « dans la
+          journée ». */''}
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="jvsvg" aria-hidden="true">
       <line x1="0" y1="${(H / 2).toFixed(1)}" x2="${W}" y2="${(H / 2).toFixed(1)}"
             stroke="var(--line-soft)" stroke-dasharray="2 4"/>
@@ -3709,12 +3746,40 @@ function thematiquesMarkup(ts) {
  * pleine largeur. Trois colonnes dont deux vides seraient un tableau de bord
  * qui annonce des choses qu'il n'a pas.
  */
+/**
+ * LE TEXTE DU SOIR, DÉCOUPÉ EN SUJETS.
+ *
+ * Ce qu'on écrit le soir arrive d'un bloc : six cents mots où l'on passe de sa
+ * nuit à son ex, de son ex à sa mère, sans un alinéa. Relu trois mois plus
+ * tard, ce bloc ne se relit pas — on le survole.
+ *
+ * ON NE RÉÉCRIT RIEN, ET ON N'ENLÈVE RIEN. Le texte est là mot pour mot, dans
+ * son ordre ; on pose des coupures là où le sujet change, une icône en face, et
+ * l'estimation du passage à droite. Une paraphrase de ce qu'on a écrit un
+ * mauvais soir n'a aucune raison d'être plus juste que la phrase — le découpage
+ * est la seule façon de structurer sans toucher au texte.
+ *
+ * Le serveur rend une liste VIDE quand il n'a trouvé qu'un seul sujet : une
+ * icône posée au-dessus de toute une journée serait une étiquette, pas un
+ * repère. On retombe alors sur le texte tel quel, ce qui est le bon défaut.
+ */
+function sujetsMarkup(sujets) {
+  if (!sujets?.length) return '';
+  return `<div class="jsujets">${sujets.map(s => `
+    <div class="jsujet">
+      <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 16)}</span>
+      <p class="serif jstexte">${esc(s.texte)}</p>
+      ${estimeMarkup(s.estime)}
+    </div>`).join('')}</div>`;
+}
+
 function journeeMarkup(m) {
   const j = m.journee ?? {};
   const moments = j.moments ?? [];
-  const texte = m.jour?.text
+  const decoupe = sujetsMarkup(j.sujets);
+  const texte = decoupe || (m.jour?.text
     ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
-    : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`;
+    : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`);
   const cote = `${volatiliteMarkup(j.volatilite)}${mesuresMarkup(m.mesures)}${thematiquesMarkup(j.thematiques)}`;
   if (!moments.length && !cote) return texte;
 
@@ -3731,16 +3796,6 @@ function journeeMarkup(m) {
   </div>`;
 }
 
-function amplitudeMarkup(a) {
-  if (!a) return '';
-  const g = (a.bas / 10) * 100, d = ((10 - a.haut) / 10) * 100;
-  return `<div class="amplitude" title="${a.n} relevés pendant la conversation">
-    <span class="k faint">dans la journée</span>
-    <span class="ampbar" aria-hidden="true"><i style="left:${g}%;right:${d}%"></i></span>
-    <span class="ampval mono">${a.bas} → ${a.haut}</span>
-    <span class="ampdit">${a.ecart >= 5 ? 'ça a beaucoup bougé' : a.ecart >= 3 ? 'ça a bougé' : 'assez stable'}</span>
-  </div>`;
-}
 
 function reperesMarkup(rep, date) {
   const jour = rep?.jour ?? [];
