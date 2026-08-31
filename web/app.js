@@ -2165,8 +2165,6 @@ function carnetItemMarkup(n) {
                                                                             */
 
 let MOI = null;                 // la reponse de /api/moi
-let MOI_PISTE = null;           // la piste depliee, par son nom
-let MOI_ECARTS = false;         // les ecarts, replies par defaut
 
 /*
  * OU S'AFFICHE LA JOURNEE OUVERTE.
@@ -2185,7 +2183,6 @@ async function ouvrirJour(date) {
   return renderMoi(date);
 }
 
-const FORCE_MOT = { 1: 'une direction possible', 2: 'net', 3: 'partout' };
 
 /**
  * UNE PISTE. Le seul endroit de l'application ou un mot lourd peut s'ecrire.
@@ -2199,126 +2196,51 @@ const FORCE_MOT = { 1: 'une direction possible', 2: 'net', 3: 'partout' };
  * de formulation s'oublie, une structure non.
  */
 /**
- * CE QUI A CHANGE DEPUIS LA DERNIERE LECTURE, dit sur la piste elle-meme.
+ * « MOI » NE MONTRE PLUS QU'UN MOIS, ET LA JOURNEE QU'ON Y CHOISIT.
  *
- * Chaque relecture rendait des pistes differentes et rien ne disait lesquelles
- * etaient nouvelles : il fallait se souvenir de l'ecran d'avant pour savoir si
- * quelque chose avait bouge, et de memoire, tout parait avoir bouge.
+ * Il portait quatre choses avant d'arriver au calendrier : un compte de
+ * journées, un compte de textes, une référence, une série — puis trois cartes
+ * de pistes, puis une phrase d'avertissement. Cinq écrans de haut pour un onglet
+ * dont le geste est « ouvrir un jour ». Les pistes n'ont pas disparu du
+ * produit : elles vivent dans « Ma carte », sous la carte qui les porte, où
+ * elles sont à leur place.
  *
- * Le marqueur ne s'affiche QUE s'il y avait une lecture avant. A la premiere,
- * tout est neuf par construction, et coller « nouveau » sur chaque piste ne
- * dirait rien -- ce serait juste du bruit sur l'ecran le plus important.
+ * Le mois se lit de gauche à droite, une case par jour. Une grille de sept
+ * colonnes range les journées par jour de semaine — utile pour voir « tous mes
+ * lundis », inutile ici : ce qu'on suit dans un journal, c'est une SUITE, et
+ * une suite se lit sur une ligne.
  */
-function suiteMarkup(p, suivi) {
-  if (!suivi) return '';
-  if (p.suite === 'nouveau') return `<span class="psuite neuf">nouveau</span>`;
-  if (p.avant?.length) {
-    return `<span class="psuite" title="${p.suite === 'fusion'
-      ? 'Deux pistes que ta relecture a réunies.' : 'La même piste, sous un autre nom.'}">${
-      p.suite === 'fusion' ? 'réunit' : 'avant'} ${p.avant.map(esc).join(' + ')}</span>`;
-  }
-  return '';
-}
+function moisRuban(m, date) {
+  const cases = m.calendrier ?? [];
+  if (!cases.length) return '';
+  const mois = (MIR_CAL.curseur ?? date.slice(0, 7));
+  const [an, mo] = mois.split('-').map(Number);
+  const precedent = mo === 1 ? `${an - 1}-12` : `${an}-${String(mo - 1).padStart(2, '0')}`;
+  const suivant = mo === 12 ? `${an + 1}-01` : `${an}-${String(mo + 1).padStart(2, '0')}`;
+  const apresAujourdhui = suivant > S.today.slice(0, 7);
 
-function pisteMarkup(p, i, suivi = false) {
-  const ouvert = MOI_PISTE === p.nom;
-  const teinte = teintePiste(p, i);
-  return `<div class="piste${ouvert ? ' ouvert' : ''}" style="--p:${teinte}">
-    <button class="ptete" data-piste="${esc(p.nom)}" aria-expanded="${ouvert}">
-      <span class="pcadre">une piste, du côté de</span>
-      <span class="pnom">${esc(p.nom)}${suiteMarkup(p, suivi)}</span>
-      <span class="pforce" data-f="${p.force}" title="${FORCE_MOT[p.force] ?? ''}">
-        <i></i><i></i><i></i></span>
-    </button>
-    ${ouvert ? `<div class="pcorps">
-      <p class="pquoi">${esc(p.quoi)}</p>
-      ${/* CE QUI VA CONTRE. Obligatoire, et affiche aussi visiblement que le
-            reste : une hypothese dont on cache ce qui l'affaiblit est un
-            verdict deguise. */''}
-      <p class="pcontre"><span class="k">ce qui va contre</span>${esc(p.contre)}</p>
-      <div class="pthemes">
-        ${p.themes.map(t => `<button data-piste-theme="${esc(t)}"
-          title="Voir ce mécanisme et ses journées">${esc(t)}</button>`).join('')}
-      </div>
-    </div>` : ''}
-  </div>`;
-}
-
-function pistesMarkup() {
-  if (!MOI) return '';
-  const p = MOI.pistes ?? [];
-  if (!p.length) {
-    return `<div class="card pistescard">
-      <div class="moihead"><h2>Ce vers quoi ça pointe</h2></div>
-      <p class="sub" style="margin:0">${MOI.lue
-        ? `Aucune grande direction ne se dégage de ton journal — et c'est une réponse,
-           pas une panne. Il y a ${MOI.themes?.length ?? 0} mécanisme${(MOI.themes?.length ?? 0) > 1 ? 's' : ''}
-           dans <b>Ma carte</b>, mais rien qui les regroupe assez pour porter un nom.`
-        : `Ton journal n'a pas encore été lu. Les pistes viennent de la lecture — elle se lance
-           dans <b>Ma carte</b>, bouton « relire ».`}</p>
-    </div>`;
-  }
-
-  return `<div class="card pistescard">
-    <div class="moihead"><h2>Ce vers quoi ça pointe</h2></div>
-    <p class="sub">
-      Chacune regroupe plusieurs mécanismes de <b>Ma carte</b>. Ce sont des directions à
-      explorer, pas des états : clique pour voir ce qui va dans ce sens, ce qui va contre,
-      et les mécanismes qui les portent.
-    </p>
-    ${/* « suivi » : une lecture precedente existait. Si toutes les pistes sont
-          neuves, c'est la premiere -- et « nouveau » partout ne dit rien. */''}
-    <div class="pistes">${(() => {
-      const suivi = p.some(x => x.suite && x.suite !== 'nouveau');
-      return p.map((x, i) => pisteMarkup(x, i, suivi)).join('');
-    })()}</div>
-    ${/* Une fois, en bas du bloc, et pas sous chaque piste : repete trois fois
-          la phrase devient une decharge de responsabilite au lieu d'un conseil. */''}
-    <p class="prenvoi">
-      Un mot posé ici n'est pas un diagnostic — c'est une hypothèse tirée de ce que tu as
-      écrit. Trancher, c'est le métier d'un psychiatre ou d'un psychologue, et ça vaut la
-      peine de leur en parler.
-    </p>
-  </div>`;
-}
-
-/** L'en-tete de « Moi » : les pistes, et rien d'autre au-dessus du calendrier. */
-function moiEntete() {
-  const r = MOI?.resume;
-  return `<div class="moiresume">
-    ${r ? `<span><b>${r.jours}</b> journées notées</span>
-      <span><b>${r.ecrites}</b> avec du texte</span>
-      ${r.reference !== null ? `<span>référence <b>${r.reference}</b></span>` : ''}
-      ${r.serie ? `<span><b>${r.serie}</b> jour${r.serie > 1 ? 's' : ''} de suite</span>` : ''}` : ''}
+  return `<div class="moisbar">
+    <button class="moisfl" data-mois="${precedent}" aria-label="Mois précédent">‹</button>
+    <span class="moisnom">${MOIS_LONG[mo - 1]} <span class="faint mono">${an}</span></span>
+    <button class="moisfl" data-mois="${suivant}" ${apresAujourdhui ? 'disabled' : ''} aria-label="Mois suivant">›</button>
   </div>
-  ${pistesMarkup()}`;
-}
-
-/**
- * LES ECARTS : ce qui distingue une journee de ta propre moyenne.
- *
- * Aucun de ces nombres n'a traverse un modele : le serveur les mesure et ecrit
- * la phrase. C'est pour ca qu'ils s'affichent meme quand aucune lecture n'a
- * tourne -- ils ne coutent rien et ne dependent de personne.
- */
-function ecartsMarkup() {
-  const e = MOI?.ecarts ?? [];
-  if (!e.length) return '';
-  const montres = MOI_ECARTS ? e : e.slice(0, 3);
-  return `<div class="card ecartscard">
-    <h2>Ce qui te distingue de ta propre moyenne</h2>
-    <p class="sub">Mesuré sur tes notes, pas déduit. Il faut au moins huit journées de chaque côté pour qu'une comparaison s'affiche.</p>
-    <div class="ecarts">
-      ${montres.map(c => `<div class="ecart" data-signe="${c.ecart > 0 ? 'plus' : 'moins'}">
-        <span class="ebarre"><i style="width:${Math.min(100, Math.abs(c.ecart) / 2 * 100)}%"></i></span>
-        <span class="etxt">${esc(c.phrase)}</span>
-        <span class="enum mono">${c.ecart > 0 ? '+' : ''}${c.ecart}</span>
-      </div>`).join('')}
-    </div>
-    ${e.length > 3 ? `<button class="btn" data-moi-ecarts style="margin-top:12px">
-      ${MOI_ECARTS ? 'en montrer moins' : `voir les ${e.length - 3} autres`}</button>` : ''}
+  <div class="moisruban" style="--n:${cases.length}">
+    ${cases.map(c => {
+      const note = c.note !== null && c.note !== undefined;
+      const futur = c.date > S.today;
+      return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}"
+        data-cal="jour" data-d="${c.date}" ${futur ? 'disabled' : ''}
+        ${note ? `style="background:${deltaColor(c.delta ?? 0)}"` : ''}
+        title="${esc(fmtDay(c.date))}${note ? ` · ${c.note}/10` : ''}${c.texte ? ' · écrit' : ''}">
+        <span class="mjn">${Number(c.date.slice(8))}</span>
+        ${c.texte ? '<span class="mjpt"></span>' : ''}
+      </button>`;
+    }).join('')}
   </div>`;
 }
+
+const MOIS_LONG = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 
 async function renderMoi(date, { garderCal = false, rafraichir = false } = {}) {
   JOUR_DANS = 'moi';
@@ -3447,9 +3369,13 @@ async function renderMirror(date, { garderCal = false } = {}) {
       ${date !== S.today ? `<button data-goto="${S.today}">aujourd'hui</button>` : ''}
     </div>`;
   $('#view').innerHTML = `
-    ${moi ? moiEntete() : barre}
+    ${moi ? '' : barre}
     <div class="jourseul${moi ? ' dansmoi' : ''}">
-      ${calendarMarkup(m, date)}
+      ${/* Dans « Moi », le mois est un RUBAN : une case par jour, de gauche à
+            droite. Ailleurs (une journée ouverte depuis « Ma carte ») c'est la
+            grille de sept colonnes, parce qu'on y arrive d'une preuve et qu'on
+            veut voir où ce jour tombe dans sa semaine. */''}
+      ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
 
       ${reperesMarkup(m.reperes, date)}
@@ -3498,8 +3424,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
       </div>
 
       ${notesDuJourMarkup(m.carnet)}
-    </div>
-    ${moi ? ecartsMarkup() : ''}`;
+    </div>`;
   const form = $('#cnForm'); if (form) form.dataset.jour = date;
   wireMirror();
 }
@@ -3738,27 +3663,9 @@ function wireMirror() {
   const rejouer = (d, o) => (JOUR_DANS === 'moi' ? renderMoi(d, o) : renderMirror(d, o));
 
   $('#view').onclick = async e => {
-    /* --- les pistes, propres a « Moi » --- */
-    const pi = e.target.closest('[data-piste]');
-    if (pi) {
-      MOI_PISTE = MOI_PISTE === pi.dataset.piste ? null : pi.dataset.piste;
-      return renderMoi(MIRROR_DATE, { garderCal: true });
-    }
-    // Un mecanisme cite par une piste mene a « Ma carte », deplie : c'est la
-    // qu'il porte ses journees, et une piste ne vaut que si on peut descendre
-    // jusqu'aux dates qui la portent.
-    const pt = e.target.closest('[data-piste-theme]');
-    if (pt) {
-      MIR_THEME = pt.dataset.pisteTheme; MIRROR_DATE = null;
-      view = 'mirror'; syncNav();
-      await renderLecture();
-      $('#view').querySelector('.meca.ouvert')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      return;
-    }
-    if (e.target.closest('[data-moi-ecarts]')) {
-      MOI_ECARTS = !MOI_ECARTS;
-      return renderMoi(MIRROR_DATE, { garderCal: true });
-    }
+    /* Le mois : une case par jour, de gauche à droite. */
+    const mb = e.target.closest('[data-mois]');
+    if (mb) { MIR_CAL.curseur = mb.dataset.mois; return renderMoi(MIRROR_DATE, { garderCal: true }); }
 
     // La note de la journée ouverte : l'échelle s'ouvre, puis se pose.
     if (e.target.closest('#dayNote')) {
