@@ -377,6 +377,12 @@ Tu ne relies que ce que tu as vu se produire ensemble chez LUI. Deux choses qui 
 souvent ensemble en général ne sont pas un lien : c'est une généralité, et il en a déjà
 entendu assez.
 
+CHAQUE NŒUD DIT CE QU'IL EST. Une à deux phrases, à la deuxième personne, comme pour un
+thème : ce que cette chose est CHEZ LUI, et ce qu'elle vient faire dans ses journées. Pas une
+définition — « Londres » n'est pas une ville, c'est l'endroit d'où il revient toujours plus
+haut. Un nom seul sur une carte est un mot ; avec sa phrase, c'est quelque chose qu'il
+reconnaît.
+
 Chaque nœud porte SES JOURNÉES : toutes les dates du corpus où cette chose apparaît. Pas
 un échantillon, pas les trois plus parlantes — toutes celles que tu as vues. Ce sont elles
 qui donnent son épaisseur au nœud, et c'est ce qui fait la différence entre une carte et un
@@ -627,6 +633,7 @@ const OUTIL = {
               type: 'object',
               properties: {
                 nom:   { type: 'string', description: 'Un à trois mots. Une chose, pas un mot : « Léa », « les nuits courtes », « le dimanche soir ».' },
+                quoi:  { type: 'string', description: "Une a deux phrases, deuxieme personne : ce que cette chose est CHEZ LUI, et pourquoi elle est sur la carte. Pas une definition — ce qu'elle vient faire dans ses journees. « Ta soeur. Tu l'appelles surtout les soirs ou ca ne va pas, et jamais les autres. »" },
                 genre: { type: 'string', description: "personne | lieu | travail | corps | mecanisme | periode | activite | dependance. « dependance » pour ce dont il a du mal a se passer, quelle qu'en soit la nature : une substance, un ecran, quelqu'un." },
                 poids: { type: 'integer', description: '0 à 3 : à quel point cette chose occupe de la place chez lui.' },
                 suite: { type: 'string', description: "repris | nouveau | renomme | fusion. Voir LA CONTINUITE." },
@@ -643,7 +650,7 @@ const OUTIL = {
                   items: { type: 'string' }
                 }
               },
-              required: ['nom', 'genre', 'poids', 'jours']
+              required: ['nom', 'quoi', 'genre', 'poids', 'jours']
             }
           },
           liens: {
@@ -954,6 +961,10 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
       .slice(0, 120);
     vus.set(nom.toLowerCase(), {
       nom,
+      // Un noeud sans phrase reste un noeud : les lectures d'avant n'en ont
+      // aucune, et les jeter effacerait la carte de quelqu'un pour un champ qui
+      // vient d'apparaitre.
+      quoi: texte(n?.quoi, 300),
       genre: GENRES.includes(String(n?.genre)) ? String(n.genre) : 'activite',
       poids: borne(Math.round(n?.poids), 0, 3),
       jours,

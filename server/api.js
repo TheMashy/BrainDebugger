@@ -226,20 +226,63 @@ const MIN_COMPARABLE = 5;   // SPEC 4.4 - aveu d'ignorance
  * L'ecart, et pas la note : la carte du Miroir dit des ECARTS partout ailleurs,
  * et deux echelles differentes dans la meme page se lisent l'une pour l'autre.
  */
-function decorerCarte(lecture, byDate) {
+/*
+ * COMBIEN DE JOURNEES D'UN NOEUD ON RENVOIE EN TOUTES LETTRES.
+ *
+ * Un noeud porte jusqu'a cent vingt dates. Les rendre toutes avec le texte de
+ * la journee ferait passer la lecture de quelques dizaines de kilo-octets a
+ * plusieurs centaines, pour un panneau qui en montre six. Les plus RECENTES,
+ * parce que c'est celles-la qu'on reconnait -- et parce qu'une chose qui
+ * revient encore compte plus qu'une chose qui revenait.
+ */
+const EXTRAITS_PAR_NOEUD = 6;
+const EXTRAIT_CAR = 110;
+
+/** Le texte de chaque journee ecrite, par date. Bati a la demande, pas mis en cache :
+    il ne sert qu'aux deux routes de la lecture, et il vit le temps d'une reponse. */
+function textesParJour(userId) {
+  const m = new Map();
+  for (const r of series(userId).rows) if (r.text?.trim()) m.set(r.date, r.text);
+  return m;
+}
+
+function decorerCarte(lecture, byDate, parJour = new Map()) {
   const c = lecture?.carte;
   if (!c?.noeuds?.length) return lecture;
   return {
     ...lecture,
     carte: {
       ...c,
-      noeuds: c.noeuds.map(n => ({
-        ...n,
-        jours: (n.jours ?? []).map(d => {
+      noeuds: c.noeuds.map(n => {
+        const jours = (n.jours ?? []).map(d => {
           const j = byDate.get(d);
           return { d, e: j?.delta ?? null };
-        })
-      }))
+        });
+        /*
+         * LES OCCURRENCES, EN TOUTES LETTRES.
+         *
+         * Un noeud avait ses dates et rien d'autre : quarante points sur une
+         * couronne, et pour savoir ce qu'il y avait dedans il fallait ouvrir
+         * une journee, puis une autre. Un theme, lui, montre ses preuves
+         * datees avec la phrase. Le noeud n'avait pas de raison d'en montrer
+         * moins -- c'est la meme question : « pourquoi cette chose est-elle
+         * la ? »
+         *
+         * On ne garde que les journees qui portent du TEXTE : une date sans
+         * rien a lire donne une ligne vide, et une ligne vide dans une liste
+         * de preuves ressemble a une preuve qui manque.
+         */
+        const extraits = [...(n.jours ?? [])].reverse()
+          .map(d => ({ date: d, texte: (parJour.get(d) ?? '').trim() }))
+          .filter(x => x.texte)
+          .slice(0, EXTRAITS_PAR_NOEUD)
+          .map(x => ({
+            date: x.date,
+            extrait: x.texte.length > EXTRAIT_CAR
+              ? x.texte.slice(0, EXTRAIT_CAR).trimEnd() + '…' : x.texte
+          }));
+        return { ...n, jours, extraits };
+      })
     }
   };
 }
@@ -1087,7 +1130,7 @@ export const routes = {
       // Une lecture faite avant la bascule vers « tout le journal » : elle
       // s'affiche, mais elle est perimee par construction.
       ancienne: !!l?.ancienne,
-      lecture: l?.contenu ? decorerCarte(l.contenu, series(userId).byDate) : null,
+      lecture: l?.contenu ? decorerCarte(l.contenu, series(userId).byDate, textesParJour(userId)) : null,
       fait_le: l?.fait_le ?? null,
       jours: l?.jours ?? 0,
       modele: l?.modele ?? null,
@@ -1123,7 +1166,8 @@ export const routes = {
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
     });
-    return { ancienne: false, lecture: decorerCarte(l.contenu, series(userId).byDate),
+    return { ancienne: false,
+             lecture: decorerCarte(l.contenu, series(userId).byDate, textesParJour(userId)),
              fait_le: l.fait_le, jours: l.jours,
              modele: l.modele, possible: true, perime: false, retard: 0,
              arelire: false, cle: true, usage: usageFor(userId) };

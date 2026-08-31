@@ -1218,6 +1218,35 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 .ncjours { margin: -8px 0 0; font-size: 12px; color: var(--ink-faint); }
 .ncjours b { color: hsl(var(--p, 258) 45% 74%); font-weight: 500; }
 
+/* CE QUE CETTE CHOSE EST CHEZ LUI. Même rôle, même forme que la phrase d'un
+   mécanisme juste en dessous : un nom seul sur une carte est un mot, avec sa
+   phrase c'est quelque chose qu'on reconnaît. */
+.ncquoi { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-dim); }
+
+/* Les journées d'un nœud, en toutes lettres et cliquables — exactement les
+   preuves datées d'un mécanisme. Il n'avait que ses points : quarante marques
+   sur une couronne, et pour savoir ce qu'il y avait dedans il fallait ouvrir
+   une journée, puis une autre. */
+.ncjours-liste { display: flex; flex-direction: column; gap: 2px; }
+.ncjour {
+  display: flex; gap: 10px; width: 100%; text-align: left; align-items: baseline;
+  padding: 6px 8px; border-radius: 7px; background: none; border: 0;
+  border-left: 2px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.ncjour:hover {
+  background: color-mix(in srgb, hsl(var(--p, 258) 45% 45%) 10%, transparent);
+  border-left-color: hsl(var(--p, 258) 55% 58%);
+}
+.ncjour .mono { font-size: 11px; color: var(--ink-faint); flex: none; }
+.ncjour span:last-child {
+  font-size: 12.5px; line-height: 1.45; color: var(--ink-dim);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ncjour:hover span:last-child { color: var(--ink); }
+/* Ce qui n'est pas listé n'est pas perdu : il est sur la carte, en points. */
+.ncreste { font-size: 11px; color: var(--ink-faint); padding-left: 8px; }
+
 .ncbloc { display: flex; flex-direction: column; gap: 7px; }
 .nck {
   font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
@@ -2634,6 +2663,46 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   border: 1px solid currentColor;
 }
 .mecagroupe.seuls .mecatitre { color: var(--ink-faint); }
+
+/* ---- LA LISTE DES NŒUDS, SOUS L'ÎLOT QUI LES TIENT ----
+   Ce sont les mêmes objets que sur la toile, avec le même point de couleur au
+   même genre. Assez petits pour qu'un îlot de douze nœuds tienne en trois
+   lignes : ce qu'on lit ici est un INVENTAIRE, pas une liste de commandes. */
+.ncartes { display: flex; flex-wrap: wrap; gap: 5px; margin: 1px 0 2px; }
+.ncarte {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 9px 4px 8px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  font: 13px/1.35 var(--sans); color: var(--ink-dim);
+  cursor: pointer; text-align: left;
+  transition: border-color .14s, color .14s, background .14s;
+}
+.ncarte:hover {
+  background: var(--panel-2);
+  border-color: hsl(var(--g, 258) 45% 46%);
+  color: var(--ink);
+}
+/* Ouvert = celui dont le panneau de droite parle en ce moment. Le nœud, sa
+   pastille et son détail sont le même objet vu trois fois. */
+.ncarte.ouvert {
+  border-color: hsl(var(--g, 258) 55% 58%);
+  color: var(--ink);
+  background: hsl(var(--g, 258) 30% 16% / .5);
+}
+.ncpuce {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: hsl(var(--g, 258) 52% 60%);
+}
+.ncnomc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20ch; }
+/* Le nombre de journées : le poids du nœud. Discret — il informe, il ne crie
+   pas, et il disparaît quand il n'y a rien à compter. */
+.ncn { font-size: 11px; color: var(--ink-faint); }
+.ncarte.ouvert .ncn, .ncarte:hover .ncn { color: var(--ink-dim); }
+
+/* Les mécanismes passent SOUS les nœuds, en retrait : un nœud est une chose de
+   sa vie, un mécanisme est ce qu'elle fait. L'un explique l'autre, et se lit
+   après lui. */
+.mecasous { display: flex; flex-direction: column; gap: 5px; margin-top: 3px; }
 
 /* ---------------------------------------------------------------------
    LES DEUX MOITIÉS DE LA PAGE SE RÉPONDENT.

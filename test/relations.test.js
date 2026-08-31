@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
-         contour, poidsDuNoeud, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+         contour, poidsDuNoeud, ilotDesNoeuds, LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
 
@@ -467,4 +467,64 @@ test('le nom d’un îlot est celui de la piste, au caractère près', () => {
   // parler de deux choses.
   const pistes = [{ nom: 'la peur d’être seul le soir', noeuds: ['Léa', 'les nuits courtes'] }];
   assert.equal(versGraphe(CARTE, pistes).ilots[0].nom, 'la peur d’être seul le soir');
+});
+
+test('la liste sous la carte et l’enveloppe sur la carte tiennent les mêmes nœuds', () => {
+  /*
+   * L'INCOHÉRENCE QU'ON NE POUVAIT PAS VOIR. La zone « dépendance » de la
+   * toile tenait la weed et les anxios ; la colonne « dépendance » d'en dessous
+   * tenait autre chose. Même titre, même couleur, deux contenus — et rien pour
+   * s'en apercevoir, puisque les deux avaient l'air d'aller bien.
+   *
+   * Une seule appartenance est calculée, `ilotDesNoeuds`, et les deux moitiés
+   * la lisent. Ce test tient la promesse par le seul bout qui compte : pour
+   * chaque îlot, l'ensemble des noms qu'il dessine est l'ensemble des noms que
+   * la liste écrirait sous son titre.
+   */
+  const pistes = [
+    { nom: 'dépendance', noeuds: ['Léa', 'les nuits courtes', 'un nœud disparu'] },
+    { nom: 'vide au travail', noeuds: ['le dimanche soir', 'Léa'] } // Léa est déjà prise
+  ];
+  const ilotDe = ilotDesNoeuds(CARTE, pistes);
+  const G = versGraphe(CARTE, pistes);
+
+  for (const a of G.ilots) {
+    const surLaCarte = G.noeuds.filter(n => n.ilot === a.i).map(n => n.nom).sort();
+    // Ce que la liste écrit sous ce titre : le même filtre, depuis la carte brute.
+    const enListe = CARTE.noeuds
+      .filter(n => ilotDe.get(String(n.nom).toLowerCase()) === a.i)
+      .map(n => n.nom).sort();
+    assert.deepEqual(surLaCarte, enListe,
+                     `« ${a.nom ?? 'sans nom'} » ne tient pas la même chose des deux côtés`);
+  }
+  // Et un nom que la carte ne porte pas ne compte nulle part.
+  assert.equal(ilotDe.has('un nœud disparu'), false);
+  // Un nœud revendiqué deux fois reste au premier qui l'a nommé, des deux côtés.
+  assert.equal(ilotDe.get('léa'), 0);
+});
+
+test('ce qui n’est dans aucune piste est quand même sur la carte, sans titre', () => {
+  /*
+   * « s'il y a des nœuds un peu hors piste qui ne se retrouvent pas encore dans
+   * une grande thématique, tu peux quand même les afficher sur la carte dans
+   * des groupes séparés qui ne forment pas encore un îlot proprement
+   * identifié. » Une enveloppe sans nom, donc — et un index qui ne peut pas
+   * croiser celui d'une piste, sans quoi survoler l'une allumerait l'autre.
+   */
+  const carte = {
+    noeuds: [...CARTE.noeuds,
+             { nom: 'la salle de sport', genre: 'activite', poids: 2 },
+             { nom: 'le mardi', genre: 'periode', poids: 1 }],
+    liens: [...CARTE.liens,
+            { de: 'la salle de sport', vers: 'le mardi', quoi: 'tombe', force: 2 }]
+  };
+  const G = versGraphe(carte, [{ nom: 'dépendance', noeuds: ['Léa', 'les nuits courtes'] }]);
+
+  const sansNom = G.ilots.filter(a => a.nom == null);
+  assert.equal(sansNom.length, 1);
+  assert.ok(sansNom[0].i >= LIBRE, 'une grappe ne doit jamais porter l’index d’une piste');
+  assert.deepEqual(G.noeuds.filter(n => n.ilot === sansNom[0].i).map(n => n.nom),
+                   ['la salle de sport', 'le mardi']);
+  // Le nœud qui n'a aucun voisin libre reste seul : deux, c'est un groupe, un, non.
+  assert.equal(G.noeuds.find(n => n.nom === 'le dimanche soir').ilot, null);
 });

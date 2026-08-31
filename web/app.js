@@ -2,7 +2,8 @@ import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
 import { disposer } from './carte.js';
 import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
-         vueNeutre, zoomer, poidsDuNoeud, NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
+         vueNeutre, zoomer, poidsDuNoeud, ilotDesNoeuds,
+         NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
@@ -2593,18 +2594,79 @@ function mecanismes(lecture) {
  * Ce qui n'appartient a aucune piste vient a la fin, sans titre. Ce n'est pas un
  * reste : c'est ce qui n'entre pas dans une case, et tout n'a pas a y entrer.
  */
+/**
+ * UNE PASTILLE DE NOEUD : ce que la carte porte, en liste.
+ *
+ * Elle dit ce que le noeud dit sur la toile -- son genre par la couleur du
+ * point, son nom, et le nombre de journees qu'il porte. Cliquer l'ouvre dans le
+ * meme panneau que cliquer le noeud lui-meme : deux chemins, une seule reponse.
+ */
+function noeudChip(n) {
+  const j = (n.jours ?? []).length;
+  const ouvert = NOEUD_OUVERT && String(NOEUD_OUVERT).toLowerCase() === String(n.nom).toLowerCase();
+  return `<button class="ncarte${ouvert ? ' ouvert' : ''}" data-noeud-ouvrir="${esc(n.nom)}"
+      style="--g:${TEINTE_GENRE[n.genre] ?? TEINTE_GENRE.activite}"
+      title="${esc(n.quoi || NOM_GENRE[n.genre] || '')}">
+    <span class="ncpuce"></span>
+    <span class="ncnomc">${esc(n.nom)}</span>
+    ${j ? `<span class="ncn mono">${j}</span>` : ''}
+  </button>`;
+}
+
+/**
+ * SOUS LA CARTE, CE QUE LA CARTE CONTIENT.
+ *
+ * On y listait les MECANISMES pendant que la toile montrait des NOEUDS. Les
+ * deux venaient de la meme lecture, portaient les memes titres d'ilots, et ne
+ * contenaient pas les memes choses : la zone « dependance » de la toile tenait
+ * la weed et les anxios, la colonne « dependance » d'en dessous tenait « l'acte
+ * t'est retire ». Rien ne se repondait, et il fallait deviner que c'etait
+ * pourtant le meme groupe.
+ *
+ * La liste est donc devenue celle des NOEUDS, groupes par le meme calcul que
+ * les enveloppes -- `ilotDesNoeuds`, une seule fois, partagee. Les deux ne
+ * peuvent plus diverger : c'est la meme appartenance, affichee deux fois.
+ *
+ * Les mecanismes ne disparaissent pas pour autant : ils vivent sous les noeuds
+ * de leur piste, en retrait. Un noeud est une CHOSE de sa vie, un mecanisme est
+ * ce qu'elle fait -- et l'un explique l'autre.
+ */
 function mecaGroupes(lecture) {
   const tous = mecanismes(lecture);
   const pistes = lecture?.pistes ?? [];
-  if (!pistes.length) return tous.map(mecaMarkup).join('');
+  const noeuds = lecture?.carte?.noeuds ?? [];
+  if (!pistes.length && !noeuds.length) return tous.map(mecaMarkup).join('');
 
+  const ilotDe = ilotDesNoeuds(lecture?.carte, pistes);
   const restant = new Set(tous.map(m => m.cle));
+  const places = new Set();
   const bloc = [];
+
+  /*
+   * UN MECANISME QUI PORTE LE NOM D'UN NOEUD APPARTIENT A SON ILOT.
+   *
+   * « les nuits blanches » est un noeud d'« autodestruction » ET un motif suivi
+   * dans la conversation. Range par ses seuls themes, le motif tombait dans
+   * « pas encore regroupe » -- le meme nom ecrit deux fois sur la meme page,
+   * dans deux groupes differents, sans que rien n'explique pourquoi. Les
+   * themes gardent la priorite (premier tour), le nom de noeud rattrape le
+   * reste (second tour).
+   */
+  const parTheme = new Map();
   pistes.forEach((p, i) => {
-    const noms = new Set((p.themes ?? []).map(t => String(t).toLowerCase()));
-    const dedans = tous.filter(m => restant.has(m.cle) && noms.has(String(m.nom).toLowerCase()));
-    if (!dedans.length) return;
-    for (const m of dedans) restant.delete(m.cle);
+    for (const t of p.themes ?? []) if (!parTheme.has(String(t).toLowerCase())) parTheme.set(String(t).toLowerCase(), i);
+  });
+  const ilotDuMeca = m => {
+    const k = String(m.nom).toLowerCase();
+    return parTheme.get(k) ?? ilotDe.get(k) ?? null;
+  };
+
+  pistes.forEach((p, i) => {
+    const dedans = noeuds.filter(n => ilotDe.get(String(n.nom).toLowerCase()) === i);
+    const meca = tous.filter(m => restant.has(m.cle) && ilotDuMeca(m) === i);
+    if (!dedans.length && !meca.length) return;
+    for (const m of meca) restant.delete(m.cle);
+    for (const n of dedans) places.add(n.nom);
     const teinte = teintePiste(p, i);
     /*
      * `data-ilot` : le NUMERO de la piste, celui que la carte emploie pour ses
@@ -2616,14 +2678,23 @@ function mecaGroupes(lecture) {
     bloc.push(`<div class="mecagroupe" style="--p:${teinte}" data-ilot="${i}">
       <button class="mecatitre" data-ilot-voir="${i}"
               title="Le montrer sur la carte"><span></span>${esc(p.nom)}</button>
-      ${dedans.map(mecaMarkup).join('')}
+      ${dedans.length ? `<div class="ncartes">${dedans.map(noeudChip).join('')}</div>` : ''}
+      ${meca.length ? `<div class="mecasous">${meca.map(mecaMarkup).join('')}</div>` : ''}
     </div>`);
   });
+
+  /*
+   * CE QUI N'A PAS ENCORE DE NOM. Ni un reste ni un echec : des choses qui
+   * reviennent sans entrer dans une case, et tout n'a pas a y entrer. Elles ont
+   * leur enveloppe pale sur la toile, sans titre, et leur colonne ici.
+   */
+  const libres = noeuds.filter(n => !places.has(n.nom));
   const seuls = tous.filter(m => restant.has(m.cle));
-  if (seuls.length) {
+  if (libres.length || seuls.length) {
     bloc.push(`<div class="mecagroupe seuls">
-      ${pistes.length ? '<div class="mecatitre"><span></span>hors des pistes</div>' : ''}
-      ${seuls.map(mecaMarkup).join('')}
+      <div class="mecatitre"><span></span>pas encore regroupé</div>
+      ${libres.length ? `<div class="ncartes">${libres.map(noeudChip).join('')}</div>` : ''}
+      ${seuls.length ? `<div class="mecasous">${seuls.map(mecaMarkup).join('')}</div>` : ''}
     </div>`);
   }
   return bloc.join('');
@@ -2667,13 +2738,27 @@ function viserIlot(i) {
   if (ILOT_VISE === i) return;
   ILOT_VISE = i;
   RELA_PEINDRE?.();
+  refleterIlotVise();
+}
+
+/**
+ * REPOSER L'ÎLOT VISÉ SUR UNE LISTE QUI VIENT D'ÊTRE REFAITE.
+ *
+ * Les classes vivent sur le DOM, et « Ma carte » se redessine entièrement dès
+ * qu'on ouvre un nœud. Après ce redessin, `ILOT_VISE` disait encore « la
+ * dépendance » pendant que plus aucun groupe n'était éteint — et le garde
+ * `if (ILOT_VISE === i) return;` refusait alors de le remettre, puisque de son
+ * point de vue c'était déjà fait. Cliquer le titre ne faisait plus rien, une
+ * fois sur deux, sans rien pour l'expliquer.
+ */
+function refleterIlotVise() {
   // La liste répond au même signal que la carte : le groupe visé garde son
   // encre, les autres s'effacent — exactement ce que fait la toile au-dessus.
   const v = $('#view');
   if (!v) return;
-  v.classList.toggle('ilotvise', i != null);
+  v.classList.toggle('ilotvise', ILOT_VISE != null);
   for (const g of v.querySelectorAll('.mecagroupe')) {
-    g.classList.toggle('eteint', i != null && Number(g.dataset.ilot) !== i);
+    g.classList.toggle('eteint', ILOT_VISE != null && Number(g.dataset.ilot) !== ILOT_VISE);
   }
 }
 
@@ -2715,6 +2800,32 @@ function noeudMarkup() {
     <h3 class="ncnom">${esc(p.nom)}</h3>
     <p class="ncjours">${p.jours.length} journée${p.jours.length > 1 ? 's' : ''}${
       p.ilot ? ` · dans <b>${esc(p.ilot.nom)}</b>` : ' · hors des pistes'}</p>
+
+    ${/*
+       * UN NŒUD SE PRÉSENTE COMME UN MÉCANISME.
+       *
+       * Il n'avait qu'un nom, un compte et des chiffres. Un mécanisme, juste en
+       * dessous, dit ce qu'il est en une phrase puis montre ses journées avec
+       * ce qui y était écrit — et c'est exactement ce qu'on veut savoir d'un
+       * nœud aussi : pourquoi cette chose est là, et à quoi ça ressemblait.
+       *
+       * La phrase vient du modèle, les extraits du journal. Les deux manquent
+       * aux lectures faites avant ce changement, et le panneau s'en passe sans
+       * rien casser — il faut une relecture pour les voir apparaître.
+       */''}
+    ${p.quoi ? `<p class="ncquoi">${esc(p.quoi)}</p>` : ''}
+
+    ${p.extraits.length ? `<div class="ncbloc">
+      <span class="nck">Là où ça revient</span>
+      <div class="ncjours-liste">${p.extraits.map(x => `<button class="ncjour" data-jour="${x.date}">
+        <span class="mono">${fmtDay(x.date)}</span>
+        <span>${esc(x.extrait)}</span>
+      </button>`).join('')}</div>
+      ${p.jours.length > p.extraits.length
+        ? `<span class="ncreste">et ${p.jours.length - p.extraits.length} autre${
+            p.jours.length - p.extraits.length > 1 ? 's' : ''} journée${
+            p.jours.length - p.extraits.length > 1 ? 's' : ''} — les points autour du nœud</span>` : ''}
+    </div>` : ''}
 
     ${p.pesees.length ? `<div class="ncbloc">
       <span class="nck">Ce que ça pèse</span>
@@ -2809,7 +2920,7 @@ function monterCarte(carte, pistes = []) {
     // Plus de marge en haut dès qu'il y a des îlots : leur nom se pose
     // AU-DESSUS de l'enveloppe, et le cadrage ne réserve de la place que pour
     // les nœuds — le titre du plus haut sortait par le bord.
-    cadrer(RELA_DISPO.pts, L, H, 62, RELA.ilots?.length ? 66 : 38);
+    cadrer(RELA_DISPO.pts, L, H, 62, RELA.ilots?.length ? 96 : 38);
     RELA_VUE = vueNeutre();
     peindre();
   };
@@ -3064,6 +3175,7 @@ async function renderLecture() {
 
   wireLecture();
   wireIlots();
+  refleterIlotVise();   // la liste vient d'être refaite : elle a perdu l'îlot visé
   monterCarte(L.lecture?.carte, L.lecture?.pistes ?? []);
 
   // « elle doit toujours faire de l'analyse de fond » : si elle manque, on la
@@ -3136,8 +3248,14 @@ function wireLecture() {
     // Le panneau d'un nœud : le refermer, aller à un nœud voisin, ou descendre
     // sur la piste dont il vient de dire le poids.
     if (e.target.closest('[data-noeud-fermer]')) { NOEUD_OUVERT = null; return renderLecture(); }
-    const na = e.target.closest('[data-noeud-aller]');
-    if (na) { NOEUD_OUVERT = na.dataset.noeudAller; return renderLecture(); }
+    const na = e.target.closest('[data-noeud-aller]') || e.target.closest('[data-noeud-ouvrir]');
+    if (na) {
+      const nom = na.dataset.noeudAller ?? na.dataset.noeudOuvrir;
+      // Recliquer celui qui est ouvert le referme : c'est le geste attendu
+      // d'une liste, et sans lui on ne peut plus revenir a la synthese.
+      NOEUD_OUVERT = NOEUD_OUVERT === nom ? null : nom;
+      return renderLecture();
+    }
     const iv = e.target.closest('[data-ilot-voir]');
     if (iv) {
       // Le titre d'un groupe renvoie a la carte : c'est le meme ilot, et le
