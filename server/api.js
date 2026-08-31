@@ -14,6 +14,7 @@ import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
+import { journee } from './journee.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
@@ -602,6 +603,13 @@ export const routes = {
              floored: false, floor, yesterday, episodes: ep, similar, textCount,
              reperes: reperesDuJour(date, userId),
              amplitude: amplitude(date, userId),
+             /*
+              * LA JOURNEE HEURE PAR HEURE. Ce qui manquait le plus : on ouvrait
+              * une journee et on y voyait sa note et son texte, jamais ce qui
+              * s'y etait PASSE. Une journee notee 8 peut contenir « juste envie
+              * de mourir » ecrit le soir, et c'est la bascule qui la raconte.
+              */
+             journee: journee(date, userId),
              // Les notes apportees passent le plancher, pour la meme raison que
              // les reperes : ce sont des faits que la personne a poses
              // elle-meme, pas une statistique calculee sur elle.

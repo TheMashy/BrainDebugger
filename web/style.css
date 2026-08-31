@@ -1593,6 +1593,10 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
    repère s'il y en a un, la note et le texte. La largeur est celle qu'avait
    déjà cette colonne — rien n'a bougé de place, deux blocs ont disparu. */
 .jourseul { display: flex; flex-direction: column; gap: 30px; max-width: 520px; }
+/* Une journée qui a un fil s'étale : les 520 px étaient la largeur d'un texte
+   qu'on relit, pas celle de trois colonnes qui se répondent. Une journée sans
+   fil garde la colonne étroite — c'est encore la bonne largeur pour lire. */
+.jourseul:has(.jgrille) { max-width: 1180px; }
 .mcol { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
 @media (max-width: 900px) { .mirror { grid-template-columns: 1fr; } }
 
@@ -1753,6 +1757,86 @@ button.bignum:hover { opacity: .82; }
 .dayText {
   white-space: pre-wrap; font-size: 15.5px; line-height: 1.65; margin: 0;
   max-height: 42vh; overflow-y: auto; overscroll-behavior: contain;
+}
+
+/* ======================================================================
+   LA JOURNÉE OUVERTE : TROIS COLONNES QUI RÉPONDENT À TROIS QUESTIONS.
+
+   Ce qui s'est DIT (à quelle heure, et quoi) · ce qui a BOUGÉ (l'amplitude,
+   les sujets) · ce qu'on a ÉCRIT le soir. Elles se lisent de gauche à droite
+   dans l'ordre de la journée elle-même : les moments, puis ce qu'ils font,
+   puis la phrase qui conclut.
+
+   Aucune ne pousse la page : chacune a son propre débordement, et la page
+   entière reste à sa hauteur. Une journée bavarde ne doit pas obliger à
+   faire défiler l'écran pour retrouver le calendrier au-dessus.
+   ====================================================================== */
+.jgrille {
+  display: grid; grid-template-columns: minmax(0, 1.15fr) 210px minmax(0, 1fr);
+  gap: 22px 26px; align-items: start;
+}
+.jcol { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+/* Les trois titres de colonne parlent la même langue. Le `>` en laissait deux
+   de côté — « Ce qui a bougé » et « De quoi tu as parlé » vivent dans un bloc
+   intermédiaire — et trois titres dans deux styles font deux niveaux là où il
+   n'y en a qu'un. */
+.jcol .k { letter-spacing: .1em; text-transform: uppercase; font-size: 10.5px; }
+
+/* --- le fil des moments --- */
+.jmoments {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 34vh; overflow-y: auto; overscroll-behavior: contain;
+}
+.jmoment {
+  display: grid; grid-template-columns: auto 9px minmax(0, 1fr);
+  align-items: baseline; gap: 10px;
+  padding: 5px 7px 5px 2px; border-radius: 6px;
+  transition: background .12s;
+}
+.jmoment:hover { background: var(--surface); }
+.jheure { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+/* Le point porte la scène de ce moment-là. Il est CONTOURÉ quand rien ne
+   ressort et rempli quand quelque chose ressort : la force se lit dans
+   l'encre, pas dans un chiffre à côté. */
+.jpoint {
+  width: 7px; height: 7px; border-radius: 50%; align-self: center;
+  background: hsl(var(--s, 224) 45% 58% / var(--f, .3));
+  box-shadow: 0 0 0 1px hsl(var(--s, 224) 45% 58% / .45);
+}
+.jcoeur {
+  font-size: 13.5px; line-height: 1.5; color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.jmoment:hover .jcoeur { color: var(--ink); }
+
+/* --- ce qui a bougé --- */
+.jcote { gap: 20px; }
+.jvol, .jthemes { display: flex; flex-direction: column; gap: 7px; }
+.jvsvg {
+  width: 100%; height: 46px; display: block;
+  background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 7px;
+}
+.jvpied { display: flex; align-items: baseline; gap: 9px; font-size: 11px; color: var(--ink-faint); }
+.jvchiffre { font-size: 13px; color: var(--ink-dim); }
+
+.jtlist { display: flex; flex-wrap: wrap; gap: 6px; }
+.jtheme {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px 4px 7px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2);
+  font-size: 12.5px; color: var(--ink-dim); cursor: default;
+}
+.jticone { display: inline-flex; color: var(--ink-faint); }
+.jtn { font-size: 10.5px; color: var(--ink-faint); }
+
+.jecrit .dayText { max-height: 34vh; }
+
+/* Sous 1080 px les trois colonnes font des lignes de six mots : elles se
+   remettent l'une sous l'autre, dans le même ordre de lecture. */
+@media (max-width: 1080px) {
+  .jgrille { grid-template-columns: 1fr; gap: 24px; }
+  .jmoments, .jecrit .dayText { max-height: none; }
 }
 
 /* ---------- le fond ----------
