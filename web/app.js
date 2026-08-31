@@ -7,7 +7,7 @@ import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
-import { icone, iconeDe, themeDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
+import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { ico, ICO_VUE } from './icones.js';
 import { friseMarkup as friseSVG } from './frise.js';
 import { calMarkup, calClic, moisDe } from './calendrier.js';
@@ -1983,7 +1983,11 @@ function friseMarkup(events) {
         return `<div class="repligne${EV?.id === ev.id ? ' ouvert' : ''}" data-theme="${t}"
                      data-edev="${ev.id}" role="button" tabindex="0"
                      title="Modifier ce repère">
-          <span class="ricone-box"${ev.teinte != null ? ` style="color:hsl(${ev.teinte} 62% 62%)"` : ''}>${icone(t, 18)}</span>
+          ${/* La même règle que sur la frise : la teinte choisie d'abord, celle
+                du thème ensuite. Une liste grise sous une frise colorée obligeait
+                à reconnaître deux fois le même repère. */''}
+          <span class="ricone-box"${teinteDe({ ...ev, theme: t }) != null
+            ? ` style="color:hsl(${teinteDe({ ...ev, theme: t })} 62% 62%)"` : ''}>${icone(t, 18)}</span>
           <span class="repdate mono faint">${quand}</span>
           <span class="replabel">${esc(ev.label)}</span>
           <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">${ico('fermer', 11)}</button>
@@ -3623,7 +3627,8 @@ function reperesMarkup(rep, date) {
     <div class="k faint repk">${jour.length > 1 ? 'Repères' : 'Repère'}</div>
     <div class="repliste">
       ${jour.map(r => `<div class="rep pose">
-        <span class="ricone-box">${icone(r.theme, 22)}</span>
+        <span class="ricone-box"${teinteDe(r) != null
+          ? ` style="color:hsl(${teinteDe(r)} 62% 62%)"` : ''}>${icone(r.theme, 22)}</span>
         <div class="reptxt"><b>${esc(r.label)}</b><span class="faint">${esc(NOMS[r.theme] ?? 'jalon')}</span></div>
       </div>`).join('')}
     </div>

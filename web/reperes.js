@@ -142,6 +142,48 @@ export const ICONES = {
  */
 export const TEINTES_DECLAREES = [232, 258, 284, 310, 336];
 
+/**
+ * LA TEINTE DE CHAQUE THÈME.
+ *
+ * Sur la frise, les bandes de périodes se ressemblaient toutes : elles portent
+ * le dégradé des notes de leur période — une mesure, et c'est juste — mais du
+ * coup « Ecole 3D », « Nobody Studio » et « Couple » étaient trois arcs-en-ciel
+ * côte à côte. Rien ne disait de quoi ces trois années étaient faites avant
+ * d'avoir lu les trois étiquettes.
+ *
+ * Chaque thème reçoit donc une teinte, et elle sert au TRAIT et au fond, jamais
+ * au remplissage : « ce qui est rempli est mesuré, ce qui est contouré est
+ * déclaré ». Le dégradé des notes reste ce qu'on lit dans la bande ; la teinte
+ * dit ce que la bande EST.
+ *
+ * Elles sont rangées par familles, parce que c'est ce qu'on lit d'abord de loin
+ * sur une frise de trente ans : le soin en bleu-vert, ce qui blesse en rouge et
+ * orange, les gens en magenta, ce qu'on fait en bleu et violet, le cadre en
+ * ambre. Le détail vient de l'icône, qui, elle, distingue vraiment.
+ */
+export const TEINTE_THEME = {
+  // ce qui blesse
+  crise: 2, conso: 20, deuil: 268, rupture: 340,
+  // le corps et le soin
+  soin: 172, sante: 190, dormir: 246, manger: 158,
+  // les gens
+  amour: 350, famille: 310, ami: 128,
+  // ce qu'on fait
+  travail: 212, etudes: 232, creation: 288, sport: 142,
+  // le cadre
+  maison: 34, voyage: 52, argent: 82
+  /*
+   * `jalon` n'y est pas, et c'est voulu. C'est le thème par DÉFAUT — celui de
+   * ce qui n'a pas été reconnu — et lui donner une couleur reviendrait à
+   * annoncer une lecture qui n'a pas eu lieu. Sans teinte, il garde le trait
+   * neutre, qui est la bonne réponse à « je ne sais pas ce que c'est ».
+   */
+};
+
+/** La teinte d'un repère : celle qu'on a choisie, sinon celle de son thème. */
+export const teinteDe = (ev) =>
+  ev?.teinte ?? TEINTE_THEME[ev?.theme ?? DEFAUT] ?? null;
+
 /** Les noms lisibles, pour les infobulles et le champ de saisie. */
 export const NOMS = {
   jalon: 'jalon', crise: 'crise', conso: 'consommation', manger: 'alimentation',
