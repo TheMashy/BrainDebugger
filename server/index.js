@@ -4,7 +4,8 @@ import { randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { routes, streamMessage } from './api.js';
+import { routes, streamMessage, ambiance } from './api.js';
+import { attente, cleDeLaRequete, proprietaireDeLaCle } from './passerelle.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
 import { DB_PATH, db, upsertUser, countUsers, OWNER } from './db.js';
 import { claimOwnerData } from './migrate.js';
@@ -158,6 +159,39 @@ async function traiter(req, res) {
 
   // sonde de l'hebergeur : jamais derriere le verrou
   if (url.pathname === '/healthz') return json(res, 200, { ok: true });
+
+  /* ---------- la passerelle vers une application locale ----------
+   *
+   * DEVANT LE VERROU, PARCE QU'ELLE N'A PAS DE NAVIGATEUR DERRIERE ELLE.
+   *
+   * Une application qui tourne sur la machine de quelqu'un vient demander ce
+   * que le site a en attente : elle n'a pas de session, elle n'en aura jamais,
+   * et lui en donner une reviendrait a lui confier une identite complete pour
+   * allumer une lampe. Elle porte une CLE creee expres dans Reglages, qui
+   * n'ouvre que cette route, en lecture, et qu'on peut retirer sans se
+   * deconnecter de nulle part.
+   *
+   * Deux chemins pour une seule reponse : `machitool` est celui qu'appelle
+   * l'application telle qu'elle est ecrite, `passerelle` est le nom du produit.
+   * Refuser le premier ferait chercher longtemps pour rien.
+   */
+  if (req.method === 'GET'
+      && (url.pathname === '/api/machitool/attente' || url.pathname === '/api/passerelle/attente')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    // Le message dit CE QU'IL FAUT FAIRE, pas juste que c'est refuse : sans la
+    // phrase, un 401 sur une route qui existe ressemble a une route qui
+    // n'existe pas, et on cherche du cote du chemin.
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      return json(res, 200, attente(userId, { ambiance: ambiance(userId) }));
+    } catch (err) {
+      console.error('[passerelle]', err);
+      return json(res, 500, { error: String(err.message ?? err).slice(0, 200) });
+    }
+  }
 
   /* ---------- verrou ---------- */
 

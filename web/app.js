@@ -3753,6 +3753,34 @@ async function renderSettings() {
       <div id="backendCfg"></div>
     </div>
 
+    <div class="card">
+      <h2>La passerelle</h2>
+      <p class="sub">
+        Une application qui tourne sur ta machine — une guirlande, une lampe, un widget — peut venir
+        demander au site ce qu'il a en attente. Elle lit une couleur, une note sur dix, un titre de
+        repère. <b>Jamais le journal</b> : pas une phrase écrite, pas un message, pas une lecture.
+      </p>
+      <div class="field">
+        <span>Clé</span>
+        <div class="keystate ${s.passerelleCle ? 'stored' : 'none'}" id="passState">
+          ${s.passerelleCle
+            ? `<b class="mono" id="passCle">${esc(s.passerelleCle)}</b>
+               <button class="btn" id="passRefaire" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('refaire', 11)}la remplacer</button>
+               <button class="btn" id="passRetirer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}la retirer</button>`
+            : `<b>Aucune clé</b> — rien ne peut interroger le site.
+               <button class="btn" id="passCreer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('plus', 11)}en créer une</button>`}
+        </div>
+        <p class="faint" style="font-size:11.5px;margin:8px 0 0">
+          ${/* La route est nommee ici parce que c'est ce qu'on doit recopier, et
+                qu'aller la chercher ailleurs veut dire ouvrir le code. */''}
+          L'application interroge <span class="mono">GET /api/machitool/attente</span> et présente la clé
+          en <span class="mono">Authorization: Bearer</span>, en <span class="mono">X-Machitool-Cle</span>
+          ou en <span class="mono">?cle=</span> — les trois marchent.
+          La retirer coupe l'accès tout de suite, sans toucher à ta session.
+        </p>
+      </div>
+    </div>
+
     <div class="row">
       <div class="card">
         <h2>Le plancher</h2>
@@ -4135,7 +4163,7 @@ async function renderBackendCfg() {
     } catch (err) {
       out.innerHTML = `<span style="color:var(--danger)">${esc(err.message)}</span>`;
     } finally {
-      b.disabled = false; b.textContent = 'Tester la clé';
+      b.disabled = false; b.innerHTML = ico('cle') + 'Tester la clé';
     }
   });
 
@@ -4143,6 +4171,39 @@ async function renderBackendCfg() {
     await saveSettings({ apiKey: '', clearKey: true });
     renderSettings();
     toast('Clé effacée');
+  });
+
+  /*
+   * LA CLÉ DE LA PASSERELLE. Elle est CRÉÉE par le serveur, jamais choisie ici :
+   * une clé tapée à la main est une clé devinable, et celle-ci ouvre une route
+   * qui répond sans session.
+   *
+   * Elle reste affichée en clair après création — contrairement à la clé
+   * Anthropic, qui ne revient jamais au navigateur. Il faut pouvoir la recopier
+   * dans l'application qui s'en sert, et le seul navigateur qui la reçoit est
+   * celui de la session déjà ouverte.
+   */
+  const poserPasserelle = async () => {
+    await api('/api/passerelle/cle', {});
+    S.settings = (await api('/api/state')).settings;
+    renderSettings();
+    toast('Clé créée — colle-la dans ton application');
+  };
+  $('#passCreer')?.addEventListener('click', poserPasserelle);
+  $('#passRefaire')?.addEventListener('click', poserPasserelle);
+  $('#passRetirer')?.addEventListener('click', async () => {
+    await fetch('/api/passerelle/cle', { method: 'DELETE', headers: enTetes() });
+    S.settings = (await api('/api/state')).settings;
+    renderSettings();
+    toast('Clé retirée — l’application ne peut plus interroger le site');
+  });
+  // Un clic sur la clé la copie : la recopier à la main, c'est trente-deux
+  // caractères et une faute de frappe.
+  $('#passCle')?.addEventListener('click', async e => {
+    try {
+      await navigator.clipboard.writeText(e.target.textContent.trim());
+      toast('Clé copiée');
+    } catch { /* pas de presse-papiers : elle est lisible à l'écran, ça suffit */ }
   });
   $('#carnetMemoire')?.addEventListener('change', async e => {
     await saveSettings({ carnetMemoire: e.target.checked });
