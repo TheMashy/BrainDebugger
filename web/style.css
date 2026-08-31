@@ -186,6 +186,7 @@ header.top {
 
 nav { display: flex; gap: 20px; }
 nav button {
+  display: inline-flex; align-items: center;
   background: none; border: 0; padding: 3px 0; border-radius: 0;
   color: var(--ink-faint); font-size: 10.5px; font-weight: 500;
   letter-spacing: .16em; text-transform: uppercase;
@@ -195,6 +196,31 @@ nav button:hover { color: var(--ink-dim); background: none; }
 /* L'onglet courant est deja nomme a gauche : ici il s'efface, il ne se pave
    pas de vert. */
 nav button[aria-current="true"] { color: var(--ink); background: none; }
+
+/* ----------------------------------------------------------------------
+   L'ICÔNE PORTE, LE MOT SE DÉPLIE.
+
+   Cinq mots en capitales alignés côte à côte, c'est cinq choses à lire pour
+   en choisir une — et on les relit à chaque passage, alors qu'on sait déjà
+   où l'on va. Le dessin, lui, se reconnaît sans se lire.
+
+   Le nom ne sort donc que pour l'onglet où l'on EST, et au survol pour celui
+   qu'on s'apprête à prendre. Il se déplie, il n'apparaît pas : une largeur qui
+   s'ouvre dit d'où vient le mot, une opacité qui saute ne dit rien.
+
+   `max-width` et pas `width` : le mot fait la largeur qu'il fait, « Réglages »
+   n'a pas à tenir dans la place de « Moi ».
+   ---------------------------------------------------------------------- */
+.navico { display: inline-flex; flex: none; }
+.navnom {
+  max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap;
+  transition: max-width .26s cubic-bezier(.22, 1, .36, 1),
+              opacity .18s ease, margin-left .26s cubic-bezier(.22, 1, .36, 1);
+}
+nav button[aria-current="true"] .navnom,
+nav button:hover .navnom,
+nav button:focus-visible .navnom { max-width: 9em; opacity: 1; margin-left: 8px; }
+@media (prefers-reduced-motion: reduce) { .navnom { transition: none; } }
 
 /* ---------- primitives ---------- */
 
@@ -295,6 +321,26 @@ button.btn:hover { background: var(--surface-h); border-color: #33413a; }
 button.btn.primary { background: var(--accent); color: #06120b; border-color: transparent; font-weight: 600; }
 button.btn.primary:hover { background: #62e895; }
 button.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ----------------------------------------------------------------------
+   UN BOUTON QUI PORTE UNE ICÔNE SE MET EN LIGNE, TOUT SEUL.
+
+   Plutôt qu'énumérer ici les trente classes de boutons du produit — et en
+   oublier une, et découvrir le décalage sur une capture d'écran — la règle
+   suit le contenu : s'il y a un dessin dedans, il y a un écart après lui.
+
+   `> .ico` et pas `.ico` : les onglets ont la leur, dans un span, et leur
+   propre mise en page. Le sélecteur les laisse tranquilles.
+   ---------------------------------------------------------------------- */
+button:has(> .ico) { display: inline-flex; align-items: center; gap: 7px; }
+/* L'icône ne se comprime jamais : c'est le mot qui cède, pas le dessin. Un
+   crayon écrasé à deux tiers de large ne ressemble plus à rien. */
+.ico { flex: none; }
+/* Pas de règle « icône seule » ici : `:only-child` ne compte que les ELEMENTS,
+   et le libellé d'un bouton est un nœud de texte. « Tester la clé » passait donc
+   pour une icône seule, et l'écart tombait à zéro sur tous les boutons du
+   produit — un dessin collé à son mot, partout, pour une exception qui n'a de
+   toute façon rien à espacer. */
 
 input[type=text], input[type=number], input[type=password], input[type=date], select, textarea {
   background: var(--bg); border: 1px solid var(--line);
@@ -774,7 +820,13 @@ nav button { white-space: nowrap; }
      Sur deux lignes elles tiennent toutes, sans rien renommer. */
   nav button { flex: 1 1 0; min-width: 0; padding: 7px 2px; font-size: 9.5px;
                letter-spacing: .08em; min-height: 40px;
-               white-space: normal; line-height: 1.2; text-align: center; }
+               justify-content: center; line-height: 1.2; text-align: center; }
+  /* Sur cinq parts de soixante-dix pixels, le mot déplié pousse ses voisins.
+     L'icône seule tient, et le nom de la vue est écrit deux lignes plus haut de
+     toute façon. Le survol n'existe pas sur un doigt : on n'ouvre que l'actif,
+     et seulement s'il y a la place. */
+  nav button:hover .navnom, nav button:focus-visible .navnom { max-width: 0; opacity: 0; margin-left: 0; }
+  nav button[aria-current="true"] .navnom { max-width: 6em; margin-left: 6px; }
 
   /* Tout ce qui se touche. 40 px est le minimum recommandé par Apple ; sur
      cette application un bouton raté efface des journées. */

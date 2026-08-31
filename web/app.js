@@ -8,6 +8,7 @@ import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
 import { icone, iconeDe, themeDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
+import { ico, ICO_VUE } from './icones.js';
 import { friseMarkup as friseSVG } from './frise.js';
 import { calMarkup, calClic, moisDe } from './calendrier.js';
 
@@ -130,7 +131,7 @@ function drawGaugePanel() {
         <b>${esc(S.user?.username ?? 'Toi')}</b>
         <span>connecté${S.user?.id && S.user.id !== 'local' ? ' avec Discord' : ''}</span>
       </div>
-      <form method="post" action="/logout" style="margin-left:auto"><button class="btn" type="submit">Déconnexion</button></form>
+      <form method="post" action="/logout" style="margin-left:auto"><button class="btn" type="submit">${ico('partir')}Déconnexion</button></form>
     </div>
 
     ${/* Sans enveloppe, la barre n'a plus rien à mesurer : elle deviendrait un
@@ -301,8 +302,7 @@ const DUREE_NOTEDITE = 11000;
  * couleur de sa note. C'est litteralement ce qu'on va y voir, donc l'icone n'a
  * rien a apprendre a personne.
  */
-const GLYPHE_ANNEE = `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"
-  aria-hidden="true"><rect x="1" y="1" width="3.4" height="3.4" rx=".8"/><rect x="6.3" y="1" width="3.4" height="3.4" rx=".8"/><rect x="11.6" y="1" width="3.4" height="3.4" rx=".8" opacity=".45"/><rect x="1" y="6.3" width="3.4" height="3.4" rx=".8" opacity=".45"/><rect x="6.3" y="6.3" width="3.4" height="3.4" rx=".8"/><rect x="11.6" y="6.3" width="3.4" height="3.4" rx=".8"/><rect x="1" y="11.6" width="3.4" height="3.4" rx=".8"/><rect x="6.3" y="11.6" width="3.4" height="3.4" rx=".8" opacity=".45"/><rect x="11.6" y="11.6" width="3.4" height="3.4" rx=".8"/></svg>`;
+const GLYPHE_ANNEE = ico('annee', 12);
 
 const lienAnnee = () =>
   `<button class="versannee" data-vers-annee>${GLYPHE_ANNEE}Année</button>`;
@@ -384,7 +384,7 @@ async function renderTonight() {
              */''}
           ${hier || !manques.length ? `<div class="noteline">
             <span class="k">${hier ? `Tu notes le ${fmtDay(t)}` : 'Note avant de te coucher'}</span>
-            ${hier ? `<button class="retourjour" data-notejour="">revenir à aujourd'hui</button>` : ''}
+            ${hier ? `<button class="retourjour" data-notejour="">${ico('point', 12)}revenir à aujourd'hui</button>` : ''}
           </div>
 
           <div class="notestrip" id="notestrip">
@@ -410,7 +410,7 @@ async function renderTonight() {
               mot, en retrait, qui n'existe que s'il y a un fil a quitter. */''}
         <button class="newchat" id="newChat"${S.messages?.length ? '' : ' hidden'}
                 title="Repartir sur un fil vide. Rien n'est effacé : tes journées restent dans le journal."
-        >nouveau fil</button>
+        >${ico('plus', 12)}nouveau fil</button>
       </div>
     </div>`;
 
@@ -819,7 +819,7 @@ function gestesMarkup() {
            <span>${g.taille} signes${g.jour ? ` · ${fmtDay(g.jour)}` : g.quand ? ` · ${esc(g.quand)}` : ' · sans date'}
              — ne compte pas comme une journée écrite</span>
          </div>
-         ${g.jour ? `<button class="gbtn" data-voir="${g.jour}">voir</button>` : ''}
+         ${g.jour ? `<button class="gbtn" data-voir="${g.jour}">${ico('oeil', 12)}voir</button>` : ''}
        </div>`
     : `<div class="geste repere">
          <span class="gicone">${icone(g.theme, 20)}</span>
@@ -827,7 +827,7 @@ function gestesMarkup() {
            <b>Repère posé</b>
            <span>${esc(g.label)} · ${fmtDay(g.date)}</span>
          </div>
-         <button class="gbtn" data-voir="${g.date}">voir</button>
+         <button class="gbtn" data-voir="${g.date}">${ico('oeil', 12)}voir</button>
        </div>`).join('')}</div>`;
 }
 
@@ -1314,7 +1314,7 @@ function renderNoData(why) {
       <h2 style="margin:0 0 5px">Rien à afficher</h2>
       <p class="sub" style="margin:0 0 13px">${esc(why)}</p>
       <div style="display:flex;gap:9px;flex-wrap:wrap">
-        <button class="btn primary" data-goview="tonight">Noter aujourd'hui</button>
+        <button class="btn primary" data-goview="tonight">${ico('crayon')}Noter aujourd'hui</button>
       </div>
       <p class="faint" style="font-size:12px;margin:13px 0 0">
         Si tu as déjà un historique dans un tableur :
@@ -1857,7 +1857,7 @@ function noteFormMarkup() {
         <input type="date" id="cnjour" max="${S.today}">
       </label>
       <span class="sub" style="margin:0;flex:1;min-width:180px">Sans date, elle est rangée à part. Elle ne comptera jamais comme une journée écrite.</span>
-      <button class="btn primary" type="submit">Ranger</button>
+      <button class="btn primary" type="submit">${ico('ranger')}Ranger</button>
     </div>
   </form>`;
 }
@@ -1916,7 +1916,7 @@ function composeurMarkup() {
           ${TEINTES_DECLAREES.map(t => `<button type="button" class="evt" data-teinte="${t}"
             aria-pressed="${e.teinte === t}" style="--t:${t}" title="teinte ${t}°"></button>`).join('')}
         </div>
-        <button type="button" class="appauto" data-ico="">choisir d'après le libellé</button>
+        <button type="button" class="appauto" data-ico="">${ico('loupe', 12)}choisir d'après le libellé</button>
       </div>` : ''}
     </span>
 
@@ -1929,8 +1929,8 @@ function composeurMarkup() {
       ${POP === 'date' ? calPopMarkup(true) : ''}
     </span>
 
-    <button class="btn primary" type="submit">${e.id ? 'Enregistrer' : 'Poser'}</button>
-    ${e.id ? `<button type="button" class="btn" id="evannul">Annuler</button>` : ''}
+    <button class="btn primary" type="submit">${e.id ? ico('valider') + 'Enregistrer' : ico('epingle') + 'Poser'}</button>
+    ${e.id ? `<button type="button" class="btn" id="evannul">${ico('fermer')}Annuler</button>` : ''}
   </form>`;
 }
 
@@ -1964,7 +1964,7 @@ function friseMarkup(events) {
           <span class="ricone-box"${ev.teinte != null ? ` style="color:hsl(${ev.teinte} 62% 62%)"` : ''}>${icone(t, 18)}</span>
           <span class="repdate mono faint">${quand}</span>
           <span class="replabel">${esc(ev.label)}</span>
-          <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">×</button>
+          <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">${ico('fermer', 11)}</button>
         </div>`;
       }).join('')}
     </div>`).join('');
@@ -2113,7 +2113,7 @@ function carnetItemMarkup(n) {
     </button>
     ${ouvert ? `<div class="cncorps">
       <div class="cnmeta">
-        ${n.jour ? `<button class="cndate" data-goto="${n.jour}">ouvrir le ${fmtDay(n.jour)}</button>` : ''}
+        ${n.jour ? `<button class="cndate" data-goto="${n.jour}">${ico('fleche', 12)}ouvrir le ${fmtDay(n.jour)}</button>` : ''}
         ${apporte ? `<span class="faint">${decale ? 'apportée le' : 'donnée le'} ${fmtDay(apporte)}</span>` : ''}
         <button class="repdel" data-delcn="${n.id}" title="Retirer cette note"
                 aria-label="Retirer cette note">retirer</button>
@@ -2795,7 +2795,7 @@ function noeudMarkup() {
     <div class="ncdessus">
       <span class="ncgenre" style="--g:${TEINTE_GENRE[p.genre] ?? TEINTE_GENRE.activite}">${
         esc(NOM_GENRE[p.genre] ?? p.genre)}</span>
-      <button class="ncfermer" data-noeud-fermer aria-label="Fermer">×</button>
+      <button class="ncfermer" data-noeud-fermer aria-label="Fermer">${ico('fermer', 12)}</button>
     </div>
     <h3 class="ncnom">${esc(p.nom)}</h3>
     <p class="ncjours">${p.jours.length} journée${p.jours.length > 1 ? 's' : ''}${
@@ -3145,16 +3145,16 @@ async function renderLecture() {
       <p>Cette lecture demande une clé Claude.</p>
       <p class="sub">Compter des mots, l'application sait le faire seule. Reconnaître un fonctionnement
       qui ne se dit jamais deux fois avec les mêmes mots, non.</p>
-      <button class="btn" data-aller-reglages>Réglages</button></div>`;
+      <button class="btn" data-aller-reglages>${ico('reglages')}Réglages</button></div>`;
   } else if (LECTURE_ERR) {
     corps = `<div class="lectvide">
       <p>La lecture n'a pas abouti.</p>
       <p class="sub lecterr">${esc(LECTURE_ERR)}</p>
-      <button class="btn primary" data-lire>Réessayer</button></div>`;
+      <button class="btn primary" data-lire>${ico('refaire')}Réessayer</button></div>`;
   } else {
     corps = `<div class="lectvide">
       <p>Ton journal n'a pas encore été lu.</p>
-      <button class="btn primary" data-lire>Lancer la lecture</button></div>`;
+      <button class="btn primary" data-lire>${ico('oeil')}Lancer la lecture</button></div>`;
   }
 
   $('#view').innerHTML = `<div class="lecture">
@@ -3163,7 +3163,7 @@ async function renderLecture() {
         L.perime ? ` · <b>${L.retard} journée${L.retard > 1 ? 's' : ''} depuis</b>` : ''}</span>` : ''}
       ${L.lecture ? (LECTURE_EN_COURS
         ? `<span class="lecmeta faint"><span class="spin petit"></span> il relit</span>`
-        : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus.">relire</button>`) : ''}
+        : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus.">${ico('refaire')}relire</button>`) : ''}
     </div>
     ${/* Une relecture qui échoue par-dessus une lecture existante ne peut pas
           prendre l'écran — l'ancienne vaut mieux que rien — mais elle ne peut
@@ -3340,7 +3340,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
       <button class="wide" data-lecture title="Revenir à la vue d'ensemble">‹ ma carte</button>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
       <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
-      ${date !== S.today ? `<button class="wide" data-goto="${S.today}">aujourd'hui</button>` : ''}
+      ${date !== S.today ? `<button class="wide" data-goto="${S.today}">${ico('point', 12)}aujourd'hui</button>` : ''}
     </div>`;
 
   /* --- SPEC 4.1 : sous le plancher, aucune statistique. --- */
@@ -3382,7 +3382,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
         <div>
           <p style="margin:0 0 4px">Il n'y a rien d'écrit à te remontrer pour l'instant.</p>
           <p class="sub" style="margin:0 0 12px">Le miroir a besoin de tes mots pour servir à quelque chose. Il n'en a pas encore.</p>
-          <button class="btn" id="backToChat">Écrire</button>
+          <button class="btn" id="backToChat">${ico('crayon')}Écrire</button>
         </div>
       </div>` : ''}`;
     const f = $('#cnForm'); if (f) f.dataset.jour = date;
@@ -3443,7 +3443,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
               ${m.note ?? '\u2014'}<span class="sl">/10</span>
             </button>
           </div>
-          <button class="daydrop" data-erase="${date}" title="Effacer cette journée">effacer</button>
+          <button class="daydrop" data-erase="${date}" title="Effacer cette journée">${ico('corbeille', 12)}effacer</button>
         </div>
 
         ${/*
@@ -3468,7 +3468,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
             return `<button data-jn="${n}" aria-pressed="${m.note === n}" style="background:rgb(${c})"
               data-tip="${esc(S.anchors.find(a => a.note === n)?.descr ?? `${n}/10`)}">${n}</button>`;
           }).join('')}
-          ${m.note !== null ? `<button class="jourdenote" data-jn="">retirer</button>` : ''}
+          ${m.note !== null ? `<button class="jourdenote" data-jn="">${ico('moins', 12)}retirer</button>` : ''}
         </div>` : ''}
         ${amplitudeMarkup(m.amplitude)}
 
@@ -3796,7 +3796,7 @@ async function renderSettings() {
           style="width:100%;resize:vertical;background:var(--panel-2);border:1px solid var(--line);
                  border-radius:var(--r);padding:10px 12px;font:13.5px/1.6 var(--sans)"></textarea>
         <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
-          <button class="btn" id="scanNotes">Analyser</button>
+          <button class="btn" id="scanNotes">${ico('loupe')}Analyser</button>
           <span class="sub" style="margin:0">Rien n'est écrit avant que tu aies vu le résultat.</span>
         </div>
         <div id="notesReport"></div>
@@ -3848,8 +3848,8 @@ async function renderSettings() {
           Tout est dans un fichier SQLite sur ce disque. Aucun compte, aucun serveur, aucune synchro.
         </p>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn" id="export">Exporter en JSON</button>
-          <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">Se déconnecter</button></form>
+          <button class="btn" id="export">${ico('sortir')}Exporter en JSON</button>
+          <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">${ico('partir')}Se déconnecter</button></form>
         </div>
       </div>
 
@@ -3919,7 +3919,7 @@ async function renderSettings() {
         <p>Pour effacer <b>${quoi}</b>, tape <b class="mono">SUPPRIMER</b> ci-dessous.</p>
         <div class="wipefield">
           <input type="text" id="wipeWord" autocomplete="off" spellcheck="false" placeholder="SUPPRIMER">
-          <button class="btn danger" id="wipeGo" disabled>Effacer</button>
+          <button class="btn danger" id="wipeGo" disabled>${ico('corbeille')}Effacer</button>
         </div>
       </div>`;
     const mot = $('#wipeWord'), go = $('#wipeGo');
@@ -4049,10 +4049,10 @@ async function renderBackendCfg() {
         ${s.keySource === 'env'
           ? `<b>Fournie par l'environnement</b> — variable <code>ANTHROPIC_API_KEY</code>. Rien à faire.
              ${s.hasStoredKey ? `Une clé traîne aussi en base ; elle est ignorée.
-               <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">l'effacer</button>` : ''}`
+               <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}l'effacer</button>` : ''}`
           : s.keySource === 'stored'
             ? `<b>Enregistrée dans l'app</b> — elle n'est jamais renvoyée au navigateur.
-               <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">effacer</button>`
+               <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}effacer</button>`
             : `<b>Aucune clé</b> — le compagnon reste en mode hors-ligne.`}
       </div>
       <input type="password" id="apiKey" value="" autocomplete="off"
@@ -4063,7 +4063,7 @@ async function renderBackendCfg() {
         de l'hébergeur qui doit servir. Sans variable, la clé collée ici prend le relais.
       </p>
       <div style="display:flex;align-items:center;gap:10px;margin-top:11px;flex-wrap:wrap">
-        <button class="btn" id="testKey">Tester la clé</button>
+        <button class="btn" id="testKey">${ico('cle')}Tester la clé</button>
         <span id="keyResult" class="sub" style="margin:0"></span>
       </div>
     </div>
@@ -4230,7 +4230,7 @@ function drawImportPreview(p) {
         </div>` : ''}
       ${p.overwrite ? `<p class="sub" style="color:var(--warn);margin:0 0 12px">
         ${p.overwrite} journée${p.overwrite > 1 ? 's' : ''} déjà notée${p.overwrite > 1 ? 's' : ''} ${p.overwrite > 1 ? 'seront remplacées' : 'sera remplacée'} par la valeur du fichier.</p>` : ''}
-      <button class="btn primary" id="doImport">Importer ${p.total} journées</button>
+      <button class="btn primary" id="doImport">${ico('ranger')}Importer ${p.total} journées</button>
     </div>`;
 
   $('#doImport').onclick = async e => {
@@ -4292,7 +4292,7 @@ function drawNotesPreview(p) {
         </div>`).join('')}
       </div>
       ${p.nouvelles + p.ajouts
-        ? `<button class="btn primary" id="doNotes">Ajouter ${p.nouvelles + p.ajouts} journée${p.nouvelles + p.ajouts > 1 ? 's' : ''} au miroir</button>`
+        ? `<button class="btn primary" id="doNotes">${ico('plus')}Ajouter ${p.nouvelles + p.ajouts} journée${p.nouvelles + p.ajouts > 1 ? 's' : ''} au miroir</button>`
         : `<p class="sub" style="margin:0">Tout est déjà dans le miroir. Rien à ajouter.</p>`}
     </div>`;
 
@@ -4327,7 +4327,22 @@ const VIEWS = {
 
 const NOM_VUE = { tonight: 'Parler', moi: 'Moi', year: 'Année', mirror: 'Ma carte', settings: 'Réglages' };
 
+/**
+ * LES ONGLETS PRENNENT LEUR ICÔNE, UNE FOIS.
+ *
+ * Le dessin vit dans `icones.js` et pas en double dans le HTML : une icône
+ * corrigée l'est partout où elle sert. Posée au démarrage plutôt qu'à chaque
+ * `syncNav`, parce qu'elle ne change jamais — seul le nom à côté bouge.
+ */
+function monterNav() {
+  for (const b of document.querySelectorAll('nav button[data-view]')) {
+    const c = b.querySelector('.navico');
+    if (c && !c.firstChild) c.innerHTML = ico(ICO_VUE[b.dataset.view] ?? 'point', 15);
+  }
+}
+
 function syncNav() {
+  monterNav();
   for (const b of document.querySelectorAll('nav button')) {
     b.setAttribute('aria-current', String(b.dataset.view === view));
   }
