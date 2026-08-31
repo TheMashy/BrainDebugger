@@ -290,6 +290,16 @@ export const DEFAULT_SETTINGS = {
   anthropicModel: 'claude-opus-5',
   anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
   /*
+   * LA CLE DE LA PASSERELLE. Vide tant qu'on n'en a pas cree une.
+   *
+   * Elle n'ouvre qu'une route, en lecture, et ce que cette route rend n'est
+   * jamais le journal (voir server/passerelle.js). Elle part vers le navigateur
+   * avec le reste des reglages, contrairement a la cle Anthropic : il faut
+   * pouvoir la LIRE pour la recopier dans l'application qui s'en sert, et le
+   * seul navigateur qui la recoit est celui de la session deja ouverte.
+   */
+  passerelleCle: '',
+  /*
    * L'enveloppe de jetons levee. UN OUTIL DE DEVELOPPEUR, ET RIEN D'AUTRE.
    *
    * L'enveloppe existe parce que c'est la cle de l'instance qui regle, pas la

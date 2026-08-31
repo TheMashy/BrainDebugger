@@ -14,6 +14,7 @@ import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
+import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
@@ -1092,6 +1093,13 @@ export const routes = {
       }
     };
   },
+
+  /* ---------- la passerelle vers une application locale ----------
+     Creer la cle et la retirer se font depuis la session, comme tout le reste
+     des reglages. C'est la LECTURE de /api/passerelle/attente qui se passe de
+     session : elle est appelee par un programme, pas par un navigateur. */
+  'POST /api/passerelle/cle': ({ userId }) => ({ cle: poserCle(userId) }),
+  'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
 
   'GET /api/lecture': ({ userId }) => {
     const { rows } = series(userId);
