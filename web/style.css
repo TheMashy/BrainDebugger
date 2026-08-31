@@ -3006,3 +3006,198 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   .qstbl th:nth-child(4), .qstbl td:nth-child(4) { display: none; }
   .qsoubli { opacity: 1; }
 }
+
+/* ==================================================================
+   LE SUIVI : les séances, et le compte rendu qu'on emporte.
+   ================================================================== */
+
+.suivi { display: flex; flex-direction: column; gap: 26px; }
+.seances h2 { display: flex; align-items: center; gap: 8px; }
+
+.sform { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.sform input[type="date"] { width: auto; flex: none; }
+.sform input[type="text"] { flex: 1 1 220px; }
+
+.sliste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.sliste li {
+  display: grid; grid-template-columns: auto auto 1fr auto; gap: 12px; align-items: center;
+  padding: 7px 0; border-top: 1px solid var(--line-soft);
+}
+.sdate {
+  background: none; border: 0; padding: 0; font: 500 13.5px/1 var(--mono);
+  color: var(--ink-dim); cursor: pointer; white-space: nowrap;
+}
+.sdate:hover { color: var(--accent); }
+/* La séance qu'on prépare est celle dont le compte rendu est affiché dessous.
+   Sans le repère, on lit un document sans savoir de quelle date il parle. */
+.sdate.vise { color: var(--accent); }
+.snom { font-size: 13px; color: var(--ink-faint); white-space: nowrap; }
+.sapporter {
+  background: none; border: 0; border-bottom: 1px solid transparent; border-radius: 0;
+  padding: 3px 0; font-size: 13px; color: var(--ink-dim);
+}
+.sapporter:focus { border-bottom-color: var(--line); color: var(--ink); outline: none; }
+.ssupp { opacity: 0; padding: 2px 8px; font-size: 11px; }
+.sliste li:hover .ssupp, .ssupp:focus-visible { opacity: 1; }
+.ssupp:hover { color: var(--danger); }
+
+.crbarre { display: flex; align-items: flex-start; gap: 18px; justify-content: space-between; flex-wrap: wrap; }
+.crbarre h2 { margin: 0 0 4px; }
+.crbarre .sub { margin: 0; max-width: 60ch; }
+.crbarre .btn { flex: none; }
+
+/* Le compte rendu lui-même. Il a une largeur de LECTURE, pas de tableau de
+   bord : il finit sur une feuille A4 entre les mains de quelqu'un qui le lit
+   en deux minutes. */
+.cr {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 32px 36px; max-width: 860px;
+}
+.crtete { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 24px; }
+.crtete h2 { margin: 0 0 10px; font-size: 21px; }
+.crperiode { display: flex; flex-direction: column; gap: 3px; margin: 0; }
+.crperiode b { font: 500 15px/1.4 var(--mono); color: var(--ink); }
+.crperiode span { font-size: 12.5px; color: var(--ink-faint); }
+.crprec { margin: 9px 0 0; font-size: 12.5px; color: var(--ink-faint); }
+
+.crsec { margin-bottom: 26px; }
+.crsec h3 {
+  margin: 0 0 12px; font: 500 11px/1 var(--mono); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.crsec h4 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--ink-dim); }
+.crsub { margin: -6px 0 12px; font-size: 12.5px; color: var(--ink-faint); max-width: 62ch; }
+.crvide { margin: 0; font-size: 13px; color: var(--ink-faint); font-style: italic; }
+.crvidebloc { padding: 40px 0; }
+.crvidebloc p { margin: 0; color: var(--ink-faint); }
+
+.crapporter p {
+  margin: 0; padding: 12px 16px; border-left: 2px solid var(--accent);
+  background: var(--panel-2); border-radius: 0 8px 8px 0; font-size: 14.5px;
+}
+
+.crchiffres { display: flex; gap: 34px; flex-wrap: wrap; }
+.crchiffres div { display: flex; flex-direction: column; gap: 2px; }
+.crchiffres b { font: 300 30px/1 var(--sans); color: var(--ink); }
+.crchiffres span { font-size: 11.5px; color: var(--ink-faint); display: flex; flex-direction: column; }
+.crchiffres i { font-style: normal; color: var(--ink-dim); font-size: 12px; }
+.crlegende { margin: 16px 0 0; display: flex; flex-direction: column; gap: 3px;
+             font-size: 12px; color: var(--ink-faint); }
+.crlegende b { color: var(--ink-dim); font-family: var(--mono); margin-right: 4px; }
+.crnote { margin: 12px 0 0; font-size: 13px; color: var(--ink-dim); }
+
+.crdeux { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+@media (max-width: 720px) { .crdeux { grid-template-columns: 1fr; } }
+.crjours { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+/* La date et la note tiennent la première ligne, la citation prend la sienne.
+   En `flex-wrap`, une phrase courte restait à côté de sa note et une longue
+   passait dessous : deux mises en page dans la même liste, et l'œil ne trouve
+   plus la colonne des dates. */
+.crjours li {
+  display: grid; grid-template-columns: auto auto 1fr; gap: 4px 10px;
+  align-items: baseline; font-size: 13.5px;
+}
+.crjours li .crq { grid-column: 1 / -1; }
+.crjours li .crcalc { grid-column: 3; }
+.crd { font: 400 12px/1.5 var(--mono); color: var(--ink-faint); white-space: nowrap; }
+.crjours b { font-weight: 500; }
+/* Ce qui est cité l'est EN ITALIQUE et entre guillemets : dans un document qui
+   part chez un tiers, la frontière entre ce que la personne a écrit et ce que
+   la machine a calculé doit se voir sans être expliquée. */
+.crq { font-style: italic; color: var(--ink-dim); font-size: 13px; }
+/* Ce qui est calculé se pose à côté, droit : la différence de graisse est ce
+   qui sépare une phrase de la personne d'un chiffre de la machine. */
+.crcalc { font-size: 12.5px; color: var(--ink-faint); }
+
+.crevo { display: flex; align-items: baseline; gap: 10px; margin: 0; flex-wrap: wrap; font-size: 14.5px; }
+.crfleche { font-size: 19px; line-height: 1; }
+.crevo.haut .crfleche { color: var(--accent); }
+.crevo.bas .crfleche { color: var(--warn); }
+.crevo.stable .crfleche { color: var(--ink-faint); }
+.crecrit { font-size: 12.5px; color: var(--ink-faint); }
+
+.crfaits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.crfaits li { display: flex; gap: 11px; align-items: center; flex-wrap: wrap; }
+.crico { display: inline-flex; color: var(--ink-dim); flex: none; }
+.crl { font-size: 14.5px; }
+.crtag {
+  font: 400 10.5px/1 var(--mono); letter-spacing: .05em; color: var(--ink-faint);
+  border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px;
+}
+.crtag.neuf { color: var(--ink-dim); border-color: var(--line); }
+
+.crmotifs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.crmotifs li { border-left: 2px solid hsl(var(--g) 45% 46%); padding-left: 14px; }
+.crmtete { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.crmtete b { font-size: 15px; font-weight: 500; }
+.crmn { font: 400 12px/1 var(--mono); color: var(--ink-faint); }
+.crmn i { font-style: normal; margin-left: 6px; }
+.crmn i.haut { color: var(--warn); }
+.crmn i.bas { color: var(--accent); }
+.crmmeca { margin: 5px 0 0; font-style: italic; color: var(--ink-dim); font-size: 13.5px; }
+.crmjours { margin: 6px 0 0; font: 400 11.5px/1.6 var(--mono); color: var(--ink-faint); }
+
+.crpied { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 4px; }
+.crpied p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--ink-faint); max-width: 70ch; }
+
+@media (max-width: 700px) {
+  /* Sur téléphone, la note « à dire la prochaine fois » prend sa propre ligne.
+     Sur la même rangée que la date et le praticien, il lui restait quarante
+     pixels : on y voyait trois mots et la fin défilait dans le champ. */
+  .sliste li { grid-template-columns: auto 1fr auto; }
+  .sapporter { grid-column: 1 / -1; border-bottom-color: var(--line-soft); }
+  .cr { padding: 22px 18px; }
+  .crchiffres { gap: 22px; }
+  .crchiffres b { font-size: 26px; }
+}
+
+/* ------------------------------------------------------------------
+   À L'IMPRESSION.
+
+   Le document quitte l'écran : il finit sur une feuille, dans les mains de
+   quelqu'un. On retire tout ce qui n'est pas lui — la navigation, le rail, la
+   liste des séances, le bouton qui a lancé l'impression — et on repasse en
+   encre noire sur papier blanc, parce qu'un fond sombre imprimé mange une
+   cartouche et sort gris.
+   ------------------------------------------------------------------ */
+@media print {
+  /* LE FOND N'EST PAS SUR `body`. Il est peint par le canvas de la scène,
+     derrière toute la page : `body { background: #fff }` seul laissait sortir
+     un rectangle noir de bout en bout. */
+  html, body { background: #fff !important; }
+  body > canvas { display: none !important; }
+
+  /* `header` NU MASQUAIT AUSSI CELUI DU DOCUMENT. La bannière du compte rendu
+     est un <header>, et c'est elle qui porte la période couverte — la ligne la
+     plus importante de la feuille pour qui la reçoit. On nomme donc la barre de
+     l'application, on ne masque pas une balise. */
+  nav, .rail, header.top, .crbarre, .seances, .toast, .tip, .gaugepanel { display: none !important; }
+
+  /* La coquille est une GRILLE À DEUX COLONNES, et cacher le rail ne libère pas
+     sa colonne : le compte rendu sortait dans 184 px de large, en colonne de
+     journal. On aplatit la grille au lieu de masquer son premier enfant. */
+  .shell { display: block !important; height: auto !important; max-width: none !important; }
+  .panel, #view, .suivi {
+    display: block !important; width: auto !important; max-width: none !important;
+    padding: 0 !important; margin: 0 !important; overflow: visible !important;
+    height: auto !important; max-height: none !important;
+  }
+  .cr {
+    background: #fff; color: #111; border: 0; border-radius: 0;
+    padding: 0; max-width: none; font-size: 11pt;
+  }
+  .cr h2, .cr h3, .cr h4, .cr b, .crl { color: #111; }
+  .cr .crd, .cr .crsub, .cr .crvide, .cr .crmjours, .cr .crlegende,
+  .cr .crperiode span, .cr .crprec, .cr .crpied p, .cr .crecrit, .cr .crmn { color: #555; }
+  .cr .crq, .cr .crmmeca { color: #333; }
+  .crtete, .crpied { border-color: #ccc; }
+  .crtag { border-color: #bbb; color: #555; }
+  /* Le filet qui groupe les lignes d'un mécanisme : plus épais et plus sombre
+     qu'à l'écran. Une teinte de 2 px pensée pour un fond noir disparaît sur
+     du papier, et les trois blocs se lisent alors comme un seul. */
+  .crmotifs li { border-left: 3px solid #888; }
+  .crapporter p { background: #f4f4f4; border-left-color: #666; }
+  .crico { color: #444; }
+  /* Une section coupée en deux par un saut de page se relit deux fois. */
+  .crsec, .crmotifs li, .crjours li { break-inside: avoid; }
+}

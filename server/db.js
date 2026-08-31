@@ -310,6 +310,33 @@ CREATE TABLE IF NOT EXISTS qs_journal (
 );
 CREATE INDEX IF NOT EXISTS idx_qs_journal ON qs_journal(user_id, id DESC);
 
+/*
+ * Les seances : les rendez-vous chez le praticien.
+ *
+ * La table est minuscule, et c'est le point. Elle ne stocke ni compte rendu ni
+ * contenu de seance -- ce qui se dit dans un cabinet ne se saisit pas dans une
+ * application, et une case pour l'y mettre serait une invitation a le faire.
+ * Elle stocke une DATE, qui est la seule chose dont le compte rendu a besoin :
+ * elle decoupe le journal en intervalles « depuis la derniere fois ».
+ *
+ * « apporter » est la note qu'on se laisse a soi-meme entre deux seances -- la
+ * chose qu'on veut penser a dire et qu'on aura oubliee le jour venu. Elle
+ * appartient a la personne, pas au praticien.
+ *
+ * LA COLONNE QU'ON N'AJOUTE JAMAIS : une humeur d'apres-seance, notee de 0 a
+ * 10. Elle transformerait le suivi en evaluation du praticien, et le fait de
+ * savoir qu'on va etre note change ce qu'on dit en seance.
+ */
+CREATE TABLE IF NOT EXISTS seances (
+  id        INTEGER PRIMARY KEY,
+  user_id   TEXT NOT NULL DEFAULT '${OWNER}',
+  date      TEXT NOT NULL,       -- 'AAAA-MM-JJ'
+  praticien TEXT,                -- libre : « Dr M. », « la psy », NULL
+  apporter  TEXT,                -- ce qu'on veut penser a dire la prochaine fois
+  cree_le   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_seances_date ON seances(user_id, date);
+
 CREATE TABLE IF NOT EXISTS settings (
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   key     TEXT NOT NULL,
@@ -967,6 +994,35 @@ export function motifSeries(userId = OWNER) {
   return par;
 }
 
+/**
+ * LES OCCURRENCES D'UN MOTIF DANS UN INTERVALLE, DATEES.
+ *
+ * `motifSeries` groupe par mois, ce qui suffit a une courbe et pas a un compte
+ * rendu : un intervalle entre deux seances tombe rarement sur des bornes de
+ * mois, et « 4 fois en aout » ne dit pas si les quatre sont d'avant ou d'apres
+ * le rendez-vous. On rend donc les JOURS, et l'appelant compte.
+ *
+ * Bornes incluses des deux cotes : `debut` est le jour de la seance
+ * precedente, `fin` celui de la seance a preparer, et ce qui s'est dit ces
+ * jours-la appartient a l'intervalle.
+ */
+export function motifsEntre(debut, fin, userId = OWNER) {
+  const rows = db.prepare(`
+    SELECT f.id, f.nom, f.mecanisme, f.teinte, m.date
+    FROM motif_vues v
+    JOIN messages m ON m.id = v.message_id
+    JOIN motifs f   ON f.id = v.motif_id
+    WHERE f.user_id = ? AND m.user_id = ? AND m.date >= ? AND m.date <= ?
+    ORDER BY m.date ASC
+  `).all(userId, userId, debut, fin);
+  const par = new Map();
+  for (const r of rows) {
+    if (!par.has(r.id)) par.set(r.id, { id: r.id, nom: r.nom, mecanisme: r.mecanisme, teinte: r.teinte, jours: [] });
+    par.get(r.id).jours.push(r.date);
+  }
+  return [...par.values()].sort((a, b) => b.jours.length - a.jours.length || a.id - b.id);
+}
+
 export function addMotif({ nom, mecanisme, userId = OWNER, quand = new Date().toISOString() }) {
   const deja = db.prepare('SELECT id FROM motifs WHERE user_id = ? AND nom = ?').get(userId, nom);
   if (deja) return { id: deja.id, existait: true };
@@ -1223,6 +1279,42 @@ export const journalQS = (userId = OWNER, limite = JOURNAL_QS) => db.prepare(
 
 export const viderJournalQS = (userId = OWNER) =>
   db.prepare('DELETE FROM qs_journal WHERE user_id = ?').run(userId).changes;
+
+/* ---------- séances ---------- */
+
+export const allSeances = (userId = OWNER) => db.prepare(
+  'SELECT id, date, praticien, apporter FROM seances WHERE user_id = ? ORDER BY date DESC'
+).all(userId);
+
+/**
+ * La seance qui precede une date -- le debut de l'intervalle a raconter.
+ *
+ * Strictement anterieure : le jour meme d'une seance, l'intervalle a rapporter
+ * est celui qui vient de se terminer, pas un intervalle vide qui commencerait a
+ * l'instant. Quelqu'un qui prepare son compte rendu le matin du rendez-vous
+ * doit y trouver les six dernieres semaines, pas zero jour.
+ */
+export const seanceAvant = (date, userId = OWNER) => db.prepare(
+  'SELECT id, date, praticien, apporter FROM seances WHERE user_id = ? AND date < ? ORDER BY date DESC LIMIT 1'
+).get(userId, date) ?? null;
+
+export function addSeance({ date, praticien = null, apporter = null, userId = OWNER }) {
+  const info = db.prepare(
+    'INSERT INTO seances(user_id, date, praticien, apporter, cree_le) VALUES(?,?,?,?,?)'
+  ).run(userId, date, praticien || null, apporter || null, new Date().toISOString());
+  return { id: Number(info.lastInsertRowid), date, praticien: praticien || null, apporter: apporter || null };
+}
+
+export function updateSeance(id, patch, userId = OWNER) {
+  const cols = ['date', 'praticien', 'apporter'].filter(k => k in patch);
+  if (!cols.length) return null;
+  db.prepare(`UPDATE seances SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE id = ? AND user_id = ?`)
+    .run(...cols.map(c => patch[c] || null), id, userId);
+  return db.prepare('SELECT id, date, praticien, apporter FROM seances WHERE id = ? AND user_id = ?').get(id, userId) ?? null;
+}
+
+export const deleteSeance = (id, userId = OWNER) =>
+  db.prepare('DELETE FROM seances WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
 
 /* ---------- anchors ---------- */
 
