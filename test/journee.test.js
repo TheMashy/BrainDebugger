@@ -14,6 +14,7 @@ import { join } from 'node:path';
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-jour-')), 'test.db');
 
 const { OWNER, addMessage, setNote } = await import('../server/db.js');
+const { readMood } = await import('../server/mood.js');
 const J = await import('../server/journee.js');
 
 const JOUR = '2026-03-12';
@@ -121,12 +122,12 @@ test('un seul relevé n’est pas une amplitude', () => {
   assert.ok(Array.isArray(v.charges));
 });
 
-test('la journée rendue au navigateur a ses trois parties', () => {
+test('la journée rendue au navigateur a ses quatre parties', () => {
   const j = J.journee(JOUR, OWNER, { zone: 'UTC' });
-  assert.deepEqual(Object.keys(j).sort(), ['moments', 'thematiques', 'volatilite']);
+  assert.deepEqual(Object.keys(j).sort(), ['moments', 'sujets', 'thematiques', 'volatilite']);
   for (const m of j.moments) {
     assert.deepEqual(Object.keys(m).sort(),
-                     ['charge', 'coeur', 'force', 'heure', 'messages', 'note', 'scene', 'sens', 'ts']);
+                     ['charge', 'coeur', 'estime', 'force', 'heure', 'messages', 'note', 'scene', 'sens', 'ts']);
   }
 });
 
@@ -135,4 +136,126 @@ test('l’heure est celle du lecteur, pas celle du serveur', () => {
   // lendemain matin et la journée se raconte à l'envers.
   assert.equal(J.heureDe('2026-03-12T23:30:00Z', 'UTC'), '23:30');
   assert.equal(J.heureDe('2026-03-12T23:30:00Z', 'Europe/Paris'), '00:30');
+});
+
+
+/* ============ L'ESTIMATION D'UN MOMENT ============ */
+
+test('l’estimation se cale sur la normale de la personne, pas sur 5', () => {
+  // Chez quelqu'un qui tourne à 4, une journée à 5 est une bonne journée. La
+  // caler sur le milieu de l'échelle la peindrait en médiocre — et c'est déjà
+  // la façon dont tout le reste du produit lit un chiffre.
+  assert.equal(J.estimationDe(0, 4), 4);
+  assert.equal(J.estimationDe(0, 7), 7);
+  assert.equal(J.estimationDe(-1, 7), 4);
+  assert.equal(J.estimationDe(1, 4), 7);
+});
+
+test('l’estimation reste dans l’échelle, et au demi-point', () => {
+  assert.equal(J.estimationDe(-1, 2), 1, 'une estimation est sortie sous 1');
+  assert.equal(J.estimationDe(1, 9), 10, 'une estimation est sortie au-dessus de 10');
+  // Dire « 4,37 » d'une déduction faite sur des mots serait une précision
+  // inventée, et c'est exactement ce qui la ferait prendre pour une mesure.
+  assert.equal(J.estimationDe(0.1, 5) % 0.5, 0);
+});
+
+/* ============ VERS OÙ PENCHE UN PASSAGE ============ */
+
+test('un passage sans mot chargé ne penche nulle part — et ne rend pas 0', () => {
+  // Rendre 0 ferait sortir l'estimation à la référence exacte, c'est-à-dire un
+  // chiffre constant présenté comme une lecture. Pire que le silence.
+  assert.equal(J.pencheDe('on a mangé des pâtes et après on est rentrés'), null);
+  assert.equal(J.pencheDe(''), null);
+});
+
+test('un passage sombre penche vers le bas, un passage calme vers le haut', () => {
+  const bas = J.pencheDe('j’ai envie de mourir, je tiens plus, c’est la fin');
+  const haut = J.pencheDe('journée tranquille et calme, je me sens apaisé, content de moi');
+  assert.ok(bas < -0.4, `attendu franchement négatif, obtenu ${bas}`);
+  assert.ok(haut > 0.4, `attendu franchement positif, obtenu ${haut}`);
+});
+
+test('LA DENSITÉ COMPTE : les mêmes mots noyés dans un pavé pèsent moins', () => {
+  const court = J.pencheDe('angoisse, panique, je tremble, crise d’angoisse totale');
+  const noye = J.pencheDe('angoisse, panique, je tremble, crise d’angoisse totale. '
+    + 'ensuite on a parlé de la liste des courses et du train de mardi et de la '
+    + 'couleur du mur du salon et de ce que fait le voisin le week-end et de la '
+    + 'facture du garage et du match et du programme de la semaine prochaine');
+  assert.ok(Math.abs(noye) < Math.abs(court),
+            'trois mots lourds dans un pavé pèsent autant qu’un cri de deux lignes');
+});
+
+test('`readMood` aurait rendu 0 sur ces passages — c’est pour ça que pencheDe existe', () => {
+  // MOTS_MINIMUM = 25 est le seuil qui décide s'il faut repeindre TOUT le décor
+  // de l'application. Appliqué à un paragraphe, il rend `force: 0` partout.
+  const court = 'j’ai envie de mourir, je tiens plus';
+  assert.equal(readMood(court, null).force, 0);
+  assert.ok(J.pencheDe(court) < -0.5, 'le passage devrait pencher malgré tout');
+});
+
+/* ============ LE TEXTE DÉCOUPÉ EN SUJETS ============ */
+
+const PAVE = "j’ai fait nuit blanche et là je me suis pas encore endormi, je suis crevé. "
+  + "Je m’imagine mon ex quand on se parlait, j’avais l’impression de pas être "
+  + "confortable par le fait qu’elle m’aime et maintenant on s’engueule parce qu’on "
+  + "est plus ensemble. Ma mère m’a appelé aussi, ça s’est mal passé comme d’habitude, "
+  + "elle trouve que je fais pas assez d’efforts et que c’est toujours à elle de venir "
+  + "vers moi. J’ai repris la weed le soir pour dormir, ça marche pas vraiment, je suis "
+  + "défoncé et je dors quand même pas.";
+
+test('le découpage ne perd pas un mot du texte', () => {
+  // ON NE RÉÉCRIT RIEN. Le texte reste mot pour mot, dans son ordre ; on pose
+  // seulement des coupures. Un découpage qui mange une phrase serait une
+  // réécriture silencieuse du journal de quelqu'un.
+  const sujets = J.sujetsDuTexte(PAVE, 5);
+  assert.ok(sujets.length >= 2);
+  const recolle = sujets.map(s => s.texte).join(' ');
+  const nu = t => t.replace(/\s+/g, ' ').trim();
+  assert.equal(nu(recolle), nu(PAVE), 'le découpage a perdu ou déplacé du texte');
+});
+
+test('UN SEUL SUJET N’EST PAS UN DÉCOUPAGE', () => {
+  // Ce serait le texte avec une icône au-dessus, et l'icône serait alors une
+  // étiquette posée sur toute une journée. La page retombe sur le texte nu.
+  assert.deepEqual(J.sujetsDuTexte('j’ai vu ma mère, ça s’est mal passé, comme toujours avec elle.', 5), []);
+  assert.deepEqual(J.sujetsDuTexte('', 5), []);
+});
+
+test('une phrase sans thème prolonge le bloc au lieu d’en ouvrir un', () => {
+  // « Je sais pas. » entre deux phrases sur sa mère parle encore de sa mère.
+  const t = "Ma mère m’a rappelé hier soir, elle voulait qu’on se voie ce week-end. "
+    + "Je sais pas. "
+    + "Elle a insisté et j’ai fini par dire oui alors que j’avais pas envie du tout. "
+    + "J’ai repris la weed pour dormir, ça marche pas, je suis défoncé et je dors pas.";
+  const sujets = J.sujetsDuTexte(t, 5);
+  assert.ok(sujets.length <= 3, `${sujets.length} blocs — le texte a été émietté`);
+  assert.equal(sujets.some(s => s.texte.trim() === 'Je sais pas.'), false,
+               '« Je sais pas. » a eu son propre bloc');
+});
+
+test('un bloc trop court est refondu — dans le PRÉCÉDENT, jamais dans le suivant', () => {
+  /*
+   * La fusion va vers l'arrière, et c'est la seule direction sûre. Une phrase
+   * courte à la fin d'un paragraphe le prolonge ; la même phrase poussée dans
+   * le paragraphe SUIVANT lui collerait une ouverture qui parle d'autre chose,
+   * et l'icône du bloc porterait sur un texte qui commence ailleurs.
+   *
+   * Le premier bloc n'a pas de précédent : il reste tel quel, même court. Une
+   * ouverture de journée EST un sujet — « j'ai fait nuit blanche » n'a pas à
+   * être avalée par le paragraphe sur son ex.
+   */
+  const sujets = J.sujetsDuTexte(PAVE, 5);
+  for (const s of sujets.slice(1)) {
+    assert.ok(s.texte.length >= J.SUJET_CAR,
+              `bloc de ${s.texte.length} signes : « ${s.texte} »`);
+  }
+  assert.ok(sujets[0].texte.startsWith('j’ai fait nuit blanche'),
+            'l’ouverture a été fondue dans le bloc suivant');
+});
+
+test('le découpage est borné : on ne lit pas un sommaire', () => {
+  const long = Array.from({ length: 40 }, (_, i) =>
+    `Ma mère m’a appelé le jour ${i} et ça s’est mal passé comme toujours entre nous deux. `
+    + `J’ai repris la weed ce soir-là pour arriver à dormir, ça n’a pas marché du tout.`).join(' ');
+  assert.ok(J.sujetsDuTexte(long, 5).length <= J.MAX_SUJETS);
 });

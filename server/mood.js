@@ -160,7 +160,7 @@ const compte = (texte, mot) => {
 };
 
 /** Ce qu'un texte pese pour chaque scene, avant toute ponderation. */
-function scoresDe(texte) {
+export function scoresDe(texte) {
   const t = ' ' + norm(texte).replace(/[’']/g, ' ') + ' ';
   const scores = {};
   for (const [scene, lex] of Object.entries(LEXIQUES)) {

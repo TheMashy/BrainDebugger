@@ -1671,35 +1671,6 @@ button.bignum {
 button.bignum:hover { opacity: .82; }
 .jourstrip { margin: 4px 0 16px; max-width: 420px; }
 
-/* ---------------------------------------------------------------------
-   L'AMPLITUDE D'UNE JOURNÉE.
-
-   Le compagnon relève, pendant la conversation, où quelqu'un semble être quand
-   le ton bascule. On n'affiche jamais la moyenne de ces relevés : une moyenne
-   ressemblerait à une note, se lirait comme une note, et finirait comparée à
-   la vraie. On affiche l'ÉCART — « de 3 à 8 dans la même soirée » ne prononce
-   aucun verdict, c'est un fait sur son amplitude.
-
-   CONTOURÉ, JAMAIS REMPLI. Ces bornes sont dites par le compagnon ; la note de
-   la journée est mesurée par la personne. Les deux ne peuvent pas se confondre
-   à l'œil.
-   --------------------------------------------------------------------- */
-.amplitude {
-  display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
-  margin: 0 0 16px; padding: 9px 0 0; border-top: 1px solid var(--line-soft);
-}
-.amplitude .k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; }
-.ampbar {
-  position: relative; flex: 1 1 130px; max-width: 220px; height: 8px;
-  border-radius: 999px; border: 1px solid var(--line);
-}
-.ampbar i {
-  position: absolute; top: -1px; bottom: -1px;
-  border: 1px solid hsl(272 55% 62%); border-radius: 999px;
-  background: hsl(272 55% 62% / .13);
-}
-.ampval { font-size: 12px; color: hsl(272 45% 76%); font-variant-numeric: tabular-nums; }
-.ampdit { font-size: 12px; color: var(--ink-faint); }
 .jourdenote {
   background: none; border: 0; color: var(--ink-faint);
   font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
@@ -1813,10 +1784,10 @@ button.bignum:hover { opacity: .82; }
 /* --- ce qui a bougé --- */
 .jcote { gap: 20px; }
 .jvol, .jthemes { display: flex; flex-direction: column; gap: 7px; }
-.jvsvg {
-  width: 100%; height: 46px; display: block;
-  background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 7px;
-}
+/* Ni fond ni bordure : la courbe se pose dans la colonne, elle n'y est pas
+   encadrée. Un petit graphe en boîte au milieu d'une page de texte se lit comme
+   un objet rapporté ; sans cadre, il se lit comme une ligne de la page. */
+.jvsvg { width: 100%; height: 46px; display: block; }
 .jvpied { display: flex; align-items: baseline; gap: 9px; font-size: 11px; color: var(--ink-faint); }
 .jvchiffre { font-size: 13px; color: var(--ink-dim); }
 
@@ -3239,3 +3210,67 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 /* Une mesure qui porte un lien connu est la seule qu'on veut voir en premier
    dans une colonne de huit lignes grises. */
 .jm.lie .jmnom { color: var(--ink); }
+
+/* ==================================================================
+   LA JOURNÉE QUI SE LIT : estimations et sujets.
+   ================================================================== */
+
+/*
+ * L'ESTIMATION, ET LA RÈGLE DE COULEUR DU PRODUIT.
+ *
+ * « Ce qui est REMPLI est MESURÉ, ce qui est CONTOURÉ est DÉCLARÉ. » Un relevé
+ * posé à la main est plein ; une estimation lue dans des mots n'est qu'un trait
+ * et porte un « ≈ ». La différence doit se voir sans être expliquée, parce que
+ * c'est la frontière entre ce que la personne a dit et ce que la machine a
+ * déduit — et le produit ne note personne à sa place.
+ */
+.jest {
+  flex: none; font: 500 11.5px/1 var(--mono); border-radius: 999px;
+  padding: 3px 7px; white-space: nowrap; letter-spacing: .01em;
+}
+.jest.lu { color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); }
+.jest.mesure { color: #0c100e; background: var(--c); border: 1px solid var(--c); }
+
+/*
+ * L'ESTIMATION PREND UNE QUATRIEME COLONNE, elle ne flotte pas.
+ *
+ * `margin-left: auto` ne pousse rien dans une grille à colonnes déclarées : la
+ * pastille débordait dans la piste du texte et retombait sur sa propre ligne,
+ * à gauche, sous la phrase. Une colonne de plus, et les pastilles s'alignent
+ * d'un moment à l'autre — c'est cet alignement qui fait qu'on lit une colonne
+ * de chiffres au lieu de six chiffres éparpillés.
+ */
+.jmoment { grid-template-columns: auto 9px minmax(0, 1fr) auto; }
+
+/* Les sujets : une colonne d'icônes, le texte, l'estimation à droite. */
+/* Le même plafond que le texte nu qu'il remplace : la journée ouverte doit
+   tenir sur l'écran, et c'est la colonne du texte qui déborde en premier. Sans
+   ce cap, un soir bavard poussait toute la page sous le pli. */
+.jsujets {
+  display: flex; flex-direction: column; gap: 16px;
+  max-height: 34vh; overflow-y: auto; overscroll-behavior: contain;
+}
+.jsujet {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 12px;
+  align-items: start;
+}
+.jsico {
+  display: inline-flex; color: var(--ink-faint); padding-top: 4px;
+  /* L'icône ne descend pas avec le texte : elle marque le DÉBUT du passage,
+     et centrée verticalement sur un bloc de dix lignes elle ne marquerait
+     plus rien. */
+}
+/* La même encre que le texte nu qu'il remplace : le découpage change la mise
+   en page, il ne doit pas changer la lisibilité de ce qui est écrit. */
+.jstexte {
+  margin: 0; white-space: pre-wrap; font-size: 15.5px; line-height: 1.65;
+  color: var(--ink);
+}
+.jsujet .jest { margin-top: 3px; }
+
+@media (max-width: 760px) {
+  /* L'estimation passe sous le texte : à trois colonnes sur un écran étroit,
+     le texte tombait à quarante caractères et se lisait en colonne de journal. */
+  .jsujet { grid-template-columns: auto 1fr; }
+  .jsujet .jest { grid-column: 2; justify-self: start; margin-top: 0; }
+}
