@@ -337,6 +337,29 @@ CREATE TABLE IF NOT EXISTS seances (
 );
 CREATE INDEX IF NOT EXISTS idx_seances_date ON seances(user_id, date);
 
+/*
+ * LE JOURNAL D'ACTIVITE : un digest par jour, envoye par Machi Tool.
+ *
+ * C'est l'ENVELOPPE d'une journee de travail -- combien de temps par
+ * application et par site, combien de bascules entre fenetres, la plage de
+ * reveil a coucher, les trous. Jamais le CONTENU : pas une phrase tapee, pas
+ * un message. Machi Tool le mesure comme ActivityWatch, sur la seule fenetre
+ * au premier plan, et le renvoie ici une fois par jour, reecrit a chaque fois
+ * que la journee avance.
+ *
+ * Une ligne par (personne, jour). Le digest entier est garde tel quel, en
+ * JSON : sa forme evolue cote application, et le site n'a pas a la figer pour
+ * la ranger. La console Quantified Self le relit et le consolide.
+ */
+CREATE TABLE IF NOT EXISTS activite_jours (
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  date    TEXT NOT NULL,          -- 'AAAA-MM-JJ'
+  recu_le TEXT NOT NULL,
+  digest  TEXT NOT NULL,          -- le resume du jour, en JSON, tel qu'envoye
+  PRIMARY KEY (user_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_activite_date ON activite_jours(user_id, date DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   key     TEXT NOT NULL,
@@ -1303,6 +1326,34 @@ export const journalQS = (userId = OWNER, limite = JOURNAL_QS) => db.prepare(
 
 export const viderJournalQS = (userId = OWNER) =>
   db.prepare('DELETE FROM qs_journal WHERE user_id = ?').run(userId).changes;
+
+/* ---------- journal d'activité (Machi Tool) ---------- */
+
+/**
+ * Range le digest d'un jour, en REMPLAÇANT celui qui existait.
+ *
+ * Machi Tool renvoie la même journée plusieurs fois — elle grossit au fil des
+ * heures — et c'est la dernière version qui compte. La clé (personne, jour) le
+ * garantit : le second envoi écrase le premier, il n'empile pas.
+ */
+export function poserActiviteJour(userId, date, digest) {
+  db.prepare(`
+    INSERT INTO activite_jours(user_id, date, recu_le, digest)
+    VALUES(?,?,?,?)
+    ON CONFLICT(user_id, date) DO UPDATE SET
+      recu_le = excluded.recu_le, digest = excluded.digest
+  `).run(userId, date, new Date().toISOString(), JSON.stringify(digest));
+}
+
+/** Les derniers jours d'activité, du plus récent au plus ancien, digest déjà relu. */
+export const activiteJours = (userId = OWNER, limite = 120) =>
+  db.prepare(
+    'SELECT date, recu_le, digest FROM activite_jours WHERE user_id = ? ORDER BY date DESC LIMIT ?'
+  ).all(userId, limite).map(r => {
+    let d = null;
+    try { d = JSON.parse(r.digest); } catch { d = null; }
+    return { date: r.date, recu_le: r.recu_le, digest: d };
+  });
 
 /* ---------- séances ---------- */
 
