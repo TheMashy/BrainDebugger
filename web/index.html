@@ -51,11 +51,17 @@
     <header class="top">
       <div class="viewname" id="viewName"></div>
       <nav>
-        <button data-view="tonight">Parler</button>
-        <button data-view="moi">Moi</button>
-        <button data-view="mirror">Ma carte</button>
-        <button data-view="year">Année</button>
-        <button data-view="settings">Réglages</button>
+        <!-- L'ICÔNE PORTE, LE MOT SE DÉPLIE.
+             Cinq mots en capitales alignés en haut à droite, c'est cinq choses à
+             lire pour en choisir une. L'icône se reconnaît sans se lire ; le nom
+             ne sort que pour l'onglet où l'on est — et au survol, pour celui
+             qu'on s'apprête à prendre. Le `span` de l'icône est rempli au
+             démarrage : le dessin vit dans `icones.js`, pas en double ici. -->
+        <button data-view="tonight" aria-label="Parler"><span class="navico"></span><span class="navnom">Parler</span></button>
+        <button data-view="moi" aria-label="Moi"><span class="navico"></span><span class="navnom">Moi</span></button>
+        <button data-view="mirror" aria-label="Ma carte"><span class="navico"></span><span class="navnom">Ma carte</span></button>
+        <button data-view="year" aria-label="Année"><span class="navico"></span><span class="navnom">Année</span></button>
+        <button data-view="settings" aria-label="Réglages"><span class="navico"></span><span class="navnom">Réglages</span></button>
       </nav>
     </header>
     <main id="view"></main>
