@@ -15,8 +15,9 @@ import * as sessions from './sessions.js';
 import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
+import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
-import { corpusPour, lire, MIN_JOURS as LECTURE_MIN } from './lecture.js';
+import { corpusPour, lire, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -119,6 +120,25 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   // Ce que le compagnon a deja pose. Sans cette liste il reposerait chaque
   // matin le repere de la veille, et declarerait trois fois le meme motif sous
   // trois noms voisins -- l'echec classique d'un agent sans etat.
+  /*
+   * OU IL EN EST, SUR PLUSIEURS DISTANCES.
+   *
+   * Le compagnon avait les quatorze dernieres journees telles qu'ecrites, et la
+   * grille des notes sur quatre ans. Entre les deux, rien : sur « ca fait
+   * combien de temps que ca dure ? », il avait le texte de la semaine et une
+   * suite de chiffres, et il repondait a cote.
+   *
+   * Ces quatre synthese sont ecrites UNE FOIS par la lecture de fond, qui lit
+   * deja tout. Elles ne remplacent pas les journees brutes -- il doit lire ce
+   * qu'elle a ECRIT, pas un resume d'elle -- elles portent la DISTANCE, qu'il
+   * n'avait pas du tout. Et elles ne changent qu'une fois par semaine, donc
+   * elles se mettent en cache avec le reste de la memoire stable.
+   */
+  if (days) {
+    const h = horizonBlock(getLecture(userId)?.contenu?.horizons);
+    if (h) morceaux.push(h);
+  }
+
   const jalons = jalonBlock(allEvents(userId));
   if (jalons) morceaux.push(jalons);
   const motifs = motifBlock(allMotifs(userId));
@@ -395,6 +415,53 @@ export function corpusDuJournal(userId, rows = series(userId).rows,
     // suivre les couleurs.
     precedente: avant?.contenu ? { ...avant.contenu, fait_le: avant.fait_le } : null
   });
+}
+
+/**
+ * ALLER VOIR SI LE LOT EST PRET, ET LE RANGER S'IL L'EST.
+ *
+ * Appelee en passant, quand quelqu'un ouvre « Ma carte ». Elle ne jette jamais :
+ * un lot qui echoue range son message d'erreur et rend la main -- l'ecran doit
+ * afficher la lecture precedente, pas une page blanche parce que le releve d'un
+ * lot n'a pas abouti.
+ *
+ * Le corpus est RECONSTRUIT ici, pas conserve depuis le lancement. Le journal ne
+ * fait que grandir : une date que le modele a citee etait dans le corpus qu'il a
+ * lu, donc elle est dans celui d'aujourd'hui. Garder une copie de tout le corpus
+ * dans les reglages pendant une heure aurait coute plus cher que le lot.
+ */
+async function releverLecture(userId) {
+  const s = getSettings(userId);
+  const lot = s.lectureLot;
+  if (!lot?.id) return null;
+  try {
+    const { rows, carnet } = series(userId);
+    const corpus = corpusDuJournal(userId, rows, carnet);
+    const r = await releverLot(lot.id, corpus, s);
+    if (!r.pret) return null;
+
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+    const ecrites = rows.filter(x => x.text && x.text.trim());
+    setLecture({
+      contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
+      jours: corpus.jours, modele: r.modele, userId
+    });
+    setSettings({ lectureLot: null, lectureLotErreur: null }, userId);
+    return r;
+  } catch (err) {
+    /*
+     * ON NE JETTE LE LOT QUE S'IL EST VRAIMENT FINI.
+     *
+     * Une cle absente, une coupure de trois secondes, un 500 passager : ce sont
+     * des pannes qui passent, et jeter le lot pour l'une d'elles perdrait une
+     * lecture deja payee. Seul un lot expire, echoue ou introuvable est retire
+     * -- le garder ferait retenter le meme echec a chaque ouverture de la page.
+     */
+    if (err?.lotFini) {
+      setSettings({ lectureLot: null, lectureLotErreur: String(err.message).slice(0, 200) }, userId);
+    }
+    return null;
+  }
 }
 
 export const routes = {
@@ -1146,7 +1213,16 @@ export const routes = {
   'POST /api/passerelle/cle': ({ userId }) => ({ cle: poserCle(userId) }),
   'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
 
-  'GET /api/lecture': ({ userId }) => {
+  'GET /api/lecture': async ({ userId }) => {
+    /*
+     * ON RELEVE LE LOT EN PASSANT.
+     *
+     * Pas de `setInterval` qui interroge l'API toute la nuit : il couterait
+     * plus d'appels que la lecture elle-meme n'en fait. On regarde quand
+     * quelqu'un ouvre « Ma carte » -- c'est-a-dire exactement quand le resultat
+     * sert a quelque chose.
+     */
+    await releverLecture(userId);
     const { rows } = series(userId);
     const ecrites = rows.filter(r => r.text && r.text.trim());
     const dernier = ecrites.at(-1)?.date ?? null;
@@ -1195,12 +1271,25 @@ export const routes = {
       notes,
       perime: !!l && retard > 0,
       // Ce qui declenche une relecture sans qu'on la demande.
-      arelire: !l || retard >= SEUIL,
+      /*
+       * ET PAS PENDANT QU'UN LOT EST EN VOL. Le garde vaut aussi -- surtout --
+       * quand il n'y a AUCUNE lecture : c'est le cas ou `arelire` est vrai
+       * quoi qu'il arrive, donc celui ou la relance automatique repartirait a
+       * chaque ouverture de la page sur un lot deja parti.
+       */
+      arelire: (!l || retard >= SEUIL) && !getSettings(userId).lectureLot,
+      /*
+       * UN LOT EN COURS SE DIT. Sans ca, l'ecran affiche « relire » pendant
+       * qu'une lecture est deja partie, et cliquer en lancerait une deuxieme
+       * -- payante, sur le meme corpus, pour le meme resultat.
+       */
+      enLot: !!getSettings(userId).lectureLot,
+      lotErreur: getSettings(userId).lectureLotErreur || null,
       cle: resolveKey(getSettings(userId)).source !== 'none'
     };
   },
 
-  'POST /api/lecture': async ({ userId }) => {
+  'POST /api/lecture': async ({ body, userId }) => {
     const s = getSettings(userId);
     const { rows, carnet } = series(userId);
     const ecrites = rows.filter(r => r.text && r.text.trim());
@@ -1211,6 +1300,30 @@ export const routes = {
     if (!corpus.dates.size) {
       return { error: "Rien d'écrit dans ton journal — il n'y a rien à lire." };
     }
+    /*
+     * EN LOT QUAND PERSONNE N'ATTEND, DIRECT QUAND QUELQU'UN ATTEND.
+     *
+     * `fond: true` est mis par la relance automatique : elle part toute seule
+     * quand le retard atteint le seuil, l'ecran garde la lecture precedente
+     * affichee, et personne ne regarde. Le lot rend en une heure au lieu de deux
+     * minutes et facture la moitie -- c'est exactement l'echange qu'on veut.
+     *
+     * Le bouton « relire » n'envoie pas `fond` : quelqu'un vient de cliquer, il
+     * attend une reponse, et lui faire attendre une heure pour economiser trente
+     * centimes serait un mauvais echange.
+     */
+    if (body?.fond && s.lectureEnLot !== false) {
+      if (s.lectureLot?.id) return { error: 'Une lecture est déjà partie.' };
+      try {
+        const lot = await lancerLot(corpus, s);
+        setSettings({ lectureLot: { id: lot.id, depuis: new Date().toISOString() },
+                      lectureLotErreur: null }, userId);
+      } catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
+      // Pas de lecture a rendre : celle d'avant reste a l'ecran, et `enLot` dit
+      // pourquoi le bouton ne repond plus.
+      return { enLot: true, ...(await routes['GET /api/lecture']({ userId })) };
+    }
+
     let r;
     try { r = await lire(corpus, s); }
     catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }

@@ -29,6 +29,7 @@
 import { resolveKey } from './chat.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
 import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
+import { SCHEMA_HORIZONS, validerHorizons, ecritesParHorizon } from './horizons.js';
 
 let _sdk = null;
 
@@ -308,7 +309,14 @@ ${amp.map(a => `${a.date} | ${a.n} | ${a.bas} → ${a.haut} | ${a.ecart}`).join(
     etendue: fenetre.length
       ? Math.round((jourDe(fenetre.at(-1).date) - jourDe(fenetre[0].date)) / 86400000) + 1
       : 0,
-    depuis: fenetre[0]?.date ?? null
+    depuis: fenetre[0]?.date ?? null,
+    /*
+     * LES LIGNES ELLES-MEMES, pour compter les journees ecrites de chaque
+     * horizon. C'est le serveur qui decide si une fenetre a de quoi parler --
+     * le modele n'a pas le droit d'ecrire trois phrases sur trois mois dont il
+     * n'a lu que quatre journees.
+     */
+    lignes: fenetre
   };
 }
 
@@ -668,7 +676,17 @@ const OUTIL = {
           }
         },
         required: ['noeuds', 'liens']
-      }
+      },
+      /*
+       * LES HORIZONS SORTENT DU MEME APPEL.
+       *
+       * La lecture lit deja tout le journal, avec l'effort le plus haut. Lui
+       * demander quatre syntheses de plus coute quelques centaines de jetons de
+       * SORTIE, une fois par semaine -- et zero appel supplementaire. Les
+       * ecrire a part, sur le meme corpus, aurait coute un deuxieme passage
+       * complet pour la meme lecture.
+       */
+      horizons: SCHEMA_HORIZONS
     },
     required: ['synthese', 'themes', 'pistes', 'carte']
   }
@@ -788,7 +806,7 @@ function teinterPistes(pistes, mem) {
  * disparait : la consigne dit qu'il ne tient pas sans ancrage, et une consigne
  * qui n'est pas appliquee n'est pas une regle.
  */
-export function valider(brut, dates, comps = [], precedente = null) {
+export function valider(brut, dates, comps = [], precedente = null, rows = null) {
   /*
    * Le chiffre ne traverse jamais le modele. Il rend « c3 » ; la phrase de c3
    * est cherchee ici, dans la liste que le serveur a calculee. Un identifiant
@@ -855,6 +873,17 @@ export function valider(brut, dates, comps = [], precedente = null) {
      * le vide, s » -- ce qui se lit comme une panne, pas comme une limite.
      */
     synthese: phrase(brut?.synthese, 1100),
+    /*
+     * LES HORIZONS, VALIDES SUR CE QUE LE SERVEUR COMPTE.
+     *
+     * Une fenetre sur laquelle il n'y a presque rien a lire ne doit pas
+     * produire de phrase : « ces trois mois ont ete calmes » ecrit sur quatre
+     * journees notees est une affirmation sur du vide, et le compagnon la
+     * repeterait comme un fait. Le modele ne decide pas s'il a de quoi parler.
+     */
+    horizons: rows?.length
+      ? validerHorizons(brut?.horizons, ecritesParHorizon(rows, rows[rows.length - 1].date))
+      : null,
     themes,
     pistes: validerPistes(brut?.pistes, noms,
       new Set(carte.noeuds.map(n => n.nom.toLowerCase())), mem),
@@ -1002,20 +1031,32 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
 
 /* ------------------------------ l'appel ------------------------------ */
 
-export async function lire(corpus, settings) {
+async function clientDe(settings) {
   if (!_sdk) {
     try { ({ default: _sdk } = await import('@anthropic-ai/sdk')); }
     catch { throw new Error("SDK absent — lance : npm install @anthropic-ai/sdk"); }
   }
   const { key } = resolveKey(settings);
   if (!key) throw new Error("Pas de clé API. Colle-la dans Réglages, ou définis ANTHROPIC_API_KEY.");
+  return new _sdk({ apiKey: key });
+}
 
+/**
+ * LA REQUETE, SORTIE DE L'APPEL.
+ *
+ * Elle part maintenant par deux chemins -- tout de suite, ou en lot a moitie
+ * prix -- et les deux doivent envoyer EXACTEMENT la meme chose. Deux copies du
+ * meme prompt finissent toujours par diverger, et la divergence se lit dans une
+ * lecture legerement differente selon le chemin, ce que personne ne saurait
+ * expliquer.
+ *
+ * `fallbacks` n'y est pas : le repli serveur est refuse par l'API des lots, et
+ * un parametre accepte ici, rejete la, ferait echouer le lot entier sur une
+ * validation. Le chemin direct le remet lui-meme.
+ */
+export function requeteLecture(corpus, settings) {
   const grain = grainPour(corpus.etendue ?? 0);
-  const client = new _sdk({ apiKey: key });
-
-  const res = await client.beta.messages.create({
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
+  return {
     model: settings.anthropicModel || 'claude-opus-5',
     max_tokens: 8000,
     /*
@@ -1042,18 +1083,106 @@ export async function lire(corpus, settings) {
       role: 'user',
       content: `Tout son journal, du premier jour au dernier. Découpe les séries par ${grain}.\n\n${corpus.texte}`
     }]
-  });
+  };
+}
 
-  const appel = res.content?.find(b => b.type === 'tool_use');
+/** Ce qu'une reponse du modele devient, une fois validee contre le corpus. */
+function depouiller(res, corpus, settings) {
+  const appel = res?.content?.find(b => b.type === 'tool_use');
   if (!appel) throw new Error("Le modèle n'a rien rendu d'exploitable.");
-
   const u = res.usage ?? {};
   return {
-    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? [], corpus.precedente),
+    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? [], corpus.precedente, corpus.lignes),
     modele: res.model ?? settings.anthropicModel,
     usage: {
       input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
       output: u.output_tokens ?? 0
     }
   };
+}
+
+export async function lire(corpus, settings) {
+  const client = await clientDe(settings);
+  const res = await client.beta.messages.create({
+    // Repli serveur : un refus sur une lecture de fond renverrait l'ecran a
+    // « Lancer la lecture », sans rien dire de ce qui s'est passe.
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    ...requeteLecture(corpus, settings)
+  });
+  return depouiller(res, corpus, settings);
+}
+
+/* ------------------------------ la lecture en lot ------------------------------ */
+
+/**
+ * LA MEME LECTURE, A MOITIE PRIX.
+ *
+ * L'API des lots traite les requetes de facon asynchrone et facture la moitie.
+ * La lecture de fond est exactement la charge qu'elle est faite pour absorber :
+ * elle tourne toute seule une fois par semaine, l'ecran dit « Il relit ton
+ * journal » et garde la lecture precedente affichee pendant ce temps. Personne
+ * ne la regarde apparaitre.
+ *
+ * Ce qui reste direct : le bouton « relire ». Quelqu'un qui vient de cliquer
+ * attend une reponse, et lui faire attendre une heure pour economiser trente
+ * centimes serait un mauvais echange.
+ */
+export async function lancerLot(corpus, settings) {
+  const client = await clientDe(settings);
+  const lot = await client.messages.batches.create({
+    requests: [{ custom_id: 'lecture', params: requeteLecture(corpus, settings) }]
+  });
+  return { id: lot.id, etat: lot.processing_status };
+}
+
+/**
+ * ALLER VOIR SI LE LOT EST PRET. Un seul passage, jamais d'attente : le serveur
+ * regarde en passant, quand quelqu'un ouvre « Ma carte ». Un `setInterval` qui
+ * interroge l'API toute la nuit couterait plus d'appels que la lecture elle-meme
+ * n'en fait.
+ *
+ * @returns {{pret: false, etat: string} | {pret: true, ...}} 
+ */
+/**
+ * Une erreur qui dit « ce lot-la est fini, n'y reviens pas ».
+ *
+ * On la distingue d'une panne de reseau ou d'une cle absente : celles-la sont
+ * passageres, et jeter le lot pour une coupure de trois secondes perdrait une
+ * lecture deja payee.
+ */
+function fini(message) {
+  const e = new Error(message);
+  e.lotFini = true;
+  return e;
+}
+
+export async function releverLot(id, corpus, settings) {
+  const client = await clientDe(settings);
+  let lot;
+  try {
+    lot = await client.messages.batches.retrieve(id);
+  } catch (err) {
+    // Un lot introuvable ne reviendra pas : il a plus de vingt-neuf jours, ou
+    // la cle a change. Le garder ferait retenter le meme 404 a chaque
+    // ouverture de la page, pour toujours.
+    if (err?.status === 404) throw fini("le lot n'existe plus");
+    throw err;
+  }
+  if (lot.processing_status !== 'ended') return { pret: false, etat: lot.processing_status };
+
+  for await (const r of await client.messages.batches.results(id)) {
+    if (r.custom_id !== 'lecture') continue;
+    if (r.result?.type === 'succeeded') return { pret: true, ...depouiller(r.result.message, corpus, settings) };
+    /*
+     * UN LOT QUI ECHOUE DOIT LE DIRE. Rendu silencieusement « pas pret », il
+     * laisserait l'ecran sur « Il relit ton journal » pour toujours, et la
+     * seule facon de s'en apercevoir serait de remarquer que la date de la
+     * lecture ne bouge plus.
+     */
+    const quoi = r.result?.type === 'expired' ? 'le lot a expiré'
+               : r.result?.error?.message ?? `le lot a échoué (${r.result?.type})`;
+    throw fini(String(quoi).slice(0, 300));
+  }
+  throw fini("Le lot s'est terminé sans résultat.");
 }

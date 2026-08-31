@@ -301,6 +301,32 @@ export const DEFAULT_SETTINGS = {
    */
   anthropicModel: 'claude-opus-5',
   anthropicModelChat: 'claude-sonnet-5',
+  /*
+   * LA LECTURE DE FOND PART EN LOT, A MOITIE PRIX.
+   *
+   * Elle tourne toute seule une fois par semaine, l'ecran dit « Il relit ton
+   * journal » et garde la lecture precedente affichee : personne ne la regarde
+   * apparaitre. C'est exactement la charge que l'API des lots est faite pour
+   * absorber -- elle rend en une heure au lieu de deux minutes, et facture la
+   * moitie.
+   *
+   * Le bouton « relire » reste DIRECT quoi qu'il arrive : quelqu'un qui vient
+   * de cliquer attend une reponse.
+   */
+  lectureEnLot: true,
+  /*
+   * Le lot en cours : `{ id, depuis }`. Vide quand il n'y en a pas. C'est un
+   * REGLAGE et pas une table, parce qu'il n'y en a jamais qu'un a la fois et
+   * qu'il ne survit a rien -- un lot perdu se relance.
+   */
+  lectureLot: null,
+  /*
+   * Ce qui a fait echouer le dernier lot, s'il a echoue. Efface au lancement du
+   * suivant. Sans lui, un lot expire laisserait l'ecran sur « il relit » pour
+   * toujours, et la seule facon de s'en apercevoir serait de remarquer que la
+   * date de la lecture ne bouge plus.
+   */
+  lectureLotErreur: null,
   anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
   /*
    * LA CLE DE LA PASSERELLE. Vide tant qu'on n'en a pas cree une.

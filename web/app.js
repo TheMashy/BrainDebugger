@@ -3109,15 +3109,24 @@ async function renderLecture() {
     <div class="lechead">
       ${L.lecture ? `<span class="lecmeta faint">${L.jours} journées · ${fmtDay(L.fait_le.slice(0, 10))}${
         L.perime ? ` · <b>${L.retard} journée${L.retard > 1 ? 's' : ''} depuis</b>` : ''}</span>` : ''}
-      ${L.lecture ? (LECTURE_EN_COURS
-        ? `<span class="lecmeta faint"><span class="spin petit"></span> il relit</span>`
-        : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus.">${ico('refaire')}relire</button>`) : ''}
+      ${/* UN LOT EN COURS SE DIT. Il rend en une heure au lieu de deux minutes :
+             sans cette ligne, l'écran affiche « relire » pendant qu'une lecture
+             est déjà partie, et cliquer en lancerait une deuxième — payante, sur
+             le même corpus, pour le même résultat. */''}
+      ${L.lecture ? (LECTURE_EN_COURS || L.enLot
+        ? `<span class="lecmeta faint" title="${L.enLot
+             ? 'Partie en tâche de fond, à moitié prix. Elle arrive dans l’heure.' : ''}">
+             <span class="spin petit"></span> il relit${L.enLot ? ' — en fond' : ''}</span>`
+        : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus, tout de suite.">${ico('refaire')}relire</button>`) : ''}
     </div>
     ${/* Une relecture qui échoue par-dessus une lecture existante ne peut pas
           prendre l'écran — l'ancienne vaut mieux que rien — mais elle ne peut
           pas non plus se taire : sinon ce qu'on regarde est vieux sans qu'on le
           sache, et « relire » a l'air de ne rien faire. */''}
     ${L.lecture && LECTURE_ERR ? `<p class="sub lecterr lecterrhaut">La relecture n'a pas abouti — ceci est la lecture précédente. ${esc(LECTURE_ERR)}</p>` : ''}
+    ${/* Un lot qui a échoué doit le dire, sinon la seule façon de s'en
+          apercevoir est de remarquer que la date ne bouge plus. */''}
+    ${!LECTURE_ERR && L.lotErreur ? `<p class="sub lecterr lecterrhaut">La lecture de fond n'a pas abouti — ${esc(L.lotErreur)} Tu peux relancer avec « relire ».</p>` : ''}
     ${corps}
   </div>`;
 
@@ -3140,17 +3149,23 @@ async function renderLecture() {
   // l'ecran tourne en rond et l'API est appelee en continu tant que l'onglet
   // est ouvert. On ne relance donc jamais tout seul apres un echec -- le bouton
   // « Réessayer » est la pour ca, et lui sait qu'on l'a demande.
-  if (!LECTURE_EN_COURS && !LECTURE_ERR && L.possible && L.cle && L.arelire) lancerLecture();
+  if (!LECTURE_EN_COURS && !LECTURE_ERR && L.possible && L.cle && L.arelire) lancerLecture({ fond: true });
 }
 
-async function lancerLecture() {
+/**
+ * @param {{fond?: boolean}} opts  `fond` : c'est la relance automatique, pas un
+ *   clic. Elle part en LOT, à moitié prix : personne ne la regarde apparaître,
+ *   l'écran garde la lecture précédente, et une heure d'attente ne coûte rien à
+ *   qui n'attend pas. Un clic sur « relire », lui, veut une réponse.
+ */
+async function lancerLecture({ fond = false } = {}) {
   if (LECTURE_EN_COURS) return;
   LECTURE_EN_COURS = true;
   LECTURE_ERR = null;
   const avait = !!LECTURE?.lecture;
   if (!avait) await renderLecture();       // l'attente ne s'affiche que s'il n'y a rien à montrer
   try {
-    const r = await api('/api/lecture', {});
+    const r = await api('/api/lecture', { fond });
     LECTURE = r;
     // Les pistes viennent de CETTE lecture : celles gardees pour « Moi »
     // parlent d'une fenetre qui vient d'etre relue, et il faut les redemander.
@@ -4201,6 +4216,16 @@ async function renderBackendCfg() {
       <br>Hors ligne, le compagnon n'a ni tes journées ni tes notes.
     </p>
     <label class="field" style="margin-top:14px"><span>
+      <input type="checkbox" id="lectureEnLot" ${s.lectureEnLot !== false ? 'checked' : ''}
+             style="width:auto;margin-right:7px">
+      La lecture de fond part en tâche de fond</span></label>
+    <p class="sub" style="margin:0;font-size:12px">
+      Elle tourne toute seule une fois par semaine, l'écran garde la lecture précédente affichée, et
+      personne ne la regarde apparaître. En tâche de fond elle rend <b>dans l'heure</b> au lieu de deux
+      minutes, et coûte <b>moitié moins</b>.
+      <br>« relire » reste immédiat quoi qu'il arrive : quand tu cliques, tu attends une réponse.
+    </p>
+    <label class="field" style="margin-top:14px"><span>
       <input type="checkbox" id="sansEnveloppe" ${s.sansEnveloppe ? 'checked' : ''}
              style="width:auto;margin-right:7px">
       Retirer l'enveloppe de jetons</span></label>
@@ -4290,6 +4315,10 @@ async function renderBackendCfg() {
       await navigator.clipboard.writeText(e.target.textContent.trim());
       toast('Clé copiée');
     } catch { /* pas de presse-papiers : elle est lisible à l'écran, ça suffit */ }
+  });
+  $('#lectureEnLot')?.addEventListener('change', async e => {
+    await saveSettings({ lectureEnLot: e.target.checked });
+    toast(e.target.checked ? 'La lecture de fond partira en tâche de fond' : 'La lecture de fond sera immédiate');
   });
   $('#carnetMemoire')?.addEventListener('change', async e => {
     await saveSettings({ carnetMemoire: e.target.checked });
