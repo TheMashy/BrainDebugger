@@ -6,8 +6,9 @@ import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage, ambiance } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle } from './passerelle.js';
+import { analyser, apercuDe } from './mesures.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
-import { DB_PATH, db, upsertUser, countUsers, OWNER } from './db.js';
+import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi } from './db.js';
 import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
 import * as discord from './discord.js';
@@ -190,6 +191,52 @@ async function traiter(req, res) {
     } catch (err) {
       console.error('[passerelle]', err);
       return json(res, 500, { error: String(err.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /* ---------- ce qu'une application de suivi POUSSE ----------
+   *
+   * L'autre sens de la passerelle, et la meme cle : une application de suivi
+   * (montre, telephone, balance) envoie ce qu'elle mesure, le site le range.
+   * Elle non plus n'a pas de navigateur derriere elle, donc elle non plus ne
+   * passe pas le verrou -- elle presente sa cle, exactement comme en lecture.
+   *
+   * TOUT ENVOI EST JOURNALISE, y compris ceux qu'on refuse. C'est la seule
+   * facon de deboguer une integration sans terminal : sans le journal, une
+   * application qui envoie et un site qui repond 200 ne disent nulle part ce
+   * que le site a COMPRIS de ce qui est arrive.
+   *
+   * Un envoi refuse faute de cle n'est journalise nulle part : on ne sait pas
+   * a QUI l'ecrire, et l'ecrire chez tout le monde donnerait a n'importe qui
+   * le pouvoir de remplir le journal des autres.
+   */
+  if (req.method === 'POST'
+      && (url.pathname === '/api/qs' || url.pathname === '/api/mesures'
+          || url.pathname === '/api/machitool/mesures' || url.pathname === '/api/passerelle/mesures')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    // La zone de la personne, pas celle du serveur : une mesure sans date
+    // appartient a SA journee. Une montre qui synchronise a 00h30 rangerait
+    // sinon sa nuit dans la journee d'avant ou d'apres selon l'hebergeur.
+    const zone = zoneDeRequete(req);
+    try {
+      const charge = await readBody(req);
+      const { gardees, laissees, vues } = dansLaZone(zone, () => analyser(charge, { zone }));
+      for (const m of gardees) poserMesure({ ...m, userId });
+      const refus = laissees.length ? laissees.slice(0, 4).map(l => l.cle ? `${l.cle} : ${l.pourquoi}` : l.pourquoi).join(' · ') : null;
+      noterEnvoi({ userId, source: gardees[0]?.source ?? null, statut: 200,
+                   recues: gardees.length + laissees.length, gardees: gardees.length,
+                   refus, apercu: apercuDe(vues) });
+      // On rend le detail de ce qui a ete laisse : l'application qui envoie est
+      // la seule qui puisse corriger, et elle ne lira jamais notre onglet.
+      return json(res, 200, { gardees: gardees.length, laissees: laissees.length, detail: laissees.slice(0, 20) });
+    } catch (err) {
+      const pourquoi = String(err.message ?? err).slice(0, 200);
+      noterEnvoi({ userId, statut: 400, refus: pourquoi });
+      return json(res, 400, { error: pourquoi });
     }
   }
 
