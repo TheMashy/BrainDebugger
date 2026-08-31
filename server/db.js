@@ -287,7 +287,20 @@ export const DEFAULT_SETTINGS = {
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'qwen2.5:7b',
   apiKey: '',                 // cle Anthropic ; repli sur ANTHROPIC_API_KEY
+  /*
+   * DEUX MODELES, PARCE QUE C'EST DEUX METIERS.
+   *
+   * `anthropicModel` sert la LECTURE de fond : relire quatre ans de journal et
+   * en tirer des mecanismes. C'est la seule tache du produit ou l'intelligence
+   * se voit vraiment, et elle tourne une fois par semaine.
+   *
+   * `anthropicModelChat` sert le COMPAGNON : tenir une conversation du soir.
+   * Ca demande de la justesse et de la vitesse, pas la meme profondeur -- et
+   * ca tourne quarante fois par jour. Sonnet 5 par defaut : deux fois et demie
+   * moins cher en entree, deux fois et demie en sortie.
+   */
   anthropicModel: 'claude-opus-5',
+  anthropicModelChat: 'claude-sonnet-5',
   anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
   /*
    * LA CLE DE LA PASSERELLE. Vide tant qu'on n'en a pas cree une.

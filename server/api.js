@@ -72,6 +72,21 @@ function series(userId = OWNER) {
  * @param {string} userId
  * @param {string|null} texte  ce qu'il vient d'ecrire, pour y chercher des echos
  */
+/**
+ * COMBIEN DE MESSAGES DU FIL PARTENT AVEC CHAQUE QUESTION.
+ *
+ * C'etait soixante. Renvoyes a chaque tour, et un echange avec outils coute
+ * deux ou trois tours : soixante messages traversaient le reseau trois fois
+ * pour une reponse de deux phrases.
+ *
+ * Vingt-cinq suffisent, parce que la memoire longue de ce produit ne passe pas
+ * par le fil : les journees passees, les reperes, la grille et les motifs
+ * arrivent par le bloc de memoire, et ce que la lecture de fond a compris
+ * arrive par la lecture. Le fil ne sert qu'a une chose -- savoir de quoi on
+ * est en train de parler -- et vingt-cinq messages, c'est une soiree entiere.
+ */
+export const FIL_TRANSMIS = 25;
+
 export function recentMemory(date, userId = OWNER, texte = null) {
   const s = getSettings(userId);
   const days = Number(s.memoryDays ?? 0);
@@ -131,6 +146,25 @@ export function recentMemory(date, userId = OWNER, texte = null) {
    * du temps : present a chaque tour, il deviendrait du bruit, et le compagnon
    * finirait par le citer pour meubler.
    */
+  /*
+   * ===================================================================
+   * A PARTIR D'ICI, CE QUI CHANGE A CHAQUE PHRASE.
+   *
+   * Tout ce qui precede tient la journee : les journees passees, les ancres,
+   * la grille, les jalons, les motifs, le carnet. Ces blocs partent dans le
+   * prompt systeme, avec un point de reprise de cache -- ils sont relus a
+   * un dixieme du prix a chaque message de la soiree.
+   *
+   * Les echos et la presence, eux, dependent de CE QUI VIENT D'ETRE ECRIT.
+   * Poses dans le systeme, ils invalideraient a chaque phrase le cache de
+   * toute la conversation qui suit : le cache ne prendrait jamais, et on
+   * paierait en plus le quart de surcout de l'ecriture. Ils partent donc a
+   * part, et le compagnon les recoit dans le dernier tour.
+   * ===================================================================
+   */
+  const stable = morceaux.length ? morceaux.join('\n\n---\n\n') : null;
+  const volatil = [];
+
   if (days && texte && String(texte).trim().length >= 12) {
     const { index, rows, byDate, textCount } = series(userId);
     if (textCount >= 2) {
@@ -141,14 +175,16 @@ export function recentMemory(date, userId = OWNER, texte = null) {
         note: byDate.get(h.id)?.note ?? null,
         text: rows.find(r => r.date === h.id)?.text ?? ''
       })).filter(h => h.text.trim()));
-      if (bloc) morceaux.push(bloc);
+      if (bloc) volatil.push(bloc);
     }
   }
 
+  // La presence : depuis quand il n'a rien dit. Elle change entre deux
+  // messages par definition, donc elle est du cote volatil.
   const note = presenceNote(presence(userId));
-  if (note) morceaux.push(note);
+  if (note) volatil.push(note);
 
-  return morceaux.length ? morceaux.join('\n\n---\n\n') : null;
+  return { stable, echos: volatil.length ? volatil.join('\n\n---\n\n') : null };
 }
 
 /**
@@ -440,9 +476,10 @@ export const routes = {
     addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
     invalidate(userId);
 
-    const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
-    const r = await reply(history, getSettings(userId), { memory: recentMemory(date, userId, text) });
-    if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
+    const history = recentMessages(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
+    const m = recentMemory(date, userId, text);
+    const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos });
+    if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
 
     addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
     return {
@@ -1441,21 +1478,25 @@ export async function streamMessage(body, send, userId = OWNER) {
   invalidate(userId);
   send('user', { messages: recentMessages(80, userId) });
 
-  const history = recentMessages(60, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
+  const history = recentMessages(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
   // Les pieces s'accrochent au message qu'on vient d'ecrire, pas a l'historique.
   if (pieces.length && history.length) history[history.length - 1].pieces = pieces;
   const settings = getSettings(userId);
 
   const before = usageFor(userId);
+  // Le texte du message en cours declenche les echos ; ils repartent a part du
+  // reste de la memoire, parce qu'ils changent a chaque phrase et que le reste
+  // tient la journee (voir `recentMemory`).
+  const memoire = recentMemory(date, userId, text);
   const r = await reply(history, settings, {
-    // le texte du message en cours : c'est lui qui declenche les echos
-    memory: recentMemory(date, userId, text),
+    memory: memoire.stable,
+    echos: memoire.echos,
     onText: chunk => send('delta', { text: chunk }),
     onPense: chunk => send('pense', { text: chunk }),
     exhausted: before.exhausted,
     outils: outilsPour(userId, messageId, send)
   });
-  if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output);
+  if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
 
   addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
                text: r.text, reflexion: r.pensee ?? null, userId });

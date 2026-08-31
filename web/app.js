@@ -4139,11 +4139,17 @@ async function renderBackendCfg() {
   if (s.chatBackend === 'anthropic') {
     let info = { models: [], hasEnvKey: false };
     try { info = await api('/api/models'); } catch { /* ignoré */ }
+    const choix = (id, valeur) => `<select id="${id}">
+      ${info.models.map(m => `<option value="${esc(m.id)}" ${m.id === valeur ? 'selected' : ''}>${esc(m.label)} — ${esc(m.note)}</option>`).join('')}
+    </select>`;
     el.innerHTML = `<div class="row">
-      <label class="field"><span>Modèle</span>
-        <select id="anthropicModel">
-          ${info.models.map(m => `<option value="${esc(m.id)}" ${m.id === s.anthropicModel ? 'selected' : ''}>${esc(m.label)} — ${esc(m.note)}</option>`).join('')}
-        </select></label>
+      ${/* DEUX MODÈLES, PARCE QUE C'EST DEUX MÉTIERS. Le compagnon tient une
+            conversation du soir, quarante fois par jour ; la lecture relit
+            quatre ans de journal, une fois par semaine. C'est la seule tâche du
+            produit où l'intelligence se voit vraiment, et la seule qui mérite
+            le modèle le plus cher. */''}
+      <label class="field"><span>Le compagnon</span>${choix('anthropicModelChat', s.anthropicModelChat)}</label>
+      <label class="field"><span>La lecture de fond</span>${choix('anthropicModel', s.anthropicModel)}</label>
       <label class="field"><span>Effort</span>
         <select id="anthropicEffort">
           <option value="low" ${s.anthropicEffort === 'low' ? 'selected' : ''}>bas — répond vite</option>
@@ -4219,7 +4225,7 @@ async function renderBackendCfg() {
     <label class="field"><span>Clé API</span><input type="password" id="apiKey" value="${esc(s.apiKey)}"></label>`;
   } else { el.innerHTML = ''; return; }
 
-  for (const id of ['ollamaUrl', 'ollamaModel', 'anthropicModel', 'anthropicEffort']) {
+  for (const id of ['ollamaUrl', 'ollamaModel', 'anthropicModel', 'anthropicModelChat', 'anthropicEffort']) {
     $('#' + id)?.addEventListener('change', async e => { await saveSettings({ [id]: e.target.value }); });
   }
   // Le champ est vide en permanence : une chaine vide ne doit pas effacer la
