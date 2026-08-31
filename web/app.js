@@ -3494,9 +3494,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
         </div>` : ''}
         ${amplitudeMarkup(m.amplitude)}
 
-        ${m.jour?.text
-          ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
-          : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`}
+        ${journeeMarkup(m)}
       </div>
 
       ${notesDuJourMarkup(m.carnet)}
@@ -3548,6 +3546,138 @@ const JOURS_COURT = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
  * est declare » : ces bornes sont dites par le compagnon, la note de la journee
  * est mesuree par la personne. Les deux ne peuvent pas se confondre a l'oeil.
  */
+/* ==================== LA JOURNÉE, HEURE PAR HEURE ====================
+
+   On ouvrait une journée et on y trouvait sa note, son texte, et rien de ce qui
+   s'était PASSÉ dedans. Or une journée notée 8 peut contenir « juste envie de
+   mourir » écrit le soir : c'est la bascule qui la raconte, pas le niveau moyen.
+
+   Trois colonnes, et chacune répond à une question différente :
+     — CE QUI S'EST DIT : l'heure, et la phrase de ce moment-là. Sa phrase,
+       choisie, jamais réécrite — une paraphrase de ce qu'on a écrit un mauvais
+       soir n'a aucune raison d'être plus juste que la phrase.
+     — CE QUI A BOUGÉ : la volatilité, et de quoi on a parlé.
+     — CE QUE TU AS ÉCRIT : la note du soir, telle quelle.
+   ==================================================================== */
+
+/** Le point d'un moment : la couleur de sa scène, l'opacité de sa force. */
+function pointMoment(m) {
+  const t = TEINTE_SCENE[m.scene] ?? TEINTE_SCENE.drift;
+  const f = Math.min(1, (m.force ?? 0) / 3);
+  return `style="--s:${t};--f:${(0.28 + 0.72 * f).toFixed(2)}"`;
+}
+
+/*
+ * LA TEINTE D'UNE SCÈNE.
+ *
+ * Les mêmes huit que la passerelle envoie à une lampe, en HSL parce qu'ici on
+ * module la clarté au survol. Elles ne sortent pas de la rampe des notes : un
+ * moment déduit de mots ne doit jamais pouvoir se lire comme une note posée.
+ */
+const TEINTE_SCENE = {
+  drift: 224, brume: 205, abyss: 28, eclipse: 268,
+  voidwell: 218, monolith: 220, grain: 78, mandel: 312
+};
+
+/** Un moment : son heure, son point, sa phrase. Cliquer ouvre le fil à ce moment. */
+function momentMarkup(m) {
+  return `<li class="jmoment" data-moment="${esc(m.ts)}"
+      title="${esc(m.sens ?? NOM_SCENE[m.scene] ?? '')}">
+    <span class="jheure mono">${esc(m.heure)}</span>
+    <span class="jpoint" ${pointMoment(m)}></span>
+    <span class="jcoeur">${esc(m.coeur)}</span>
+  </li>`;
+}
+
+/**
+ * CE QUI A BOUGÉ DANS LA JOURNÉE.
+ *
+ * Deux couches, et il ne faut pas les confondre. Les RELEVÉS sont posés à la
+ * main, sur dix, à une heure connue : c'est une mesure, elle se dessine PLEINE.
+ * La charge des moments est déduite de mots : c'est une lecture, elle se dessine
+ * en trait. « Ce qui est rempli est mesuré, ce qui est contouré est déclaré » —
+ * la règle du produit vaut jusqu'ici.
+ */
+function volatiliteMarkup(v) {
+  const rel = v?.releves ?? [], ch = v?.charges ?? [];
+  if (rel.length < 2 && ch.length < 2) return '';
+  const W = 200, H = 46, PB = 6;
+  // Deux échelles, un seul cadre : les relevés vont de 0 à 10, les charges de
+  // −1 à +1. Les superposer sur une seule graduation ferait croire qu'un point
+  // bas de l'un vaut un point bas de l'autre.
+  const xs = n => n <= 1 ? [W / 2] : Array.from({ length: n }, (_, i) => 2 + (i / (n - 1)) * (W - 4));
+  const yRel = val => PB + (1 - val / 10) * (H - PB * 2);
+  const yCh = c => PB + (1 - (c + 1) / 2) * (H - PB * 2);
+
+  const px = xs(ch.length);
+  const ligne = ch.length >= 2
+    ? `<path d="${ch.map((c, i) => `${i ? 'L' : 'M'}${px[i].toFixed(1)} ${yCh(c.charge).toFixed(1)}`).join('')}"
+         fill="none" stroke="var(--ink-faint)" stroke-width="1.2" stroke-linejoin="round"/>` : '';
+  const rx = xs(rel.length);
+  const points = rel.map((r, i) =>
+    `<circle cx="${rx[i].toFixed(1)}" cy="${yRel(r.valeur).toFixed(1)}" r="3"
+       fill="${noteColor(r.valeur, 6)}"><title>${esc(r.heure)} · ${r.valeur}/10</title></circle>`).join('');
+
+  const ecart = v.ecart != null
+    ? `<span class="jvchiffre mono">${v.bas} <span class="faint">→</span> ${v.haut}</span>` : '';
+  return `<div class="jvol">
+    <div class="k faint">Ce qui a bougé</div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="jvsvg" aria-hidden="true">
+      <line x1="0" y1="${(H / 2).toFixed(1)}" x2="${W}" y2="${(H / 2).toFixed(1)}"
+            stroke="var(--line-soft)" stroke-dasharray="2 4"/>
+      ${ligne}${points}
+    </svg>
+    <div class="jvpied">
+      ${ecart}
+      <span class="faint">${rel.length >= 2 ? 'relevé à la main' : 'lu dans tes mots'}</span>
+    </div>
+  </div>`;
+}
+
+/** De quoi on a parlé, en icônes — les mêmes que sur la frise. */
+function thematiquesMarkup(ts) {
+  if (!ts?.length) return '';
+  return `<div class="jthemes">
+    <div class="k faint">De quoi tu as parlé</div>
+    <div class="jtlist">
+      ${ts.map(t => `<span class="jtheme" title="${esc(t.extrait)}">
+        <span class="jticone">${icone(t.theme, 15)}</span>
+        <span class="jtnom">${esc(NOMS[t.theme] ?? t.theme)}</span>
+        ${t.n > 1 ? `<span class="jtn mono">${t.n}</span>` : ''}
+      </span>`).join('')}
+    </div>
+  </div>`;
+}
+
+/**
+ * LE CORPS DE LA JOURNÉE OUVERTE.
+ *
+ * Sans fil ce jour-là, on retombe sur ce qui existait : le texte, seul, en
+ * pleine largeur. Trois colonnes dont deux vides seraient un tableau de bord
+ * qui annonce des choses qu'il n'a pas.
+ */
+function journeeMarkup(m) {
+  const j = m.journee ?? {};
+  const moments = j.moments ?? [];
+  const texte = m.jour?.text
+    ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
+    : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`;
+  const cote = `${volatiliteMarkup(j.volatilite)}${thematiquesMarkup(j.thematiques)}`;
+  if (!moments.length && !cote) return texte;
+
+  return `<div class="jgrille">
+    ${moments.length ? `<div class="jcol jfil">
+      <div class="k faint">Ce qui s'est dit</div>
+      <ol class="jmoments">${moments.map(momentMarkup).join('')}</ol>
+    </div>` : ''}
+    ${cote ? `<div class="jcol jcote">${cote}</div>` : ''}
+    <div class="jcol jecrit">
+      <div class="k faint">Ce que tu as écrit</div>
+      ${texte}
+    </div>
+  </div>`;
+}
+
 function amplitudeMarkup(a) {
   if (!a) return '';
   const g = (a.bas / 10) * 100, d = ((10 - a.haut) / 10) * 100;
@@ -3661,7 +3791,23 @@ function wireMirror() {
     // case, si. Deux gestes, deux effets.
     const c = e.target.closest('[data-cal]');
     if (c) {
-      if (c.dataset.cal === 'jour') { MIR_CAL.curseur = c.dataset.d.slice(0, 7); return rejouer(c.dataset.d); }
+      if (c.dataset.cal === 'jour') {
+        MIR_CAL.curseur = c.dataset.d.slice(0, 7);
+        await rejouer(c.dataset.d);
+        /*
+         * LA JOURNÉE VIENT À L'ÉCRAN.
+         *
+         * Dans « Moi », le calendrier arrive après les pistes : cliquer une
+         * case chargeait la journée SOUS le pli, et il fallait faire défiler
+         * pour voir ce qu'on venait de demander — l'écran ne bougeait pas, on
+         * pouvait croire que le clic n'avait rien fait.
+         *
+         * On amène la journée en haut, pas au centre : le calendrier reste
+         * juste au-dessus, à portée pour en ouvrir une autre.
+         */
+        $('#view').querySelector('.jourseul')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        return;
+      }
       MIR_CAL = calClic({ ...MIR_CAL, debut: MIRROR_DATE }, c.dataset);
       return rejouer(MIRROR_DATE, { garderCal: true });
     }
