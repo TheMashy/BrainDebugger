@@ -4,7 +4,7 @@ import {
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
-  updateEvent, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
+  updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
@@ -1664,6 +1664,101 @@ export function outilsPour(userId, messageId, send = () => {}) {
       const fait = { type: 'repere', ...ev, theme: themeDe(l) };
       send('geste', fait);
       return { message: `Repère posé le ${d} : « ${l} ».`, fait };
+    },
+
+    /*
+     * CORRIGER, ET PAS EFFACER.
+     *
+     * Il peut deplacer une date et reecrire un libelle ; il ne peut pas faire
+     * disparaitre un fait. Effacer le repere de quelqu'un sur le jugement d'un
+     * modele est une autre chose que corriger une faute de frappe -- et la
+     * personne a un bouton pour ca dans « Annee ».
+     *
+     * Les memes verrous qu'a la pose, aux memes valeurs : une correction qui
+     * accepterait une date dans le futur ou un libelle de trois cents mots
+     * ouvrirait par la porte de derriere ce que la pose refuse par la grande.
+     */
+    corriger_repere: ({ id, date, label }) => {
+      const n = Number(id);
+      if (!Number.isInteger(n)) return { erreur: 'Identifiant manquant. Cherche-le avec chercher_repere.' };
+      const ev = allEvents(userId).find(e => e.id === n);
+      if (!ev) return { erreur: `Aucun repère #${n}. Cherche-le avec chercher_repere.` };
+
+      const patch = {};
+      if (date != null) {
+        const d = String(date).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { erreur: 'Date invalide : il faut AAAA-MM-JJ.' };
+        if (d > today()) return { erreur: "Cette date est dans le futur. Un repère marque ce qui a eu lieu." };
+        // Une periode dont le debut passerait apres la fin n'existe pas : la
+        // barre se dessinerait a l'envers, sur une largeur negative.
+        if (ev.fin && d > ev.fin) return { erreur: `Ce repère finit le ${ev.fin} : il ne peut pas commencer après.` };
+        patch.date = d;
+      }
+      if (label != null) {
+        const l = String(label).trim().replace(/\s+/g, ' ');
+        if (l.length < 3) return { erreur: 'Libellé trop court.' };
+        if (l.length > 60) return { erreur: 'Libellé trop long : trois à six mots.' };
+        patch.label = l;
+        /*
+         * ON NE TOUCHE PAS AU THEME, ET C'EST CE QUI LE FAIT SUIVRE.
+         *
+         * Un repere pose sans theme n'en stocke aucun : il est DEDUIT du
+         * libelle a l'affichage, partout. Corriger le libelle suffit donc a
+         * corriger l'icone -- « rupture » devient « pause » et le cœur brise
+         * s'en va tout seul.
+         *
+         * Et un theme STOCKE l'a ete par un choix a la main dans Annee : le
+         * rededuire ici ecraserait une declaration par une deduction, ce que le
+         * produit ne fait nulle part.
+         */
+      }
+      if (!Object.keys(patch).length) return { erreur: 'Rien à corriger : donne une date, un libellé, ou les deux.' };
+
+      const avant = { date: ev.date, label: ev.label };
+      const maj = updateEvent(n, patch, userId);
+      if (!maj) return { erreur: 'La correction n’a pas abouti.' };
+      // Le theme du geste est deduit ici comme partout ailleurs a l'affichage.
+      const fait = { type: 'repere', corrige: true, avant, ...maj, theme: maj.theme ?? themeDe(maj.label) };
+      send('geste', fait);
+      const quoi = [patch.date ? `du ${avant.date} au ${maj.date}` : null,
+                    patch.label ? `« ${avant.label} » → « ${maj.label} »` : null].filter(Boolean).join(', ');
+      return { message: `Repère #${n} corrigé : ${quoi}.`, fait };
+    },
+
+    /*
+     * UN NOM DE MOTIF EST UNE HYPOTHESE, ET UNE HYPOTHESE SE CORRIGE.
+     *
+     * L'identifiant, la teinte et les occurrences ne bougent pas : le motif est
+     * le meme objet, il a change de nom, pas de nature. Sans ce chemin, la
+     * seule facon de corriger etait d'en declarer un nouveau -- et de perdre
+     * les occurrences deja marquees, c'est-a-dire ce qui faisait sa valeur.
+     */
+    renommer_motif: ({ id, nom, mecanisme }) => {
+      const n = Number(id);
+      if (!Number.isInteger(n)) return { erreur: 'Identifiant manquant.' };
+      if (nom == null && mecanisme == null) {
+        return { erreur: 'Rien à changer : donne un nom, une description, ou les deux.' };
+      }
+      if (nom != null) {
+        const v = String(nom).trim().replace(/\s+/g, ' ');
+        if (v.length < 3 || v.length > 40) return { erreur: 'Le nom fait deux à quatre mots.' };
+      }
+      if (mecanisme != null && String(mecanisme).trim().length < 10) {
+        return { erreur: 'Décris le mécanisme en une phrase.' };
+      }
+      const avant = allMotifs(userId).find(x => x.id === n);
+      if (!avant) return { erreur: `Aucun motif #${n}.` };
+
+      const r = renommerMotif(n, { nom, mecanisme }, userId);
+      if (r.erreur === 'introuvable') return { erreur: `Aucun motif #${n}.` };
+      if (r.erreur) return { erreur: `Impossible : ${r.erreur}.` };
+
+      const motif = allMotifs(userId).find(x => x.id === n);
+      const fait = { type: 'motif', renomme: true, avant: avant.nom, ...motif };
+      send('geste', fait);
+      return { message: avant.nom !== motif.nom
+        ? `Motif #${n} renommé : « ${avant.nom} » → « ${motif.nom} ». Ses ${motif.vues} occurrences sont gardées.`
+        : `Motif #${n} : description réécrite.`, fait };
     },
 
     suivre_motif: ({ nom, mecanisme }) => {

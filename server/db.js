@@ -994,6 +994,37 @@ export function teinterMotif(id, teinte, userId = OWNER) {
   return info.changes > 0;
 }
 
+/**
+ * RENOMMER UN MOTIF SANS PERDRE SON HISTOIRE.
+ *
+ * Le nom d'un motif est une hypothese, et une hypothese se corrige : « humour
+ * de defense » devient « minimisation » quand on a compris que ce n'etait pas
+ * de l'humour. Sans ce chemin, la seule facon de corriger etait d'en creer un
+ * nouveau -- et de perdre les quarante occurrences deja marquees, c'est-a-dire
+ * exactement ce qui donnait sa valeur au motif.
+ *
+ * L'IDENTIFIANT, LA TEINTE ET LES OCCURRENCES NE BOUGENT PAS. Le motif est le
+ * meme objet ; il a change de nom, pas de nature. Un motif qui changerait de
+ * couleur en changeant de nom se lirait comme un motif neuf partout ou sa
+ * pastille apparait.
+ *
+ * @returns {{ok: true, motif} | {erreur: string}}
+ */
+export function renommerMotif(id, { nom, mecanisme }, userId = OWNER) {
+  const cur = db.prepare('SELECT * FROM motifs WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!cur) return { erreur: 'introuvable' };
+  const n = nom == null ? cur.nom : String(nom).trim().replace(/\s+/g, ' ');
+  const m = mecanisme == null ? cur.mecanisme : String(mecanisme).trim().replace(/\s+/g, ' ');
+  if (n !== cur.nom) {
+    // Deux motifs du meme nom rendraient l'un des deux inatteignable : c'est le
+    // nom qui sert a les distinguer partout ailleurs dans le produit.
+    const pris = db.prepare('SELECT id FROM motifs WHERE user_id = ? AND nom = ? AND id <> ?').get(userId, n, id);
+    if (pris) return { erreur: 'ce nom est déjà pris' };
+  }
+  db.prepare('UPDATE motifs SET nom = ?, mecanisme = ? WHERE id = ? AND user_id = ?').run(n, m, id, userId);
+  return { ok: true, motif: db.prepare('SELECT * FROM motifs WHERE id = ?').get(id) };
+}
+
 export function deleteMotif(id, userId = OWNER) {
   const m = db.prepare('SELECT id FROM motifs WHERE id = ? AND user_id = ?').get(id, userId);
   if (!m) return false;

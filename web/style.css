@@ -1914,6 +1914,9 @@ body:has(#ambiance) { background: transparent; }
 .geste .gtxt { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .geste .gtxt b { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
 .geste .gtxt span { font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+/* Ce qu'il y avait avant la correction, en retrait : c'est ce qui prouve que le
+   compagnon a corrigé le repère au lieu d'en poser un deuxième à côté. */
+.geste .gavant { color: var(--ink-faint); font-size: 12px; }
 .geste .gbtn {
   flex: none; background: none; border: 1px solid var(--line);
   color: var(--ink-dim); border-radius: 7px; padding: 4px 11px; font-size: 12px;

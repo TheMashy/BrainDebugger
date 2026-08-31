@@ -824,8 +824,13 @@ function gestesMarkup() {
     : `<div class="geste repere">
          <span class="gicone">${icone(g.theme, 20)}</span>
          <div class="gtxt">
-           <b>Repère posé</b>
-           <span>${esc(g.label)} · ${fmtDay(g.date)}</span>
+           ${/* UNE CORRECTION DIT CE QU'ELLE CORRIGE. Sans l'état d'avant, elle
+                 est indistinguable d'une pose — et on ne peut pas savoir si le
+                 compagnon a compris la rectification ou posé un deuxième
+                 repère à côté du premier. */''}
+           <b>${g.corrige ? 'Repère corrigé' : 'Repère posé'}</b>
+           <span>${esc(g.label)} · ${fmtDay(g.date)}${g.corrige && g.avant
+             ? ` <span class="gavant">au lieu de ${esc(g.avant.label)} · ${fmtDay(g.avant.date)}</span>` : ''}</span>
          </div>
          <button class="gbtn" data-voir="${g.date}">${ico('oeil', 12)}voir</button>
        </div>`).join('')}</div>`;
