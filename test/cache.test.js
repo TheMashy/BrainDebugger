@@ -186,3 +186,45 @@ test('au plus quatre points de reprise, l’automatique compris', () => {
   const marqueurs = JSON.stringify(r).split('"cache_control"').length - 1;
   assert.ok(marqueurs <= 3, `${marqueurs} marqueurs explicites : l’automatique en prend un quatrième`);
 });
+
+/* ============ LA LECTURE EN LOT ============ */
+
+test('la requête part par un seul chemin, quel que soit le tuyau', async () => {
+  /*
+   * Elle part maintenant tout de suite ou en lot à moitié prix. Deux copies du
+   * même prompt finissent toujours par diverger, et la divergence se lirait dans
+   * une lecture légèrement différente selon le chemin — ce que personne ne
+   * saurait expliquer.
+   */
+  const lecture = await import('../server/lecture.js');
+  const r = lecture.requeteLecture({ etendue: 400, texte: 'le corpus' },
+                                   { anthropicModel: 'claude-opus-5' });
+  assert.equal(r.model, 'claude-opus-5');
+  assert.ok(r.tools?.length, 'la lecture répond par un outil, ou elle ne répond pas');
+  assert.deepEqual(r.tool_choice, { type: 'tool', name: 'rendre_lecture' });
+  assert.equal(r.output_config.effort, 'high');
+  // `fallbacks` est REFUSÉ par l'API des lots : un paramètre accepté ici et
+  // rejeté là ferait échouer le lot entier sur une validation.
+  assert.equal('fallbacks' in r, false);
+  assert.equal('betas' in r, false);
+  assert.match(r.messages[0].content, /le corpus/);
+});
+
+test('le lot est un réglage, et il est allumé par défaut', () => {
+  // La lecture de fond tourne toute seule une fois par semaine, l'écran garde
+  // la précédente affichée : personne ne la regarde apparaître.
+  assert.equal(DEFAULT_SETTINGS.lectureEnLot, true);
+  assert.equal(DEFAULT_SETTINGS.lectureLot, null);
+  assert.equal(DEFAULT_SETTINGS.lectureLotErreur, null);
+});
+
+test('un lot en cours empêche d’en lancer un deuxième', async () => {
+  // Sans ce garde, l'écran affiche « relire » pendant qu'une lecture est déjà
+  // partie, et cliquer en lancerait une deuxième — payante, sur le même corpus,
+  // pour le même résultat.
+  setSettings({ lectureLot: { id: 'msgbatch_x', depuis: new Date().toISOString() } }, OWNER);
+  const e = await api.routes['GET /api/lecture']({ userId: OWNER });
+  assert.equal(e.enLot, true);
+  assert.equal(e.arelire, false, 'la relance automatique repartirait sur un lot déjà en cours');
+  setSettings({ lectureLot: null }, OWNER);
+});

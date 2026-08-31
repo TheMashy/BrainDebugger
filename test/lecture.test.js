@@ -75,7 +75,9 @@ test('les intensités hors échelle sont ramenées dedans', () => {
 
 test('rien d’exploitable rend une lecture vide, pas une exception', () => {
   assert.deepEqual(valider(null, DATES),
-    { synthese: '', themes: [], pistes: [], carte: { noeuds: [], liens: [] } });
+    // `horizons: null` et pas absent : sans lignes de journal, le serveur ne
+    // peut pas savoir si une fenêtre a de quoi parler, donc aucune ne parle.
+    { synthese: '', horizons: null, themes: [], pistes: [], carte: { noeuds: [], liens: [] } });
   assert.deepEqual(valider({ themes: 'pas un tableau' }, DATES).themes, []);
   assert.deepEqual(valider({ themes: [{}] }, DATES).themes, []);
 });
@@ -193,57 +195,58 @@ const ecrire = (date, texte) => {
   addMessage({ ts: `${date}T20:00:00Z`, date, role: 'user', text: texte });
   api.invalidate(OWNER);
 };
+// La route est asynchrone depuis qu'elle relève le lot en passant.
 const etat = () => api.routes['GET /api/lecture']({ userId: OWNER });
 
-test('sans assez de journées, la lecture n’est pas possible', () => {
+test('sans assez de journées, la lecture n’est pas possible', async () => {
   for (let i = 1; i <= 5; i++) ecrire(`2026-01-0${i}`, 'une journée');
-  const r = etat();
+  const r = await etat();
   assert.equal(r.possible, false);
   assert.equal(r.ecrites, 5);
 });
 
-test('sans lecture, il faut la lancer ; avec, le retard décide', () => {
+test('sans lecture, il faut la lancer ; avec, le retard décide', async () => {
   for (let i = 6; i <= 25; i++) ecrire(`2026-01-${String(i).padStart(2, '0')}`, 'une journée');
-  assert.equal(etat().possible, true);
-  assert.equal(etat().arelire, true, 'aucune lecture : il faut la faire');
+  assert.equal((await etat()).possible, true);
+  assert.equal((await etat()).arelire, true, 'aucune lecture : il faut la faire');
 
   setLecture({ contenu: { synthese: 'x', themes: [] },
                jusqu_au: '2026-01-25', jours: 25, modele: 'm', userId: OWNER });
-  const a = etat();
+  const a = await etat();
   assert.deepEqual([a.retard, a.perime, a.arelire], [0, false, false]);
 
   // Écrire tous les soirs ne doit PAS relancer une relecture complète du corpus
   // tous les soirs, pour un thème qui n'aura pas bougé d'un cheveu.
   ecrire('2026-01-26', 'une journée');
   ecrire('2026-01-27', 'une journée');
-  const b = etat();
+  const b = await etat();
   assert.deepEqual([b.retard, b.perime, b.arelire], [2, true, false]);
 
   // Passé le seuil, elle se relance seule.
   for (let i = 1; i <= 14; i++) ecrire(`2026-02-${String(i).padStart(2, '0')}`, 'une journée');
-  assert.equal(etat().arelire, true);
+  assert.equal((await etat()).arelire, true);
 });
 
-test('les notes apportées font vieillir la carte, pas seulement les journées', () => {
+test('les notes apportées font vieillir la carte, pas seulement les journées', async () => {
   // Coller trois ans de carnet est l'événement qui change le plus une carte, et
   // c'était exactement celui qui ne comptait pas : une note n'est pas une
   // journée, donc elle ne bougeait pas le retard.
   setLecture({ contenu: { synthese: 'x', themes: [] },
                jusqu_au: '2026-02-14', jours: 40, modele: 'm', userId: OWNER });
-  const avant = etat();
+  const avant = await etat();
   assert.equal(avant.notes, 0);
   for (let i = 0; i < 30; i++) {
     addCarnet({ texte: `vieille note ${i}`, jour: null, userId: OWNER,
                 quandCree: new Date(Date.now() + 1000 + i).toISOString() });
   }
   api.invalidate(OWNER);
-  const apres = etat();
+  const apres = await etat();
   assert.equal(apres.notes, 30);
   assert.ok(apres.retard >= 30);
   assert.equal(apres.arelire, true, 'trente notes collées n’ont pas rafraîchi la carte');
 });
 
-test('une lecture faite avant la bascule s’affiche encore, mais périmée', () => {
+test('une lecture faite avant la bascule s’affiche encore, mais périmée', async () => {
   // Ce qu'une migration destructive aurait effacé : la seule lecture que
   // quelqu'un possède. On la rend, marquée « ancienne », et l'interface propose
   // de relire — un écran vide serait une régression pour qui met à jour.
@@ -253,7 +256,7 @@ test('une lecture faite avant la bascule s’affiche encore, mais périmée', ()
     .run(OWNER, 'moyen', '2026-02-01T00:00:00Z', '2026-01-25', 25, 'm',
          JSON.stringify({ synthese: 'la vieille', themes: [] }));
   api.invalidate(OWNER);
-  const r = etat();
+  const r = await etat();
   assert.equal(r.ancienne, true);
   assert.equal(r.lecture.synthese, 'la vieille');
 });
