@@ -800,6 +800,26 @@ function rembobMarkup(m) {
 
 let GESTES = [];
 
+/**
+ * Ce qu'une correction remplace -- et RIEN D'AUTRE.
+ *
+ * Une correction de date seule affichait « au lieu de arrêt du traitement · 21
+ * août », en recopiant un label identique de part et d'autre du « au lieu de ».
+ * L'oeil doit alors comparer deux chaines pour trouver le seul mot qui a bouge.
+ * On ne montre donc que le champ qui a change : la date, le label, ou les deux
+ * quand les deux ont bouge.
+ */
+function avantDe(g) {
+  const a = g?.avant;
+  if (!a) return '';
+  const dateAutre = a.date && a.date !== g.date;
+  const labelAutre = a.label && a.label !== g.label;
+  if (dateAutre && labelAutre) return `au lieu de ${esc(a.label)} · ${fmtDay(a.date)}`;
+  if (dateAutre) return `au lieu du ${fmtDay(a.date)}`;
+  if (labelAutre) return `au lieu de « ${esc(a.label)} »`;
+  return '';
+}
+
 function gestesMarkup() {
   if (!GESTES.length) return '';
   /*
@@ -829,8 +849,8 @@ function gestesMarkup() {
                  compagnon a compris la rectification ou posé un deuxième
                  repère à côté du premier. */''}
            <b>${g.corrige ? 'Repère corrigé' : 'Repère posé'}</b>
-           <span>${esc(g.label)} · ${fmtDay(g.date)}${g.corrige && g.avant
-             ? ` <span class="gavant">au lieu de ${esc(g.avant.label)} · ${fmtDay(g.avant.date)}</span>` : ''}</span>
+           <span>${esc(g.label)} · ${fmtDay(g.date)}${g.corrige && avantDe(g)
+             ? ` <span class="gavant">${avantDe(g)}</span>` : ''}</span>
          </div>
          <button class="gbtn" data-voir="${g.date}">${ico('oeil', 12)}voir</button>
        </div>`).join('')}</div>`;
@@ -3796,6 +3816,118 @@ function wireMirror() {
 
 /* ============================= vue : réglages ============================= */
 
+/* ==================================================================
+   QUANTIFIED SELF : CE QU'UNE AUTRE APPLICATION A ENVOYE.
+   ================================================================== */
+
+let QSVUE = 'series';
+
+/** Un nombre lisible d'un coup d'oeil : 8410 devient « 8 410 », 6.2 reste « 6,2 ». */
+const qsNombre = v => v == null ? '—' : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(v);
+
+/**
+ * « aujourd'hui 14:07 » plutôt qu'une date complète.
+ *
+ * On regarde ce journal quand on vient de brancher quelque chose, c'est-à-dire
+ * dans les minutes qui suivent. Une date absolue oblige alors à calculer si
+ * c'est bien l'envoi qu'on vient de déclencher.
+ */
+function qsQuand(iso) {
+  const d = new Date(iso);
+  const jour = d.toISOString().slice(0, 10);
+  const auj = new Date().toISOString().slice(0, 10);
+  const q = jour === auj ? "aujourd'hui" : jour === dayShift(auj, -1) ? 'hier' : fmtDay(jour);
+  return `${q} ${fmtTime(iso)}`;
+}
+
+/*
+ * L'EXEMPLE EST DANS LA PAGE, PAS DANS UNE DOC.
+ *
+ * Ce qu'on cherche en arrivant ici est « qu'est-ce que je colle dans l'autre
+ * application ? ». La route, la clé et une charge qui marche répondent en une
+ * fois ; un lien vers un fichier README fait ouvrir un deuxième onglet pour
+ * apprendre trois lignes.
+ */
+const qsExemple = cle => `curl -X POST ${location.origin}/api/qs \\
+  -H "Authorization: Bearer ${cle || '<ta-clé>'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"source":"montre","date":"${new Date().toISOString().slice(0, 10)}",
+       "mesures":{"sommeil_h":6.2,"pas":8410,"cafe":3}}'`;
+
+function qsSeriesMarkup(series) {
+  if (!series.length) return `<p class="faint" style="font-size:12.5px;margin:14px 0 0">
+    Rien n'est encore arrivé. Envoie la commande ci-dessus : la série apparaîtra ici.</p>`;
+  return `<div class="tblwrap"><table class="tbl qstbl">
+    <thead><tr>
+      <th>Série</th><th>Source</th><th class="n">Points</th><th>Étendue</th><th>Dernière</th><th></th>
+    </tr></thead><tbody>
+    ${series.map(x => `<tr>
+      <td class="mono">${esc(x.cle)}${x.unite ? ` <span class="faint">${esc(x.unite)}</span>` : ''}</td>
+      <td class="faint">${esc(x.source)}</td>
+      <td class="n">${x.n}</td>
+      ${/* Une série entièrement textuelle n'a pas d'étendue, et en afficher une
+            calculée sur zéro nombre donnerait « 0 – 0 », qu'on lirait comme une
+            mesure plate au lieu d'une absence de mesure. */''}
+      <td class="faint">${x.sansNombre === x.n ? 'texte'
+        : `${qsNombre(x.bas)} – ${qsNombre(x.haut)}`}</td>
+      <td>${x.derniere
+        ? `${qsNombre(x.derniere.valeur) === '—' ? esc(x.derniere.texte ?? '') : qsNombre(x.derniere.valeur)}
+           <span class="faint" style="font-size:11.5px">· ${fmtDay(x.derniere.date)}</span>`
+        : '—'}</td>
+      <td><button class="btn qsoubli" data-source="${esc(x.source)}" data-cle="${esc(x.cle)}"
+            style="padding:2px 8px;font-size:11px" data-tip="oublier cette série">${ico('corbeille', 11)}</button></td>
+    </tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+function qsJournalMarkup(journal) {
+  if (!journal.length) return `<p class="faint" style="font-size:12.5px;margin:14px 0 0">
+    Aucun envoi reçu pour l'instant.</p>`;
+  return `<div class="tblwrap"><table class="tbl qstbl">
+    <thead><tr>
+      <th>Quand</th><th>Source</th><th class="n">Reçues</th><th class="n">Gardées</th><th>Ce qui a été laissé</th>
+    </tr></thead><tbody>
+    ${journal.map(l => `<tr class="${l.statut >= 400 ? 'qsko' : l.gardees < l.recues ? 'qspartiel' : ''}">
+      <td class="mono">${qsQuand(l.quand)}</td>
+      <td class="faint">${esc(l.source ?? '—')}
+        ${l.apercu ? `<span class="qsapercu">${esc(l.apercu)}</span>` : ''}</td>
+      <td class="n">${l.recues}</td>
+      <td class="n">${l.gardees}</td>
+      ${/* La raison EN TOUTES LETTRES. Un code d'erreur renverrait au code
+            source, et personne ne lit le code source de son journal intime. */''}
+      <td>${l.refus ? esc(l.refus) : '<span class="faint">—</span>'}</td>
+    </tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+function qsMarkup(qs) {
+  const s = S.settings;
+  return `
+    <h2>${ico('antenne', 15)}Quantified self</h2>
+    <p class="sub">
+      Une application qui mesure — une montre, un téléphone, une balance, un tracker de sommeil —
+      pousse ici ce qu'elle relève. Elle utilise <b>la même clé que la passerelle</b> : un seul secret
+      à coller, un seul à révoquer. <b>Rien de ce qui arrive ici ne compte comme une journée écrite</b> —
+      une mesure est relevée par une machine, une journée est vécue et notée à la main.
+    </p>
+    ${!s.passerelleCle ? `<p class="warn" style="font-size:12.5px;margin:0 0 12px">
+      Aucune clé : crée-la dans <b>La passerelle</b>, juste au-dessus. Sans elle, rien ne peut envoyer.</p>` : ''}
+    <pre class="qscode">${esc(qsExemple(s.passerelleCle))}</pre>
+    <p class="faint" style="font-size:11.5px;margin:8px 0 16px">
+      La forme du JSON est libre : à plat, dans une enveloppe, en lot, ou avec un niveau d'imbrication.
+      Les noms sont normalisés — <span class="mono">Sommeil (h)</span> et <span class="mono">sommeil_h</span>
+      sont la même série. Un même jour renvoyé deux fois <b>remplace</b>, il ne s'additionne pas.
+      <span class="mono">source · date · at · ts · mesures</span> décrivent l'envoi : ce ne sont jamais des mesures.
+    </p>
+    <div class="horizons qsonglets">
+      <button data-qsvue="series" aria-pressed="${QSVUE === 'series'}">Séries ${qs.series.length || ''}</button>
+      <button data-qsvue="journal" aria-pressed="${QSVUE === 'journal'}">Journal ${qs.journal.length || ''}</button>
+    </div>
+    <div id="qspan">${QSVUE === 'series' ? qsSeriesMarkup(qs.series) : qsJournalMarkup(qs.journal)}</div>
+    ${QSVUE === 'journal' && qs.journal.length ? `<button class="btn" id="qsvider"
+      style="margin-top:12px;padding:3px 10px;font-size:11.5px">${ico('corbeille', 11)}vider le journal</button>` : ''}`;
+}
+
 async function renderSettings() {
   const s = S.settings;
 
@@ -3880,6 +4012,10 @@ async function renderSettings() {
         </p>
       </div>
     </div>
+
+    ${/* Juste sous la passerelle, parce que c'est le MEME tuyau dans l'autre
+          sens et la même clé. Les séparer ferait chercher la clé deux fois. */''}
+    <div class="card qscard" id="qscard"><p class="faint" style="font-size:12.5px;margin:0">Quantified self…</p></div>
 
     <div class="row">
       <div class="card">
@@ -4253,8 +4389,26 @@ async function renderBackendCfg() {
       <label class="field"><span>Modèle</span><input type="text" id="apiModel" value="${esc(s.apiModel)}"></label>
     </div>
     <label class="field"><span>Clé API</span><input type="password" id="apiKey" value="${esc(s.apiKey)}"></label>`;
-  } else { el.innerHTML = ''; return; }
+  } else { el.innerHTML = ''; }
 
+  /*
+   * PAS DE `return` ICI, ET C'EST UNE CORRECTION.
+   *
+   * Il y en avait un dans la branche « aucun modèle », et il quittait
+   * renderSettings() tout entier -- pas seulement le bloc du backend. Tout ce
+   * qui suit dans cette fonction restait donc SANS GESTIONNAIRE dans le mode
+   * hors-ligne : la clé de la passerelle ne se créait pas, la lecture en lot ne
+   * se cochait pas, le carnet ne se retirait pas du contexte. Les boutons
+   * s'affichaient normalement et ne faisaient rien -- la panne la plus longue à
+   * comprendre, parce qu'il n'y a rien à voir.
+   *
+   * Et c'était le mode exactement le plus concerné : quelqu'un qui tient à ce
+   * que rien ne sorte de sa machine est le premier à vouloir brancher une
+   * application locale.
+   *
+   * Tous les branchements ci-dessous passent par `?.`, donc l'absence des
+   * champs du backend ne casse rien.
+   */
   for (const id of ['ollamaUrl', 'ollamaModel', 'anthropicModel', 'anthropicModelChat', 'anthropicEffort']) {
     $('#' + id)?.addEventListener('change', async e => { await saveSettings({ [id]: e.target.value }); });
   }
@@ -4321,6 +4475,43 @@ async function renderBackendCfg() {
       toast('Clé copiée');
     } catch { /* pas de presse-papiers : elle est lisible à l'écran, ça suffit */ }
   });
+  /*
+   * LA CARTE QUANTIFIED SELF SE REMPLIT APRÈS COUP.
+   *
+   * Elle interroge une route à elle, et pas /api/state : brancher son inventaire
+   * sur l'état général le ferait recalculer à chaque note posée, à chaque
+   * message envoyé, pour une carte qu'on ouvre trois fois dans sa vie. Elle
+   * arrive donc en différé, et la page ne l'attend pas pour s'afficher.
+   */
+  const peindreQS = async () => {
+    const carte = $('#qscard');
+    if (!carte) return;
+    try {
+      const qs = await api('/api/qs');
+      carte.innerHTML = qsMarkup(qs);
+      carte.querySelectorAll('[data-qsvue]').forEach(b => b.addEventListener('click', () => {
+        QSVUE = b.dataset.qsvue;
+        peindreQS();
+      }));
+      carte.querySelectorAll('.qsoubli').forEach(b => b.addEventListener('click', async () => {
+        // Une série s'oublie sans confirmation à rallonge : c'est une série
+        // mesurée par une machine, elle repartira au prochain envoi. Ce qui ne
+        // se récupère pas, ce sont les journées — et elles ne sont pas ici.
+        const { retirees } = await api('/api/qs/oublier', { source: b.dataset.source, cle: b.dataset.cle });
+        toast(`${retirees} mesure${retirees > 1 ? 's' : ''} oubliée${retirees > 1 ? 's' : ''}`);
+        peindreQS();
+      }));
+      carte.querySelector('#qsvider')?.addEventListener('click', async () => {
+        await api('/api/qs/journal/vider', {});
+        peindreQS();
+      });
+    } catch (err) {
+      carte.innerHTML = `<h2>${ico('antenne', 15)}Quantified self</h2>
+        <p class="warn" style="font-size:12.5px;margin:0">${esc(err.message)}</p>`;
+    }
+  };
+  peindreQS();
+
   $('#lectureEnLot')?.addEventListener('change', async e => {
     await saveSettings({ lectureEnLot: e.target.checked });
     toast(e.target.checked ? 'La lecture de fond partira en tâche de fond' : 'La lecture de fond sera immédiate');

@@ -246,6 +246,70 @@ CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
   PRIMARY KEY (user_id, date)
 );
 
+/*
+ * LES MESURES : ce qu'une AUTRE application sait de la personne.
+ *
+ * Montre, telephone, balance, tracker de sommeil, appli de suivi. Elles
+ * mesurent en continu ce que personne ne pense a ecrire le soir -- l'heure de
+ * coucher, les pas, le temps d'ecran, la cafeine -- et c'est precisement le
+ * genre de fait qui explique une journee a 3 quand la personne, elle, ne voit
+ * qu'une journee a 3.
+ *
+ * UNE MESURE N'EST PAS UNE NOTE, et l'invariant est le meme que pour le
+ * carnet : elle n'entre jamais dans un compte de journees. Une journee est
+ * vecue et notee a la main ; une mesure est relevee par une machine, souvent a
+ * l'insu de la personne. Les compter ensemble deplacerait le plancher, la
+ * reference, et le denominateur de tout ce que l'application affiche -- au
+ * profit de journees ou personne n'a rien dit.
+ *
+ * L'INDEX UNIQUE EST LA FONCTIONNALITE PRINCIPALE. Une application de suivi
+ * resynchronise : elle renvoie la semaine entiere a chaque reveil, parce que
+ * c'est plus simple que de savoir ce qu'elle a deja envoye. Sans contrainte
+ * d'unicite, huit mille pas deviennent vingt-quatre mille en trois envois, et
+ * la serie ment sans que rien ne le signale. La cle est (source, jour, mesure)
+ * et le dernier envoi remplace le precedent.
+ */
+CREATE TABLE IF NOT EXISTS mesures (
+  id      INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  date    TEXT NOT NULL,        -- 'AAAA-MM-JJ' : le jour auquel elle appartient
+  ts      TEXT,                 -- l'instant exact, si l'application l'a donne
+  source  TEXT NOT NULL,        -- qui l'a envoyee : 'montre', 'machitool'...
+  cle     TEXT NOT NULL,        -- normalisee : 'sommeil_h', 'pas', 'ecran_min'
+  valeur  REAL,                 -- numerique, ou NULL
+  texte   TEXT,                 -- si la mesure n'est pas un nombre
+  unite   TEXT,
+  recu_le TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mesures_cle ON mesures(user_id, source, date, cle);
+CREATE INDEX IF NOT EXISTS idx_mesures_date ON mesures(user_id, date);
+
+/*
+ * LE JOURNAL DES ENVOIS : ce qui est arrive, et ce qui a ete refuse.
+ *
+ * Sans lui, brancher une application exterieure se debogue a l'aveugle : elle
+ * envoie, le site repond 200 ou 401, et personne ne peut voir ce que le site a
+ * COMPRIS de ce qui est arrive. Une cle mal orthographiee, une date au mauvais
+ * format, un tableau la ou on attendait un objet -- tout ca se voit ici, dans
+ * l'application, sans ouvrir un terminal.
+ *
+ * ON N'Y MET PAS D'ADRESSE IP. Elle n'aiderait a rien pour deboguer -- c'est
+ * toujours la meme machine -- et un journal d'adresses horodate est un fichier
+ * de deplacements dont personne n'a besoin ici.
+ */
+CREATE TABLE IF NOT EXISTS qs_journal (
+  id      INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT '${OWNER}',
+  quand   TEXT NOT NULL,
+  source  TEXT,
+  statut  INTEGER NOT NULL,     -- le code HTTP rendu
+  recues  INTEGER NOT NULL DEFAULT 0,
+  gardees INTEGER NOT NULL DEFAULT 0,
+  refus   TEXT,                 -- la raison, en francais, s'il y en a une
+  apercu  TEXT                  -- les premieres cles vues : on reconnait son app
+);
+CREATE INDEX IF NOT EXISTS idx_qs_journal ON qs_journal(user_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   key     TEXT NOT NULL,
@@ -1076,6 +1140,89 @@ export function amplitudes(userId = OWNER, depuis = null) {
   `).all(...(depuis ? [userId, depuis] : [userId]));
   return rows.map(r => ({ ...r, ecart: r.haut - r.bas }));
 }
+
+/* ---------- mesures (quantified self) ---------- */
+
+/** Combien d'envois on garde. Au-dela, on ne debogue plus, on fouille. */
+export const JOURNAL_QS = 120;
+
+/**
+ * Ecrire une mesure, ou remplacer celle du meme jour.
+ *
+ * `INSERT ... ON CONFLICT DO UPDATE` et non `INSERT OR REPLACE` : le second
+ * supprime la ligne puis en cree une neuve, ce qui change son `id` a chaque
+ * resynchronisation. Un identifiant qui bouge tout seul casse tout ce qui
+ * pourrait un jour pointer dessus.
+ */
+export function poserMesure({ date, ts = null, source, cle, valeur = null,
+                              texte = null, unite = null, userId = OWNER }) {
+  const info = db.prepare(`
+    INSERT INTO mesures(user_id, date, ts, source, cle, valeur, texte, unite, recu_le)
+    VALUES(?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(user_id, source, date, cle) DO UPDATE SET
+      ts = excluded.ts, valeur = excluded.valeur, texte = excluded.texte,
+      unite = excluded.unite, recu_le = excluded.recu_le
+  `).run(userId, date, ts, source, cle, valeur, texte, unite, new Date().toISOString());
+  return info.changes > 0;
+}
+
+export const mesuresDuJour = (date, userId = OWNER) => db.prepare(
+  'SELECT source, cle, valeur, texte, unite, ts FROM mesures WHERE user_id = ? AND date = ? ORDER BY cle ASC'
+).all(userId, date);
+
+export const mesuresEntre = (debut, fin, userId = OWNER) => db.prepare(
+  'SELECT date, source, cle, valeur, texte, unite FROM mesures WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, cle ASC'
+).all(userId, debut, fin);
+
+/**
+ * L'INVENTAIRE : une ligne par serie recue, avec de quoi juger si elle est
+ * saine. Le compte, l'etendue, la derniere valeur et la derniere date.
+ *
+ * C'est ce que l'onglet montre en premier, avant le journal : une serie qui
+ * s'appelle `pas` et une autre `Pas (jour)` sautent aux yeux ici, alors
+ * qu'elles se noient dans une liste d'envois.
+ */
+export const inventaireMesures = (userId = OWNER) => db.prepare(`
+  SELECT source, cle, unite, COUNT(*) n,
+         MIN(date) depuis, MAX(date) jusqu_au,
+         AVG(valeur) moyenne, MIN(valeur) bas, MAX(valeur) haut,
+         SUM(CASE WHEN valeur IS NULL THEN 1 ELSE 0 END) sansNombre
+  FROM mesures WHERE user_id = ?
+  GROUP BY source, cle
+  ORDER BY n DESC, cle ASC
+`).all(userId);
+
+/** La derniere valeur connue d'une serie -- celle qu'on affiche a cote de son nom. */
+export const derniereMesure = (source, cle, userId = OWNER) => db.prepare(
+  'SELECT date, valeur, texte, unite FROM mesures WHERE user_id = ? AND source = ? AND cle = ? ORDER BY date DESC LIMIT 1'
+).get(userId, source, cle) ?? null;
+
+/** Retirer une serie entiere : une integration ratee doit pouvoir s'annuler. */
+export const oublierMesure = (source, cle, userId = OWNER) =>
+  db.prepare('DELETE FROM mesures WHERE user_id = ? AND source = ? AND cle = ?').run(userId, source, cle).changes;
+
+export function noterEnvoi({ source = null, statut, recues = 0, gardees = 0,
+                             refus = null, apercu = null, userId = OWNER }) {
+  db.prepare(`
+    INSERT INTO qs_journal(user_id, quand, source, statut, recues, gardees, refus, apercu)
+    VALUES(?,?,?,?,?,?,?,?)
+  `).run(userId, new Date().toISOString(), source, statut, recues, gardees, refus, apercu);
+  // On taille a chaque ecriture plutot qu'a l'ouverture de l'onglet : une
+  // application qui envoie toutes les cinq minutes remplirait la table entre
+  // deux visites, et c'est justement celle qu'on n'ouvre jamais.
+  db.prepare(`
+    DELETE FROM qs_journal WHERE user_id = ? AND id NOT IN (
+      SELECT id FROM qs_journal WHERE user_id = ? ORDER BY id DESC LIMIT ?
+    )
+  `).run(userId, userId, JOURNAL_QS);
+}
+
+export const journalQS = (userId = OWNER, limite = JOURNAL_QS) => db.prepare(
+  'SELECT id, quand, source, statut, recues, gardees, refus, apercu FROM qs_journal WHERE user_id = ? ORDER BY id DESC LIMIT ?'
+).all(userId, limite);
+
+export const viderJournalQS = (userId = OWNER) =>
+  db.prepare('DELETE FROM qs_journal WHERE user_id = ?').run(userId).changes;
 
 /* ---------- anchors ---------- */
 

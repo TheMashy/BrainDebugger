@@ -44,7 +44,10 @@ export const TRAITS = {
   fleche:   '<path d="M3.2 9h10.4"/><path d="M10.2 5.4 13.8 9l-3.6 3.6"/>',
   point:    '<circle cx="9" cy="9" r="5.6"/><circle cx="9" cy="9" r="1.7" fill="currentColor" stroke="none"/>',
   moins:    '<path d="M4.2 9h9.6"/>',
-  plus:     '<path d="M9 4.2v9.6M4.2 9h9.6"/>'
+  plus:     '<path d="M9 4.2v9.6M4.2 9h9.6"/>',
+  // Antenne : un point et deux ondes qui en partent. Ce qui ARRIVE d'ailleurs
+  // -- une montre, une balance, un telephone qui pousse ce qu'il a mesure.
+  antenne:  '<circle cx="5" cy="13" r="1.6" fill="currentColor" stroke="none"/><path d="M8.8 13a3.8 3.8 0 0 0-3.8-3.8"/><path d="M13.2 13A8.2 8.2 0 0 0 5 4.8"/>'
 };
 
 /*

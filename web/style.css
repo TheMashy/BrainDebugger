@@ -2946,3 +2946,63 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   .moisruban { gap: 2px; }
   .mjour { height: 38px; font-size: 10.5px; }
 }
+
+/* ==================================================================
+   QUANTIFIED SELF — l'inventaire de ce qu'une autre application envoie.
+   ================================================================== */
+
+.qscard h2 { display: flex; align-items: center; gap: 8px; }
+
+/* La commande à recopier. Elle DÉBORDE plutôt qu'elle ne se replie : une
+   commande curl coupée en deux par un retour à la ligne automatique se colle
+   dans un terminal comme deux commandes cassées. */
+.qscode {
+  margin: 0; padding: 12px 14px; border-radius: 9px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  font: 11.5px/1.65 var(--mono); color: var(--ink-dim);
+  overflow-x: auto; white-space: pre;
+}
+
+/* L'avertissement se voit ou il ne sert a rien. `.warn` n'existait que sur
+   `.pill` : la phrase « aucune clé » sortait en blanc, au milieu d'un
+   paragraphe blanc, et ne disait donc rien de plus que le reste. */
+.qscard .warn { color: var(--warn); }
+
+.qsonglets { margin: 4px 0 6px; align-self: flex-start; }
+
+/* Le journal garde cent vingt envois : déroulé en entier, il pousse tout le
+   bas de Réglages hors de l'écran. Il défile donc DANS sa boîte, et l'en-tête
+   reste collé — sans lui, on descend de vingt lignes et on ne sait plus quelle
+   colonne on lit. */
+#qspan .tblwrap { max-height: 330px; overflow-y: auto; }
+.qstbl thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--panel); padding-top: 2px;
+}
+
+.qstbl td, .qstbl th { padding-right: 16px; }
+.qstbl td:last-child, .qstbl th:last-child { padding-right: 0; }
+
+/* L'aperçu des noms de séries, sous la source : c'est ce qui fait reconnaître
+   son application dans une liste d'envois qui se ressemblent tous. */
+.qsapercu {
+  display: block; font: 11px/1.4 var(--mono); color: var(--ink-faint);
+  max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Trois états, lisibles sans lire : tout est passé, une partie est tombée,
+   rien n'est passé. C'est la colonne qu'on balaye quand ça ne marche pas. */
+.qstbl tr.qspartiel td:first-child { box-shadow: inset 2px 0 0 var(--warn); padding-left: 9px; }
+.qstbl tr.qsko td:first-child { box-shadow: inset 2px 0 0 var(--danger); padding-left: 9px; }
+.qstbl tr.qsko td:last-child { color: var(--danger); }
+
+.qsoubli { opacity: 0; transition: opacity .12s, color .12s; }
+.qstbl tr:hover .qsoubli, .qsoubli:focus-visible { opacity: 1; }
+.qsoubli:hover { color: var(--danger); }
+
+@media (max-width: 700px) {
+  /* Sur téléphone la ligne ne tient pas : l'étendue est ce qu'on lit le moins
+     souvent, et la retirer garde la série, sa source et sa dernière valeur. */
+  .qstbl th:nth-child(4), .qstbl td:nth-child(4) { display: none; }
+  .qsoubli { opacity: 1; }
+}

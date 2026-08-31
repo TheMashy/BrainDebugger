@@ -5,7 +5,8 @@ import {
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
-  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES
+  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
+  inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -1212,6 +1213,41 @@ export const routes = {
      session : elle est appelee par un programme, pas par un navigateur. */
   'POST /api/passerelle/cle': ({ userId }) => ({ cle: poserCle(userId) }),
   'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
+
+  /* ---------- quantified self : ce qui est arrive, et par quel tuyau ----------
+   *
+   * L'inventaire AVANT le journal, et c'est l'ordre qui compte : deux series
+   * presque identiques (`pas` et `pas_jour`) sautent aux yeux dans un
+   * inventaire et se noient dans une liste d'envois. La question qu'on se pose
+   * en ouvrant l'onglet est « qu'est-ce que le site croit savoir ? », pas
+   * « qu'est-ce qui est arrive a 14h07 ? ».
+   */
+  'GET /api/qs': ({ userId }) => {
+    const series = inventaireMesures(userId).map(x => ({
+      ...x,
+      moyenne: x.moyenne == null ? null : Math.round(x.moyenne * 100) / 100,
+      derniere: derniereMesure(x.source, x.cle, userId)
+    }));
+    return {
+      series,
+      total: series.reduce((n, x) => n + x.n, 0),
+      journal: journalQS(userId),
+      // La cle est la meme que celle de la lecture : un seul secret a coller
+      // dans l'application qui envoie, un seul a revoquer si elle fuit.
+      cle: !!getSettings(userId).passerelleCle
+    };
+  },
+
+  'POST /api/qs/oublier': ({ body, userId }) => {
+    const { source, cle } = body ?? {};
+    if (!source || !cle) return { error: 'source et clé requises' };
+    // Une integration ratee doit pouvoir s'annuler. Sans ca, un premier essai
+    // qui envoie des minutes la ou on voulait des heures pollue la serie pour
+    // toujours, et la seule issue est d'en creer une deuxieme a cote.
+    return { retirees: oublierMesure(source, cle, userId) };
+  },
+
+  'POST /api/qs/journal/vider': ({ userId }) => ({ vides: viderJournalQS(userId) }),
 
   'GET /api/lecture': async ({ userId }) => {
     /*
