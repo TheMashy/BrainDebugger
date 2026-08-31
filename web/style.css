@@ -3201,3 +3201,41 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   /* Une section coupée en deux par un saut de page se relit deux fois. */
   .crsec, .crmotifs li, .crjours li { break-inside: avoid; }
 }
+
+/* ==================================================================
+   LES MESURES DANS LA JOURNÉE OUVERTE.
+   ================================================================== */
+
+.jmesures { display: flex; flex-direction: column; gap: 8px; }
+.jmlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+/* Une ligne par mesure : le nom, la valeur, le côté. La grille tient les trois
+   en colonnes — en `flex`, les valeurs ne s'alignent pas d'une ligne à l'autre
+   et la liste se lit comme du texte au lieu d'un relevé. */
+.jm {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 4px 10px;
+  align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line-soft);
+}
+.jm:first-child { border-top: 0; }
+.jmnom { font-size: 12.5px; color: var(--ink-dim); }
+.jmval { font: 500 13px/1.3 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+/* Une espace fine avant l'unité, en `em` et pas en pixels : collée au nombre,
+   « 8,2h » se lit comme une décimale de plus, et 2 px ne suffisaient pas à
+   séparer un chiffre monospace d'une lettre. */
+.jmval i { font-style: normal; font-size: 11px; color: var(--ink-faint); margin-left: .3em; }
+.jmcote { font: 400 11px/1.3 var(--mono); color: var(--ink-faint); white-space: nowrap; }
+.jmcote .faint { font-size: 10.5px; }
+
+/* Le lien prend toute la largeur, sous les trois colonnes : c'est une phrase,
+   pas une quatrième valeur, et la serrer dans une colonne la couperait en
+   confettis de deux mots. */
+.jmlien {
+  grid-column: 1 / -1; font-size: 11.5px; line-height: 1.5;
+  color: var(--ink-faint); padding: 3px 0 1px 9px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.jmlien b { color: var(--ink-dim); font-weight: 500; }
+
+/* Une mesure qui porte un lien connu est la seule qu'on veut voir en premier
+   dans une colonne de huit lignes grises. */
+.jm.lie .jmnom { color: var(--ink); }

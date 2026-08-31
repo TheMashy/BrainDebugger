@@ -7,12 +7,14 @@ import {
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
-  allSeances, addSeance, updateSeance, deleteSeance, motifsEntre
+  allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
+  toutesMesures, signatureQS
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
+import { liens } from './liens.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMoodFil, readEnergy, SENS } from './mood.js';
@@ -256,6 +258,84 @@ export function publicUser(userId) {
  * machine -- le cas nominal de ce produit.
  */
 export const today = () => jourLocal(Date.now());
+
+/* ==================================================================
+   LES LIENS ENTRE LES MESURES ET LES NOTES, CALCULES UNE FOIS.
+   ================================================================== */
+
+const MEMO_LIENS = new Map();
+
+/**
+ * Le calcul croise toute la base de mesures contre tout le journal. On
+ * feuillette vingt journées d'affilée dans « Moi », et le refaire à chaque clic
+ * serait vingt fois le même travail pour vingt fois le même résultat.
+ *
+ * L'invalidation ne se fait pas au temps mais à la SIGNATURE des données : un
+ * cache d'une minute rendrait un résultat périmé juste après un envoi, ce qui
+ * est précisément le moment où quelqu'un regarde.
+ */
+export function liensDe(userId = OWNER) {
+  const sig = signatureQS(userId);
+  const vu = MEMO_LIENS.get(userId);
+  if (vu?.sig === sig) return vu.out;
+  const out = liens(toutesMesures(userId), allEntries(userId));
+  MEMO_LIENS.set(userId, { sig, out });
+  return out;
+}
+
+/**
+ * LES MESURES D'UNE JOURNEE, SITUEES.
+ *
+ * « 5,4 » tout seul ne dit rien : ni si c'est beaucoup, ni si ça compte. On
+ * ajoute donc deux choses, et seulement deux.
+ *
+ * D'abord le COTE : au-dessus ou en dessous de la médiane de la série. C'est ce
+ * qui transforme un nombre en information sans demander à personne de retenir
+ * ses propres normales.
+ *
+ * Ensuite le LIEN, quand il existe et qu'il a survécu à la correction. Une
+ * mesure sans lien connu reste affichée : elle est arrivée, elle a le droit
+ * d'être vue, et la cacher ferait croire qu'elle n'a pas été reçue.
+ */
+export function mesuresSituees(date, userId = OWNER, { avecLiens = true } = {}) {
+  const jour = mesuresDuJour(date, userId);
+  if (!jour.length) return [];
+  const { liens: trouves } = avecLiens ? liensDe(userId) : { liens: [] };
+  const toutes = toutesMesures(userId);
+
+  const medianes = new Map();
+  for (const m of toutes) {
+    const k = `${m.source} ${m.cle}`;
+    if (!medianes.has(k)) medianes.set(k, []);
+    medianes.get(k).push(m.valeur);
+  }
+  for (const [k, v] of medianes) {
+    v.sort((a, b) => a - b);
+    medianes.set(k, v.length % 2 ? v[(v.length - 1) / 2]
+      : (v[v.length / 2 - 1] + v[v.length / 2]) / 2);
+  }
+
+  return jour.map(m => {
+    const k = `${m.source} ${m.cle}`;
+    const med = medianes.get(k) ?? null;
+    // Le lien du jour même passe devant celui du lendemain : sur la journée
+    // qu'on est en train de lire, c'est celui qui parle d'elle.
+    const pour = trouves.filter(l => l.source === m.source && l.cle === m.cle)
+                        .sort((a, b) => a.decalage - b.decalage);
+    return {
+      ...m,
+      mediane: med == null ? null : Math.round(med * 100) / 100,
+      /*
+       * TROIS ETATS. Avec deux, la valeur qui EST la médiane tombait du côté
+       * « haut » et s'annonçait au-dessus d'elle-même. Sur une série impaire,
+       * c'est exactement la journée du milieu — pas un cas de bord.
+       */
+      cote: med == null || m.valeur == null ? null
+        : m.valeur === med ? 'pile' : m.valeur > med ? 'haut' : 'bas',
+      lien: pour[0] ?? null
+    };
+  });
+}
 
 /**
  * SPEC 4.1 - Le plancher.
@@ -649,9 +729,25 @@ export const routes = {
         .map(r => ({ date: r.date, text: r.text, note: r.note }));
       // Les reperes passent le plancher : ce sont des faits que la personne a
       // elle-meme poses, pas une statistique calculee sur elle.
+      /*
+       * LES MESURES PASSENT LE PLANCHER, LEURS LIENS NON.
+       *
+       * La règle du plancher n'est pas « on cache tout » : les repères et les
+       * notes apportées le franchissent déjà, parce que ce sont des FAITS que
+       * la personne a posés, pas une statistique calculée sur elle. Une durée
+       * de sommeil relevée par une montre est de la même nature — un fait,
+       * daté, que rien n'interprète.
+       *
+       * La phrase du lien, elle, est exactement ce que le plancher existe pour
+       * retenir. « Les journées au-dessus de 6,2 h sont notées 2,2 points plus
+       * haut », sur une journée que quelqu'un vient de noter 2, c'est
+       * l'application qui explique à quelqu'un qui va mal que ça se voyait
+       * venir. On garde le chiffre, on retire le commentaire.
+       */
       return { date, note, jour, calendrier, floored: true, floor, yesterday, rawPast: past,
                episodes: null, similar: null, reperes: reperesDuJour(date, userId),
-             amplitude: amplitude(date, userId),
+               amplitude: amplitude(date, userId),
+               mesures: mesuresSituees(date, userId, { avecLiens: false }),
                carnet: carnetDuJour(date, userId) };
     }
 
@@ -717,6 +813,13 @@ export const routes = {
               * de mourir » ecrit le soir, et c'est la bascule qui la raconte.
               */
              journee: journee(date, userId),
+             /*
+              * CE QU'UNE MACHINE A MESURE CE JOUR-LA. Une journée notée 4 avec
+              * quatre heures de sommeil derrière n'est pas la même journée
+              * qu'une journée notée 4 après huit heures — et c'est exactement
+              * ce dont personne ne se souvient en relisant.
+              */
+             mesures: mesuresSituees(date, userId),
              // Les notes apportees passent le plancher, pour la meme raison que
              // les reperes : ce sont des faits que la personne a poses
              // elle-meme, pas une statistique calculee sur elle.

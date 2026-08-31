@@ -1222,6 +1222,30 @@ export function poserMesure({ date, ts = null, source, cle, valeur = null,
   return info.changes > 0;
 }
 
+/** Toutes les mesures numériques : ce que la recherche de liens croise avec les notes. */
+export const toutesMesures = (userId = OWNER) => db.prepare(
+  'SELECT date, source, cle, valeur, unite FROM mesures WHERE user_id = ? AND valeur IS NOT NULL ORDER BY date ASC'
+).all(userId);
+
+/**
+ * DE QUOI SAVOIR SI LE CALCUL DES LIENS EST PERIME, EN UNE REQUETE.
+ *
+ * Il croise toute la base contre tout le journal ; le refaire à chaque
+ * ouverture d'une journée, alors qu'on en feuillette vingt d'affilée, est du
+ * travail jeté. Un simple compte ne suffit pas : une application de suivi
+ * REMPLACE une valeur sans changer le nombre de lignes, et le lien resterait
+ * calculé sur l'ancienne. On y joint donc la date de réception la plus récente.
+ */
+export const signatureQS = (userId = OWNER) => {
+  const m = db.prepare(
+    'SELECT COUNT(*) n, MAX(recu_le) dernier FROM mesures WHERE user_id = ?'
+  ).get(userId);
+  const e = db.prepare(
+    'SELECT COUNT(*) n, MAX(date) dernier FROM entries WHERE user_id = ? AND note IS NOT NULL'
+  ).get(userId);
+  return `${m.n}:${m.dernier ?? ''}:${e.n}:${e.dernier ?? ''}`;
+};
+
 export const mesuresDuJour = (date, userId = OWNER) => db.prepare(
   'SELECT source, cle, valeur, texte, unite, ts FROM mesures WHERE user_id = ? AND date = ? ORDER BY cle ASC'
 ).all(userId, date);
