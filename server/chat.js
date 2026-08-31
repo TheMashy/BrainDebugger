@@ -135,6 +135,26 @@ Avant de poser un repère sur un fait ancien, tu peux vérifier avec chercher_re
 n'existe pas déjà sous d'autres mots : « déménagement à Lyon » et « installation à Lyon »
 sont le même fait, et deux repères pour un fait cassent la lecture d'une frise.
 
+QUAND IL TE RECTIFIE
+« En fait c'était le 3 mai, pas le 3 mars. » « Ce n'était pas une rupture, c'était une pause. »
+Tu corriges, avec corriger_repere : tu le retrouves d'abord par chercher_repere pour son
+identifiant, puis tu changes la date, le libellé, ou les deux. Tu ne poses PAS un deuxième
+repère à côté du premier — la frise finirait avec les deux, et c'est elle qui date tout le
+reste.
+
+Tu ne peux pas en effacer un, et c'est voulu : faire disparaître un fait de la vie de quelqu'un
+sur ton jugement n'est pas la même chose que corriger une faute de frappe. Si le fait n'a jamais
+eu lieu, dis-le-lui — elle le retire elle-même dans Année, en un clic.
+
+Tu ne corriges QUE ce qu'il rectifie. Repasser derrière ses libellés parce que tu les
+formulerais mieux, c'est réécrire sa frise pendant qu'il te parle d'autre chose.
+
+Le même geste vaut pour les motifs que tu suis, avec renommer_motif. Un nom de motif est une
+hypothèse, et une hypothèse se corrige : « humour de défense » devient « minimisation » le jour
+où tu comprends que ce n'était pas de l'humour. Renomme plutôt que d'en déclarer un nouveau —
+les occurrences déjà marquées restent attachées, et c'est tout ce qui donne sa valeur au motif.
+Si c'est un AUTRE mécanisme, alors c'en est un autre : déclare-le.
+
 QUAND LE TON BASCULE DANS LA MÊME CONVERSATION
 Il peut te raconter une soirée correcte et glisser d'un coup sur quelque chose de très noir, ou
 remonter aussi vite. Tu disposes de relever_humeur : tu notes où il SEMBLE être à cet instant,
@@ -988,6 +1008,57 @@ impression. Le libelle fait trois a six mots, dans ses mots a elle, sans date de
         label: { type: 'string', description: 'Trois a six mots. Ex : « changement de boulot », « demenagement a Montpellier ».' }
       },
       required: ['date', 'label']
+    }
+  },
+
+  /*
+   * CORRIGER, ET PAS EFFACER.
+   *
+   * Le compagnon peut deplacer une date et reecrire un libelle. Il ne peut pas
+   * faire disparaitre un fait : effacer le repere de quelqu'un sur le jugement
+   * d'un modele est une autre chose que corriger une faute de frappe, et la
+   * personne a un bouton pour ca dans « Annee ».
+   *
+   * Sans cet outil, corriger « le 3 mai, pas le 3 mars » demandait de poser un
+   * deuxieme repere -- et la frise finissait avec les deux.
+   */
+  corriger_repere: {
+    description: `Corrige un repere DEJA POSE : sa date, son libelle, ou les deux. Sert quand la
+personne rectifie -- « en fait c'etait le 3 mai », « ce n'etait pas une rupture, c'etait une
+pause ». Cherche-le d'abord avec chercher_repere pour avoir son identifiant. Tu ne peux pas
+l'effacer : si le fait n'a jamais eu lieu, dis-le-lui, elle le retirera elle-meme dans Annee.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:    { type: 'integer', description: "L'identifiant rendu par chercher_repere, sans le #." },
+        date:  { type: 'string', description: 'AAAA-MM-JJ. La date corrigee. Omets si seul le libelle change.' },
+        label: { type: 'string', description: 'Trois a six mots. Le libelle corrige. Omets si seule la date change.' }
+      },
+      required: ['id']
+    }
+  },
+
+  /*
+   * UN NOM DE MOTIF EST UNE HYPOTHESE, ET UNE HYPOTHESE SE CORRIGE.
+   *
+   * « humour de defense » devient « minimisation » quand on a compris que ce
+   * n'etait pas de l'humour. Sans ce chemin, la seule facon de corriger etait
+   * d'en declarer un nouveau -- et de perdre les quarante occurrences deja
+   * marquees, c'est-a-dire exactement ce qui donnait sa valeur au motif.
+   */
+  renommer_motif: {
+    description: `Renomme un motif que tu suis deja, ou reecris sa description. Sert quand ce que
+tu vois s'est precise : le motif est le meme, ton nom pour lui etait approximatif. Les
+occurrences deja marquees restent -- c'est tout l'interet de renommer plutot que d'en declarer
+un nouveau. N'en profite pas pour changer de sujet : si c'est un AUTRE mecanisme, declare-le.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:  { type: 'integer', description: "L'identifiant du motif, celui rendu quand tu l'as declare." },
+        nom: { type: 'string', description: 'Deux a quatre mots, en francais, au singulier. Omets si seule la description change.' },
+        mecanisme: { type: 'string', description: 'Une phrase : a quoi tu le reconnais. Omets si seul le nom change.' }
+      },
+      required: ['id']
     }
   },
 
