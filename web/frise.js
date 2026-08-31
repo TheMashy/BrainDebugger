@@ -144,6 +144,7 @@ export function situer(date, { debut, fin }) {
 /* ======================= le dessin ======================= */
 
 import { deltaColor } from './charts.js';
+import { teinteDe } from './reperes.js';
 
 /* Ce qui n'a pas de journees derriere lui n'a pas de couleur, et c'est une
    information : on ne colorie pas ce qu'on ne sait pas. */
@@ -340,8 +341,18 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
     if (g.def) defs.push(g.def);
     const actif = survol === p.id;
     const h = p.fort ? 20 : 15;
-    // CONTOURE = DECLARE : la teinte choisie ne touche jamais le remplissage.
-    const contour = p.teinte != null ? `hsl(${p.teinte} 62% 62%)` : 'var(--line)';
+    /*
+     * CONTOURE = DECLARE : la teinte ne touche jamais le remplissage, qui reste
+     * le degrade des notes de la periode -- une mesure.
+     *
+     * Elle vient maintenant du THEME quand personne n'en a choisi une. Sans ca,
+     * trois bandes cote a cote -- une ecole, un studio, une histoire -- etaient
+     * trois arcs-en-ciel a trait gris : rien ne disait de quoi ces annees
+     * etaient faites avant d'avoir lu les trois etiquettes. Un choix a la main
+     * l'emporte toujours : c'est une declaration plus forte qu'une deduction.
+     */
+    const teinte = teinteDe(p);
+    const contour = teinte != null ? `hsl(${teinte} 62% 62%)` : 'var(--line)';
     const large = x2 - x1 > 96;
     // Combien de place a droite avant la barre suivante de cette voie.
     const place = (suivanteSurLaVoie.get(p.id) ?? W - MD) - x2 - 8;
@@ -349,12 +360,17 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
     return `<g class="fperiode${actif ? ' on' : ''}${p.fort ? ' fort' : ''}"
       data-ev="${p.id}" data-date="${p.date}" data-fin="${p.fin}" data-label="${esc(p.label)}"
       data-theme="${p.theme}" data-duree="${p.jours?.length ?? 0}">
+      ${/* LE FOND DE LA BANDE, sous le degrade. Une periode sans une seule
+             journee notee etait une barre grise : maintenant elle a la couleur
+             de ce qu'elle est, meme quand on n'a rien mesure dedans. */''}
+      ${teinte != null ? `<rect x="${x1.toFixed(1)}" y="${y}" width="${(x2 - x1).toFixed(1)}" height="${h}"
+            rx="3" fill="hsl(${teinte} 45% 42%)" fill-opacity="${actif ? .5 : .34}"/>` : ''}
       <rect x="${x1.toFixed(1)}" y="${y}" width="${(x2 - x1).toFixed(1)}" height="${h}" rx="3"
-            fill="${g.ref}" fill-opacity="${actif ? .85 : .62}"
-            stroke="${contour}" stroke-opacity="${actif ? 1 : p.teinte != null ? .85 : .5}"
+            fill="${g.ref}" fill-opacity="${actif ? .8 : .55}"
+            stroke="${contour}" stroke-opacity="${actif ? 1 : teinte != null ? .85 : .5}"
             stroke-width="${p.fort ? 1.5 : 1}"/>
       <g transform="translate(${(x1 + 3).toFixed(1)} ${y + (h - 12) / 2}) scale(.5)"
-         color="${p.teinte != null ? contour : 'var(--ink-dim)'}">${icone(p.theme, 24)}</g>
+         color="${teinte != null ? contour : 'var(--ink-dim)'}">${icone(p.theme, 24)}</g>
       ${etiquette ? `<text x="${(large ? x1 + 18 : x2 + 6).toFixed(1)}" y="${(y + h / 2 + 3.5).toFixed(1)}"
             class="fetiq${large ? ' dedans' : ''}">${esc(p.label)}</text>` : ''}
     </g>`;
@@ -365,7 +381,11 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
     const x = X(p.date);
     // REMPLI = MESURE : la couleur de sa case dans la grille, exactement.
     const remplissage = p.ecart === null ? SANS_DONNEES : deltaColor(p.ecart);
-    const contour = p.teinte != null ? `hsl(${p.teinte} 62% 62%)` : 'transparent';
+    // Meme regle que pour les bandes : la teinte declaree d'abord, celle du
+    // theme ensuite. Un point de « rupture » et un point de « travail » ne se
+    // distinguaient que par leur icone, a douze pixels de haut.
+    const teinte = teinteDe(p);
+    const contour = teinte != null ? `hsl(${teinte} 62% 62%)` : 'transparent';
     const actif = survol === p.id;
     const r = p.fort ? 3.6 : 2.6;
     const t = p.fort ? 26 : 22;

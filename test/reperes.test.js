@@ -103,3 +103,39 @@ test('« pensée » a une icône sans être un thème de repère', () => {
   assert.ok(ICONES.pensee && NOMS.pensee);
   assert.ok(!THEMES.some(([n]) => n === 'pensee'));
 });
+
+test('chaque thème a sa teinte, sauf celui qui veut dire « je ne sais pas »', async () => {
+  const { THEMES, TEINTE_THEME, teinteDe, DEFAUT } = await import('../web/reperes.js');
+  /*
+   * Les bandes de la frise portent le dégradé des notes de leur période — une
+   * mesure, et c'est juste — mais trois bandes côte à côte étaient trois
+   * arcs-en-ciel à trait gris : rien ne disait de quoi ces années étaient
+   * faites. La teinte du thème sert au TRAIT et au fond, jamais au
+   * remplissage : « ce qui est rempli est mesuré, ce qui est contouré est
+   * déclaré ».
+   */
+  for (const [id] of THEMES) {
+    assert.equal(typeof TEINTE_THEME[id], 'number', `le thème « ${id} » n'a pas de teinte`);
+    assert.ok(TEINTE_THEME[id] >= 0 && TEINTE_THEME[id] < 360);
+  }
+  // `jalon` est le thème par DÉFAUT — celui de ce qui n'a pas été reconnu. Lui
+  // donner une couleur annoncerait une lecture qui n'a pas eu lieu.
+  assert.equal(TEINTE_THEME[DEFAUT], undefined);
+  assert.equal(teinteDe({ theme: DEFAUT }), null);
+
+  // Un choix à la main l'emporte : c'est une déclaration plus forte qu'une déduction.
+  assert.equal(teinteDe({ theme: 'travail' }), TEINTE_THEME.travail);
+  assert.equal(teinteDe({ theme: 'travail', teinte: 336 }), 336);
+  assert.equal(teinteDe(null), null);
+});
+
+test('deux thèmes voisins ne portent pas la même teinte', async () => {
+  const { TEINTE_THEME } = await import('../web/reperes.js');
+  const vues = new Map();
+  for (const [id, t] of Object.entries(TEINTE_THEME)) {
+    const proche = [...vues.entries()].find(([, v]) => Math.abs(v - t) < 8);
+    assert.equal(proche, undefined,
+                 `« ${id} » (${t}) et « ${proche?.[0]} » (${proche?.[1]}) se confondent`);
+    vues.set(id, t);
+  }
+});
