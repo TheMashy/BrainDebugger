@@ -835,7 +835,7 @@ nav button { white-space: nowrap; }
   .calhead button { min-width: 38px; min-height: 38px; }
   .calcase { max-height: none; }
   .repform .btn, .repform input { min-height: 44px; }
-  [data-fen], [data-cum], [data-daily], [data-year], .daynav button {
+  [data-fen], [data-win], [data-daily], [data-year], .daynav button {
     min-height: 40px; padding-left: 12px; padding-right: 12px;
   }
   .daydrop { min-height: 36px; }
@@ -2294,7 +2294,10 @@ button.amasrow:hover { background: var(--panel); }
 /* ================= la frise de vie ================= */
 
 .frisewrap { width: 100%; overflow-x: auto; margin-bottom: 10px; }
-.frisesvg { display: block; width: 100%; min-width: 620px; }
+/* `height: auto` : la hauteur se déduit du viewBox, donc la boîte a exactement
+   la forme du dessin et rien n'est ni centré ni rogné. C'est ce qui met la
+   frise sur le même axe que les graphes au-dessus. */
+.frisesvg { display: block; width: 100%; height: auto; min-width: 620px; }
 .frisesvg text { font-family: var(--mono); fill: var(--ink-faint); }
 .frisesvg .frisean { font-size: 9.5px; letter-spacing: .06em; }
 .frisesvg .frisejournal { font-size: 8.5px; letter-spacing: .14em;
@@ -2380,9 +2383,10 @@ button.amasrow:hover { background: var(--panel); }
 .cumhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .cumhead h2 { margin: 0; }
 .cumhead .centerpick { margin-bottom: 0; }
-.etalonfield { margin: 0; display: flex; align-items: center; gap: 8px; }
-.etalonfield span { margin: 0; font-size: 12px; }
-.etalonfield input { width: 62px; padding: 5px 7px; font-size: 12px; }
+/* La dérive, à la place du champ d'étalon : ce que la courbe DIT, pas comment
+   on la calcule. Elle était cachée dans l'infobulle du champ qu'on a retiré. */
+.cumderive { font-size: 12px; white-space: nowrap; }
+.cumderive .faint { font-size: 11px; }
 
 /* ================================ le mode pudique ================================
 

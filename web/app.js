@@ -6,7 +6,7 @@ import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
          NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
-import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION } from './charts.js';
+import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
 import { icone, iconeDe, themeDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { ico, ICO_VUE } from './icones.js';
 import { friseMarkup as friseSVG } from './frise.js';
@@ -1345,18 +1345,21 @@ let FRISE = null;
 // clic pour aller voir l'avant-journal.
 let FRISE_CADRE = 'journal';
 /*
- * LE CUMUL DEMARRE EN REFERENCE GLISSANTE.
+ * LE CUMUL SE COMPTE CONTRE LA REFERENCE GLISSANTE, ET RIEN D'AUTRE.
  *
- * L'etalon fixe compare quatre ans de journees a une meme constante : c'est la
- * formule du tableur d'origine, et elle a le defaut de son epoque -- quelqu'un
- * dont la vie a change en 2024 lit encore ses journees de 2026 a l'aune de
- * 2022. La mediane glissante des 365 jours precedents compare chaque journee a
- * la periode qui l'entoure, ce qui est la question qu'on se pose vraiment.
+ * Il y avait le choix : etalon fixe, ou mediane glissante des 365 jours
+ * precedents. L'etalon fixe compare quatre ans de journees a une meme
+ * constante -- c'est la formule du tableur d'origine, avec le defaut de son
+ * epoque : quelqu'un dont la vie a change en 2024 lit encore ses journees de
+ * 2026 a l'aune de 2022. Personne ne choisissait jamais ce mode-la, et le
+ * proposer demandait deux boutons et un champ de nombre au-dessus de la courbe.
  *
- * L'etalon reste accessible : c'est la meme serie, lue autrement, et l'ancienne
- * lecture n'est pas fausse.
+ * Le choix est retire. La glissante repond a la question qu'on se pose --
+ * « ou j'en suis par rapport a la periode qui m'entoure » -- et une commande
+ * qu'on n'utilise pas n'est pas une liberte, c'est trois objets de plus a
+ * comprendre avant d'atteindre le dessin.
  */
-let CUMMODE = 'reference';
+const CUM_KEY = 'cumDeltaRef';
 
 /*
  * LA FENETRE DU CUMUL.
@@ -1386,12 +1389,39 @@ function libFenetre() {
   return f[1] === null ? 'tout le journal' : `les ${f[1]} derniers jours`;
 }
 
+/**
+ * LA FENÊTRE, EN INDICE ET EN DATES.
+ *
+ * L'indice sert à couper les séries ; les DATES servent à cadrer les dessins.
+ * Les deux ne disent pas la même chose et c'est tout le sujet : sur « 30 j »
+ * avec douze journées écrites, l'indice donne douze points et les bornes
+ * donnent trente jours. Cadrer sur les points faisait mentir le libellé — on
+ * lisait « les 30 derniers jours » au-dessus d'un dessin qui en couvrait douze,
+ * étalés sur toute la largeur — et surtout, la frise en dessous cadrait, elle,
+ * sur de vraies dates : les deux ne pouvaient pas s'aligner.
+ *
+ * Les bornes gagnent. Trente jours font trente jours, les trous se voient, et
+ * les trois dessins reçoivent le même domaine.
+ */
 function fenetreCumul() {
   const f = FENETRES.find(x => x[0] === CUMWIN) ?? FENETRES.at(-1);
-  if (f[1] === null) return { i0: 0, jours: null };
-  const depuis = dayShift(SERIES.date.at(-1), -(f[1] - 1));
+  /*
+   * LA FENÊTRE FINIT AUJOURD'HUI, PAS À LA DERNIÈRE NOTE.
+   *
+   * « Les 30 derniers jours » veut dire les trente derniers jours. Finir à la
+   * dernière journée notée décalait la fenêtre en arrière dès qu'on avait deux
+   * jours de retard — et un repère posé aujourd'hui tombait hors du cadre, donc
+   * disparaissait d'Année sans rien dire. La queue vide, elle, se voit : c'est
+   * exactement l'information « tu n'as pas noté depuis deux jours ».
+   */
+  const dernier = SERIES.date.at(-1);
+  const fin = S?.today && S.today > dernier ? S.today : dernier;
+  if (f[1] === null) {
+    return { i0: 0, jours: null, debut: SERIES.date[0], fin };
+  }
+  const depuis = dayShift(fin, -(f[1] - 1));
   const i0 = SERIES.date.findIndex(d => d >= depuis);
-  return { i0: i0 < 0 ? SERIES.date.length - 1 : i0, jours: f[1] };
+  return { i0: i0 < 0 ? SERIES.date.length - 1 : i0, jours: f[1], debut: depuis, fin };
 }
 
 async function renderYear(year) {
@@ -1401,14 +1431,19 @@ async function renderYear(year) {
   CARNET = await api('/api/carnet');
   FRISE = await api('/api/frise');
   const grid = await api(`/api/year?year=${year}`);
-  const eta = SERIES.etalon;
 
-  const cumKey = CUMMODE === 'etalon' ? 'cumEtalon' : 'cumDeltaRef';
-  const { i0: CUM0 } = fenetreCumul();
-  const base = CUM0 > 0 ? SERIES[cumKey][CUM0 - 1] : 0;
+  const FEN = fenetreCumul();
+  const CUM0 = FEN.i0;
+  const base = CUM0 > 0 ? SERIES[CUM_KEY][CUM0 - 1] : 0;
   const cumX = SERIES.date.slice(CUM0);
-  const cumY = SERIES[cumKey].slice(CUM0).map(v => Math.round((v - base) * 1000) / 1000);
+  const cumY = SERIES[CUM_KEY].slice(CUM0).map(v => Math.round((v - base) * 1000) / 1000);
   const drift = cumY.length ? cumY.at(-1) / cumY.length : 0;
+  /*
+   * LE DOMAINE PARTAGÉ. Un seul objet, passé aux trois dessins : le quotidien,
+   * le cumul, la frise. C'est lui qui fait que le 1er juin est au même endroit
+   * dans les trois — pas la chance, pas trois réglages à garder d'accord.
+   */
+  const DOM = { debut: FEN.debut, fin: FEN.fin };
 
   /*
    * Les annees que la fenetre couvre, et rien d'autre. C'est ce qui empeche la
@@ -1467,7 +1502,7 @@ async function renderYear(year) {
           <span class="faint mono" style="font-size:11.5px">${libFenetre()}</span>
         </div>
         ${dailyChart(cumX, cumX.map((_, i) => SERIES.contrastFixed[CUM0 + i]),
-                     { height: 240, events: SERIES.events })}
+                     { height: 240, events: SERIES.events, domaine: DOM })}
       </div>
 
       <div class="card">
@@ -1483,19 +1518,16 @@ async function renderYear(year) {
                  <button data-cadre="journal" aria-pressed="${FRISE_CADRE === 'journal'}">journal</button>
                  <button data-cadre="vie" aria-pressed="${FRISE_CADRE === 'vie'}">vie</button>
                </div>` : ''}
-          <div class="centerpick" style="margin-left:auto">
-            <button data-cum="etalon" aria-pressed="${CUMMODE === 'etalon'}"
-              title="Somme des écarts à un étalon fixe.">étalon</button>
-            <button data-cum="reference" aria-pressed="${CUMMODE === 'reference'}"
-              title="Somme des écarts à la médiane glissante des 365 jours précédents.">glissante</button>
-          </div>
-          <label class="field etalonfield"
-                 title="Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}. Dérive sur la fenêtre : ${drift > 0 ? '+' : ''}${drift.toFixed(3)}/jour.">
-            <input type="number" id="etalon" min="0" max="10" step="0.1" value="${eta}"
-                   aria-label="étalon">
-          </label>
+          ${/* Ce qui reste du bandeau : ce que la courbe DIT, pas comment on
+                la calcule. La dérive était cachée dans l'infobulle d'un champ de
+                nombre qu'on retirait ; c'est pourtant le seul chiffre que cette
+                courbe produise. */''}
+          <span class="faint mono cumderive" style="margin-left:auto"
+                title="Écart à la médiane glissante des 365 jours précédents, cumulé sur la fenêtre. Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}.">
+            ${drift > 0 ? '+' : ''}${drift.toFixed(2)} <span class="faint">par jour</span>
+          </span>
         </div>
-        ${lineChart(cumX, cumY, { height: 250, events: SERIES.events, colore: true })}
+        ${lineChart(cumX, cumY, { height: 250, events: SERIES.events, colore: true, domaine: DOM })}
 
         ${/* La frise se pose sous la courbe et partage EXACTEMENT son axe : les
               marges de lineChart, à l'unité près. Un repère tombe alors sur
@@ -1504,9 +1536,10 @@ async function renderYear(year) {
               sous une fenetre de sept jours, elle peut etre vide. */''}
         ${(() => {
           const svg = FRISE ? friseSVG(FRISE, icone, {
-            mg: 46, md: 12,
-            domaine: (CUMWIN === 'tout' && FRISE_CADRE === 'vie') ? FRISE.etendue
-                   : { debut: cumX[0], fin: cumX.at(-1) }
+            // Les marges viennent du cadre des graphes, pas d'un nombre recopié :
+            // douze pixels d'écart sur mille font trois jours de décalage sur un an.
+            mg: CADRE.PL, md: CADRE.PR,
+            domaine: (CUMWIN === 'tout' && FRISE_CADRE === 'vie') ? FRISE.etendue : DOM
           }) : '';
           return svg ? `<div class="frisewrap" id="frisewrap">${svg}
             <div class="frisetip" id="frisetip" hidden></div></div>` : '';
@@ -1567,8 +1600,6 @@ async function renderYear(year) {
   $('#view').onclick = async e => {
     const y = e.target.closest('[data-year]');
     if (y) return renderYear(Number(y.dataset.year));
-    const c = e.target.closest('[data-cum]');
-    if (c) { CUMMODE = c.dataset.cum; return renderYear(year); }
     const w = e.target.closest('[data-win]');
     if (w) { CUMWIN = w.dataset.win; return renderYear(year); }
     const cell = e.target.closest('td.cell.has');
@@ -1623,15 +1654,6 @@ async function renderYear(year) {
       await renderYear(year);
       toast(jour ? `Note rangée sur le ${fmtDay(jour)}` : 'Note rangée');
     } catch (err) { toast(err.message); }
-  };
-
-  $('#etalon').onchange = async e => {
-    const v = Number(e.target.value);
-    if (!Number.isFinite(v) || v < 0 || v > 10) return toast('Étalon hors 0..10');
-    await saveSettings({ etalon: v });
-    SERIES = await api('/api/series');
-    CUMMODE = 'etalon';
-    renderYear(year);
   };
 
 }

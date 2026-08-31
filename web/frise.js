@@ -382,7 +382,23 @@ export function friseMarkup(F, icone, { hauteurVoie = 26, survol = null, cadre =
     </g>`;
   }).join('');
 
-  return `<svg class="frisesvg" viewBox="0 0 ${W} ${H}" style="height:${H}px"
+  /*
+   * PAS DE HAUTEUR FIXE, ET C'EST CE QUI FAIT TOMBER LES REPÈRES AU BON ENDROIT.
+   *
+   * Le SVG faisait `width:100%` avec `height:58px` et un viewBox de 1000×58 :
+   * deux formes différentes, donc `preserveAspectRatio` par défaut — « meet » —
+   * qui rentre le dessin dans la boîte SANS le déformer et le CENTRE. Sur un
+   * écran large, la frise se retrouvait dessinée sur mille pixels au milieu de
+   * mille-deux-cents, avec cent pixels de vide de chaque côté. Les graphes,
+   * eux, s'étirent (`preserveAspectRatio="none"`). Un repère du 1er juin tombait
+   * donc cent pixels à gauche de l'inflexion qu'il explique — sur les fenêtres
+   * larges seulement, ce qui rendait le décalage insaisissable.
+   *
+   * On laisse la hauteur suivre la largeur. Le dessin garde ses proportions —
+   * les icônes restent rondes, ce qu'un « none » leur retirerait — et il occupe
+   * toute la largeur, exactement comme les deux graphes au-dessus.
+   */
+  return `<svg class="frisesvg" viewBox="0 0 ${W} ${H}"
                role="img" aria-label="Frise de tes repères">
     ${defs.length ? `<defs>${defs.join('')}</defs>` : ''}
     ${fond}
