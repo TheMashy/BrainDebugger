@@ -3352,6 +3352,16 @@ async function renderMirror(date, { garderCal = false } = {}) {
             l'affichait jamais : le champ était reçu et jeté. Le plancher retire
             des chiffres, pas des faits qu'on a soi-même posés. */''}
       ${reperesMarkup(m.reperes, date)}
+      ${/* MEME RAISON POUR LES MESURES, et le même piège : le serveur les envoie
+            dans cette branche, et il suffirait de ne pas écrire cette ligne pour
+            qu'elles soient reçues et jetées, comme les repères l'ont été.
+
+            Ce qui les accompagne d'habitude — « les journées au-dessus de 6,2 h
+            sont notées 2,2 points plus haut » — n'arrive pas jusqu'ici : le
+            serveur le retire sous le plancher. Une durée de sommeil est un fait
+            qu'une montre a relevé ; la phrase qui l'explique est ce que le
+            plancher existe pour retenir. */''}
+      ${m.mesures?.length ? `<div class="card">${mesuresMarkup(m.mesures)}</div>` : ''}
       ${notesDuJourMarkup(m.carnet)}
 
       ${m.yesterday.text ? `<div class="card hier">
@@ -3604,6 +3614,80 @@ function volatiliteMarkup(v) {
 }
 
 /** De quoi on a parlé, en icônes — les mêmes que sur la frise. */
+/* ==================================================================
+   CE QU'UNE MACHINE A MESURE CE JOUR-LA.
+
+   Une journée notée 4 avec quatre heures de sommeil derrière n'est pas la même
+   journée qu'une journée notée 4 après huit heures. C'est exactement ce dont
+   personne ne se souvient en relisant — et c'est ce que le journal seul ne
+   pourra jamais dire.
+   ================================================================== */
+
+/** `sommeil_h` a été normalisé à l'entrée ; on lui rend ses espaces pour le lire. */
+const nomMesure = cle => String(cle ?? '').replace(/_/g, ' ');
+
+const valMesure = m => m.valeur == null
+  ? (m.texte ?? '—')
+  : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(m.valeur);
+
+/* Une espace insécable fine avant l'unité : « 8,2 h », pas « 8,2h ». Collée,
+   l'unité se lit comme une décimale de plus. Insécable, parce qu'un retour à la
+   ligne entre le nombre et son unité les sépare définitivement. */
+const uniteDe = m => m.unite ? `\u202f${esc(m.unite)}` : '';
+
+/**
+ * LA PHRASE D'UN LIEN — ET LE MOT QU'ELLE N'EMPLOIE JAMAIS.
+ *
+ * Un lien entre le sommeil et l'humeur ne dit pas lequel des deux mène : dormir
+ * peu peut abîmer la journée, une journée qui s'annonce mal peut aussi tenir
+ * éveillé la nuit d'avant. On dit donc « vont avec », jamais « à cause de ».
+ *
+ * Et on donne l'écart EN POINTS, pas le coefficient : « r = 0,42 » ne veut rien
+ * dire pour personne, alors que « 1,8 point plus bas » se vérifie contre son
+ * propre souvenir — ce qu'on veut justement que la personne fasse.
+ */
+function phraseLien(l) {
+  if (!l?.moitie) return '';
+  const e = Math.abs(l.moitie.ecart);
+  if (e < 0.3) return '';
+  const quand = l.decalage === 1 ? 'le lendemain sont notées' : 'sont notées';
+  // Le seuil passe par le MÊME formateur que les valeurs juste au-dessus :
+  // « au-dessus de 6.2 » à côté de « 8,2 h » donne deux conventions décimales
+  // dans trois centimètres, et l'œil bute avant de comprendre pourquoi.
+  return `Les journées au-dessus de ${valMesure({ valeur: l.moitie.seuil })}${uniteDe(l)} ${quand}
+    <b>${e.toFixed(1).replace('.', ',')} point${e >= 2 ? 's' : ''}
+    ${l.moitie.ecart > 0 ? 'plus haut' : 'plus bas'}</b> — sur ${l.n} journées.`;
+}
+
+function mesuresMarkup(mesures) {
+  if (!mesures?.length) return '';
+  return `<div class="jmesures">
+    <div class="k faint">Ce qui a été mesuré</div>
+    <ul class="jmlist">
+      ${mesures.map(m => {
+        const phrase = phraseLien(m.lien);
+        return `<li class="jm${m.lien ? ' lie' : ''}">
+          <span class="jmnom">${esc(nomMesure(m.cle))}</span>
+          <span class="jmval">${esc(valMesure(m))}${m.unite ? `<i>${esc(m.unite)}</i>` : ''}</span>
+          ${/* Le côté, et pas seulement la valeur : « 5,4 » ne dit ni si c'est
+                beaucoup ni par rapport à quoi. La médiane de SA série épargne à
+                la personne d'avoir à retenir ses propres normales.
+
+                TROIS ÉTATS ET PAS DEUX. Avec un simple `>=`, la valeur qui EST
+                la médiane s'annonçait « au-dessus de » suivi d'elle-même —
+                « 8 562 ↑ au-dessus de 8 562 ». Ça arrive à chaque série impaire
+                dont on ouvre le jour du milieu, c'est-à-dire souvent. */''}
+          ${m.cote ? `<span class="jmcote ${m.cote}">${m.cote === 'pile' ? '=' : m.cote === 'haut' ? '↑' : '↓'}
+            <span class="faint">${m.cote === 'pile'
+              ? 'ta médiane'
+              : `${m.cote === 'haut' ? 'au-dessus de' : 'sous'} ${valMesure({ valeur: m.mediane })}`}</span></span>` : ''}
+          ${phrase ? `<span class="jmlien">${phrase}</span>` : ''}
+        </li>`;
+      }).join('')}
+    </ul>
+  </div>`;
+}
+
 function thematiquesMarkup(ts) {
   if (!ts?.length) return '';
   return `<div class="jthemes">
@@ -3631,7 +3715,7 @@ function journeeMarkup(m) {
   const texte = m.jour?.text
     ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
     : `<p class="sub" style="margin:0">${m.note !== null ? 'Notée, sans texte.' : "Rien pour cette journée."}</p>`;
-  const cote = `${volatiliteMarkup(j.volatilite)}${thematiquesMarkup(j.thematiques)}`;
+  const cote = `${volatiliteMarkup(j.volatilite)}${mesuresMarkup(m.mesures)}${thematiquesMarkup(j.thematiques)}`;
   if (!moments.length && !cote) return texte;
 
   return `<div class="jgrille">
