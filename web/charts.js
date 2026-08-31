@@ -110,12 +110,50 @@ function degradeParJour(values, id) {
 /** Un identifiant unique par graphe : deux <defs> homonymes se marchent dessus. */
 let _gradN = 0;
 
-export function lineChart(dates, values, { height = 210, events = [], color = '#4ade80', colore = false } = {}) {
+/* --------------------------------------------------------------------------
+   UN SEUL CADRE, ET UN AXE QUI EST DU TEMPS.
+
+   Les deux graphes plaçaient leurs points PAR INDICE : le i-ème jour écrit à la
+   i-ème position. Tant qu'on écrit tous les jours, ça ressemble à un axe de
+   temps ; dès qu'il manque une semaine, ce n'en est plus un — et la frise, elle,
+   a toujours été en temps réel. Un repère du 1er juin tombait donc à côté de
+   l'inflexion qu'il explique, d'autant plus loin qu'il y avait de trous avant.
+   Personne ne pouvait le voir : les deux dessins avaient l'air justes.
+
+   L'axe est maintenant une DATE, dans les deux graphes et dans la frise, sur le
+   même domaine et avec les mêmes marges. L'alignement n'est plus une
+   coïncidence à surveiller : c'est la même transformation appliquée trois fois.
+
+   Les marges viennent d'ici pour la même raison. Elles valaient 46/12 d'un côté
+   et 34/10 de l'autre — douze pixels d'écart sur mille, soit trois jours de
+   décalage sur une fenêtre d'un an, invisibles à l'œil et faux quand même.
+   -------------------------------------------------------------------------- */
+export const CADRE = { W: 1000, PL: 46, PR: 12 };
+
+/** Une date ISO en jours depuis l'époque. Midi UTC : aucun fuseau ne la fait basculer. */
+export const enJours = d => Math.round(Date.parse(String(d).slice(0, 10) + 'T12:00:00Z') / 86400000);
+
+/**
+ * Le domaine d'un graphe : ce qu'on lui demande de couvrir, ou ce qu'il contient.
+ *
+ * Explicite, il couvre la FENÊTRE DEMANDÉE — « 30 j » fait trente jours même si
+ * l'on n'en a écrit douze, et les trois dessins montrent alors le même mois.
+ * Implicite, il se replie sur les données, ce qui reste juste pour un appel
+ * isolé.
+ */
+export function domaineDe(dates, domaine) {
+  const debut = enJours(domaine?.debut ?? dates[0]);
+  const fin = enJours(domaine?.fin ?? dates[dates.length - 1]);
+  return { debut, fin, largeur: Math.max(1, fin - debut) };
+}
+
+export function lineChart(dates, values, { height = 210, events = [], color = '#4ade80', colore = false, domaine = null } = {}) {
   const n = values.length;
   if (!n) return '<div class="empty">Pas encore de donnees.</div>';
 
-  const W = 1000, H = height, PL = 46, PR = 12, PT = 12, PB = 26;
+  const { W, PL, PR } = CADRE, H = height, PT = 12, PB = 26;
   const iw = W - PL - PR, ih = H - PT - PB;
+  const dom = domaineDe(dates, domaine);
 
   let min = Math.min(...values), max = Math.max(...values);
   if (min === max) { min -= 1; max += 1; }
@@ -124,7 +162,9 @@ export function lineChart(dates, values, { height = 210, events = [], color = '#
   if (min > 0) min = 0;
   if (max < 0) max = 0;
 
-  const X = i => PL + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+  // Par la DATE, pas par le rang : c'est ce qui met ce graphe, celui du dessus
+  // et la frise du dessous sur le même axe.
+  const X = d => PL + ((enJours(d) - dom.debut) / dom.largeur) * iw;
   const Y = v => PT + ih - ((v - min) / (max - min)) * ih;
 
   // ticks y "ronds"
@@ -133,21 +173,25 @@ export function lineChart(dates, values, { height = 210, events = [], color = '#
   const ticks = [];
   for (let v = Math.ceil(min / step) * step; v <= max; v += step) ticks.push(v);
 
-  const path = values.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join('');
-  const area = `${path}L${X(n - 1).toFixed(1)} ${Y(0).toFixed(1)}L${X(0).toFixed(1)} ${Y(0).toFixed(1)}Z`;
+  const path = values.map((v, i) => `${i ? 'L' : 'M'}${X(dates[i]).toFixed(1)} ${Y(v).toFixed(1)}`).join('');
+  const area = `${path}L${X(dates[n - 1]).toFixed(1)} ${Y(0).toFixed(1)}L${X(dates[0]).toFixed(1)} ${Y(0).toFixed(1)}Z`;
 
   // etiquettes x : un par changement d'annee, sinon debut/fin
   const xl = [];
   let lastYear = null;
   for (let i = 0; i < n; i++) {
     const y = dates[i].slice(0, 4);
-    if (y !== lastYear) { xl.push({ i, label: y }); lastYear = y; }
+    if (y !== lastYear) { xl.push({ d: dates[i], label: y }); lastYear = y; }
   }
 
+  /*
+   * Un repère se place à SA date, qu'elle soit écrite ou non. `dates.indexOf`
+   * le faisait disparaître dès que la journée n'avait pas de note — or c'est
+   * souvent le cas des jours qui comptent le plus.
+   */
   const evMarks = events
-    .map(e => ({ ...e, i: dates.indexOf(e.date) }))
-    .filter(e => e.i >= 0)
-    .map(e => `<line x1="${X(e.i).toFixed(1)}" y1="${PT}" x2="${X(e.i).toFixed(1)}" y2="${PT + ih}"
+    .filter(e => enJours(e.date) >= dom.debut && enJours(e.date) <= dom.fin)
+    .map(e => `<line x1="${X(e.date).toFixed(1)}" y1="${PT}" x2="${X(e.date).toFixed(1)}" y2="${PT + ih}"
                  stroke="#ffffff" stroke-opacity=".18" stroke-dasharray="2 3"/>
                <title>${esc(e.date)} — ${esc(e.label)}</title>`).join('');
 
@@ -166,7 +210,7 @@ export function lineChart(dates, values, { height = 210, events = [], color = '#
          l'information, l'aire ne fait que lui donner du poids. -->
     <path d="${area}" fill="${color}" fill-opacity=".07"/>
     <path d="${path}" fill="none" stroke="${trait}" stroke-width="${colore ? 1.8 : 1.4}" stroke-linejoin="round"/>
-    ${xl.map(t => `<text x="${X(t.i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${t.label}</text>`).join('')}
+    ${xl.map(t => `<text x="${X(t.d).toFixed(1)}" y="${H - 8}" text-anchor="middle">${t.label}</text>`).join('')}
   </svg>`;
 }
 
@@ -197,17 +241,28 @@ export function bandMarkup(band) {
  * Trace en escalier (un palier par jour) plutot qu'en ligne lissee : chaque
  * journee est une valeur discrete, l'interpolation entre deux jours n'existe pas.
  */
-export function dailyChart(dates, values, { height = 240, events = [] } = {}) {
+export function dailyChart(dates, values, { height = 240, events = [], domaine = null } = {}) {
   const n = values.length;
   if (!n) return '<div class="empty">Pas encore de données.</div>';
 
-  const W = 1000, H = height, PL = 34, PR = 10, PT = 14, PB = 24;
+  const { W, PL, PR } = CADRE, H = height, PT = 14, PB = 24;
   const iw = W - PL - PR, ih = H - PT - PB;
   const lim = Math.max(10, Math.ceil(Math.max(...values.map(Math.abs))));
+  const dom = domaineDe(dates, domaine);
 
-  const X = i => PL + (i / n) * iw;
+  /*
+   * UNE PLACE PAR JOUR CALENDAIRE, PAS PAR JOURNÉE ÉCRITE.
+   *
+   * Les barres se serraient les unes contre les autres quel que soit le
+   * calendrier : trois notes en juin et douze en août donnaient quinze barres
+   * jointives, et un mois de silence ne se voyait pas. Il se voit maintenant,
+   * parce que c'est une information — et parce que c'est ce qui permet à la
+   * courbe du dessous et à la frise de tomber au même endroit.
+   */
+  const cases = dom.largeur + 1;
+  const step = iw / cases;
+  const X = d => PL + ((enJours(d) - dom.debut) / cases) * iw;
   const Y = v => PT + ih / 2 - (v / lim) * (ih / 2);
-  const step = iw / n;
   const y0 = Y(0);
 
   // Une barre fine avec un filet de fond entre deux jours tant qu'il y a la
@@ -224,13 +279,13 @@ export function dailyChart(dates, values, { height = 240, events = [] } = {}) {
   let last = null;
   for (let i = 0; i < n; i++) {
     const key = singleYear ? dates[i].slice(5, 7) : dates[i].slice(0, 4);
-    if (key !== last) { xl.push({ i, label: singleYear ? MO[Number(key) - 1] : key }); last = key; }
+    if (key !== last) { xl.push({ d: dates[i], label: singleYear ? MO[Number(key) - 1] : key }); last = key; }
   }
 
+  // Comme dans la courbe : un repère se place à sa date, notée ou non.
   const evMarks = events
-    .map(e => ({ ...e, i: dates.indexOf(e.date) }))
-    .filter(e => e.i >= 0)
-    .map(e => `<line x1="${X(e.i).toFixed(1)}" y1="${PT}" x2="${X(e.i).toFixed(1)}" y2="${PT + ih}"
+    .filter(e => enJours(e.date) >= dom.debut && enJours(e.date) <= dom.fin)
+    .map(e => `<line x1="${(X(e.date) + step / 2).toFixed(1)}" y1="${PT}" x2="${(X(e.date) + step / 2).toFixed(1)}" y2="${PT + ih}"
                  stroke="#ffffff" stroke-opacity=".18" stroke-dasharray="2 3"><title>${esc(e.date)} — ${esc(e.label)}</title></line>`).join('');
 
   const bars = values.map((v, i) => {
@@ -239,7 +294,7 @@ export function dailyChart(dates, values, { height = 240, events = [] } = {}) {
     const h = Math.max(0.9, Math.abs(y - y0));            // un jour a zero reste visible
     const top = v >= 0 ? y : y0;
     const c = deltaColor(deltaDuContraste(v)) ?? 'var(--line)';
-    return `<rect x="${(X(i) + gap / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${bw.toFixed(2)}"`
+    return `<rect x="${(X(dates[i]) + gap / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${bw.toFixed(2)}"`
          + ` height="${h.toFixed(2)}"${rx ? ` rx="${rx}"` : ''} fill="${c}">`
          + `<title>${esc(dates[i])} · ${v > 0 ? '+' : ''}${v.toFixed(1)}</title></rect>`;
   }).join('');
@@ -251,7 +306,7 @@ export function dailyChart(dates, values, { height = 240, events = [] } = {}) {
     ${evMarks}
     ${bars}
     <line class="axis" x1="${PL}" y1="${y0.toFixed(1)}" x2="${W - PR}" y2="${y0.toFixed(1)}"/>
-    ${xl.map(t => `<text x="${X(t.i).toFixed(1)}" y="${H - 7}" text-anchor="middle">${t.label}</text>`).join('')}
+    ${xl.map(t => `<text x="${(X(t.d) + step / 2).toFixed(1)}" y="${H - 7}" text-anchor="middle">${t.label}</text>`).join('')}
   </svg>`;
 }
 
