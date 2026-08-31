@@ -6,11 +6,13 @@ import {
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
-  inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour
+  inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
+  allSeances, addSeance, updateSeance, deleteSeance, motifsEntre
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
+import { compteRendu, intervalle } from './compte-rendu.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
 import { readMoodFil, readEnergy, SENS } from './mood.js';
@@ -1248,6 +1250,55 @@ export const routes = {
   },
 
   'POST /api/qs/journal/vider': ({ userId }) => ({ vides: viderJournalQS(userId) }),
+
+  /* ---------- le suivi : les séances, et le compte rendu ---------- */
+
+  'GET /api/seances': ({ userId }) => ({ seances: allSeances(userId) }),
+
+  'POST /api/seances': ({ body, userId }) => {
+    const { id, date, praticien, apporter, supprimer } = body ?? {};
+    if (supprimer && id) return { supprimee: deleteSeance(id, userId) };
+    if (id) {
+      const patch = {};
+      for (const k of ['date', 'praticien', 'apporter']) if (k in (body ?? {})) patch[k] = body[k];
+      if ('date' in patch && !/^\d{4}-\d{2}-\d{2}$/.test(String(patch.date))) return { error: 'date invalide' };
+      const s = updateSeance(id, patch, userId);
+      return s ? { seance: s } : { error: 'séance introuvable' };
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date ?? ''))) return { error: 'date invalide' };
+    return { seance: addSeance({ date, praticien, apporter, userId }) };
+  },
+
+  /*
+   * LE COMPTE RENDU. Aucun appel a un modele -- voir l'en-tete de
+   * server/compte-rendu.js pour les trois raisons. Ici, on se contente de
+   * poser devant lui tout ce que la base sait, et il compte.
+   *
+   * L'intervalle se calcule AVANT d'aller chercher les motifs : ils se lisent
+   * sur deux fenetres (celle-ci et la precedente, de meme longueur), et il faut
+   * connaitre les bornes pour les demander.
+   */
+  'GET /api/compte-rendu': ({ query, userId }) => {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(query?.date ?? '')) ? query.date : today();
+    const entries = allEntries(userId);
+    const seances = allSeances(userId);
+    const iv = intervalle(seances, date, entries[0]?.date ?? null);
+
+    const avantFin = iv.precedente ? addDays(iv.debut, -1) : null;
+    const avantDebut = avantFin ? addDays(avantFin, -(iv.jours - 1)) : null;
+
+    return {
+      date,
+      rendu: compteRendu({
+        entries, seances,
+        events: allEvents(userId),
+        ancres: allAnchors(userId),
+        motifs: motifsEntre(iv.debut, iv.fin, userId),
+        motifsAvant: avantDebut ? motifsEntre(avantDebut, avantFin, userId) : [],
+        amplitudes: amplitudes(userId)
+      }, date)
+    };
+  },
 
   'GET /api/lecture': async ({ userId }) => {
     /*

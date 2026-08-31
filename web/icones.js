@@ -27,6 +27,9 @@ export const TRAITS = {
   carte:    '<circle cx="4.4" cy="12.6" r="1.9"/><circle cx="9.2" cy="4.4" r="1.9"/><circle cx="14" cy="11.2" r="1.9"/><path d="M5.5 10.9 8.2 6.1M10.6 5.6l2.3 3.9M6.3 12.2l5.9-.7"/>',
   // Réglages : deux curseurs. On y déplace des valeurs, on n'y engrène rien.
   reglages: '<path d="M2.6 6h6.6M12.9 6h2.5M2.6 12h2.5M9.2 12h6.2"/><circle cx="11" cy="6" r="1.7"/><circle cx="7.3" cy="12" r="1.7"/>',
+  // Suivi : une feuille avec deux lignes ecrites et un coin plie. C'est un
+  // DOCUMENT qu'on emporte -- pas un graphe, pas un tableau de bord.
+  suivi:    '<path d="M4 2.6h6.2L14 6.4v9a1.4 1.4 0 0 1-1.4 1.4H4a1.4 1.4 0 0 1-1.4-1.4V4a1.4 1.4 0 0 1 1.4-1.4z"/><path d="M10 2.7v3.6h3.7"/><path d="M5.4 10.2h5.2M5.4 13h3.4"/>',
 
   /* ---- les gestes ---- */
   oeil:     '<path d="M1.7 9s2.8-4.7 7.3-4.7S16.3 9 16.3 9s-2.8 4.7-7.3 4.7S1.7 9 1.7 9z"/><circle cx="9" cy="9" r="1.9"/>',
@@ -83,5 +86,5 @@ export function ico(nom, t = 13) {
 
 /** L'icône de chaque onglet. Le nom de la vue est la clé employée partout ailleurs. */
 export const ICO_VUE = {
-  tonight: 'parler', moi: 'moi', mirror: 'carte', year: 'annee', settings: 'reglages'
+  tonight: 'parler', moi: 'moi', mirror: 'carte', year: 'annee', suivi: 'suivi', settings: 'reglages'
 };

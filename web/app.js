@@ -4687,6 +4687,264 @@ function drawNotesPreview(p) {
   });
 }
 
+/* ==================================================================
+   LE SUIVI : LES SÉANCES, ET LE COMPTE RENDU QU'ON EMPORTE.
+
+   Une séance commence presque toujours pareil : « alors, comment ça s'est
+   passé depuis la dernière fois ? ». La personne répond de mémoire, et sa
+   mémoire est exactement ce que la période a abîmé — on se souvient de la
+   semaine qu'on vient de vivre, pas des six. Le praticien reconstruit alors
+   par questions ce qui est déjà écrit quelque part, et cette reconstruction
+   mange le tiers du rendez-vous.
+
+   Cette page produit la feuille qui remplace ce tiers. Elle est CALCULÉE,
+   jamais rédigée par un modèle — voir server/compte-rendu.js.
+
+   ELLE NE DIAGNOSTIQUE PAS. Le produit reconnaît des motifs ; il ne nomme pas
+   de trouble. Ce qui sort d'ici, ce sont des dates, des comptes, et des
+   phrases citées entre guillemets. Nommer, c'est le métier d'en face.
+   ================================================================== */
+
+let SUIVI = { seances: [], rendu: null, date: null };
+
+const fmtCourt = d => {
+  const [y, m, dd] = d.split('-');
+  return `${dd}/${m}/${y.slice(2)}`;
+};
+
+/** « il y a 43 jours », mais dit en semaines dès que ça dépasse le mois. */
+function duree(jours) {
+  if (jours < 14) return `${jours} jour${jours > 1 ? 's' : ''}`;
+  if (jours < 70) return `${Math.round(jours / 7)} semaines`;
+  return `${Math.round(jours / 30.4)} mois`;
+}
+
+/**
+ * L'AMPLITUDE, DITE AVEC LES MOTS DE LA PERSONNE.
+ *
+ * « médiane 4,5 » ne veut rien dire pour quelqu'un qui n'a pas étalonné cette
+ * échelle-là — et le praticien, lui, ne l'a jamais vue. Les ancres sont la
+ * légende que la personne a écrite elle-même ; sans elles, le chiffre est un
+ * chiffre.
+ */
+function crAmplitude(a) {
+  if (!a) return '<p class="crvide">Aucune journée notée sur la période.</p>';
+  const anc = n => a.ancres.filter(x => x.note <= n).at(-1) ?? a.ancres[0] ?? null;
+  const mot = n => { const x = anc(n); return x ? `${esc(x.label)}` : ''; };
+  return `
+    <div class="crchiffres">
+      <div><b>${a.mediane}</b><span>médiane<i>${mot(Math.round(a.mediane))}</i></span></div>
+      <div><b>${a.min}</b><span>le plus bas<i>${mot(a.min)}</i></span></div>
+      <div><b>${a.max}</b><span>le plus haut<i>${mot(a.max)}</i></span></div>
+      <div><b>${a.n}</b><span>journées notées</span></div>
+    </div>
+    ${a.ancres.length ? `<p class="crlegende">L'échelle, dans ses mots :
+      ${a.ancres.map(x => `<span><b>${x.note}</b> ${esc(x.label)}${x.descr ? ` — « ${esc(x.descr)} »` : ''}</span>`).join('')}</p>` : ''}
+    ${a.sousPlancher ? `<p class="crnote">${a.sousPlancher} journée${a.sousPlancher > 1 ? 's' : ''}
+      au niveau le plus bas de l'échelle ou en dessous.</p>` : ''}`;
+}
+
+function crExtremes(a) {
+  if (!a) return '';
+  const ligne = j => `<li><span class="crd">${fmtDay(j.date)}</span><b>${j.note}</b>
+    ${j.texte ? `<span class="crq">« ${esc(j.texte.trim().slice(0, 150))}${j.texte.length > 150 ? '…' : ''} »</span>` : ''}</li>`;
+  return `<div class="crdeux">
+    <div><h4>Les creux</h4><ul class="crjours">${a.creux.map(ligne).join('')}</ul></div>
+    <div><h4>Les pics</h4><ul class="crjours">${a.pics.map(ligne).join('')}</ul></div>
+  </div>`;
+}
+
+/**
+ * L'ÉVOLUTION, ET CE QUI EST DIT À CÔTÉ.
+ *
+ * Le nombre de journées écrites bouge aussi, et c'est une information : arrêter
+ * d'écrire est souvent le premier signe, avant que les notes ne baissent. Il se
+ * lit À CÔTÉ de la médiane, jamais à sa place.
+ */
+function crEvolution(e, precedente) {
+  if (!e) return `<p class="crvide">Pas assez de journées notées de part et d'autre pour comparer.</p>`;
+  const fleche = e.sens === 'haut' ? '↗' : e.sens === 'bas' ? '↘' : '→';
+  const dit = e.sens === 'haut' ? 'plus haut' : e.sens === 'bas' ? 'plus bas' : 'au même niveau';
+  return `<p class="crevo ${e.sens}">
+    <span class="crfleche">${fleche}</span>
+    Médiane <b>${e.apres}</b> contre <b>${e.avant}</b> sur l'intervalle précédent — ${dit}.
+    ${e.ecrites !== 0 ? `<span class="crecrit">${e.ecrites > 0 ? '+' : ''}${e.ecrites} journée${Math.abs(e.ecrites) > 1 ? 's' : ''} écrite${Math.abs(e.ecrites) > 1 ? 's' : ''}.</span>` : ''}
+  </p>`;
+}
+
+function crFaits(faits) {
+  if (!faits.length) return '<p class="crvide">Aucun repère posé sur la période.</p>';
+  return `<ul class="crfaits">${faits.map(f => `<li>
+    <span class="crico">${icone(f.theme ?? themeDe(f.label), 17)}</span>
+    <span class="crd">${fmtDay(f.date)}${f.fin ? ` → ${fmtDay(f.fin)}` : f.ouvert ? ' → en cours' : ''}</span>
+    <span class="crl">${esc(f.label)}</span>
+    ${/* « nouveau » distingue ce qui a commencé DANS l'intervalle de ce qui le
+          traverse depuis longtemps. Les deux comptent, ils ne se racontent pas
+          pareil — et c'est la première question du praticien. */''}
+    ${f.nouveau ? '<span class="crtag neuf">posé sur la période</span>'
+      : '<span class="crtag">en cours depuis avant</span>'}
+  </li>`).join('')}</ul>`;
+}
+
+/**
+ * LES MÉCANISMES, CITÉS — JAMAIS REFORMULÉS.
+ *
+ * Le nom et la phrase de mécanisme viennent du compagnon, qui les a écrits en
+ * voyant les phrases. Les réécrire ici en ferait une deuxième version, qui
+ * vieillirait à part. Ce que cette page ajoute, c'est le COMPTE sur la période
+ * et sa comparaison avec la précédente : c'est ça, l'information clinique.
+ */
+function crMotifs(motifs) {
+  if (!motifs.length) return '<p class="crvide">Aucun mécanisme reconnu sur la période.</p>';
+  return `<ul class="crmotifs">${motifs.map(m => {
+    const d = m.n - m.avant;
+    return `<li style="--g:${m.teinte}">
+      <div class="crmtete"><b>${esc(m.nom)}</b>
+        ${/* « 8 fois » tout seul n'a pas d'échelle : huit fois en six semaines et
+              huit fois en six jours ne se lisent pas pareil, et c'est justement
+              la question qu'on pose en séance. On donne donc toujours
+              l'intervalle précédent — y compris quand il est à zéro, qui est
+              une information et pas une absence d'information. */''}
+        <span class="crmn">${m.n} fois${m.avant
+          ? `, contre ${m.avant} sur l'intervalle précédent`
+          : ', aucune sur l’intervalle précédent'}
+          ${d !== 0 && m.avant ? `<i class="${d > 0 ? 'haut' : 'bas'}">${d > 0 ? '+' : ''}${d}</i>` : ''}</span></div>
+      <p class="crmmeca">« ${esc(m.mecanisme)} »</p>
+      <p class="crmjours">${m.jours.map(j => fmtCourt(j)).join(' · ')}</p>
+    </li>`;
+  }).join('')}</ul>`;
+}
+
+function crBascules(b) {
+  if (!b.length) return '';
+  return `<section class="crsec"><h3>Les journées qui ont basculé</h3>
+    <p class="crsub">Notées deux fois ou plus dans la même journée. Une journée notée 5 le soir
+      peut avoir fait 2 puis 8 — aucune note quotidienne ne porte ça.</p>
+    ${/* Pas de `.crq` ici : l'italique entre guillemets est réservé à ce qui est
+          CITÉ. Un écart est calculé, et le mettre dans la même graisse ferait
+          passer un chiffre de la machine pour une phrase de la personne. */''}
+    <ul class="crjours">${b.map(x => `<li><span class="crd">${fmtDay(x.date)}</span>
+      <b>${x.bas} → ${x.haut}</b><span class="crcalc">${x.ecart} points d'écart, ${x.n} relevés</span></li>`).join('')}</ul>
+  </section>`;
+}
+
+function renduMarkup(r, date) {
+  if (!r.assezDeMatiere) {
+    return `<div class="crvidebloc">
+      <p>Rien à rapporter pour l'instant : ${r.ecrites === 0
+        ? 'aucune journée écrite depuis la dernière séance'
+        : `l'intervalle ne fait que ${r.periode.jours} jour${r.periode.jours > 1 ? 's' : ''}`}.</p>
+    </div>`;
+  }
+  const p = r.periode;
+  return `
+    <article class="cr" id="cr">
+      <header class="crtete">
+        <h2>Depuis la dernière séance</h2>
+        <p class="crperiode">
+          <b>${fmtDay(p.debut)} → ${fmtDay(p.fin)}</b>
+          <span>${duree(p.jours)} · ${r.ecrites} journée${r.ecrites > 1 ? 's' : ''} écrite${r.ecrites > 1 ? 's' : ''}
+            sur ${p.jours} (${r.couverture} %)</span>
+        </p>
+        ${/* Le point final ne se met pas si le nom en porte déjà un : « Dr M. »
+              est la façon normale d'écrire un praticien, et « Dr M.. » se voit. */''}
+        ${r.precedente ? `<p class="crprec">Séance précédente le ${fmtDay(r.precedente.date)}${
+          r.precedente.praticien ? ` — ${esc(r.precedente.praticien)}` : ''}${
+          /[.!?]$/.test(r.precedente.praticien ?? '') ? '' : '.'}</p>`
+          : '<p class="crprec">Première séance enregistrée : la période couvre tout le journal.</p>'}
+      </header>
+
+      ${r.apporter ? `<section class="crsec crapporter">
+        <h3>Ce que je voulais dire</h3>
+        <p>${esc(r.apporter)}</p>
+      </section>` : ''}
+
+      <section class="crsec"><h3>L'amplitude</h3>${crAmplitude(r.amplitude)}</section>
+      <section class="crsec"><h3>Ce qui a changé depuis la dernière fois</h3>
+        ${crEvolution(r.evolution, r.precedente)}</section>
+      <section class="crsec"><h3>Les journées aux extrêmes</h3>${crExtremes(r.amplitude)}</section>
+      <section class="crsec"><h3>Les faits datés</h3>${crFaits(r.faits)}</section>
+      <section class="crsec"><h3>Les mécanismes reconnus</h3>${crMotifs(r.motifs)}</section>
+      ${crBascules(r.bascules)}
+
+      ${/* LA PHRASE QUI DÉLIMITE vient du serveur, pas d'ici : le document
+            quitte l'application, et cette phrase ne doit pas partir avec une
+            refonte de la page. Voir AVERTISSEMENT dans server/compte-rendu.js. */''}
+      <footer class="crpied"><p>${esc(r.avertissement ?? '')}</p></footer>
+    </article>`;
+}
+
+function seancesMarkup(seances, date) {
+  return `
+    <div class="card seances">
+      <h2>${ico('suivi', 15)}Les séances</h2>
+      <p class="sub">Une date suffit. Ce qui se dit dans un cabinet ne se saisit pas ici —
+        la date sert à découper le journal en « depuis la dernière fois ».</p>
+      <form class="sform" id="sform">
+        <input type="date" id="sdate" value="${esc(date)}" required>
+        <input type="text" id="spraticien" placeholder="Dr M., la psy… (facultatif)" maxlength="60">
+        <button class="btn" type="submit">${ico('plus', 12)}ajouter</button>
+      </form>
+      ${seances.length ? `<ul class="sliste">${seances.map(s => `<li data-seance="${s.id}">
+        <button class="sdate ${s.date === date ? 'vise' : ''}" data-voir="${s.date}">${fmtDay(s.date)}</button>
+        <span class="snom">${esc(s.praticien ?? '')}</span>
+        ${/* « à dire la prochaine fois » se saisit ICI, entre deux séances, au
+              moment où on y pense. Rangé dans le compte rendu suivant, c'est
+              exactement ce qu'on aurait oublié le jour venu. */''}
+        <input class="sapporter" data-id="${s.id}" value="${esc(s.apporter ?? '')}"
+               placeholder="à dire la prochaine fois…" maxlength="400">
+        <button class="btn ssupp" data-id="${s.id}" data-tip="retirer">${ico('corbeille', 11)}</button>
+      </li>`).join('')}</ul>`
+      : '<p class="crvide">Aucune séance enregistrée.</p>'}
+    </div>`;
+}
+
+async function renderSuivi(date = null) {
+  const d = date ?? SUIVI.date ?? new Date().toISOString().slice(0, 10);
+  $('#view').innerHTML = `<div class="suivi"><p class="crvide">…</p></div>`;
+  let data;
+  try {
+    const [s, c] = await Promise.all([api('/api/seances'), api(`/api/compte-rendu?date=${d}`)]);
+    data = { seances: s.seances, rendu: c.rendu, date: d };
+  } catch (err) {
+    $('#view').innerHTML = `<div class="card"><p class="warn">${esc(err.message)}</p></div>`;
+    return;
+  }
+  SUIVI = data;
+
+  $('#view').innerHTML = `<div class="suivi">
+    ${seancesMarkup(data.seances, d)}
+    <div class="crbarre">
+      <div>
+        <h2>Le compte rendu</h2>
+        <p class="sub">Ce qu'un praticien peut lire en deux minutes, au lieu de le reconstruire
+          par questions. Il se recalcule à chaque ouverture — il n'est stocké nulle part.</p>
+      </div>
+      <button class="btn" id="crimprimer">${ico('sortir', 12)}imprimer</button>
+    </div>
+    ${renduMarkup(data.rendu, d)}
+  </div>`;
+
+  $('#sform')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    await api('/api/seances', { date: $('#sdate').value, praticien: $('#spraticien').value.trim() });
+    renderSuivi($('#sdate').value);
+  });
+  $('#view').querySelectorAll('[data-voir]').forEach(b =>
+    b.addEventListener('click', () => renderSuivi(b.dataset.voir)));
+  $('#view').querySelectorAll('.ssupp').forEach(b => b.addEventListener('click', async () => {
+    await api('/api/seances', { id: Number(b.dataset.id), supprimer: true });
+    renderSuivi();
+  }));
+  // À la sortie du champ, pas à chaque frappe : un appel par lettre tapée pour
+  // une phrase qu'on écrit une fois par mois.
+  $('#view').querySelectorAll('.sapporter').forEach(i => i.addEventListener('change', async () => {
+    await api('/api/seances', { id: Number(i.dataset.id), apporter: i.value.trim() });
+    toast('Noté pour la prochaine fois');
+  }));
+  $('#crimprimer')?.addEventListener('click', () => window.print());
+}
+
 /* ============================= routage ============================= */
 
 const VIEWS = {
@@ -4694,10 +4952,12 @@ const VIEWS = {
   moi: () => renderMoi(),
   year: () => renderYear(),
   mirror: () => renderMirror(),
+  suivi: () => renderSuivi(),
   settings: renderSettings
 };
 
-const NOM_VUE = { tonight: 'Parler', moi: 'Moi', year: 'Année', mirror: 'Ma carte', settings: 'Réglages' };
+const NOM_VUE = { tonight: 'Parler', moi: 'Moi', year: 'Année', mirror: 'Ma carte',
+                  suivi: 'Suivi', settings: 'Réglages' };
 
 /**
  * LES ONGLETS PRENNENT LEUR ICÔNE, UNE FOIS.
