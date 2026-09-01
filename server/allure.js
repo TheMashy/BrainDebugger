@@ -91,16 +91,16 @@ export function duree(min) {
  * qu'on ait rien publié.
  */
 const DUREE_NUIT = ['sommeil', 'sleep', 'nuit'];
-const COUCHER = ['coucher', 'endormi', 'bedtime', 'bed_time', 'sleep_start'];
-const LEVER = ['lever', 'reveil', 'wake', 'sleep_end'];
+export const COUCHER = ['coucher', 'endormi', 'bedtime', 'bed_time', 'sleep_start'];
+export const LEVER = ['lever', 'reveil', 'wake', 'sleep_end'];
 /* Les heures d'ACTIVITÉ de la machine. Ce ne sont pas des heures de sommeil, et
    on ne les fera jamais passer pour telles — mais quand rien d'autre n'existe,
    « dernière activité 01 h 40 » dit quelque chose de la nuit. */
-const DERNIERE = ['derniere_activite', 'last_activity', 'derniere_action'];
-const PREMIERE = ['premiere_activite', 'first_activity', 'premiere_action'];
+export const DERNIERE = ['derniere_activite', 'last_activity', 'derniere_action'];
+export const PREMIERE = ['premiere_activite', 'first_activity', 'premiere_action'];
 
-const norm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-const contient = (cle, mots) => { const k = norm(cle); return mots.some(m => k.includes(m)); };
+export const norm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+export const contient = (cle, mots) => { const k = norm(cle); return mots.some(m => k.includes(m)); };
 
 /** La première mesure du jour dont la clé tombe dans la famille. */
 const trouver = (mesures, mots, { texte = false } = {}) =>

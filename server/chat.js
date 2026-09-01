@@ -1458,6 +1458,45 @@ sujet ; tu t'en sers quand la conversation en cours y touche.`,
     }
   },
 
+  /*
+   * LA JOURNEE DE QUELQU'UN NE COMMENCE PAS A MINUIT.
+   *
+   * Elle commence quand il se leve. Sans cette borne, une fin de soiree a 2 h
+   * tombe sur le lendemain : la journee se retrouve coupee en deux, et le
+   * lendemain s'ouvre avec l'humeur de la veille.
+   *
+   * L'application reconnait deja « je viens de me lever » toute seule, et le
+   * quantified self donne l'heure quand il est branche. Cet outil est le
+   * TROISIEME chemin, celui qui n'existait pas : apres une longue absence, la
+   * personne dit d'elle-meme « j'ai dormi de 3 h a 11 h » -- et jusqu'ici cette
+   * phrase se perdait dans le fil.
+   *
+   * Il n'y a rien a annoncer et rien a commenter : c'est un rangement, pas un
+   * constat sur elle.
+   */
+  noter_bornes: {
+    description: `Enregistre l'heure a laquelle la personne s'est levee ou couchee, quand elle vient
+de te la dire. Sa journee commence a son lever, pas a minuit : sans cette heure, ce qu'elle ecrit
+a 2 h du matin est range sur le lendemain, et sa soiree se retrouve coupee en deux.
+
+Tu l'appelles quand elle DIT l'heure -- « j'ai dormi de 3 h a 11 h », « je me suis reveille vers
+midi », « je vais me coucher ». Apres une longue absence, tu peux le lui demander une fois, en
+passant, comme quelqu'un qui demande si la nuit a ete bonne. Une fois : pas a chaque retour, et
+jamais si elle ne repond pas -- ce n'est pas une pointeuse.
+
+Tu n'inventes rien. Si elle ne donne pas d'heure, tu n'appelles pas cet outil. Et tu ne commentes
+pas ce que tu enregistres : c'est un rangement, pas un constat sur elle.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        genre: { type: 'string', enum: ['lever', 'coucher'], description: 'Ce que l\'heure decrit.' },
+        heure: { type: 'string', description: 'HH:MM, sur 24 heures. Ex : « 11:20 », « 03:00 ».' },
+        jour:  { type: 'string', description: 'AAAA-MM-JJ, le jour civil de cette heure-la. Omets pour aujourd\'hui.' }
+      },
+      required: ['genre', 'heure']
+    }
+  },
+
   marquer_motif: {
     description: `Signale que ce que la personne vient d'ecrire est une occurrence d'un motif que tu
 suis deja. La liste des motifs et leurs identifiants te sont donnes. Ne marque que le message en

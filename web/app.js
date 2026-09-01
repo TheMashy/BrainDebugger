@@ -1148,7 +1148,15 @@ async function send() {
     const res = await fetch('/api/message/stream', {
       method: 'POST',
       headers: enTetes(true),
-      body: JSON.stringify({ text, date: S.today, pieces })
+      /*
+       * PAS DE DATE : C'EST LE SERVEUR QUI SAIT QUELLE JOURNEE ON EST.
+       *
+       * Elle commence au lever, pas a minuit, et l'onglet peut etre reste
+       * ouvert toute la nuit. La date envoyee d'ici serait celle du chargement
+       * de la page — et un message ecrit a 9 h se rangerait dans la soiree de
+       * la veille. Le serveur renvoie celle qu'il a retenue, dans `done`.
+       */
+      body: JSON.stringify({ text, pieces })
     });
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
@@ -1230,6 +1238,10 @@ async function send() {
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
         if (data.motifs) S.motifs = data.motifs;
+        // La journée que le serveur a retenue pour ce message. Elle peut avoir
+        // changé depuis l'ouverture de la page : « aujourd'hui » commence au
+        // lever, et on a pu se lever pendant que l'onglet était ouvert.
+        if (data.jour) S.today = data.jour;
         // Le décor suit la conversation. Il ne changeait qu'au rechargement de
         // la page : on pouvait parler d'un deuil pendant une heure devant le
         // même fond neutre, et découvrir la pyramide le lendemain, sur une
@@ -1772,14 +1784,14 @@ function wireReperes(year) {
   if (bdate) bdate.onclick = () => {
     if (POP === 'date') { POP = null; return redessiner(); }
     ouvrirCal('date', { debut: EV.debut, fin: EV.fin, plage: !!EV.fin,
-                        min: '1900-01-01', max: S.today });
+                        min: '1900-01-01', max: jourCivil() });
     redessiner();
   };
 
   $('#naissbtn').onclick = () => {
     if (POP === 'naiss') { POP = null; return redessiner(); }
     ouvrirCal('naiss', { debut: S.settings.naissance ?? '1990-01-01', fin: null,
-                         plage: false, min: '1900-01-01', max: S.today });
+                         plage: false, min: '1900-01-01', max: jourCivil() });
     redessiner();
   };
   // Le panneau de naissance vit hors du formulaire : on le pose à côté du bouton.
@@ -1919,7 +1931,7 @@ function noteFormMarkup() {
              d'un jour precis, ou de nulle part. Elle ne compte JAMAIS comme
              une journee ecrite -- ni datee, ni libre. */''}
       <label class="fl">de quel jour ?
-        <input type="date" id="cnjour" max="${S.today}">
+        <input type="date" id="cnjour" max="${jourCivil()}">
       </label>
       <span class="sub" style="margin:0;flex:1;min-width:180px">Sans date, elle est rangée à part. Elle ne comptera jamais comme une journée écrite.</span>
       <button class="btn primary" type="submit">${ico('ranger')}Ranger</button>
@@ -2264,7 +2276,7 @@ function moisRuban(m, date) {
   const [an, mo] = mois.split('-').map(Number);
   const precedent = mo === 1 ? `${an - 1}-12` : `${an}-${String(mo - 1).padStart(2, '0')}`;
   const suivant = mo === 12 ? `${an + 1}-01` : `${an}-${String(mo + 1).padStart(2, '0')}`;
-  const apresAujourdhui = suivant > S.today.slice(0, 7);
+  const apresAujourdhui = suivant > jourCivil().slice(0, 7);
 
   return `<div class="moisbar">
     <button class="moisfl" data-mois="${precedent}" aria-label="Mois précédent">‹</button>
@@ -2274,7 +2286,7 @@ function moisRuban(m, date) {
   <div class="moisruban" style="--n:${cases.length}">
     ${cases.map(c => {
       const note = c.note !== null && c.note !== undefined;
-      const futur = c.date > S.today;
+      const futur = c.date > jourCivil();
       return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}"
         data-cal="jour" data-d="${c.date}" ${futur ? 'disabled' : ''}
         ${note ? `style="background:${deltaColor(c.delta ?? 0)}"` : ''}
@@ -3394,7 +3406,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
   const nav = `<div class="daynav">
       <button class="wide" data-lecture title="Revenir à la vue d'ensemble">‹ ma carte</button>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
-      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      <button data-goto="${next}" ${next > jourCivil() ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button class="wide" data-goto="${S.today}">${ico('point', 12)}aujourd'hui</button>` : ''}
     </div>`;
 
@@ -3486,7 +3498,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
       ${moi ? '' : '<button data-lecture>‹ ma carte</button>'}
       <span class="faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</span>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
-      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      <button data-goto="${next}" ${next > jourCivil() ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button data-goto="${S.today}">aujourd'hui</button>` : ''}
     </div>`;
   $('#view').innerHTML = `
@@ -3933,7 +3945,7 @@ function calendarMarkup(m, date) {
     vue: MIR_CAL.vue,
     curseur: MIR_CAL.curseur ?? date.slice(0, 7),
     debut: date,
-    min: '1900-01-01', max: S.today, aujourdhui: S.today,
+    min: '1900-01-01', max: jourCivil(), aujourdhui: S.today,
     /*
      * Une journée notée porte la couleur de son écart, exactement celle de sa
      * case dans la grille de l'Année. Une journée écrite mais non notée porte

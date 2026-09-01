@@ -8,7 +8,7 @@ import {
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
-  toutesMesures, signatureQS, activiteJours, mesuresEntre
+  toutesMesures, signatureQS, activiteJours, mesuresEntre, poserMesure
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -23,8 +23,10 @@ import { journee } from './journee.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
-import { nuitDe, archetypeDe, resumeDuJour, estDetail } from './allure.js';
+import { nuitDe, archetypeDe, resumeDuJour, estDetail, enMinutes } from './allure.js';
 import { lireDigest } from './digest.js';
+import { bornesDitesDans, leversConnus, medianeLever, jourVecuDe,
+         SOURCE_DIT, CLE_LEVER, CLE_COUCHER } from './jour-vecu.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
@@ -40,7 +42,7 @@ import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
 import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
-import { jourLocal, etatDuTemps } from './temps.js';
+import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -271,6 +273,72 @@ export function publicUser(userId) {
  * machine -- le cas nominal de ce produit.
  */
 export const today = () => jourLocal(Date.now());
+
+/* ==================================================================
+   LA JOURNEE VECUE : celle qui commence au lever, pas a minuit.
+   ================================================================== */
+
+/** Sur quelle fenetre on cherche ses levers. Assez pour une mediane stable. */
+const FENETRE_LEVERS = 120;
+
+const MEMO_LEVERS = new Map();
+
+/**
+ * SES LEVERS, RELUS UNE FOIS PAR CHANGEMENT DE MESURES.
+ *
+ * La question « a quelle journee appartient cet instant ? » se pose a chaque
+ * message ; recharger cent vingt jours de mesures a chaque fois serait cent
+ * vingt jours pour une seule heure. Comme pour les liens, l'invalidation se
+ * fait a la SIGNATURE et pas au temps : une borne qu'on vient d'enregistrer
+ * doit compter tout de suite, et c'est justement le moment ou quelqu'un ecrit.
+ */
+export function leversDe(userId = OWNER) {
+  const sig = signatureQS(userId);
+  const vu = MEMO_LEVERS.get(userId);
+  if (vu?.sig === sig) return vu.out;
+  const fin = today();
+  const levers = leversConnus(mesuresEntre(addDays(fin, -FENETRE_LEVERS + 1), fin, userId));
+  const out = { levers, med: medianeLever(levers) };
+  MEMO_LEVERS.set(userId, { sig, out });
+  return out;
+}
+
+/**
+ * LA JOURNEE A LAQUELLE APPARTIENT MAINTENANT.
+ *
+ * C'est ce qui remplace `today()` pour un message qui arrive : quelqu'un qui
+ * ecrit a 2 h du matin finit sa soiree, il ne commence pas sa journee. Sans
+ * lever connu, `jourVecuDe` rend la journee civile -- on ne deplace rien sur
+ * une supposition.
+ *
+ * CE QUI EST DEJA ECRIT NE BOUGE PAS. Une borne enregistree a 8 h ne va pas
+ * rechercher les messages de 7 h pour les redater : la grille de quelqu'un ne
+ * doit pas se reecrire derriere lui.
+ */
+export const jourVecu = (userId = OWNER, quand = Date.now()) => {
+  const { levers, med } = leversDe(userId);
+  return jourVecuDe(quand, { levers, medLever: med }) ?? today();
+};
+
+/**
+ * CE QUE CE MESSAGE DIT DE SON LEVER OU DE SON COUCHER, ENREGISTRE.
+ *
+ * Le chemin sans modele et sans application tierce : « je viens de me lever »
+ * suffit. L'heure vient de la phrase quand elle y est, sinon de l'instant du
+ * message -- quelqu'un qui ecrit « je viens de me lever » vient de se lever.
+ *
+ * @returns {boolean} vrai si une borne a ete posee.
+ */
+export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
+  const b = bornesDitesDans(texte);
+  if (!b) return false;
+  const heure = b.heure ?? heureLocale(quand);
+  const date = jourLocal(quand);
+  if (!heure || !date) return false;
+  poserMesure({ date, source: SOURCE_DIT, cle: b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER,
+                texte: heure, userId });
+  return true;
+}
 
 /* ==================================================================
    LES LIENS ENTRE LES MESURES ET LES NOTES, CALCULES UNE FOIS.
@@ -576,11 +644,25 @@ export const routes = {
   'GET /api/state': ({ userId }) => {
     const s = getSettings(userId);
     const { series: ser, byDate, textCount } = series(userId);
-    const t = today();
+    /*
+     * « AUJOURD'HUI » EST SA JOURNEE, PAS CELLE DU CALENDRIER.
+     *
+     * A 2 h du matin, quelqu'un finit sa soiree : la note qu'il pose, ce qu'il
+     * ecrit et les sujets qu'il aborde appartiennent a la journee qui se
+     * termine. Sans lever connu, `jourVecu` rend la journee civile -- rien ne
+     * bouge tant qu'on ne sait rien.
+     *
+     * `jourCivil` part a cote parce que les BORNES restent civiles : la date
+     * maximale d'un repere ou d'une note de carnet est ce que dit le
+     * calendrier, sinon la journee d'apres devient injoignable pendant la nuit.
+     */
+    const t = jourVecu(userId);
+    const civil = today();
     const entry = getEntry(t, userId);
     const last = ser.length ? ser[ser.length - 1] : null;
     return {
       today: t,
+      jourCivil: civil,
       // De quoi verifier a l'ecran que la chaine tient : la zone que le serveur
       // a retenue et l'heure qu'il en tire. Si ca ne colle pas avec l'horloge du
       // navigateur, c'est que l'en-tete ne passe pas.
@@ -633,7 +715,18 @@ export const routes = {
   'POST /api/message': async ({ body, userId }) => {
     const text = String(body.text ?? '').trim();
     if (!text) return { error: 'texte vide' };
-    const date = body.date ?? today();
+    /*
+     * SA JOURNEE, PAS CELLE DU CALENDRIER.
+     *
+     * `body.date` est explicite quand la personne ecrit DANS un jour passe
+     * qu'elle a ouvert : ce choix-la l'emporte sur tout. Sans lui, la journee
+     * est celle qu'elle vit -- a 2 h du matin, c'est encore hier.
+     *
+     * La borne se pose AVANT de dater : « je viens de me lever » a 11 h doit
+     * ouvrir la journee de 11 h, pas se ranger dans celle d'avant.
+     */
+    noterBornesDites(text, userId);
+    const date = body.date ?? jourVecu(userId);
     const now = new Date().toISOString();
 
     addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
@@ -2140,7 +2233,10 @@ export async function streamMessage(body, send, userId = OWNER) {
   // ligne il s'enregistrerait vide, et le fil montrerait une bulle blanche.
   if (!text) text = pieces.map(p => `[${p.nom}]`).join(' ');
 
-  const date = body.date ?? today();
+  // Voir `POST /api/message` : la borne se pose avant de dater, et une date
+  // explicite -- un jour passe ouvert a l'ecran -- l'emporte sur tout.
+  noterBornesDites(text, userId);
+  const date = body.date ?? jourVecu(userId);
   const messageId = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
   invalidate(userId);
   send('user', { messages: recentMessages(80, userId) });
@@ -2170,6 +2266,15 @@ export async function streamMessage(body, send, userId = OWNER) {
   send('done', {
     messages: recentMessages(80, userId),
     motifs: motifsDuFil(userId),
+    /*
+     * LA JOURNEE OU CE MESSAGE EST TOMBE.
+     *
+     * C'est le serveur qui la decide -- elle commence au lever, pas a minuit --
+     * et l'onglet peut etre reste ouvert toute la nuit. Sans ce renvoi, le fil
+     * continuerait a ecrire « aujourd'hui » sur la journee d'avant, et la note
+     * du soir se poserait sur la mauvaise case.
+     */
+    jour: date,
     /*
      * LE DECOR CHANGE PENDANT LA CONVERSATION, PAS AU RECHARGEMENT.
      *
@@ -2452,6 +2557,24 @@ export function outilsPour(userId, messageId, send = () => {}) {
         return `${etiq} ${t}`;
       }).filter(Boolean);
       return { message: `${lignes.length} note(s) de son carnet sur « ${m} » :\n${lignes.join('\n')}` };
+    },
+
+    /*
+     * L'HEURE DE SON LEVER, RANGEE COMME UNE MESURE.
+     *
+     * Elle rejoint les mesures du quantified self plutot qu'une table a elle :
+     * c'est la meme donnee, elle repond a la meme question, et `nuitDe` la
+     * relit sans rien savoir d'ou elle vient. Ce que la personne DIT passe
+     * devant ce que la machine mesure -- voir `jour-vecu.js`.
+     */
+    noter_bornes: ({ genre, heure, jour }) => {
+      const g = genre === 'coucher' ? 'coucher' : genre === 'lever' ? 'lever' : null;
+      if (!g) return { erreur: 'Le genre doit être « lever » ou « coucher ».' };
+      if (enMinutes(heure) == null) return { erreur: 'Donne une heure en HH:MM, sur 24 heures.' };
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(String(jour ?? '')) ? jour : today();
+      poserMesure({ date: d, source: SOURCE_DIT, cle: g === 'lever' ? CLE_LEVER : CLE_COUCHER,
+                    texte: String(heure).trim(), userId });
+      return { message: `Noté : ${g} à ${heure} le ${d}.` };
     },
 
     marquer_motif: ({ id }) => {
