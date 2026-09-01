@@ -184,3 +184,48 @@ test('decor : les faux positifs les plus prévisibles du français', () => {
     + "apaisé et plutôt content d'avoir avancé, ça va nettement mieux que la semaine dernière.", null);
   assert.equal(calme.scene, 'brume', 'le calme ne doit pas partir dans la pensée qui tourne');
 });
+
+/*
+ * LES DEUX LISTES DOIVENT DIRE LA MEME CHOSE, DANS LE MEME ORDRE.
+ *
+ * `ambiance.js` traduit un nom de scene en INDICE (`SCENE_IDS.indexOf`), et le
+ * shader branche sur cet indice. Si les deux listes divergent d'un cran, tout
+ * marche encore -- rien ne casse, rien ne se plaint -- et l'application affiche
+ * simplement la mauvaise scene. C'est le genre de panne qu'on ne trouve qu'en
+ * regardant longuement un fond qui ne correspond a rien.
+ */
+test('decor : les scenes du serveur et celles du shader sont les memes, dans l’ordre', async () => {
+  const { SCENE_IDS } = await import('../web/scenes.js');
+  assert.deepEqual(SCENES, SCENE_IDS,
+    'server/mood.js et web/scenes.js ont divergé — relance `node tools/build-scenes.mjs`');
+});
+
+/*
+ * Sous vingt-cinq mots, aucune scene ne se declenche : ces textes-la sont donc
+ * ecrits assez longs pour passer le seuil, comme un vrai message le serait.
+ */
+test('decor : l’espoir et le calme ne se confondent pas', () => {
+  // « brume » dit une journée qui tient ; « aube » dit que quelque chose
+  // s'ouvre. Deux états différents, deux décors différents.
+  assert.equal(readMood(
+    "j'ai vraiment de l'espoir pour la suite là, j'y crois, je me dis que ça va aller " +
+    "et j'ai eu une bonne nouvelle enfin, un nouveau départ, j'ai hâte de voir ce que " +
+    "ça donne demain et après").scene, 'aube');
+  assert.equal(readMood(
+    "journée calme et tranquille, je suis reposé, ça va, plutôt bien, rien à signaler, " +
+    "j'ai avancé sur ce que je voulais et je me sens apaisé, content de ma soirée, " +
+    "c'était doux").scene, 'brume');
+});
+
+test('decor : la pluie dit ce qui se relâche, pas la tristesse', () => {
+  // Le chagrin a déjà « eclipse ». Une pluie qui voudrait dire « tu vas mal »
+  // serait un verdict peint sur le fond.
+  assert.equal(readMood(
+    "j'ai craqué au téléphone, j'ai tout sorti, j'ai vidé mon sac et ça fait du bien de " +
+    "l'avoir dit, la tension retombe, je souffle enfin, je me suis confié pour une fois " +
+    "et voilà").scene, 'pluie');
+  assert.equal(readMood(
+    "de la mélancolie, de la nostalgie, le cafard qui revient, un chagrin qui traîne " +
+    "depuis des jours, le cœur lourd, triste sans savoir pourquoi, des larmes le soir " +
+    "et de la honte").scene, 'eclipse');
+});

@@ -42,7 +42,9 @@ export const COULEUR_SCENE = {
   voidwell: '#1F3350',   // le vide : le bleu le plus sombre du jeu
   monolith: '#5A5E66',   // l'épreuve : la pierre dressée, grise et franche
   grain:    '#5E6B33',   // rien ne tient : un vert acide, instable
-  mandel:   '#6B3560'    // la pensée qui se replie : un magenta profond
+  mandel:   '#6B3560',   // la pensée qui se replie : un magenta profond
+  aube:     '#C8762E',   // ce qui s'ouvre : l'ambre d'un soleil bas
+  pluie:    '#3F6B7A'    // ce qui se relâche : un bleu d'eau, froid et clair
 };
 
 /** `rgb(1,2,3)` → `#010203`. La lampe veut de l'hexadécimal. */

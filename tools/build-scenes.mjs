@@ -23,7 +23,8 @@ const OUT = join(ROOT, 'web', 'scenes.js');
 
 /* L'ordre compte : c'est l'index numerique passe au shader, et `mood.js` doit
    nommer exactement les memes. La premiere est la scene par defaut. */
-const ORDRE = ['drift', 'brume', 'abyss', 'eclipse', 'voidwell', 'monolith', 'grain', 'mandel'];
+const ORDRE = ['drift', 'brume', 'abyss', 'eclipse', 'voidwell', 'monolith', 'grain', 'mandel',
+               'aube', 'pluie'];
 
 const AIDES = ['hash11', 'hash21', 'noise2', 'fbm', 'rot', 'sdBox', 'sdSphere', 'smin'];
 
