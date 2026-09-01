@@ -3309,9 +3309,6 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qspan { display: flex; flex-direction: column; gap: 18px; }
 .qstete { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .qstete h2 { margin: 0; display: flex; align-items: center; gap: 8px; }
-/* La fenêtre pousse à droite : c'est un réglage, pas un titre. */
-.qsfen { margin-left: auto; }
-.qsfen button { padding: 4px 11px; font-size: 12px; }
 
 /* CLIQUER UN MOMENT DÉSIGNE SON PASSAGE, À DROITE.
    Les deux colonnes racontaient la même journée sans jamais se répondre : pour
@@ -3332,47 +3329,41 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .jsujet { transition: background .18s ease, box-shadow .18s ease; padding-right: 4px; }
 @media (prefers-reduced-motion: reduce) { .jsujet { transition: none } }
 
-/* LES PUCES : une valeur, ce qu'elle est, son écart à la normale.
-   Pas de courbe, pas de bornes — ce sont d'autres questions, et elles sont
-   repliées plus bas. */
-.qspuces {
-  list-style: none; margin: 0; padding: 0;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 16px 24px;
+/* Les rouages de la journée, repliés : sur un traqueur qui compte par titre de
+   fenêtre, cette colonne faisait quarante lignes. */
+.jmrouages > summary {
+  cursor: pointer; font-size: 12px; color: var(--ink-faint); padding: 6px 0;
 }
-.qspuce {
-  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
-  column-gap: 10px; align-items: baseline; min-width: 0;
+.jmrouages > summary:hover { color: var(--ink-soft); }
+.jmrouages[open] > summary { margin-bottom: 4px; }
+
+/* LA NUIT ET LA FORME DU JOUR, SUR UNE LIGNE.
+   C'étaient deux cartes côte à côte, aussi grosses que la journée juste
+   au-dessus, pour dire deux choses. Ce qui les explique passe au survol. */
+.qsligne {
+  display: flex; align-items: center; gap: 10px 22px; flex-wrap: wrap;
+  padding: 1px 0;
 }
-.qspv { grid-row: 1 / 3; font-size: 21px; color: var(--ink); align-self: center; }
-.qspk { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* La note a le droit de passer à la ligne : coupée, « 1 h 58 de plus que
-   d'… » ne dit plus rien, et c'est justement la moitié qui informe. */
-.qspn { font-size: 11.5px; color: var(--ink-faint); line-height: 1.4; }
-/* LA COULEUR NE DIT PAS « BIEN » OU « MAL ». Elle dit le SENS de l'écart —
-   au-dessus, en dessous — et rien d'autre : personne ici n'est en position de
-   décider qu'une heure d'écran de plus est une mauvaise nouvelle. */
-.qspuce.plus .qspn { color: var(--warn); }
-.qspuce.moins .qspn { color: var(--accent); }
+.qsnuitmini { display: flex; align-items: center; gap: 6px 18px; flex-wrap: wrap; }
+.qsbout { display: inline-flex; align-items: baseline; gap: 6px; }
+.qsbout .ico { align-self: center; color: var(--ink-faint); flex: none; }
+.qsbout b { font-size: 15px; font-weight: 400; color: var(--ink); }
+.qsbout i { font-style: normal; font-size: 11.5px; color: var(--ink-faint); }
+/* L'écart ne s'écrit plus, il se voit : un point de couleur sur l'heure, et la
+   phrase au survol. Trois lignes de « plus tard que d'habitude » disaient la
+   même chose en trois fois plus de place. */
+.qsbout.ecarte { cursor: help; }
+.qsbout.ecarte b { color: var(--warn); }
+/* La flèche dit le SENS, la couleur dit qu'il y en a un. Sans elle, on sait
+   qu'il se passe quelque chose sans savoir de quel côté. */
+.qsbout u { text-decoration: none; font-size: 11px; color: var(--warn); }
 
-/* LE COMPTE, EN PREMIER ET EN GRAND.
-   C'est la question qu'on pose en ouvrant — combien de journées sont
-   enregistrées — et elle n'avait qu'une petite ligne grise sous un titre.
-   La réception reste collée dessus : un branchement cassé ne se voit nulle
-   part ailleurs, les courbes restent belles, elles s'arrêtent simplement. */
-.qscompte { display: flex; align-items: baseline; gap: 12px; margin: -8px 0 0; }
-.qscn { font-size: 34px; line-height: 1; font-weight: 300; color: var(--ink); }
-.qscq { font-size: 13px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 2px; }
-.qscq .faint { font-size: 11.5px; }
-.qscompte.vieux .qscn { color: var(--warn); }
-
-/* LE DETAIL DU JOUR, EN CELLULES.
-   Une rangée qui traverse toute la largeur met le nom d'un côté et sa valeur
-   à l'autre bout : l'œil traverse le vide pour les rapprocher, six fois de
-   suite. Côte à côte, la valeur d'abord, ça se lit d'un coup. */
-.qscells { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px 18px; }
-.qscell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.qscv { font-size: 16px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qsck { font-size: 11px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qsarchmini {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--ink-soft); cursor: help;
+  padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line-soft);
+}
+.qsarchmini .ico { color: var(--accent); flex: none; }
 
 /* UNE FAMILLE : quatorze titres de pages ne sont pas quatorze mesures.
    Une ligne pour le paquet, ses plus grosses nommées, et le reste compté —

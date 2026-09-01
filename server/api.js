@@ -445,6 +445,19 @@ export function mesuresSituees(date, userId = OWNER, { avecLiens = true } = {}) 
                         .sort((a, b) => a.decalage - b.decalage);
     return {
       ...m,
+      /*
+       * UN ROUAGE, OU UNE MESURE QU'ON VIENT LIRE ?
+       *
+       * Le meme partage qu'au panneau : `temps_par_contexte_s_*`,
+       * `titres <app>:<page>`, `bascules`, `pauses_nombre` sont ce qui PRODUIT
+       * la nuit et l'archetype, deja dits en une ligne juste en dessous. Sur un
+       * vrai traqueur ils sont quarante, et la colonne du milieu de la journee
+       * redevenait le mur qu'on venait d'enlever ailleurs.
+       *
+       * Ils ne disparaissent pas -- ils se replient. Ce qui se mesure sur un
+       * CORPS reste ouvert : le sommeil, le poids, les pas, le coeur.
+       */
+      detail: estDetail(m.cle),
       mediane: med == null ? null : Math.round(med * 100) / 100,
       /*
        * TROIS ETATS. Avec deux, la valeur qui EST la médiane tombait du côté

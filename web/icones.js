@@ -50,7 +50,43 @@ export const TRAITS = {
   plus:     '<path d="M9 4.2v9.6M4.2 9h9.6"/>',
   // Antenne : un point et deux ondes qui en partent. Ce qui ARRIVE d'ailleurs
   // -- une montre, une balance, un telephone qui pousse ce qu'il a mesure.
-  antenne:  '<circle cx="5" cy="13" r="1.6" fill="currentColor" stroke="none"/><path d="M8.8 13a3.8 3.8 0 0 0-3.8-3.8"/><path d="M13.2 13A8.2 8.2 0 0 0 5 4.8"/>'
+  antenne:  '<circle cx="5" cy="13" r="1.6" fill="currentColor" stroke="none"/><path d="M8.8 13a3.8 3.8 0 0 0-3.8-3.8"/><path d="M13.2 13A8.2 8.2 0 0 0 5 4.8"/>',
+
+  /* ---- la nuit ---- */
+  // Lune : le coucher. Un croissant, rien de plus.
+  lune:     '<path d="M14.4 10.6A5.9 5.9 0 0 1 7.4 3.6a6.4 6.4 0 1 0 7 7z"/>',
+  // Lever : un demi-soleil qui sort d'une ligne. Le meme dessin que la scene
+  // « aube » reduit a trois traits -- l'horizon, et ce qui monte derriere.
+  lever:    '<path d="M2.6 13.6h12.8"/><path d="M5.6 13.6a3.4 3.4 0 0 1 6.8 0"/><path d="M9 4.2v1.9M4.4 6.1l1.3 1.3M13.6 6.1l-1.3 1.3"/>',
+
+  /*
+   * ---- LES ARCHETYPES ----
+   *
+   * Cinq dessins pour cinq formes de journee d'ordinateur. Chacun est l'IMAGE
+   * de ce qu'il decrit, jamais un symbole a apprendre : une colonne qui
+   * descend sans fin pour la navigation continue, une loupe pour la curiosite,
+   * un bloc pose pour la concentration, deux tetes pour les echanges, une
+   * ligne plate pour la journee courte.
+   *
+   * Ils ne QUALIFIENT personne. Ils disent a quoi ressemble une journee de
+   * machine, et le libelle a cote le dit en toutes lettres.
+   */
+  // Navigation continue : une flèche qui descend sans fin le long d'une colonne.
+  doomscroll: '<rect x="4.6" y="2.4" width="8.8" height="13.2" rx="1.6"/><path d="M9 5.6v6.2"/><path d="M6.9 9.7 9 11.8l2.1-2.1"/>',
+  // Curieux : une loupe, mais posée sur un livre ouvert — on cherche, on lit.
+  curieux:  '<circle cx="8.1" cy="8.1" r="4.3"/><path d="M11.2 11.2 15 15"/><path d="M6.2 8.1h3.8M8.1 6.2v3.8"/>',
+  // Concentré : un bloc plein, dressé et stable. Rien ne le traverse.
+  productif:'<rect x="3" y="3" width="12" height="12" rx="2"/><path d="M6.4 9.4 8.2 11.2l3.4-3.6"/>',
+  // Tourné vers les autres : deux têtes, l'une devant l'autre.
+  social:   '<circle cx="6.6" cy="6.4" r="2.4"/><path d="M2.6 14.4c0-2.3 1.8-3.5 4-3.5s4 1.2 4 3.5"/><path d="M12 5.1a2.4 2.4 0 0 1 0 4.6"/><path d="M13.2 11.4c1.5.4 2.4 1.5 2.4 3"/>',
+  // Écran : un moniteur sur son pied. Le temps passé DEVANT, pas dedans.
+  ecran:    '<rect x="2.4" y="3.4" width="13.2" height="8.8" rx="1.4"/><path d="M6.4 15.2h5.2M9 12.2v3"/>',
+  // Bascules : deux flèches qui s'échangent. Le rythme, pas la durée.
+  bascule:  '<path d="M3 6.4h9.2"/><path d="M9.8 4 12.2 6.4 9.8 8.8"/><path d="M15 11.6H5.8"/><path d="M8.2 9.2 5.8 11.6l2.4 2.4"/>',
+  // Pause : deux barres. Le signe universel, et il ne s'apprend pas.
+  pause:    '<path d="M6.8 4.4v9.2M11.2 4.4v9.2"/>',
+  // Reposé : une ligne calme, à peine ondulée. Peu de machine, peu de traces.
+  repose:   '<path d="M2.4 9h3.2l1.5-2.6L9 11.6l1.9-2.6h4.7"/>'
 };
 
 /*
