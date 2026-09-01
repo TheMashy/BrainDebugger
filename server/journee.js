@@ -238,6 +238,9 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
       charge,
       coeur: coeurDe(texte),
       messages: mo.ids.length,
+      // Les mêmes que ceux des sujets : c'est par eux que les deux colonnes se
+      // répondent, et non par l'heure qu'elles affichent l'une et l'autre.
+      ids: mo.ids,
       estime: pose
         ? { valeur: pose.valeur, dApres: 'releve' }
         : penche == null ? null
@@ -434,6 +437,17 @@ function blocsEnSujets(fondus, ref, zone = null) {
       const ts = b.phrases.find(x => x.ts)?.ts ?? null;
       if (ts) s.heure = heureDe(ts, zone);
     }
+    /*
+     * LES MESSAGES D'OU CE BLOC VIENT.
+     *
+     * C'est ce qui permet de relier les deux colonnes sans rien deviner : un
+     * moment à gauche et un passage à droite sont LE MEME message, et cliquer
+     * l'un doit pouvoir désigner l'autre. Rapprocher par l'heure affichée
+     * marcherait presque — et « presque » veut dire qu'un jour ça désignera le
+     * mauvais passage, sans que rien ne le dise.
+     */
+    const ids = [...new Set(b.phrases.map(x => x.id).filter(x => x != null))];
+    if (ids.length) s.ids = ids;
     return s;
   });
 
@@ -472,7 +486,7 @@ export function sujetsDuJour(date, userId = OWNER, { reference = null, zone = zo
   const lues = [];
   for (const m of msgs)
     for (const p of phrasesDe(m.text))
-      lues.push({ texte: p, theme: themeOuNull(p), penche: pencheDe(p), ts: m.ts });
+      lues.push({ texte: p, theme: themeOuNull(p), penche: pencheDe(p), ts: m.ts, id: m.id });
   return blocsEnSujets(decouperEnBlocs(lues), ref, zone);
 }
 

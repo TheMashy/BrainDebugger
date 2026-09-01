@@ -3687,8 +3687,53 @@ function estimeMarkup(e) {
     >${mesure ? '' : '≈'}${v}</span>`;
 }
 
+/**
+ * CLIQUER UN MOMENT MONTRE SON PASSAGE, À DROITE.
+ *
+ * Les deux colonnes racontent la même journée par deux bouts : à gauche ce
+ * qu'on a ressenti, heure par heure ; à droite ce qu'on a écrit. Elles se
+ * lisaient côte à côte sans jamais se répondre — pour retrouver la phrase
+ * derrière « 05:43 · De quoi le suicide est mauvais ? » il fallait relire tout
+ * le pavé de droite en cherchant l'endroit.
+ *
+ * Le lien se fait par les MESSAGES, pas par l'heure affichée : un moment et un
+ * passage sont exactement les mêmes messages. Rapprocher par l'heure marcherait
+ * presque, et « presque » veut dire qu'un jour ça désignerait le mauvais
+ * passage sans que rien ne le dise.
+ *
+ * C'est une désignation, pas une sélection : re-cliquer éteint, cliquer
+ * ailleurs éteint. Rien n'est enregistré, rien ne change de place.
+ */
+function montrerLePassage(moment) {
+  const dejaLa = moment?.classList.contains('vise');
+  for (const el of document.querySelectorAll('.jmoment.vise, .jsujet.vise, .dayText.vise'))
+    el.classList.remove('vise');
+  if (!moment || dejaLa) return;
+
+  const ids = new Set((moment.dataset.ids ?? '').split(',').filter(Boolean));
+  if (!ids.size) return;
+  moment.classList.add('vise');
+
+  const vus = [];
+  for (const s of document.querySelectorAll('.jsujet[data-ids]')) {
+    if ((s.dataset.ids ?? '').split(',').some(x => ids.has(x))) { s.classList.add('vise'); vus.push(s); }
+  }
+  /*
+   * Une journée d'un seul tenant n'a pas de passages découpés : il n'y a qu'un
+   * pavé, et le désigner en entier ne montre rien. On ne fait alors rien plutôt
+   * que d'allumer tout l'écran.
+   */
+  if (!vus.length) return;
+  // On amène le premier sous les yeux, sans brutalité : le texte peut être long
+  // et le passage visé se trouver hors de la fenêtre.
+  const doux = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  vus[0].scrollIntoView({ block: 'nearest', behavior: doux ? 'smooth' : 'auto' });
+}
+
 function momentMarkup(m) {
   return `<li class="jmoment" data-moment="${esc(m.ts)}"
+      ${m.ids?.length ? `data-ids="${esc(m.ids.join(','))}" tabindex="0" role="button"
+      aria-label="Montrer ce passage dans ce que tu as écrit"` : ''}
       title="${esc(m.sens ?? NOM_SCENE[m.scene] ?? '')}">
     <span class="jheure mono">${esc(m.heure)}</span>
     <span class="jpoint" ${pointMoment(m)}></span>
@@ -3875,7 +3920,7 @@ function sujetsMarkup(sujets) {
      la note de la journée. L'icône, plus grande, porte le sujet ; la survoler en
      donne le nom — c'est tout ce qu'on vient chercher ici. */
   return `<div class="jsujets">${sujets.map(s => `
-    <div class="jsujet">
+    <div class="jsujet"${s.ids?.length ? ` data-ids="${esc(s.ids.join(','))}"` : ''}>
       <span class="jsmarque">
         <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 20)}</span>
         ${s.heure ? `<span class="jsheure mono">${esc(s.heure)}</span>` : ''}
@@ -3984,6 +4029,17 @@ function wireMirror() {
     /* Le mois : une case par jour, de gauche à droite. */
     const mb = e.target.closest('[data-mois]');
     if (mb) { MIR_CAL.curseur = mb.dataset.mois; return renderMoi(MIRROR_DATE, { garderCal: true }); }
+
+    /*
+     * UN MOMENT DÉSIGNE SON PASSAGE. C'est de la désignation, pas de la
+     * navigation : rien n'est enregistré, rien ne change de place, et cliquer
+     * ailleurs éteint. On ne redessine donc PAS la journée — la reconstruire
+     * effacerait justement ce qu'on vient d'allumer.
+     */
+    const mom = e.target.closest('.jmoment[data-ids]');
+    if (mom) { montrerLePassage(mom); return; }
+    if (e.target.closest('.jgrille')) return;   // dans la grille, sans cible : on laisse
+    montrerLePassage(null);                     // ailleurs : on éteint
 
 
     // La note de la journée ouverte : l'échelle s'ouvre, puis se pose.
