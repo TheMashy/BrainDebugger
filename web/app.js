@@ -64,12 +64,22 @@ async function api(path, body) {
 let S = null;              // /api/state
 let view = 'tonight';
 
-function toast(msg) {
+/**
+ * @param {string} msg
+ * @param {{duree?: number}} [opts]  combien de temps il reste. Voir ci-dessous.
+ *
+ * DEUX SECONDES SUFFISENT POUR « Clé copiée », PAS POUR UNE PANNE.
+ *
+ * Un message d'erreur doit se lire ET se retenir : il nomme un réglage à
+ * changer. À 2,2 s, on voit qu'il s'est passé quelque chose et on a déjà perdu
+ * ce que c'était — il ne reste qu'à refaire le geste pour le relire.
+ */
+function toast(msg, { duree = 2200 } = {}) {
   const el = $('#toast');
   el.textContent = msg;
   el.classList.add('on');
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('on'), 2200);
+  el._t = setTimeout(() => el.classList.remove('on'), duree);
 }
 
 /* --------- infobulle globale (data-tip) --------- */
@@ -1230,7 +1240,15 @@ async function send() {
           toast('Le modèle a décliné — le compagnon hors-ligne a pris la main.');
           showHelpline();
         } else if (data.degraded) {
-          toast(`Modèle injoignable — repli hors-ligne (${String(data.degraded).slice(0, 60)})`);
+          /*
+           * PAS DE TRONCATURE. Elle coupait à soixante signes, c'est-à-dire
+           * pile avant la phrase utile : on lisait
+           * « (400 {"type":"error","error":{"type":"invalid_request_error", »
+           * et pas un mot de ce que l'API reprochait. Le serveur envoie
+           * maintenant une phrase française déjà lisible — la couper serait
+           * refaire la même chose sur un texte plus court.
+           */
+          toast(`Modèle injoignable — repli hors-ligne. ${data.degraded}`, { duree: 9000 });
         }
       }
     });
