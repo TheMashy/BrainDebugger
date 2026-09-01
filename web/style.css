@@ -3251,26 +3251,21 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   max-height: 34vh; overflow-y: auto; overscroll-behavior: contain;
 }
 .jsujet {
-  display: grid; grid-template-columns: auto 1fr auto; gap: 12px;
+  display: grid; grid-template-columns: auto 1fr; gap: 12px;
   align-items: start;
 }
 .jsico {
-  display: inline-flex; color: var(--ink-faint); padding-top: 4px;
+  display: inline-flex; color: var(--ink-faint); padding-top: 3px;
+  cursor: help;
   /* L'icône ne descend pas avec le texte : elle marque le DÉBUT du passage,
      et centrée verticalement sur un bloc de dix lignes elle ne marquerait
-     plus rien. */
+     plus rien. Plus grande, elle porte le sujet ; le curseur « ? » dit qu'on
+     peut la survoler pour en lire le nom. */
 }
+.jsico:hover { color: var(--ink); }
 /* La même encre que le texte nu qu'il remplace : le découpage change la mise
    en page, il ne doit pas changer la lisibilité de ce qui est écrit. */
 .jstexte {
   margin: 0; white-space: pre-wrap; font-size: 15.5px; line-height: 1.65;
   color: var(--ink);
-}
-.jsujet .jest { margin-top: 3px; }
-
-@media (max-width: 760px) {
-  /* L'estimation passe sous le texte : à trois colonnes sur un écran étroit,
-     le texte tombait à quarante caractères et se lisait en colonne de journal. */
-  .jsujet { grid-template-columns: auto 1fr; }
-  .jsujet .jest { grid-column: 2; justify-self: start; margin-top: 0; }
 }

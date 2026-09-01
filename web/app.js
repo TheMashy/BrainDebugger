@@ -3765,11 +3765,14 @@ function thematiquesMarkup(ts) {
  */
 function sujetsMarkup(sujets) {
   if (!sujets?.length) return '';
+  /* PAS D'ESTIMATION ICI. Cette colonne sert à VOIR LES SUJETS, pas à relire une
+     note : le chiffre du passage se lit déjà dans les moments à gauche et dans
+     la note de la journée. L'icône, plus grande, porte le sujet ; la survoler en
+     donne le nom — c'est tout ce qu'on vient chercher ici. */
   return `<div class="jsujets">${sujets.map(s => `
     <div class="jsujet">
-      <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 16)}</span>
+      <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 20)}</span>
       <p class="serif jstexte">${esc(s.texte)}</p>
-      ${estimeMarkup(s.estime)}
     </div>`).join('')}</div>`;
 }
 
@@ -3785,7 +3788,7 @@ function journeeMarkup(m) {
 
   return `<div class="jgrille">
     ${moments.length ? `<div class="jcol jfil">
-      <div class="k faint">Ce qui s'est dit</div>
+      <div class="k faint">Humeurs de la journée</div>
       <ol class="jmoments">${moments.map(momentMarkup).join('')}</ol>
     </div>` : ''}
     ${cote ? `<div class="jcol jcote">${cote}</div>` : ''}
