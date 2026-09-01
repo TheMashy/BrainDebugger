@@ -10,7 +10,9 @@
   "scripts": {
     "start": "node server/index.js",
     "import": "node server/import-csv.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "banc:carte": "node tools/banc-carte/rapport.mjs",
+    "banc:synth": "node tools/banc-carte/banc.mjs"
   },
   "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.120.0"

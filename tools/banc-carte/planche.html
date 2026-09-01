@@ -1,0 +1,41 @@
+<meta charset="utf-8">
+<title>vingt vraies toiles</title>
+<style>
+  body { margin:0; background:#0b0f0d; color:#e9efeb; font:13px/1.5 system-ui, sans-serif; }
+  figure { margin:0; padding:16px 0 26px; border-bottom:1px solid #1c2320; }
+  figcaption { padding:0 18px 10px; color:#7f8f86; }
+  figcaption b { color:#e9efeb; font-weight:600; font-size:14px; }
+  figcaption .s { color:#5d6b64; }
+  figcaption em { color:#b9c8c0; font-style:normal; }
+  canvas { display:block; margin:0 auto; }
+  .vide { padding:40px 18px; color:#8a5a5a; }
+</style>
+<div id="tout"></div>
+<script type="module">
+  import { versGraphe, dessinerRelations, cadrer } from '/relations.js';
+  import { disposer } from '/carte.js';
+  const L = 1180, H = 640, dpr = 2;
+  const rep = await (await fetch('/lectures.json')).json();
+  for (const c of rep) {
+    const f = document.createElement('figure');
+    const cap = document.createElement('figcaption');
+    const tout = document.createElement('div');
+    if (!c.lu) {
+      cap.innerHTML = `<b>${c.id}</b> <span class="s">— ${c.sujet}</span>`;
+      tout.className = 'vide'; tout.textContent = 'pas de lecture : ' + (c.erreur ?? 'absente');
+      f.append(cap, tout); document.getElementById('tout').append(f);
+      continue;
+    }
+    const G = versGraphe(c.lu.carte, c.lu.pistes);
+    const d = disposer(G, L, H);
+    cadrer(d.pts, L, H);
+    cap.innerHTML = `<b>${c.id}</b> <span class="s">— ${c.sujet} · ${c.jours} journées, ${c.mots} mots</span><br>`
+      + `${G.noeuds.length} nœuds · ${G.liens.length} liens · ${G.ilots.length} îlots`
+      + (G.ilots.filter(a => a.nom).length ? ` — <em>${G.ilots.filter(a => a.nom).map(a => a.nom).join(' · ')}</em>` : ' — <span class="s">aucune piste nommée</span>');
+    const cv = document.createElement('canvas');
+    cv.width = L * dpr; cv.height = H * dpr; cv.style.width = L + 'px'; cv.style.height = H + 'px';
+    f.append(cap, cv); document.getElementById('tout').append(f);
+    dessinerRelations(cv.getContext('2d'), G, d, { largeur: L, hauteur: H, dpr });
+  }
+  window.pret = true;
+</script>

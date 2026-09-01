@@ -8,3 +8,14 @@ data/*.db-shm
 # Un `BD_DB` ou un `$S` non defini fait ecrire dans un dossier « undefined » :
 # neuf fichiers de sortie s'etaient retrouves versionnes comme ca.
 undefined/
+
+# Le banc de la carte : les corpus telecharges, les lectures tissees et les
+# images. Rien de tout ca n'est a nous -- ni les conversations (deux corpus de
+# recherche dont la licence n'est pas declaree), ni les cartes, qui se
+# regenerent. `node tools/banc-carte/apporter.mjs` les rapporte.
+tools/banc-carte/corpus/
+tools/banc-carte/journaux/
+tools/banc-carte/lectures/
+tools/banc-carte/planches/
+tools/banc-carte/systeme.txt
+tools/banc-carte/lectures.json
