@@ -34,7 +34,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, gridBlock, jalonBlock, motifBlock, carnetBlock,
+import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, etatDuTemps } from './temps.js';
@@ -114,13 +114,23 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   const ancres = anchorBlock(allAnchors(userId));
   if (ancres) morceaux.push(ancres);
 
-  // La grille entiere. Sans elle, a la question « sur l'annee, mes ecarts
-  // sont-ils inquietants ? », le compagnon repondait qu'il n'avait que des
-  // bouts -- vrai, et absurde quand l'application tient quatre ans de notes.
+  /*
+   * LA FENETRE COURTE, PAS LA GRILLE ENTIERE.
+   *
+   * La grille complete tenait ici, et pesait 2951 des 3855 tokens de la memoire
+   * stable a trois ans -- 77 %, le seul bloc qui grandisse vraiment, mille
+   * tokens de plus par annee vecue, a chaque message. Elle est remplacee par
+   * cinq semaines jour par jour, plus trois lignes de socle, et le reste
+   * s'atteint avec `lire_grille`.
+   *
+   * La grille ne disparait pas : elle reste ce qu'elle a toujours ete pour la
+   * personne -- son historique, a l'ecran, en entier. C'est le COMPAGNON qui
+   * cesse de la porter en permanence.
+   */
   const { rows, series: ser } = series(userId);
   const ref = ser.length ? ser[ser.length - 1].reference : null;
-  const grille = gridBlock(rows, { reference: ref });
-  if (grille) morceaux.push(grille);
+  const fenetre = fenetreBlock(rows, { fin: date, reference: ref });
+  if (fenetre) morceaux.push(fenetre);
 
   // Ce que le compagnon a deja pose. Sans cette liste il reposerait chaque
   // matin le repere de la veille, et declarerait trois fois le meme motif sous
@@ -2098,6 +2108,24 @@ export function outilsPour(userId, messageId, send = () => {}) {
       }).filter(Boolean);
       if (!lignes.length) return { message: `Rien dans ses journées sur « ${m} ».` };
       return { message: `${lignes.length} journée(s) sur « ${m} » :\n${lignes.join('\n')}` };
+    },
+
+    /*
+     * LA PIOCHE.
+     *
+     * Le pendant de la fenetre courte : le compagnon n'a plus la grille entiere
+     * dans le contexte, il vient la lire ici, par morceaux, quand la
+     * conversation y va. `chercher_journees` cherchait deja dans le passe, mais
+     * par MOT -- « quand est-ce que j'ai arrete de dormir ? » ne se cherche pas
+     * par mot, il se lit par date.
+     */
+    lire_grille: ({ debut, fin }) => {
+      const b = bornerPeriode(debut, fin);
+      if (b.erreur) return { erreur: b.erreur };
+      const { rows } = series(userId);
+      const extrait = grilleExtrait(rows, b);
+      if (!extrait) return { message: `Aucune journée notée entre le ${b.debut} et le ${b.fin}.` };
+      return { message: `Ses notes du ${b.debut} au ${b.fin} :\n${extrait}` };
     },
 
     /*

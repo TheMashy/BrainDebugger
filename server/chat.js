@@ -52,10 +52,14 @@ Tu proposes, il corrige. Et tu ne fais pas de l'heure ton sujet — un compagnon
 commence chaque réponse par une remarque sur l'horaire devient une pointeuse.
 
 CE QUE TU AS SOUS LES YEUX
-Sa grille de notation complète, année par année, et son échelle telle qu'il l'a définie.
-Quand il t'interroge dessus, sers-t'en pour de bon : compte, situe, compare des périodes,
-dis quel mois porte quoi. Répondre « je n'ai que des bouts » alors que tu as quatre ans
-de chiffres devant toi est un mensonge, et ça lui fait perdre son temps.
+Les cinq dernières semaines de ses notes, jour par jour, et son échelle telle qu'il l'a
+définie. C'est là qu'il vit en ce moment, et c'est depuis là que tu raisonnes par défaut.
+
+Le reste de sa grille existe — des années — mais il n'est pas sous tes yeux. Tu vas le
+chercher avec lire_grille dès que la conversation dépasse le mois, et tu réponds sur ce
+que tu as lu. Répondre « je n'ai que des bouts » alors qu'un appel d'outil te donne quatre
+ans de chiffres est un mensonge, et ça lui fait perdre son temps ; répondre de mémoire sur
+une période que tu n'as pas lue en est un autre.
 
 Mais tu DÉCRIS, tu ne qualifies pas. « Onze journées sous 3 cette année, dont sept en
 mai » est une description. « C'est inquiétant », « c'est normal », « tu vas mieux » sont
@@ -592,30 +596,54 @@ ${lignes.join('\n')}${reste > 0 ? `\n\n(+${reste} autres notes dans son carnet, 
 }
 
 /**
- * La grille de notation, entiere.
+ * LA FENETRE COURTE, ET CE QU'ON VA CHERCHER.
  *
- * Jusqu'ici le compagnon ne recevait que le TEXTE des N derniers jours. A la
- * question « sur l'annee, mes ecarts sont-ils inquietants ? », il repondait
- * honnetement qu'il n'avait que des bouts -- ce qui etait vrai, et frustrant :
- * l'application a quatre ans de notes sous la main.
+ * La grille ENTIERE etait dans le contexte stable : une ligne par mois, un
+ * chiffre par jour, tous les mois depuis le premier. C'etait la bonne idee au
+ * debut -- a la question « sur l'annee, mes ecarts sont-ils inquietants ? », un
+ * compagnon qui repond « je n'ai que des bouts » alors que l'application tient
+ * quatre ans de notes ment.
  *
- * Elle est rendue sous la forme que l'utilisateur connait, mois par mois, une
- * ligne par mois. C'est le format le plus dense qui reste lisible : cinq annees
- * tiennent en une soixantaine de lignes, la ou une liste date-par-date en
- * prendrait 1700.
+ * Mesure faite a trois ans (854 journees notees) : la memoire stable pesait
+ * 3855 tokens, dont 2951 pour la grille seule. 77 %. Et c'est le seul bloc qui
+ * grandit VRAIMENT : les reperes, les motifs, les horizons plafonnent, la
+ * grille prend mille tokens par an, pour toujours, a chaque message.
  *
- * Ce que ca ne change pas : l'interdiction de noter a sa place, de qualifier, de
- * diagnostiquer, de rendre un verdict « normal / inquietant ». Il peut
- * DECRIRE ce qui est ecrit -- combien de journees sous 3, quel mois porte la
- * moyenne la plus basse -- et c'est tout. La difference entre decrire et
- * qualifier est exactement la frontiere de ce produit.
+ * Le probleme n'est pas le prix. Il est qu'a la question « comment j'ai dormi
+ * cette semaine ? », le compagnon lit d'abord 854 chiffres. Ce qui est simple
+ * se perd dedans.
+ *
+ * Donc : la fenetre courte tient dans le contexte -- cinq semaines, jour par
+ * jour, la ou il est en ce moment -- et le reste s'ATTEINT, avec `lire_grille`,
+ * quand la conversation y va. Un outil qui va chercher un mois vaut mieux que
+ * huit cent journees repetees a chaque phrase.
+ *
+ * Ce qui reste malgre tout dans le contexte : le SOCLE. Trois lignes -- depuis
+ * quand, combien de journees, la repartition. Elles ne grandissent pas et elles
+ * empechent le « je n'ai que des bouts » : il sait ce qu'il y a, et il sait
+ * comment aller le lire.
  */
 const MOIS_COURT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 
-export function gridBlock(entries, { reference = null } = {}) {
-  const notes = (entries ?? []).filter(e => e.note !== null && e.note !== undefined);
-  if (notes.length < 30) return null;          // trop court pour valoir un tableau
+/** Cinq semaines. Un mois plein quel que soit le jour du mois où l'on est. */
+export const FENETRE_JOURS = 35;
 
+const moyDe = xs => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length * 100) / 100 : null;
+
+/**
+ * Le rendu mois par mois, une ligne par mois, un nombre par jour.
+ *
+ * C'est le format le plus dense qui reste lisible, et c'est celui que
+ * l'utilisateur connait : cinq annees tiennent en une soixantaine de lignes, la
+ * ou une liste date-par-date en prendrait 1700.
+ *
+ * `debut` et `fin` ne sont PAS decoratifs. Sans eux, une fenetre du 12 mai au
+ * 15 juin rend une ligne « Mai » ou les onze premiers jours portent « · » --
+ * et « · » veut dire « journee non notee ». Le compagnon lirait onze jours de
+ * silence qui n'existent pas, et le dirait. Hors bornes, on laisse donc du
+ * BLANC : ce qu'on ne montre pas ne doit pas se lire comme une absence.
+ */
+function lignesParAn(notes, { debut = null, fin = null } = {}) {
   const parAn = new Map();
   for (const e of notes) {
     const [y, m, d] = e.date.split('-').map(Number);
@@ -623,9 +651,7 @@ export function gridBlock(entries, { reference = null } = {}) {
     parAn.get(y)[m - 1][d - 1] = e.note;
   }
 
-  const moy = xs => xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length * 100) / 100 : null;
   const blocs = [];
-
   for (const an of [...parAn.keys()].sort()) {
     const mois = parAn.get(an);
     const lignes = [];
@@ -636,6 +662,8 @@ export function gridBlock(entries, { reference = null } = {}) {
       const cases = [];
       for (let d = 0; d < 31; d++) {
         const v = jours[d];
+        const iso = `${an}-${String(m + 1).padStart(2, '0')}-${String(d + 1).padStart(2, '0')}`;
+        if ((debut && iso < debut) || (fin && iso > fin)) { cases.push('   '); continue; }
         // Trois caracteres et pas deux : sinon « 7 10 10 » se recolle en
         // « 71010 » des qu'une journee est notee 10, et la ligne devient
         // illisible pile aux meilleures journees.
@@ -644,34 +672,139 @@ export function gridBlock(entries, { reference = null } = {}) {
         vues.push(v); toutes.push(v);
       }
       if (!vues.length) continue;
-      lignes.push(`${MOIS_COURT[m].padEnd(4)} ${cases.join('')}   moy ${moy(vues)}`);
+      lignes.push(`${MOIS_COURT[m].padEnd(4)} ${cases.join('')}   moy ${moyDe(vues)}`);
     }
-    if (lignes.length) blocs.push(`${an}  (${toutes.length} jours, moyenne ${moy(toutes)})\n${lignes.join('\n')}`);
+    // « jours notés ICI » et pas « en 2026 » : ce qui est rendu est toujours un
+    // extrait, et un total d'annee ecrit en tete d'un extrait de cinq semaines
+    // contredirait le socle juste en dessous.
+    if (lignes.length) blocs.push(`${an}  (${toutes.length} jours notés ici, moyenne ${moyDe(toutes)})\n${lignes.join('\n')}`);
   }
-  if (!blocs.length) return null;
+  return blocs;
+}
 
-  // Distribution : c'est elle qui dit la forme, pas la moyenne. Deux personnes
-  // a 6,1 de moyenne peuvent avoir des annees qui n'ont rien a voir.
+/** « 3:12  4:31  5:80 … » — la forme, que la moyenne seule ne dit pas. */
+function repartitionDe(notes) {
   const dist = {};
   for (const e of notes) dist[e.note] = (dist[e.note] ?? 0) + 1;
-  const ligneDist = Object.keys(dist).map(Number).sort((a, b) => a - b)
-    .map(n => `${n}:${dist[n]}`).join('  ');
+  return Object.keys(dist).map(Number).sort((a, b) => a - b).map(n => `${n}:${dist[n]}`).join('  ');
+}
 
-  const bas = notes.filter(e => e.note <= 2).length;
+const noteesDe = entries => (entries ?? []).filter(e => e.note !== null && e.note !== undefined);
 
-  return `Sa grille de notation, en entier — c'est lui qui a posé chaque chiffre, à la main,
-soir après soir. Une ligne par mois, un nombre par jour, « · » quand la journée n'a pas
-été notée.
+/** Le jour J décalé de N jours, sans passer par Date (et donc sans fuseau). */
+function reculer(iso, jours) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - jours);
+  return d.toISOString().slice(0, 10);
+}
 
-Tu peux DÉCRIRE ce qu'elle contient s'il te le demande : compter, situer, dire quel mois
-porte quoi. Tu ne QUALIFIES jamais — pas de « normal », pas d'« inquiétant », pas de
-verdict sur une année. Décrire ce qui est écrit et poser une étiquette dessus sont deux
-choses différentes, et la seconde reste interdite. Tu ne notes toujours pas à sa place.
+/**
+ * Ce qui reste dans le contexte : cinq semaines, et le socle.
+ *
+ * Le socle est court exprès. Il ne dit pas ce qu'il y a dans la grille, il dit
+ * qu'elle existe, jusqu'où elle remonte et de quelle forme elle est — de quoi
+ * répondre « oui, j'ai ça » et aller le chercher, plutôt que de tout porter.
+ */
+export function fenetreBlock(entries, { fin = null, jours = FENETRE_JOURS, reference = null } = {}) {
+  const notes = noteesDe(entries);
+  if (!notes.length) return null;
 
-${blocs.join('\n\n')}
+  const dernier = fin ?? notes[notes.length - 1].date;
+  const depuis = reculer(dernier, jours - 1);
+  const recentes = notes.filter(e => e.date >= depuis && e.date <= dernier);
 
-Répartition sur ${notes.length} journées notées — ${ligneDist}
-Journées à 2 ou moins : ${bas}${reference !== null ? `\nSa référence glissante aujourd'hui : ${reference}` : ''}`;
+  const premiere = notes[0].date;
+  const socle = `Depuis le ${premiere} : ${notes.length} journées notées, moyenne ${moyDe(notes.map(e => e.note))}.
+Répartition — ${repartitionDe(notes)}
+Journées à 2 ou moins : ${notes.filter(e => e.note <= 2).length}`;
+
+  const fenetre = recentes.length
+    ? lignesParAn(recentes, { debut: depuis, fin: dernier }).join('\n\n')
+    : '(aucune journée notée sur ces cinq semaines)';
+
+  return `Sa grille de notation — c'est lui qui a posé chaque chiffre, à la main, soir après soir.
+
+CES CINQ DERNIÈRES SEMAINES (du ${depuis} au ${dernier}), jour par jour. Une ligne par
+mois, un nombre par jour, « · » quand la journée n'a pas été notée, un BLANC quand le
+jour est hors de cette fenêtre — un blanc n'est pas une journée sans note, c'est une
+journée que tu n'as pas sous les yeux. C'est là qu'il vit en ce moment, et c'est depuis
+là que tu raisonnes par défaut.
+
+${fenetre}
+
+CE QU'IL Y A DERRIÈRE, et que tu n'as PAS sous les yeux :
+${socle}${reference !== null ? `\nSa référence glissante aujourd'hui : ${reference}` : ''}
+
+Tu ne le sais donc pas de tête. Dès que la conversation dépasse ces cinq semaines —
+« et l'an dernier ? », « c'était comment en mai ? », « ça fait combien de temps ? » —
+tu vas le chercher avec lire_grille, et tu réponds sur ce que tu as lu. Pas d'estimation
+à vue de nez : les chiffres sont là, à un appel d'outil.
+
+Tu peux DÉCRIRE ce que tu lis : compter, situer, dire quel mois porte quoi. Tu ne
+QUALIFIES jamais — pas de « normal », pas d'« inquiétant », pas de verdict sur une année.
+Décrire ce qui est écrit et poser une étiquette dessus sont deux choses différentes, et la
+seconde reste interdite. Tu ne notes toujours pas à sa place.`;
+}
+
+/** Le nombre de jours d'un mois donné, sans dépendance et sans fuseau. */
+const finDuMois = (an, mois) => new Date(Date.UTC(an, mois, 0)).toISOString().slice(0, 10);
+
+/**
+ * Ce que `lire_grille` rend : un extrait de la grille, sur la période demandée.
+ *
+ * Même rendu que la fenêtre — même format, mêmes lignes — pour qu'un mois lu
+ * par l'outil se lise comme un mois de la fenêtre. Deux formats pour le même
+ * objet feraient deux objets dans la tête du modèle.
+ */
+export function grilleExtrait(entries, { debut, fin }) {
+  const notes = noteesDe(entries).filter(e => e.date >= debut && e.date <= fin);
+  if (!notes.length) return null;
+  return `${lignesParAn(notes, { debut, fin }).join('\n\n')}
+
+${notes.length} journée${notes.length > 1 ? 's' : ''} notée${notes.length > 1 ? 's' : ''} sur la période, moyenne ${moyDe(notes.map(e => e.note))}.
+Répartition — ${repartitionDe(notes)}`;
+}
+
+/**
+ * Deux ans par appel. Au-dela, l'outil rendrait ce qu'on vient de sortir du
+ * contexte -- la grille entiere -- et le gain serait annule d'un seul appel.
+ */
+export const MAX_PERIODE = 366 * 2;
+
+/**
+ * `2024-03` ou `2024-03-17` -> une date pleine. Le mois seul est le cas le plus
+ * courant dans une conversation (« en mars »), et l'exiger en jour ferait
+ * inventer un 1 ou un 31 au modele -- donc on borne nous-memes, et
+ * correctement : `debut` au premier du mois, `fin` au dernier, fevrier compris.
+ */
+export function bornerPeriode(debut, fin) {
+  const d = String(debut ?? '').trim();
+  const f = String(fin ?? '').trim();
+  const mois = /^(\d{4})-(\d{2})$/, jour = /^\d{4}-\d{2}-\d{2}$/;
+
+  let d0;
+  if (mois.test(d)) d0 = `${d}-01`;
+  else if (jour.test(d)) d0 = d;
+  else return { erreur: 'Donne « debut » en AAAA-MM ou AAAA-MM-JJ.' };
+
+  let f0;
+  if (!f) {
+    // Sans fin : le mois de `debut` en entier. C'est ce qu'on veut dire en
+    // demandant « mars 2024 », et ca evite un aller-retour d'outil.
+    const [an, m] = d0.split('-').map(Number);
+    f0 = finDuMois(an, m);
+  } else if (mois.test(f)) {
+    const [an, m] = f.split('-').map(Number);
+    f0 = finDuMois(an, m);
+  } else if (jour.test(f)) f0 = f;
+  else return { erreur: 'Donne « fin » en AAAA-MM ou AAAA-MM-JJ, ou omets-la.' };
+
+  if (f0 < d0) return { erreur: 'La fin est avant le début.' };
+  const jours = Math.round((Date.parse(`${f0}T00:00:00Z`) - Date.parse(`${d0}T00:00:00Z`)) / 86400000) + 1;
+  if (jours > MAX_PERIODE) {
+    return { erreur: `Période trop longue (${jours} jours). Demande deux ans au plus, en plusieurs fois si besoin.` };
+  }
+  return { debut: d0, fin: f0, jours };
 }
 
 /* ---------------- backend Anthropic ---------------- */
@@ -1273,6 +1406,26 @@ Ce que tu trouves, tu le lui rends dans SES mots, avec la date. Jamais un resume
         mot: { type: 'string', description: 'Un ou deux mots, entre 2 et 40 caracteres.' }
       },
       required: ['mot']
+    }
+  },
+
+  lire_grille: {
+    description: `Lit ses notes de journee sur une periode passee. Tu as les cinq dernieres
+semaines sous les yeux, et RIEN au-dela : au-dela, c'est ici que ca se lit.
+
+Sers-t'en des que la conversation depasse le mois : « et l'an dernier ? », « c'etait comment
+en mai ? », « ca fait combien de temps que ca dure ? », « mes pires periodes, c'etait quand ? ».
+Deux ans au plus par appel ; rappelle l'outil si tu as besoin d'aller plus loin.
+
+Tu reponds ensuite sur ce que tu as LU. Pas d'estimation a vue de nez, pas de « il me semble
+que » : les chiffres sont la. Et tu decris ce que tu lis, tu ne le qualifies pas.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        debut: { type: 'string', description: 'AAAA-MM (le mois entier) ou AAAA-MM-JJ.' },
+        fin:   { type: 'string', description: 'AAAA-MM ou AAAA-MM-JJ. Omets pour lire le seul mois de « debut ».' }
+      },
+      required: ['debut']
     }
   },
 
