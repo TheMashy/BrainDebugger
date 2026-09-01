@@ -93,9 +93,12 @@ function hache(cle) {
  * `sqrt` garde la repartition uniforme dans le disque : sans lui, tout
  * s'entasse au centre.
  */
-export function disposer(G, largeur, hauteur) {
+export function disposer(G, largeur, hauteur, { progressif = false } = {}) {
   const n = G.noeuds.length;
-  if (!n) return { pts: [], centres: new Map() };
+  if (!n) {
+    const vide = { pts: [], centres: new Map() };
+    return progressif ? { ...vide, pas: () => true, restant: () => 0, finir: () => vide } : vide;
+  }
 
   const R = Math.min(largeur, hauteur);
 
@@ -188,7 +191,15 @@ export function disposer(G, largeur, hauteur) {
   const amasDe = G.noeuds.map(nd => nd.amas);
   const centres = new Map();
 
-  for (let t = 0; t < TOURS; t++) {
+  /*
+   * UN TOUR DE SIMULATION, ISOLE.
+   *
+   * Il etait dans le corps de la boucle. Il en sort parce que le RETISSAGE le
+   * joue a l'image : la toile qu'on regarde se faire est cette simulation-la,
+   * ralentie a la vitesse de l'ecran, pas une animation qui l'imiterait. Une
+   * animation qui imite un calcul finit toujours par mentir sur le calcul.
+   */
+  const tour = () => {
     // Centre de chaque amas, recalcule a chaque tour : c'est lui qui regroupe.
     centres.clear();
     for (let i = 0; i < n; i++) {
@@ -239,10 +250,38 @@ export function disposer(G, largeur, hauteur) {
       pts[i].vx *= FROTTEMENT; pts[i].vy *= FROTTEMENT;
       pts[i].x += pts[i].vx; pts[i].y += pts[i].vy;
     }
+  };
+
+  /*
+   * LE MODE PROGRESSIF : la meme simulation, rendue tour par tour.
+   *
+   * Le retissage la joue a l'ecran -- quatre tours par image, quatre-vingts
+   * images -- et ce qu'on regarde alors est la disposition en train de se
+   * faire, pas une animation qui la mimerait. C'est la difference entre montrer
+   * un travail et jouer un sablier.
+   *
+   * Le recadrage n'est PAS applique pendant : il deplacerait les points sous la
+   * simulation a chaque image. Le cadrage se fait a l'affichage, par la vue --
+   * ce qui est de toute facon ce qu'une vue est faite pour.
+   */
+  const finir = () => { recadrerFinal(); return { pts, centres }; };
+  if (progressif) {
+    let faits = 0;
+    return {
+      pts, centres,
+      restant: () => TOURS - faits,
+      /** Avance de `n` tours. Rend `true` quand il n'en reste plus. */
+      pas(n = 1) { for (let k = 0; k < n && faits < TOURS; k++, faits++) tour(); return faits >= TOURS; },
+      finir
+    };
   }
+
+  for (let t = 0; t < TOURS; t++) tour();
+  return finir();
 
   // On ramene dans le cadre plutot que de laisser des mots sortir : une carte
   // dont un amas est coupe par le bord se lit comme une carte incomplete.
+  function recadrerFinal() {
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
   const y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -258,9 +297,11 @@ export function disposer(G, largeur, hauteur) {
     c.x = marge + (c.x - x0) * s + (largeur - marge * 2 - (x1 - x0) * s) / 2;
     c.y = marge + (c.y - y0) * s + (hauteur - marge * 2 - (y1 - y0) * s) / 2;
   }
-
-  return { pts, centres };
+  }
 }
+
+/** Le nombre de tours d'une disposition complète — de quoi se donner un rythme. */
+export { TOURS as TOURS_DISPOSITION };
 
 const couleur = (note, moyenne) =>
   note === null || note === undefined ? 'rgb(120,128,124)' : deltaColor(note - (moyenne ?? 6));

@@ -441,6 +441,19 @@ export const DEFAULT_SETTINGS = {
    * date de la lecture ne bouge plus.
    */
   lectureLotErreur: null,
+  /*
+   * QUAND LA TOILE A ETE RETISSEE POUR LA DERNIERE FOIS.
+   *
+   * Ecrit UNIQUEMENT par un retissage manuel qui a abouti : ni la relecture de
+   * fond ni un echec ne consomment le tour. C'est ce champ qui porte les douze
+   * heures de battement.
+   *
+   * Il doit etre declare ICI et pas ailleurs : `setSettings` ignore en silence
+   * toute cle absente de cette table. Un reglage oublie ici ne leve rien, ne
+   * casse rien, et ne s'enregistre jamais -- le battement n'aurait tout
+   * simplement jamais pris.
+   */
+  dernierRetissage: null,
   anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
   /*
    * LA CLE DE LA PASSERELLE. Vide tant qu'on n'en a pas cree une.

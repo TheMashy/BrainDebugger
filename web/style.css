@@ -3397,3 +3397,61 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   font: 400 11.5px/1.6 var(--mono); color: var(--ink-faint);
   overflow-x: auto; white-space: pre-wrap; word-break: break-all;
 }
+
+
+/* ======================================================================
+   RETISSER : la toile qu'on regarde se faire.
+
+   Un voile PLEIN et pas une boîte de dialogue : ce qu'on regarde occupe
+   l'écran entier, parce que c'est le sujet et pas une étape. Rien à cliquer
+   pendant que ça se fait — il n'y a rien à décider, il y a à regarder.
+   ====================================================================== */
+.tissage {
+  position: fixed; inset: 0; z-index: 60;
+  background: radial-gradient(120% 90% at 50% 42%, #0d1014 0%, #07090c 62%, #05070a 100%);
+  display: grid; place-items: center;
+  animation: tsentre .5s ease-out;
+}
+@keyframes tsentre { from { opacity: 0 } to { opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .tissage { animation: none } }
+
+#tissagecv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* Le texte se pose EN HAUT, pas au centre : au centre il serait sur la toile,
+   et la toile est ce qu'on est venu voir. */
+.tsdessus {
+  position: absolute; top: 8vh; left: 0; right: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  text-align: center; padding: 0 24px; pointer-events: none;
+}
+.tsdessus .btn { pointer-events: auto; }
+.tstitre {
+  font-size: 13px; letter-spacing: .22em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 500;
+}
+.tsdit { font: 400 13.5px/1.5 var(--mono); color: var(--ink-dim); min-height: 1.5em;
+         transition: opacity .3s; }
+.tserr { margin: 4px 0 0; font-size: 13px; color: var(--warn); max-width: 46ch; }
+.tsdessus .btn { margin-top: 14px; }
+
+/* Les groupes se nomment un par un, une fois la toile posée. Le retard est
+   porté par `--d` : chacun arrive quand c'est son tour, et l'ordre a un sens —
+   c'est celui des pistes. */
+.tsgroupes {
+  position: absolute; bottom: 9vh; left: 0; right: 0;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 0 24px;
+}
+.tsg {
+  font-size: 13px; letter-spacing: .04em; padding: 7px 15px; border-radius: 999px;
+  color: hsl(var(--p) 62% 76%);
+  border: 1px solid hsl(var(--p) 55% 58% / .5);
+  background: hsl(var(--p) 55% 58% / .1);
+  opacity: 0; animation: tsgroupe .8s ease-out var(--d, 0s) forwards;
+}
+@keyframes tsgroupe {
+  from { opacity: 0; transform: translateY(9px) }
+  to   { opacity: 1; transform: none }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tsg { animation: none; opacity: 1 }
+}

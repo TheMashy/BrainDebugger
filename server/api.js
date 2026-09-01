@@ -22,7 +22,7 @@ import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
-import { corpusPour, lire, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
+import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -1604,6 +1604,14 @@ export const routes = {
        */
       enLot: !!getSettings(userId).lectureLot,
       lotErreur: getSettings(userId).lectureLotErreur || null,
+      /*
+       * CE QU'IL RESTE A ATTENDRE AVANT DE POUVOIR RETISSER.
+       *
+       * En millisecondes, et pas un booleen : « pas maintenant » est une porte
+       * fermee sans explication. « dans 4 h 20 » est une porte fermee dont on
+       * connait l'heure d'ouverture, et ce n'est pas la meme chose a vivre.
+       */
+      retissage: attenteRetissage(userId),
       cle: resolveKey(getSettings(userId)).source !== 'none'
     };
   },
@@ -1895,6 +1903,134 @@ function piecesDe(body) {
                media: String(p?.media ?? ''), donnees });
   }
   return out;
+}
+
+/* ==========================================================================
+   RETISSER LA TOILE.
+
+   « Relire » existait deja : un bouton, deux minutes de sablier, une carte qui
+   apparait d'un coup. Ce qui se passe entre les deux est pourtant ce qui a le
+   plus de valeur -- tout le journal est relu, tous les motifs sont repasses, et
+   la toile se refait. Le cacher derriere un sablier, c'est jeter la seule chose
+   que cette application fait de spectaculaire.
+
+   Retisser, c'est le meme travail, MONTRE. Le serveur dit ce qu'il rassemble,
+   puis combien le modele a ecrit, puis rend la carte ; l'ecran la tisse pour de
+   bon -- la simulation tourne a l'image, ce ne sont pas des decorations.
+
+   DEUX FOIS PAR JOUR. Ce n'est pas une limite de cout, meme si ca en est une :
+   une lecture de fond coute entre dix-huit et soixante centimes. C'est que
+   RIEN NE CHANGE en une heure. Une toile qu'on peut refaire a volonte devient
+   un bouton qu'on presse en attendant qu'il dise autre chose, et une lecture
+   qu'on rejoue jusqu'a ce qu'elle plaise n'est plus une lecture.
+   ========================================================================== */
+
+/** Douze heures. Deux fois par jour, donc — et jamais deux fois le même soir. */
+export const RETISSAGE_ATTENTE = 12 * 3600 * 1000;
+
+/**
+ * Ce qu'il reste à attendre, en millisecondes. 0 quand c'est possible.
+ * Lu depuis les réglages : le champ n'est écrit QUE par un retissage manuel
+ * réussi — ni la relecture de fond ni un échec ne consomment le tour.
+ */
+export function attenteRetissage(userId = OWNER) {
+  const q = getSettings(userId).dernierRetissage;
+  if (!q) return 0;
+  const t = Date.parse(q);
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, RETISSAGE_ATTENTE - (Date.now() - t));
+}
+
+/**
+ * Le retissage, en flux.
+ *
+ * Les evenements disent CE QUI SE PASSE, jamais un pourcentage : on ne sait pas
+ * combien de temps le modele va prendre, et une barre qui avance vers une fin
+ * inventee est un mensonge de plus a chaque seconde.
+ */
+export async function retisser(body, send, userId = OWNER) {
+  const attente = attenteRetissage(userId);
+  if (attente > 0) {
+    send('refus', { attente, raison: 'Tu as déjà retissé récemment.' });
+    return;
+  }
+
+  const s = getSettings(userId);
+  const { rows, carnet } = series(userId);
+  const ecrites = rows.filter(r => r.text && r.text.trim());
+  if (ecrites.length < LECTURE_MIN) {
+    send('erreur', { error: `Il faut au moins ${LECTURE_MIN} journées écrites pour que ça veuille dire quelque chose.` });
+    return;
+  }
+
+  const corpus = corpusDuJournal(userId, rows, carnet);
+  if (!corpus.dates.size) {
+    send('erreur', { error: "Rien d'écrit dans ton journal — il n'y a rien à lire." });
+    return;
+  }
+
+  /*
+   * CE QU'ON RASSEMBLE, EN CHIFFRES REELS.
+   *
+   * L'ecran en fait une lueur par journee. Ce ne sont pas des particules
+   * decoratives : il y a exactement autant de points que de journees relues, et
+   * c'est ce qui fait que regarder ca veut dire quelque chose.
+   */
+  /*
+   * CHAQUE JOURNEE PART AVEC SON ECART.
+   *
+   * L'ecran en fait une lueur, et l'ecart en fait sa COULEUR : la meme rampe
+   * que la grille, que la journee, que les points d'un noeud. Sans lui, on
+   * regarde une pluie de points identiques ; avec, on regarde ses annees
+   * s'allumer dans les couleurs qu'elles ont vraiment eues.
+   */
+  const { byDate } = series(userId);
+  send('corpus', {
+    journees: rows.length,
+    ecrites: ecrites.length,
+    jours: [...corpus.dates].sort().map(d => ({ d, e: byDate.get(d)?.delta ?? null })),
+    reperes: allEvents(userId).length,
+    motifs: allMotifs(userId).length,
+    carnet: carnet.length,
+    depuis: rows[0]?.date ?? null,
+    jusqu_au: ecrites.at(-1)?.date ?? null
+  });
+
+  let r;
+  try {
+    // Un evenement par tranche, pas par delta : le modele rend des centaines de
+    // fragments par seconde, et autant d'ecritures SSE encombreraient le tuyau
+    // pour une information qui ne se lit pas a cette vitesse.
+    let dernier = 0;
+    r = await lireEnFlux(corpus, s, ({ signes, pense }) => {
+      if (signes - dernier < 400) return;
+      dernier = signes;
+      send('lit', { signes, pense });
+    });
+  } catch (err) {
+    send('erreur', { error: String(err?.message ?? err).slice(0, 300) });
+    return;
+  }
+
+  recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+  const l = setLecture({
+    contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
+    jours: corpus.jours, modele: r.modele, userId
+  });
+  // LE TOUR EST CONSOMME ICI, et pas avant : un retissage qui echoue sur une
+  // coupure de reseau ne doit pas couter les douze heures.
+  setSettings({ dernierRetissage: new Date().toISOString() }, userId);
+
+  const lecture = decorerCarte(l.contenu, series(userId).byDate, textesParJour(userId));
+  // La toile d'abord — c'est elle qui se tisse à l'écran. Les groupes ensuite,
+  // parce qu'ils n'ont de sens qu'une fois la toile posée.
+  send('toile', { lecture, fait_le: l.fait_le, jours: l.jours, modele: l.modele });
+  send('fini', {
+    attente: RETISSAGE_ATTENTE,
+    groupes: (l.contenu?.pistes ?? []).map(p => ({ nom: p.nom, teinte: p.teinte ?? null,
+                                                   noeuds: (p.noeuds ?? []).length })),
+    usage: usageFor(userId)
+  });
 }
 
 export async function streamMessage(body, send, userId = OWNER) {
