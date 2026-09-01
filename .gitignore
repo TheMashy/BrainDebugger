@@ -4,3 +4,7 @@ data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 .DS_Store
+
+# Un `BD_DB` ou un `$S` non defini fait ecrire dans un dossier « undefined » :
+# neuf fichiers de sortie s'etaient retrouves versionnes comme ca.
+undefined/
