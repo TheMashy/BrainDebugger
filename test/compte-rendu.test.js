@@ -179,12 +179,24 @@ test('NI DANS LA PAGE QUI L’AFFICHE — c’est elle qui arrive sous les yeux'
   // laisser « rechute » dans un titre de section reviendrait à avoir vérifié la
   // moitié qui ne se lit pas.
   const app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
-  // On démarre APRÈS la bannière de section : elle s'ouvre avant le repère, donc
-  // son « /* » n'est pas dans la tranche et le retrait des commentaires ne
-  // l'attrape pas — le test échouait sur son propre en-tête.
+  /*
+   * LA PAGE A ÉTÉ DÉBRANCHÉE, et ce test se réarme tout seul si elle revient.
+   *
+   * L'onglet « Suivi » a été retiré : le calcul et ses routes restent, la page
+   * qui les affichait n'existe plus. Un test qui passerait « parce qu'il n'a
+   * rien trouvé » serait exactement le genre de faux vert qu'on a déjà payé
+   * ailleurs — on vérifie donc un fait VRAI AUJOURD'HUI : la vue est bien
+   * débranchée. Le jour où elle revient, la première branche reprend la main
+   * et le scan des étiquettes cliniques s'applique de nouveau.
+   */
   const debut = app.indexOf('let SUIVI = {');
+  if (debut < 0) {
+    assert.equal(/renderSuivi|data-view="suivi"/.test(app), false,
+                 'la vue Suivi est à moitié branchée : ni page complète, ni retrait franc');
+    return;
+  }
   const fin = app.indexOf('============================= routage', debut);
-  assert.ok(debut > 0 && fin > debut, 'la section Suivi de app.js est introuvable — repères déplacés ?');
+  assert.ok(fin > debut, 'la section Suivi de app.js est introuvable — repères déplacés ?');
   const code = app.slice(debut, fin)
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ');
   // La page ne l'écrit plus : elle rend `r.avertissement`, qui vient du serveur.
