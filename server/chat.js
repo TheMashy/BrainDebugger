@@ -830,11 +830,77 @@ export async function testKey(settings) {
  * Un modele inconnu de cette liste n'a donc pas de repli.
  * =====================================================================
  */
-export const MODELES_AVEC_REPLI = ['claude-opus-5', 'claude-fable-5', 'claude-mythos-5'];
+/*
+ * =====================================================================
+ * CE QUE CHAQUE MODELE SAIT RECEVOIR.
+ *
+ * Reglages laisse choisir le modele, et LES MODELES N'ACCEPTENT PAS LE MEME
+ * CORPS DE REQUETE. Envoyer a l'un ce qui est fait pour l'autre ne degrade
+ * rien : ca rend 400, et le compagnon entier tombe en relances scriptees.
+ *
+ * On l'a appris deux fois de suite, sur deux champs differents :
+ *
+ *   - `fallbacks` (le repli serveur) est une fonction de la famille Opus. Il a
+ *     ete ecrit quand le compagnon tournait sur Opus 5 ; le chantier sur le
+ *     cout l'a bascule sur Sonnet 5 et l'a laisse derriere.
+ *   - `thinking: {type:'adaptive'}` et `output_config.effort` n'existent pas
+ *     sur Haiku 4.5, qui est propose dans Reglages comme « le plus rapide » --
+ *     c'est-a-dire celui qu'on choisit quand on regarde la facture. L'API
+ *     repondait « adaptive thinking is not supported on this model ».
+ *
+ * D'OU UNE TABLE PLUTOT QU'UNE SUITE DE CORRECTIFS. Chaque champ optionnel de
+ * la requete est declare par modele, une fois, ici. Ajouter un modele au menu
+ * de Reglages sans lui ajouter sa ligne le laisse au minimum commun, qui
+ * marche partout -- au lieu de le faire tomber.
+ *
+ * LE DEFAUT EST « NE RIEN ENVOYER », et c'est l'asymetrie des echecs qui le
+ * decide. Un champ absent coute une fonction en moins : le modele ne reflechit
+ * pas en amont, il n'a pas de repli sur un refus. Un champ de trop coute
+ * TOUTES les conversations. Un modele inconnu de cette table est donc servi
+ * nu.
+ * =====================================================================
+ */
+export const CAPACITES = {
+  'claude-fable-5':    { pense: true, effort: true, repli: true },
+  'claude-mythos-5':   { pense: true, effort: true, repli: true },
+  'claude-opus-5':     { pense: true, effort: true, repli: true },
+  'claude-opus-4-8':   { pense: true, effort: true },
+  'claude-opus-4-7':   { pense: true, effort: true },
+  'claude-opus-4-6':   { pense: true, effort: true },
+  'claude-sonnet-5':   { pense: true, effort: true },
+  'claude-sonnet-4-6': { pense: true, effort: true },
+  // Haiku 4.5 : ni l'un ni l'autre. Sa pensee se pilote par `budget_tokens`,
+  // que ce produit n'utilise pas, et l'effort y rend une erreur.
+  'claude-haiku-4-5':  {}
+};
+
+export const capacitesDe = model => CAPACITES[String(model ?? '').trim()] ?? {};
+
+/**
+ * Les champs optionnels que CE modele accepte. A etaler dans la requete.
+ *
+ * @param {string} model
+ * @param {{effort?: string, repli?: boolean}} [opts]
+ *        `repli` a false pour les appels qui n'en veulent pas -- l'API des lots
+ *        refuse le repli serveur meme sur un modele qui le porte.
+ */
+export function optionsDuModele(model, { effort = null, repli = true } = {}) {
+  const c = capacitesDe(model);
+  const out = {};
+  if (c.pense) out.thinking = { type: 'adaptive' };
+  if (c.effort && effort) out.output_config = { effort };
+  if (c.repli && repli) {
+    out.betas = ['server-side-fallback-2026-07-01'];
+    out.fallbacks = 'default';
+  }
+  return out;
+}
+
+export const MODELES_AVEC_REPLI = Object.keys(CAPACITES).filter(m => CAPACITES[m].repli);
 
 /** Les deux champs du repli serveur, ou rien du tout. A etaler dans la requete. */
 export const repliServeur = model =>
-  MODELES_AVEC_REPLI.includes(String(model ?? '').trim())
+  capacitesDe(model).repli
     ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }
     : {};
 
@@ -936,7 +1002,8 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
         // Repli serveur, MAIS SEULEMENT SI LE MODELE LE CONNAIT. Voir
         // `repliServeur` : demande a un modele qui ne le porte pas, il rend 400
         // et fait tomber tout le compagnon.
-        ...repliServeur(s.anthropicModelChat || 'claude-sonnet-5'),
+        ...optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5',
+                           { effort: s.anthropicEffort || 'low' }),
         /*
          * LE COMPAGNON ET LA LECTURE N'ONT PAS BESOIN DE LA MEME TETE.
          *
@@ -953,8 +1020,8 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
          */
         model: s.anthropicModelChat || 'claude-sonnet-5',
         max_tokens: 2048,
-        thinking: { type: 'adaptive' },
-        output_config: { effort: s.anthropicEffort || 'low' },
+        /* `thinking` et `output_config` sont montes par `optionsDuModele`
+           ci-dessus : ils n'existent pas sur tous les modeles du menu. */
         /*
          * LA MISE EN CACHE AUTOMATIQUE, POUR LA QUEUE DE CONVERSATION.
          *
