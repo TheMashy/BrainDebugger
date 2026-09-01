@@ -3449,6 +3449,14 @@ async function renderMirror(date, { garderCal = false } = {}) {
             veut voir où ce jour tombe dans sa semaine. */''}
       ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
+      ${/* Le bouton vit dans « Moi » parce que c'est la page de ce qu'on SAIT
+            de soi. Réglages garde le branchement et le journal des envois :
+            deux questions différentes, deux endroits. */''}
+      ${moi ? `<div class="qsbarre">
+        <button class="btn" id="qsbouton" aria-pressed="${QS_OUVERT}">
+          ${ico('antenne', 13)}${QS_OUVERT ? 'masquer les données' : 'quantified self'}</button>
+      </div>
+      <div id="qspanneau">${QS_OUVERT ? qsPanneauMarkup(QS_DATA) : ''}</div>` : ''}
 
       ${reperesMarkup(m.reperes, date)}
 
@@ -3904,6 +3912,25 @@ function wireMirror() {
     /* Le mois : une case par jour, de gauche à droite. */
     const mb = e.target.closest('[data-mois]');
     if (mb) { MIR_CAL.curseur = mb.dataset.mois; return renderMoi(MIRROR_DATE, { garderCal: true }); }
+
+    /*
+     * Le panneau quantified self s'ouvre SANS redessiner la journée : elle est
+     * juste au-dessus, et la reconstruire ferait clignoter ce qu'on est en
+     * train de lire pour montrer autre chose plus bas.
+     */
+    if (e.target.closest('#qsbouton')) {
+      if (QS_OUVERT) {
+        QS_OUVERT = false;
+        $('#qspanneau').innerHTML = '';
+        $('#qsbouton').setAttribute('aria-pressed', 'false');
+        $('#qsbouton').innerHTML = ico('antenne', 13) + 'quantified self';
+      } else {
+        $('#qsbouton').setAttribute('aria-pressed', 'true');
+        $('#qsbouton').innerHTML = ico('antenne', 13) + 'masquer les données';
+        await ouvrirQS();
+      }
+      return;
+    }
 
     // La note de la journée ouverte : l'échelle s'ouvre, puis se pose.
     if (e.target.closest('#dayNote')) {
@@ -4893,6 +4920,155 @@ function drawNotesPreview(p) {
  * Remettre l'onglet est alors une ligne dans `VIEWS` ; l'avoir supprimé aurait
  * voulu dire le réécrire.
  */
+
+/* ==================================================================
+   LE VISUALISEUR DES DONNÉES REÇUES.
+
+   Réglages répond « est-ce que ça rentre » : les noms des séries, le journal
+   des envois, les refus. C'est une console de branchement. Elle ne répond pas
+   à la question de quelqu'un qui regarde SES données — « qu'est-ce qu'il y a
+   dedans ? » — et les digests d'activité, eux, n'étaient visibles nulle part :
+   ils ne se lisaient que par la clé, c'est-à-dire depuis l'application qui les
+   envoie.
+
+   ON NE REFORMATE PAS LE DIGEST. Sa forme appartient à l'application qui
+   l'écrit et elle bougera ; la figer ici voudrait dire la casser à chaque
+   version de leur côté. Le rendu est donc GÉNÉRIQUE — il descend dans ce qu'on
+   lui donne, quelle que soit sa forme.
+   ================================================================== */
+
+let QS_OUVERT = false;
+let QS_DATA = null;
+
+const qsNb = v => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(v);
+
+/** L'unité est portée par le NOM de la clé : `_s` des secondes, `_min` des minutes. */
+const UNITE = /_(s|min)$/;
+
+/**
+ * Les secondes en durée lisible. `temps_par_contexte_s` est un nom qui dit son
+ * unité : 4830 ne se lit pas, « 1 h 22 » se lit. La convention `_s` vient des
+ * données elles-mêmes, on ne la choisit pas.
+ *
+ * Elle est portée par le nom du BLOC autant que par celui de la valeur :
+ * `temps_par_contexte_s: { code: 4938 }` n'a d'unité que sur le parent, et
+ * « code : 4 938 » ne veut rien dire. La clé parente descend donc comme
+ * repli — la clé propre gagne toujours si elle dit elle-même son unité.
+ */
+function qsValeur(cle, v, herite = '') {
+  if (v == null) return '—';
+  if (typeof v === 'boolean') return v ? 'oui' : 'non';
+  if (typeof v !== 'number') return String(v);
+  const nom = UNITE.test(cle) ? cle : herite;
+  if (/_s$/.test(nom) && v >= 60) {
+    const h = Math.floor(v / 3600), m = Math.round((v % 3600) / 60);
+    return h ? `${h} h ${String(m).padStart(2, '0')}` : `${m} min`;
+  }
+  if (/_min$/.test(nom) && v >= 60) return `${Math.floor(v / 60)} h ${String(Math.round(v % 60)).padStart(2, '0')}`;
+  return qsNb(v);
+}
+
+/**
+ * Le nom d'une clé, lisible. Le `_s` final n'est pas un mot, c'est l'unité —
+ * et elle est déjà dans la valeur en face (« 1 h 22 ») : l'afficher deux fois
+ * donne « temps par contexte s », qui se lit comme une faute de frappe.
+ * `_min` reste : il peut vouloir dire « minimum » autant que « minutes ».
+ */
+const qsNom = k => k.replace(/_s$/, '').replace(/_/g, ' ');
+
+/** Descend dans un objet de forme inconnue. Deux niveaux, puis on replie. */
+function qsArbre(obj, profondeur = 0, herite = '') {
+  if (obj == null) return '<span class="qsnul">—</span>';
+  if (Array.isArray(obj)) {
+    if (!obj.length) return '<span class="qsnul">vide</span>';
+    if (obj.every(x => typeof x !== 'object')) {
+      return `<span class="qsliste">${obj.map(x => esc(String(x))).join(' · ')}</span>`;
+    }
+    return `<div class="qsniv">${obj.map(x => qsArbre(x, profondeur + 1, herite)).join('')}</div>`;
+  }
+  if (typeof obj !== 'object') return esc(String(obj));
+
+  const lignes = Object.entries(obj).map(([k, v]) => {
+    const feuille = v == null || typeof v !== 'object';
+    const suivante = UNITE.test(k) ? k : herite;
+    return `<div class="qsl">
+      <span class="qsk">${esc(qsNom(k))}</span>
+      ${feuille ? `<span class="qsv">${esc(qsValeur(k, v, herite))}</span>`
+                : `<div class="qsv">${qsArbre(v, profondeur + 1, suivante)}</div>`}
+    </div>`;
+  });
+  return `<div class="qsniv${profondeur ? ' dedans' : ''}">${lignes.join('')}</div>`;
+}
+
+/** Une série en courbe. Trente points suffisent à voir une forme. */
+function qsCourbe(points) {
+  const v = points.map(p => p.valeur).filter(x => x != null);
+  if (v.length < 2) return '';
+  const W = 260, H = 34, bas = Math.min(...v), haut = Math.max(...v);
+  const etendue = haut - bas || 1;
+  const d = points.filter(p => p.valeur != null).map((p, i, a) => {
+    const x = (i / Math.max(1, a.length - 1)) * W;
+    const y = H - ((p.valeur - bas) / etendue) * (H - 6) - 3;
+    return `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg class="qssvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${d}" fill="none" stroke="currentColor" stroke-width="1.3"
+          stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function qsPanneauMarkup(d) {
+  if (!d) return '<div class="card"><p class="jvide">…</p></div>';
+  const rien = !d.series.length && !d.activite.length;
+  if (rien) {
+    return `<div class="card"><h2>${ico('antenne', 15)}Quantified self</h2>
+      <p class="sub" style="margin:0">Rien n'est encore arrivé sur les ${d.jours} derniers jours.
+      Le branchement et le journal des envois sont dans <b>Réglages › Quantified self</b>.</p></div>`;
+  }
+  return `
+    <div class="card qspan">
+      <div class="qstete">
+        <h2>${ico('antenne', 15)}Quantified self</h2>
+        <span class="faint mono">${fmtDay(d.depuis)} → ${fmtDay(d.jusqu_au)}</span>
+      </div>
+
+      ${d.series.length ? `<div class="qsseries">
+        ${d.series.map(s => `<div class="qsserie">
+          <div class="qsstete">
+            <b>${esc(s.cle.replace(/_/g, ' '))}</b>
+            <span class="faint">${esc(s.source)}</span>
+            <span class="qsn mono">${s.n} pts</span>
+          </div>
+          ${qsCourbe(s.points)}
+          <div class="qsbornes mono">
+            ${s.bas != null ? `${qsNb(s.bas)} → ${qsNb(s.haut)}${s.unite ? ` ${esc(s.unite)}` : ''}
+              <span class="faint">· moy. ${qsNb(s.moyenne)}</span>` : 'texte'}
+          </div>
+        </div>`).join('')}
+      </div>` : ''}
+
+      ${d.activite.length ? `<div class="qsact">
+        <div class="k faint">Ce que l'application envoie chaque jour</div>
+        ${d.activite.slice(0, 12).map(j => `<details class="qsjour">
+          <summary><span class="mono">${fmtDay(j.date)}</span>
+            <span class="faint">${j.digest ? Object.keys(j.digest).length + ' champs' : 'illisible'}</span></summary>
+          ${j.digest ? qsArbre(j.digest) : `<pre class="qsbrut">${esc(String(j.brut).slice(0, 2000))}</pre>`}
+        </details>`).join('')}
+      </div>` : ''}
+    </div>`;
+}
+
+async function ouvrirQS() {
+  QS_OUVERT = true;
+  const hote = $('#qspanneau');
+  if (hote) hote.innerHTML = qsPanneauMarkup(null);
+  try { QS_DATA = await api('/api/qs/contenu?jours=60'); }
+  catch (err) { QS_DATA = null;
+    if (hote) hote.innerHTML = `<div class="card"><p class="warn">${esc(err.message)}</p></div>`;
+    return; }
+  const h = $('#qspanneau');
+  if (h) h.innerHTML = qsPanneauMarkup(QS_DATA);
+}
 
 /* ============================= routage ============================= */
 
