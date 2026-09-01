@@ -3193,6 +3193,15 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
    LES MESURES DANS LA JOURNÉE OUVERTE.
    ================================================================== */
 
+/* Les rouages de la journée, repliés : sur un traqueur qui compte par titre de
+   fenêtre, cette colonne faisait quarante lignes des mêmes chiffres que les
+   deux lignes du panneau, juste en dessous, disent déjà. */
+.jmrouages > summary {
+  cursor: pointer; font-size: 12px; color: var(--ink-faint); padding: 6px 0;
+}
+.jmrouages > summary:hover { color: var(--ink-soft); }
+.jmrouages[open] > summary { margin-bottom: 4px; }
+
 .jmesures { display: flex; flex-direction: column; gap: 8px; }
 .jmlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 

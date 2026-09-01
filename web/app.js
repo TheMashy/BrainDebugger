@@ -3853,12 +3853,25 @@ function phraseLien(l) {
     ${l.moitie.ecart > 0 ? 'plus haut' : 'plus bas'}</b> — sur ${l.n} journées.`;
 }
 
+/**
+ * CE QUI A ÉTÉ MESURÉ — ET CE QUI SE REPLIE.
+ *
+ * Sur un traqueur qui compte par titre de fenêtre, cette colonne affichait
+ * quarante lignes de `titres discord #meme-review`. Chacune vraie, aucune
+ * cherchée : ce sont les rouages qui produisent la nuit et l'archétype, dits en
+ * deux lignes juste en dessous. Le panneau les repliait déjà de son côté ; la
+ * colonne du milieu de la journée, elle, les gardait tous ouverts, et redevenait
+ * le mur qu'on venait d'enlever ailleurs.
+ *
+ * Ils ne disparaissent pas — une donnée arrivée a le droit d'être vue, et la
+ * cacher sans le dire ferait croire qu'elle n'est pas arrivée. Ils se replient,
+ * ce qui n'est pas la même chose. Reste ouvert ce qui se mesure sur un CORPS —
+ * sommeil, poids, pas, cœur — et tout ce qui va avec les journées notées : un
+ * rouage qui bouge avec la personne n'est plus un rouage, c'est une trouvaille.
+ */
 function mesuresMarkup(mesures) {
   if (!mesures?.length) return '';
-  return `<div class="jmesures">
-    <div class="k faint">Ce qui a été mesuré</div>
-    <ul class="jmlist">
-      ${mesures.map(m => {
+  const ligne = m => {
         const phrase = phraseLien(m.lien);
         return `<li class="jm${m.lien ? ' lie' : ''}">
           <span class="jmnom">${esc(nomMesure(m.cle))}</span>
@@ -3877,8 +3890,18 @@ function mesuresMarkup(mesures) {
               : `${m.cote === 'haut' ? 'au-dessus de' : 'sous'} ${valMesure({ valeur: m.mediane })}`}</span></span>` : ''}
           ${phrase ? `<span class="jmlien">${phrase}</span>` : ''}
         </li>`;
-      }).join('')}
-    </ul>
+  };
+
+  const ouvertes = mesures.filter(m => !m.detail || m.lien);
+  const rouages = mesures.filter(m => m.detail && !m.lien);
+
+  return `<div class="jmesures">
+    <div class="k faint">Ce qui a été mesuré</div>
+    ${ouvertes.length ? `<ul class="jmlist">${ouvertes.map(ligne).join('')}</ul>` : ''}
+    ${rouages.length ? `<details class="jmrouages">
+      <summary>${rouages.length} mesure${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
+      <ul class="jmlist">${rouages.map(ligne).join('')}</ul>
+    </details>` : ''}
   </div>`;
 }
 
