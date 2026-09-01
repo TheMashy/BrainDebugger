@@ -1087,12 +1087,64 @@ export function requeteLecture(corpus, settings) {
      */
     ...optionsDuModele(settings.anthropicModel || 'claude-opus-5',
                        { effort: 'high', repli: false }),
-    system: [{ type: 'text', text: SYSTEME }],
+    /*
+     * =================================================================
+     * LE CACHE, ET POURQUOI IL EST ICI PLUTOT QU'AILLEURS.
+     *
+     * C'est le plus gros appel du produit : soixante-dix a quatre-vingt mille
+     * jetons d'entree pour deux mille de sortie. Et c'etait le seul appel du
+     * produit sans aucun cache -- le compagnon en avait depuis le debut, pas
+     * la lecture.
+     *
+     * Le cache est un ACCORD DE PREFIXE : tout ce qui precede une marque est
+     * mis de cote, et un seul octet different plus haut invalide tout ce qui
+     * suit. L'ordre de rendu est `tools` -> `system` -> `messages`, ce qui
+     * decide ou vont les deux marques.
+     *
+     *   1. SUR LE SYSTEME. Elle couvre l'outil ET les consignes -- environ
+     *      cinq mille sept cents jetons qui ne bougent JAMAIS. Elle sert meme
+     *      quand le corpus a change entre deux lectures : quelqu'un qui ecrit
+     *      une journee puis relance ne repaie pas les consignes.
+     *
+     *   2. SUR LE CORPUS. Elle couvre tout : outil, consignes, journal. C'est
+     *      celle qui compte. Deux lectures du MEME journal a quelques minutes
+     *      d'intervalle -- un « relire » recliquе, une reprise apres une
+     *      coupure -- et la seconde relit quatre-vingt mille jetons a un
+     *      dixieme du prix au lieu du plein tarif.
+     *
+     * LE TEXTE ENVOYE NE CHANGE PAS D'UN OCTET. Le corpus reste un seul bloc,
+     * avec exactement la meme phrase devant : on ajoute une marque, on ne
+     * retouche pas un prompt qui marche.
+     *
+     * CINQ MINUTES ET PAS UNE HEURE. L'ecriture coute un quart de plus a cinq
+     * minutes, le DOUBLE a une heure. Or le cas frequent est celui ou le cache
+     * ne sert pas du tout -- une lecture par jour, et la suivante douze heures
+     * plus tard : a une heure de duree de vie, ces lectures-la couteraient deux
+     * fois leur prix pour rien. Le cas ou le cache paie est celui du reclic, et
+     * il tient largement dans cinq minutes.
+     *
+     * SUR UN AUTRE MODELE, la premiere marque peut ne rien cacher : le prefixe
+     * minimum va de 512 jetons (Opus 5) a 4096 (Opus 4.6, Haiku 4.5), et le
+     * systeme seul ne les atteint pas partout. Ce n'est pas une erreur -- rien
+     * n'est signale, l'entree n'est simplement pas creee -- et la seconde
+     * marque, elle, fonctionne partout.
+     *
+     * CE QUE CA A COUTE OU RAPPORTE SE LIT DANS LA JAUGE : `depouiller` rend
+     * les jetons relus et ecrits a part, et `usage.js` les facture a leur vrai
+     * tarif. Comptes ensemble avec l'entree pleine, ils feraient dire a la
+     * jauge que le cache n'a rien change.
+     * =================================================================
+     */
+    system: [{ type: 'text', text: SYSTEME, cache_control: { type: 'ephemeral' } }],
     tools: [OUTIL],
     tool_choice: { type: 'tool', name: 'rendre_lecture' },
     messages: [{
       role: 'user',
-      content: `Tout son journal, du premier jour au dernier. Découpe les séries par ${grain}.\n\n${corpus.texte}`
+      content: [{
+        type: 'text',
+        text: `Tout son journal, du premier jour au dernier. Découpe les séries par ${grain}.\n\n${corpus.texte}`,
+        cache_control: { type: 'ephemeral' }
+      }]
     }]
   };
 }
@@ -1105,9 +1157,23 @@ function depouiller(res, corpus, settings) {
   return {
     lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? [], corpus.precedente, corpus.lignes),
     modele: res.model ?? settings.anthropicModel,
+    /*
+     * LES TROIS SORTES DE JETONS D'ENTREE, SEPAREES.
+     *
+     * Elles etaient additionnees ici, ce qui etait juste tant que la lecture
+     * n'avait pas de cache : `input_tokens` seul aurait sous-compte l'enveloppe.
+     * Maintenant qu'elle en a un, les additionner ferait facturer a plein tarif
+     * des jetons relus qui coutent un dixieme -- la jauge dirait que le cache
+     * n'a rien change, et c'est exactement l'inverse de ce qu'on veut voir.
+     *
+     * `usage.js` recompose : l'enveloppe compte les trois (un jeton relu est un
+     * jeton lu), le prix les distingue.
+     */
     usage: {
-      input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
-      output: u.output_tokens ?? 0
+      input: u.input_tokens ?? 0,
+      output: u.output_tokens ?? 0,
+      cacheLu: u.cache_read_input_tokens ?? 0,
+      cacheEcrit: u.cache_creation_input_tokens ?? 0
     }
   };
 }

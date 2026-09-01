@@ -207,7 +207,9 @@ test('la requête part par un seul chemin, quel que soit le tuyau', async () => 
   // rejeté là ferait échouer le lot entier sur une validation.
   assert.equal('fallbacks' in r, false);
   assert.equal('betas' in r, false);
-  assert.match(r.messages[0].content, /le corpus/);
+  // Le corpus est un bloc de contenu depuis qu'il porte une marque de cache :
+  // c'est le seul moyen d'en poser une, et le texte lui-même n'a pas bougé.
+  assert.match(r.messages[0].content[0].text, /le corpus/);
 });
 
 test('le lot est un réglage, et il est allumé par défaut', () => {

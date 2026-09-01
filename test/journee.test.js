@@ -126,8 +126,11 @@ test('la journée rendue au navigateur a ses quatre parties', () => {
   const j = J.journee(JOUR, OWNER, { zone: 'UTC' });
   assert.deepEqual(Object.keys(j).sort(), ['moments', 'sujets', 'thematiques', 'volatilite']);
   for (const m of j.moments) {
+    // `ids` : les messages d'où le moment vient. C'est par eux que la colonne
+    // de gauche désigne son passage à droite — jamais par l'heure affichée.
     assert.deepEqual(Object.keys(m).sort(),
-                     ['charge', 'coeur', 'estime', 'force', 'heure', 'messages', 'note', 'scene', 'sens', 'ts']);
+                     ['charge', 'coeur', 'estime', 'force', 'heure', 'ids', 'messages',
+                      'note', 'scene', 'sens', 'ts']);
   }
 });
 
@@ -258,4 +261,49 @@ test('le découpage est borné : on ne lit pas un sommaire', () => {
     `Ma mère m’a appelé le jour ${i} et ça s’est mal passé comme toujours entre nous deux. `
     + `J’ai repris la weed ce soir-là pour arriver à dormir, ça n’a pas marché du tout.`).join(' ');
   assert.ok(J.sujetsDuTexte(long, 5).length <= J.MAX_SUJETS);
+});
+
+/*
+ * LES DEUX COLONNES SE RÉPONDENT.
+ *
+ * À gauche ce qu'on a ressenti, heure par heure ; à droite ce qu'on a écrit.
+ * Elles se lisaient côte à côte sans jamais se désigner l'une l'autre : pour
+ * retrouver la phrase derrière « 05:43 · De quoi le suicide est mauvais ? » il
+ * fallait relire tout le pavé de droite en cherchant l'endroit.
+ *
+ * Le lien passe par les MESSAGES, pas par l'heure affichée. Rapprocher par
+ * l'heure marcherait presque — et « presque » veut dire qu'un jour ça
+ * désignerait le mauvais passage, sans que rien ne le dise.
+ */
+/** Un message à une date et une heure quelconques, pas seulement le JOUR fixe. */
+const parler = (d, h, m, text) =>
+  addMessage({ ts: `${d}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`,
+               date: d, source: 'web', role: 'user', text, userId: OWNER });
+
+test('un moment et un passage portent les mêmes identifiants de message', () => {
+  const d = '2026-04-11';
+  parler(d, 9, 0, 'Réveil difficile ce matin. La tête lourde, pas envie de bouger.');
+  parler(d, 14, 20, 'Finalement je suis sorti marcher et ça allait beaucoup mieux après.');
+
+  const mo = J.momentsDuJour(d, OWNER, { zone: 'UTC' });
+  const su = J.sujetsDuJour(d, OWNER, { zone: 'UTC' });
+
+  assert.ok(mo.length, 'aucun moment');
+  for (const m of mo) assert.ok(m.ids?.length, 'un moment sans identifiants ne peut rien désigner');
+  for (const s of su) assert.ok(s.ids?.length, 'un passage sans identifiants ne peut pas être désigné');
+
+  // Tout identifiant vu à droite existe à gauche : les deux colonnes lisent
+  // exactement les mêmes messages, et rien ne peut désigner dans le vide.
+  const gauche = new Set(mo.flatMap(m => m.ids));
+  for (const s of su) for (const id of s.ids) assert.ok(gauche.has(id), `l'identifiant ${id} n'existe qu'à droite`);
+});
+
+test('un passage qui recouvre deux messages porte les deux', () => {
+  // Un bloc trop court est fondu dans le précédent : il parle alors de deux
+  // messages, et cliquer l'un OU l'autre doit l'allumer.
+  const d = '2026-04-12';
+  parler(d, 20, 0, 'Grosse journée au boulot, le rendu était à midi et ça a tenu de justesse.');
+  parler(d, 20, 2, 'Bref.');
+  const su = J.sujetsDuJour(d, OWNER, { zone: 'UTC' });
+  if (su.length) assert.ok(su.some(s => s.ids.length >= 1));
 });

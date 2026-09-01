@@ -593,6 +593,29 @@ export function setNote(date, note, userId = OWNER) {
  * SPEC 4.3 : les mots exacts. On ne stocke jamais les phrases du pet
  * dans le corpus qui sera rendu a l'utilisateur.
  */
+/**
+ * REDATER DES MESSAGES PRECIS, ET RIEN D'AUTRE.
+ *
+ * Sert a une seule chose : quand quelqu'un dit « je vais me coucher » a 6 h du
+ * matin, ce qu'il a ecrit cette nuit-la appartient a la journee qui se termine,
+ * pas a celle qui commence. On apprend la frontiere APRES coup, et les messages
+ * sont deja ranges.
+ *
+ * La liste d'identifiants vient de l'appelant, qui seul connait le fuseau de la
+ * personne et l'heure de la coupure. Cette fonction ne decide rien : elle
+ * deplace ce qu'on lui nomme. C'est ce qui la rend sure -- elle ne peut pas
+ * reecrire une grille entiere sur une erreur de calcul ailleurs.
+ */
+export function redaterMessages(ids, versDate, userId = OWNER) {
+  const liste = (ids ?? []).map(Number).filter(Number.isInteger);
+  if (!liste.length) return 0;
+  const trous = liste.map(() => '?').join(',');
+  const info = db.prepare(
+    `UPDATE messages SET date = ? WHERE user_id = ? AND id IN (${trous})`
+  ).run(versDate, userId, ...liste);
+  return info.changes;
+}
+
 export function rebuildEntryText(date, userId = OWNER) {
   // `range = 1` : des notes prises ailleurs, collees ici. Elles ne sont pas la
   // journee de la personne et n'entrent donc pas dans son texte -- sinon le
