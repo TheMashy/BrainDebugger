@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  bornesDitesDans, leversConnus, medianeLever, coupureDe, jourVecuDe, veilleDe,
+  bornesDitesDans, bornesConnues, medianeBorne, coupureDe, jourVecuDe, veilleDe,
   MIDI, SOURCE_DIT
 } from '../server/jour-vecu.js';
 
@@ -72,7 +72,7 @@ test('du texte vide ou hors sujet ne dit rien', () => {
 /* ----------------------------- les levers connus ----------------------------- */
 
 test('ce que la personne dit passe devant le quantified self', () => {
-  const l = leversConnus([
+  const l = bornesConnues([
     { date: '2026-09-01', source: 'poste', cle: 'premiere_activite', texte: '10:30' },
     { date: '2026-09-01', source: 'montre', cle: 'reveil', texte: '09:00' },
     { date: '2026-09-01', source: SOURCE_DIT, cle: 'lever_dit', texte: '07:15' }
@@ -81,7 +81,7 @@ test('ce que la personne dit passe devant le quantified self', () => {
 });
 
 test('le reveil mesuré passe devant la première activité', () => {
-  const l = leversConnus([
+  const l = bornesConnues([
     { date: '2026-09-01', source: 'poste', cle: 'premiere_activite', texte: '10:30' },
     { date: '2026-09-01', source: 'montre', cle: 'sleep_end', texte: '09:00' }
   ]);
@@ -89,13 +89,13 @@ test('le reveil mesuré passe devant la première activité', () => {
 });
 
 test('un lever d’après-midi n’est pas une frontière', () => {
-  const l = leversConnus([{ date: '2026-09-01', source: 'montre', cle: 'reveil', texte: '14:20' }]);
+  const l = bornesConnues([{ date: '2026-09-01', source: 'montre', cle: 'reveil', texte: '14:20' }]);
   assert.equal(l.has('2026-09-01'), false,
     'sinon toute la matinée des AUTRES jours basculerait sur la veille');
 });
 
 test('une heure en nombre se lit, en heures comme en minutes', () => {
-  const l = leversConnus([
+  const l = bornesConnues([
     { date: '2026-09-01', source: 'montre', cle: 'reveil', valeur: 8.5 },
     { date: '2026-09-02', source: 'montre', cle: 'reveil', valeur: 510 }
   ]);
@@ -104,7 +104,7 @@ test('une heure en nombre se lit, en heures comme en minutes', () => {
 });
 
 test('une clé qui ne parle ni de lever ni de première activité est ignorée', () => {
-  const l = leversConnus([{ date: '2026-09-01', source: 'montre', cle: 'pas', valeur: 8000 }]);
+  const l = bornesConnues([{ date: '2026-09-01', source: 'montre', cle: 'pas', valeur: 8000 }]);
   assert.equal(l.size, 0);
 });
 
@@ -117,10 +117,10 @@ test('sans rien de connu, il n’y a pas de coupure — et donc pas de déplacem
 });
 
 test('la médiane sert de repli pour les jours sans lever à eux', () => {
-  const levers = new Map([['2026-09-01', 480], ['2026-09-02', 500]]);
-  const med = medianeLever(levers);
+  const bornes = new Map([['2026-09-01', 480], ['2026-09-02', 500]]);
+  const med = medianeBorne(bornes);
   assert.equal(med, 490);
-  assert.equal(coupureDe('2026-09-09', levers, med), 490);
+  assert.equal(coupureDe('2026-09-09', bornes, med), 490);
 });
 
 test('une médiane d’après-midi ne sert pas de coupure', () => {
@@ -130,32 +130,70 @@ test('une médiane d’après-midi ne sert pas de coupure', () => {
 /* ---------------------------- la journée vécue ---------------------------- */
 
 test('deux heures du matin appartiennent à la veille', () => {
-  const levers = new Map([['2026-09-02', 8 * 60]]);
-  assert.equal(jourVecuDe(a('2026-09-02', 2, 30), { levers, zone: Z }), '2026-09-01');
+  const bornes = new Map([['2026-09-02', 8 * 60]]);
+  assert.equal(jourVecuDe(a('2026-09-02', 2, 30), { bornes, zone: Z }), '2026-09-01');
 });
 
 test('après le lever, on est bien dans sa journée', () => {
-  const levers = new Map([['2026-09-02', 8 * 60]]);
-  assert.equal(jourVecuDe(a('2026-09-02', 8, 1), { levers, zone: Z }), '2026-09-02');
-  assert.equal(jourVecuDe(a('2026-09-02', 23, 59), { levers, zone: Z }), '2026-09-02');
+  const bornes = new Map([['2026-09-02', 8 * 60]]);
+  assert.equal(jourVecuDe(a('2026-09-02', 8, 1), { bornes, zone: Z }), '2026-09-02');
+  assert.equal(jourVecuDe(a('2026-09-02', 23, 59), { bornes, zone: Z }), '2026-09-02');
 });
 
 test('pile à l’heure du lever, on est dans la journée qui commence', () => {
-  const levers = new Map([['2026-09-02', 480]]);
-  assert.equal(jourVecuDe(a('2026-09-02', 8, 0), { levers, zone: Z }), '2026-09-02');
+  const bornes = new Map([['2026-09-02', 480]]);
+  assert.equal(jourVecuDe(a('2026-09-02', 8, 0), { bornes, zone: Z }), '2026-09-02');
 });
 
-test('un couche-tard garde SA frontière : levé à 13 h, la coupure ne le suit pas', () => {
+/*
+ * LE CAS DU COUCHE-TARD, ET C'EST CELUI QUI A FAIT CHANGER LA RÈGLE.
+ *
+ * Couché à 06:10, levé à 15:30. Le lever ne peut pas servir de frontière — à
+ * 15 h 30 il rattacherait toute la matinée des autres jours à la veille — donc
+ * la première version n'en trouvait aucune, et ce qui avait été écrit à 01:56
+ * et à 05:43 restait rangé sur la journée d'après. Le coucher, lui, est une
+ * frontière parfaitement nette.
+ */
+test('le coucher marque la journée, et il passe devant le lever', () => {
+  const bornes = bornesConnues([
+    { date: '2026-09-01', source: 'dit', cle: 'coucher_dit', texte: '06:10' },
+    { date: '2026-09-01', source: 'dit', cle: 'lever_dit',   texte: '15:30' }
+  ]);
+  assert.equal(bornes.get('2026-09-01'), 6 * 60 + 10, 'le lever de 15:30 ne doit pas gagner');
+  // Ce qui a été écrit avant d'aller se coucher appartient à la veille.
+  assert.equal(jourVecuDe(a('2026-09-01', 1, 56), { bornes, zone: Z }), '2026-08-31');
+  assert.equal(jourVecuDe(a('2026-09-01', 5, 43), { bornes, zone: Z }), '2026-08-31');
+  // Ce qui vient après, non.
+  assert.equal(jourVecuDe(a('2026-09-01', 16, 24), { bornes, zone: Z }), '2026-09-01');
+});
+
+test('un coucher du soir n’est pas une frontière — sinon toute la journée basculerait', () => {
+  // Couché à 23:30 : la journée s'est terminée à minuit comme d'habitude.
+  // Prendre 23:30 pour coupure rattacherait tout le mardi au lundi.
+  const bornes = bornesConnues([{ date: '2026-09-02', source: 'dit', cle: 'coucher_dit', texte: '23:30' }]);
+  assert.equal(bornes.has('2026-09-02'), false);
+  assert.equal(jourVecuDe(a('2026-09-02', 14, 0), { bornes, zone: Z }), '2026-09-02');
+});
+
+test('ce que la personne dit passe devant ce qu’une machine mesure', () => {
+  const bornes = bornesConnues([
+    { date: '2026-09-01', source: 'montre', cle: 'coucher',   texte: '04:00' },
+    { date: '2026-09-01', source: 'dit',    cle: 'lever_dit', texte: '07:30' }
+  ]);
+  assert.equal(bornes.get('2026-09-01'), 450, 'le lever DIT passe devant le coucher MESURÉ');
+});
+
+test('un lever d’après-midi ne sert pas de frontière', () => {
   // 13 h est au-delà de midi : on n'en fait pas une frontière, on retombe sur
   // la médiane s'il y en a une, sinon sur la journée civile.
-  const levers = leversConnus([{ date: '2026-09-02', source: 'montre', cle: 'reveil', texte: '13:00' }]);
-  assert.equal(jourVecuDe(a('2026-09-02', 11, 0), { levers, zone: Z }), '2026-09-02');
+  const bornes = bornesConnues([{ date: '2026-09-02', source: 'montre', cle: 'reveil', texte: '13:00' }]);
+  assert.equal(jourVecuDe(a('2026-09-02', 11, 0), { bornes, zone: Z }), '2026-09-02');
 });
 
 test('la zone décide, pas l’horloge du serveur', () => {
-  const levers = new Map([['2026-09-02', 480]]);
+  const bornes = new Map([['2026-09-02', 480]]);
   // 2026-09-02T00:30Z est le 2 à 2 h 30 à Paris : la veille pour Paris.
-  assert.equal(jourVecuDe('2026-09-02T00:30:00Z', { levers, zone: 'Europe/Paris' }), '2026-09-01');
+  assert.equal(jourVecuDe('2026-09-02T00:30:00Z', { bornes, zone: 'Europe/Paris' }), '2026-09-01');
   // Le même instant est le 1er à 20 h 30 à New York : sa propre journée.
   const l2 = new Map([['2026-09-01', 480]]);
   assert.equal(jourVecuDe('2026-09-02T00:30:00Z', { levers: l2, zone: 'America/New_York' }), '2026-09-01');

@@ -3313,6 +3313,47 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qsfen { margin-left: auto; }
 .qsfen button { padding: 4px 11px; font-size: 12px; }
 
+/* CLIQUER UN MOMENT DÉSIGNE SON PASSAGE, À DROITE.
+   Les deux colonnes racontaient la même journée sans jamais se répondre : pour
+   retrouver la phrase derrière « 05:43 · De quoi le suicide est mauvais ? » il
+   fallait relire tout le pavé de droite en cherchant l'endroit. */
+.jmoment[data-ids] { cursor: pointer; border-radius: 7px; }
+.jmoment[data-ids]:hover { background: var(--panel-2); }
+.jmoment[data-ids]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.jmoment.vise { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+
+/* Le passage désigné : un liseré et un fond, pas un surlignage criard — on
+   montre où c'est, on ne repeint pas ce qui a été écrit. */
+.jsujet.vise {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  border-radius: 0 7px 7px 0;
+}
+.jsujet { transition: background .18s ease, box-shadow .18s ease; padding-right: 4px; }
+@media (prefers-reduced-motion: reduce) { .jsujet { transition: none } }
+
+/* LES PUCES : une valeur, ce qu'elle est, son écart à la normale.
+   Pas de courbe, pas de bornes — ce sont d'autres questions, et elles sont
+   repliées plus bas. */
+.qspuces {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 16px 24px;
+}
+.qspuce {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+  column-gap: 10px; align-items: baseline; min-width: 0;
+}
+.qspv { grid-row: 1 / 3; font-size: 21px; color: var(--ink); align-self: center; }
+.qspk { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* La note a le droit de passer à la ligne : coupée, « 1 h 58 de plus que
+   d'… » ne dit plus rien, et c'est justement la moitié qui informe. */
+.qspn { font-size: 11.5px; color: var(--ink-faint); line-height: 1.4; }
+/* LA COULEUR NE DIT PAS « BIEN » OU « MAL ». Elle dit le SENS de l'écart —
+   au-dessus, en dessous — et rien d'autre : personne ici n'est en position de
+   décider qu'une heure d'écran de plus est une mauvaise nouvelle. */
+.qspuce.plus .qspn { color: var(--warn); }
+.qspuce.moins .qspn { color: var(--accent); }
+
 /* LE COMPTE, EN PREMIER ET EN GRAND.
    C'est la question qu'on pose en ouvrant — combien de journées sont
    enregistrées — et elle n'avait qu'une petite ligne grise sous un titre.
@@ -3535,16 +3576,18 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 
 /* Une borne : son icône, son heure. La lune et le soleil remplacent « couché »
    et « levé » — deux mots qu'on relisait chaque matin sans les lire.
-   Les deux bornes sont un seul morceau : « 02:40 → 11:20 » se lit d'un trait. */
-.qsbornes { display: inline-flex; align-items: center; gap: 8px; }
-.qsborne { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); }
-.qsborne .ico { color: var(--ink-faint); }
+   Les deux bornes sont un seul morceau : « 02:40 → 11:20 » se lit d'un trait.
+   Le nom est `qsaborne` et pas `qsbornes` : celle-là est déjà prise par les
+   bornes min → max d'une série, trois cents lignes plus haut. */
+.qsaborne { display: inline-flex; align-items: center; gap: 8px; }
+.qsab { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); }
+.qsab .ico { color: var(--ink-faint); }
 /* MESURÉ / DÉDUIT. Une heure relevée par une montre est pleine ; une heure
    déduite de la dernière activité de la machine est pointillée — « ce qui est
    rempli est mesuré, ce qui est contouré est déclaré ». L'infobulle dit
    laquelle des deux on lit. */
-.qsborne.lu { color: var(--ink-dim); }
-.qsborne.lu .mono {
+.qsab.lu { color: var(--ink-dim); }
+.qsab.lu .mono {
   border-bottom: 1px dotted var(--line); cursor: help;
 }
 .qsfl { color: var(--ink-faint); font-size: 11px; }

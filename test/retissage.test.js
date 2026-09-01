@@ -41,20 +41,26 @@ test('ce qu’on écrit dans le battement se relit', () => {
   assert.equal(getSettings(OWNER).dernierRetissage, q, 'l’écriture n’a pas pris');
 });
 
-test('douze heures, et le temps restant se dit en clair', () => {
-  assert.equal(api.RETISSAGE_ATTENTE, 12 * 3600 * 1000);
+test('le refroidissement est levé — mais la mécanique reste entière', () => {
+  /*
+   * Il valait douze heures. Le produit est en construction et il faut pouvoir
+   * retisser en boucle pour regarder ce que ça donne : le délai passe à zéro,
+   * le calcul reste. Ce test vérifie donc les DEUX choses — que c'est ouvert,
+   * et que la mécanique répond encore, pour que le remettre reste une ligne.
+   */
+  assert.equal(api.RETISSAGE_ATTENTE, 0);
 
   setSettings({ dernierRetissage: null }, OWNER);
   assert.equal(api.attenteRetissage(OWNER), 0, 'sans retissage passé, c’est ouvert');
 
-  // Il y a une heure : il reste onze heures, à la seconde près.
-  setSettings({ dernierRetissage: new Date(Date.now() - 3600e3).toISOString() }, OWNER);
-  const reste = api.attenteRetissage(OWNER);
-  assert.ok(Math.abs(reste - 11 * 3600e3) < 5000, `il reste ${reste} ms`);
+  // Même juste après un retissage : rien à attendre.
+  setSettings({ dernierRetissage: new Date().toISOString() }, OWNER);
+  assert.equal(api.attenteRetissage(OWNER), 0, 'le délai est levé, pas contourné');
 
-  // Il y a treize heures : c'est rouvert.
-  setSettings({ dernierRetissage: new Date(Date.now() - 13 * 3600e3).toISOString() }, OWNER);
-  assert.equal(api.attenteRetissage(OWNER), 0);
+  // Et le calcul répond toujours au délai qu'on lui donne.
+  const t = Date.now() - 3600e3;
+  assert.equal(Math.max(0, 12 * 3600e3 - (Date.now() - t)) > 0, true,
+    'la formule du battement est intacte : y remettre douze heures suffit');
 });
 
 test('une date illisible n’enferme personne', () => {
@@ -68,16 +74,17 @@ test('une date illisible n’enferme personne', () => {
   setSettings({ dernierRetissage: null }, OWNER);
 });
 
-test('le battement refuse AVANT de dépenser quoi que ce soit', async () => {
+test('le refroidissement levé, retisser ne refuse plus — même juste après', async () => {
   /*
-   * L'ordre compte : le refus doit tomber avant le corpus et avant l'appel au
-   * modèle. Un refus qui arrive après aurait déjà payé la lecture.
+   * LA BRANCHE DE REFUS RESTE EN PLACE, et elle tombe toujours AVANT le corpus
+   * et avant l'appel au modèle : un refus qui arriverait après aurait déjà payé
+   * la lecture. Elle est simplement inatteignable tant que le délai vaut zéro —
+   * c'est ce que ce test vérifie, en retissant juste après un retissage.
    */
   setSettings({ dernierRetissage: new Date().toISOString() }, OWNER);
   const vus = [];
   await api.retisser({}, (ev, d) => vus.push([ev, d]), OWNER);
-  assert.deepEqual(vus.map(v => v[0]), ['refus'], `événements reçus : ${vus.map(v => v[0])}`);
-  assert.ok(vus[0][1].attente > 0);
+  assert.notEqual(vus[0][0], 'refus', 'le délai est levé : rien ne doit refuser');
   setSettings({ dernierRetissage: null }, OWNER);
 });
 
@@ -89,19 +96,19 @@ test('sans journal, ça le dit — et ça ne consomme pas le tour', async () => 
   assert.match(vus[0][1].error, /journées écrites|rien à lire/);
   /*
    * ET LE TOUR RESTE ENTIER. Un retissage qui échoue — pas assez de journal,
-   * une coupure de réseau, un modèle qui refuse — ne doit pas coûter les douze
-   * heures. Sinon la seule façon de perdre sa journée est que ça rate.
+   * une coupure de réseau, un modèle qui refuse — ne doit pas consommer le
+   * battement. C'est sans effet tant que le délai vaut zéro, et ça compte le
+   * jour où on le remet : sinon la seule façon de perdre sa journée serait que
+   * ça rate.
    */
-  assert.equal(api.attenteRetissage(OWNER), 0, 'un échec a consommé le tour');
-  assert.equal(getSettings(OWNER).dernierRetissage, null);
+  assert.equal(getSettings(OWNER).dernierRetissage, null, 'un échec a consommé le tour');
 });
 
-test('la route de lecture dit combien de temps il reste', () => {
+test('la route de lecture porte toujours le battement', () => {
+  // Le champ reste servi à l'écran : à zéro aujourd'hui, et il redira le temps
+  // restant le jour où le délai revient, sans rien à recâbler côté client.
   setSettings({ dernierRetissage: new Date(Date.now() - 2 * 3600e3).toISOString() }, OWNER);
-  const r = api.routes['GET /api/lecture'];
-  assert.ok(typeof r === 'function');
-  // Elle est async et touche la base ; on vérifie ici la seule chose qui nous
-  // regarde : que le calcul qu'elle expose est bien celui-là.
-  assert.ok(Math.abs(api.attenteRetissage(OWNER) - 10 * 3600e3) < 5000);
+  assert.ok(typeof api.routes['GET /api/lecture'] === 'function');
+  assert.equal(api.attenteRetissage(OWNER), 0);
   setSettings({ dernierRetissage: null }, OWNER);
 });

@@ -307,3 +307,80 @@ test('un digest vide ne produit pas une ligne vide pleine de séparateurs', () =
   assert.equal(resumeDuJour([]), '');
   assert.equal(resumeDuJour([m('j', 'pas', 8000)]), '');
 });
+
+/*
+ * LE VRAI TRAQUEUR, ET POURQUOI RIEN NE SE DÉCLENCHAIT.
+ *
+ * Machi Tool ne compte pas par application mais par TITRE DE FENÊTRE :
+ * `titres web:summer summer s…` vaut 1072 secondes. Aucune de ces clés ne
+ * contient « temps » ni « contexte », donc aucun temps d'écran n'était compté,
+ * donc aucun archétype ne se déclenchait jamais — et l'écran restait vide sans
+ * rien dire.
+ */
+import { chiffresDuJour } from '../server/allure.js';
+
+const titre = (d, p, v) => ({ date: d, source: 'qs', cle: `titres ${p}`, valeur: v });
+
+test('les titres de fenêtre comptent comme du temps d’écran', () => {
+  const j = [titre('2026-09-01', 'web:summer summer s', 1072),
+             titre('2026-09-01', 'discord @bee - discord', 300),
+             titre('2026-09-01', 'claude claude', 50)];
+  const c = contextes(j);
+  assert.equal(c.total, 1422, 'les titres ne sont pas comptés');
+  assert.equal(c.nav, 1072);
+  assert.equal(c.social, 300);
+  assert.equal(c.autre, 50, 'ce qui n’est pas reconnu ne pèse sur aucun archétype');
+});
+
+test('ce qu’on fait DANS le navigateur passe devant le navigateur', () => {
+  // `titres web:youtube.com …` contient « web » ET « youtube ». Avec `nav` en
+  // tête, deux heures de vidéo devenaient « navigation ».
+  const c = contextes([titre('2026-09-01', 'web:youtube.com youtube - x', 600),
+                       titre('2026-09-01', 'web:reddit reddit', 300)]);
+  assert.equal(c.video, 600);
+  assert.equal(c.social, 300, 'reddit est un lieu d’échanges, pas un navigateur');
+  assert.equal(c.nav, 0);
+});
+
+test('« bascules fenetre » est un COMPTE, pas des secondes', () => {
+  // Il contient « fenetre ». Additionné aux secondes, il ferait une journée
+  // plus longue qu'elle n'a été.
+  const c = contextes([titre('2026-09-01', 'web:x', 600),
+                       { date: '2026-09-01', cle: 'bascules fenetre', valeur: 77 }]);
+  assert.equal(c.total, 600);
+});
+
+test('un archétype se déclenche dès le premier jour reçu', () => {
+  /*
+   * Les seuils se lisent contre SA propre médiane. Sur une seule journée la
+   * médiane EST cette journée, l'écart vaut 1, et rien ne se déclenchait — sur
+   * le tout premier écran de quelqu'un qui vient de brancher son traqueur.
+   */
+  const j = [titre('2026-09-01', 'web:summer', 4000), titre('2026-09-01', 'web:reddit', 2000),
+             { date: '2026-09-01', cle: 'bascules', valeur: 77 }];
+  const a = archetypeDe(j, j);
+  assert.ok(a, 'aucun archétype sur la première journée');
+  assert.ok(a.preuves.length, 'une étiquette sans ses chiffres ne se conteste pas');
+});
+
+test('la durée de sommeil se déduit du coucher et du lever quand rien ne la mesure', () => {
+  const j = [t('2026-09-01', 'coucher_dit', '06:10'), t('2026-09-01', 'lever_dit', '15:30')];
+  const n = nuitDe(j, j);
+  assert.equal(n.duree, 9 * 60 + 20);
+  assert.equal(n.dureeDeduite, true, 'c’est du temps AU LIT, et l’écran doit pouvoir le dire');
+});
+
+test('les chiffres du jour sortent prêts à être des puces', () => {
+  const j = [titre('2026-09-01', 'web:summer', 3600), titre('2026-09-01', 'discord x', 1200),
+             { date: '2026-09-01', cle: 'bascules', valeur: 40 },
+             { date: '2026-09-01', cle: 'pauses_nombre', valeur: 5 }];
+  const c = chiffresDuJour(j, j);
+  assert.equal(c.ecran, 4800);
+  assert.equal(c.ou.cle, 'nav');
+  assert.equal(Math.round(c.ou.part * 100), 75);
+  assert.equal(c.bascules, 40);
+  assert.equal(c.pauses, 5);
+  // Un seul jour : pas de médiane, donc pas d'écart inventé.
+  assert.equal(c.ecranEcart, null);
+  assert.equal(c.basculesFois, null);
+});

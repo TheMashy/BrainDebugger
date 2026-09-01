@@ -8,7 +8,8 @@ import {
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
-  toutesMesures, signatureQS, activiteJours, mesuresEntre, poserMesure
+  toutesMesures, signatureQS, activiteJours, mesuresEntre, poserMesure,
+  redaterMessages, rebuildEntryText
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -23,9 +24,10 @@ import { journee } from './journee.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
-import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes } from './allure.js';
+import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
+         chiffresDuJour } from './allure.js';
 import { lireDigest } from './digest.js';
-import { bornesDitesDans, leversConnus, medianeLever, jourVecuDe,
+import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, veilleDe,
          SOURCE_DIT, CLE_LEVER, CLE_COUCHER } from './jour-vecu.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
@@ -278,13 +280,13 @@ export const today = () => jourLocal(Date.now());
    LA JOURNEE VECUE : celle qui commence au lever, pas a minuit.
    ================================================================== */
 
-/** Sur quelle fenetre on cherche ses levers. Assez pour une mediane stable. */
+/** Sur quelle fenetre on cherche ses bornes. Assez pour une mediane stable. */
 const FENETRE_LEVERS = 120;
 
 const MEMO_LEVERS = new Map();
 
 /**
- * SES LEVERS, RELUS UNE FOIS PAR CHANGEMENT DE MESURES.
+ * SES BORNES, RELUES UNE FOIS PAR CHANGEMENT DE MESURES.
  *
  * La question « a quelle journee appartient cet instant ? » se pose a chaque
  * message ; recharger cent vingt jours de mesures a chaque fois serait cent
@@ -292,13 +294,13 @@ const MEMO_LEVERS = new Map();
  * fait a la SIGNATURE et pas au temps : une borne qu'on vient d'enregistrer
  * doit compter tout de suite, et c'est justement le moment ou quelqu'un ecrit.
  */
-export function leversDe(userId = OWNER) {
+export function bornesDe(userId = OWNER) {
   const sig = signatureQS(userId);
   const vu = MEMO_LEVERS.get(userId);
   if (vu?.sig === sig) return vu.out;
   const fin = today();
-  const levers = leversConnus(mesuresEntre(addDays(fin, -FENETRE_LEVERS + 1), fin, userId));
-  const out = { levers, med: medianeLever(levers) };
+  const bornes = bornesConnues(mesuresEntre(addDays(fin, -FENETRE_LEVERS + 1), fin, userId));
+  const out = { bornes, med: medianeBorne(bornes) };
   MEMO_LEVERS.set(userId, { sig, out });
   return out;
 }
@@ -316,8 +318,8 @@ export function leversDe(userId = OWNER) {
  * doit pas se reecrire derriere lui.
  */
 export const jourVecu = (userId = OWNER, quand = Date.now()) => {
-  const { levers, med } = leversDe(userId);
-  return jourVecuDe(quand, { levers, medLever: med }) ?? today();
+  const { bornes, med } = bornesDe(userId);
+  return jourVecuDe(quand, { bornes, medBorne: med }) ?? today();
 };
 
 /**
@@ -337,7 +339,46 @@ export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
   if (!heure || !date) return false;
   poserMesure({ date, source: SOURCE_DIT, cle: b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER,
                 texte: heure, userId });
+  recalerLaNuit(date, userId);
   return true;
+}
+
+/**
+ * LA NUIT QU'ON VIENT DE FERMER REJOINT LA JOURNEE QU'ELLE TERMINAIT.
+ *
+ * On apprend la frontiere APRES coup : « je vais me coucher » arrive a 6 h du
+ * matin, et tout ce qui a ete ecrit cette nuit-la est deja range sur la
+ * journee civile du lendemain. Sans ce recalage, la borne est enregistree, la
+ * regle est juste, et l'ecran continue d'afficher la soiree au mauvais endroit
+ * -- ce qui revient a n'avoir rien fait.
+ *
+ * CE QUI EST DEPLACE EST BORNE ET EXPLICABLE : les messages de CETTE journee
+ * civile, ecrits AVANT la coupure. Rien d'autre, jamais plus d'un jour en
+ * arriere. Une grille ne se reecrit pas toute seule ; une soiree se range
+ * derriere l'heure ou elle s'est terminee.
+ *
+ * @returns {number} combien de messages ont change de journee.
+ */
+export function recalerLaNuit(date, userId = OWNER) {
+  const { bornes, med } = bornesDe(userId);
+  const coupure = coupureDe(date, bornes, med);
+  if (coupure == null) return 0;
+
+  const avant = messagesForDate(date, userId).filter(m => {
+    const h = enMinutes(heureLocale(m.ts));
+    return h != null && h < coupure;
+  });
+  if (!avant.length) return 0;
+
+  const veille = veilleDe(date);
+  const bouges = redaterMessages(avant.map(m => m.id), veille, userId);
+  // Le texte d'une journee est DERIVE de ses messages : les deux jours touches
+  // se reconstruisent, sinon la veille garderait un texte trop court et le
+  // lendemain un texte qui ne lui appartient plus.
+  rebuildEntryText(date, userId);
+  rebuildEntryText(veille, userId);
+  invalidate(userId);
+  return bouges;
 }
 
 /* ==================================================================
@@ -604,7 +645,7 @@ async function releverLecture(userId) {
     const r = await releverLot(lot.id, corpus, s);
     if (!r.pret) return null;
 
-    recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
     const ecrites = rows.filter(x => x.text && x.text.trim());
     setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
@@ -1621,18 +1662,22 @@ export const routes = {
           date: p.date, cle: s2.cle, valeur: p.valeur, texte: p.texte, unite: s2.unite
         })));
         const dernier = dernierJour;
-        if (!dernier) return { nuit: null, archetype: null, usage: null };
+        if (!dernier) return { nuit: null, archetype: null, usage: null, jour: null };
         const duJour = tous.filter(x => x.date === dernier);
         /*
          * `usage` PART AVEC L'ARCHETYPE, ET SORT DU MEME COMPTAGE.
          *
          * L'archetype nomme la forme de la journee en un mot ; l'usage dit de
-         * quoi elle etait faite. Recalculer l'un des deux ailleurs, plus tard,
-         * ferait deux comptages qui peuvent diverger -- et une etiquette qui
-         * contredit ses propres chiffres est pire qu'une etiquette seule.
+         * quoi elle etait faite, famille par famille. Recalculer l'un des deux
+         * ailleurs, plus tard, ferait deux comptages qui peuvent diverger -- et
+         * une etiquette qui contredit ses propres chiffres est pire qu'une
+         * etiquette seule. `jour` sort du meme comptage, pour la meme raison.
          */
         return { jourLu: dernier, nuit: nuitDe(duJour, tous),
-                 archetype: archetypeDe(duJour, tous), usage: usageDuJour(duJour) };
+                 archetype: archetypeDe(duJour, tous), usage: usageDuJour(duJour),
+                 // Les quelques chiffres qui font les puces : le temps d'écran,
+                 // où il est passé, le rythme. Chacun avec son écart à SA normale.
+                 jour: chiffresDuJour(duJour, tous) };
       })(),
 
       /*
@@ -1848,7 +1893,7 @@ export const routes = {
     let r;
     try { r = await lire(corpus, s); }
     catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
-    recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
     const l = setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
@@ -2119,8 +2164,22 @@ function piecesDe(body) {
    qu'on rejoue jusqu'a ce qu'elle plaise n'est plus une lecture.
    ========================================================================== */
 
-/** Douze heures. Deux fois par jour, donc — et jamais deux fois le même soir. */
-export const RETISSAGE_ATTENTE = 12 * 3600 * 1000;
+/**
+ * ZÉRO — LE REFROIDISSEMENT EST LEVÉ, POUR L'INSTANT.
+ *
+ * Il valait douze heures, et la raison tenait : rien ne change en une heure,
+ * une toile qu'on peut refaire à volonté devient un bouton qu'on presse en
+ * attendant qu'il dise autre chose. Le produit est encore en construction et
+ * il faut pouvoir retisser en boucle pour regarder ce que ça donne : la
+ * mécanique reste entière, seul le délai passe à zéro, et le remettre est une
+ * ligne.
+ *
+ * Ce qui a changé entre-temps et rend la levée moins chère : la lecture porte
+ * maintenant un cache de prefixe. Deux retissages du même journal à quelques
+ * minutes d'intervalle relisent quatre-vingt mille jetons à un dixième du
+ * prix — c'est-à-dire exactement le geste que ce délai empêchait.
+ */
+export const RETISSAGE_ATTENTE = 0;
 
 /**
  * Ce qu'il reste à attendre, en millisecondes. 0 quand c'est possible.
@@ -2213,7 +2272,7 @@ export async function retisser(body, send, userId = OWNER) {
     return;
   }
 
-  recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+  recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
   const l = setLecture({
     contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
     jours: corpus.jours, modele: r.modele, userId
@@ -2583,7 +2642,11 @@ export function outilsPour(userId, messageId, send = () => {}) {
       const d = /^\d{4}-\d{2}-\d{2}$/.test(String(jour ?? '')) ? jour : today();
       poserMesure({ date: d, source: SOURCE_DIT, cle: g === 'lever' ? CLE_LEVER : CLE_COUCHER,
                     texte: String(heure).trim(), userId });
-      return { message: `Noté : ${g} à ${heure} le ${d}.` };
+      // Meme recalage que par la phrase : la nuit qu'on vient de fermer rejoint
+      // la journee qu'elle terminait.
+      const bouges = recalerLaNuit(d, userId);
+      return { message: `Noté : ${g} à ${heure} le ${d}.`
+        + (bouges ? ` ${bouges} message(s) de cette nuit-là sont rangés sur la veille.` : '') };
     },
 
     marquer_motif: ({ id }) => {

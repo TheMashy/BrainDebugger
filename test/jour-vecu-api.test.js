@@ -96,3 +96,62 @@ test('un message sans date explicite se range dans la journée vécue', async ()
   });
   assert.ok(Array.isArray(messagesForDate(AUJ, OWNER)));
 });
+
+/*
+ * LE RECALAGE DE LA NUIT.
+ *
+ * On apprend la frontière APRÈS coup : « je vais me coucher » arrive à 6 h du
+ * matin, et ce qui a été écrit cette nuit-là est déjà rangé sur la journée
+ * civile du lendemain. Sans recalage, la borne est enregistrée, la règle est
+ * juste, et l'écran continue d'afficher la soirée au mauvais endroit — ce qui
+ * revient à n'avoir rien fait.
+ */
+test('dire « je vais me coucher » à 6 h range la nuit sur la veille', async () => {
+  const NUIT = 'couche-tard';
+  const { addMessage, messagesForDate, getEntry } = await import('../server/db.js');
+  const j = '2026-06-10', hier = '2026-06-09';
+
+  // Une soirée qui déborde : 01:56 et 05:43 le 10, puis 16:24 le même jour.
+  for (const [h, m, t] of [[1, 56, 'encore debout'], [5, 43, 'toujours pas couché'], [16, 24, 'hello']]) {
+    addMessage({ ts: new Date(a(j, h, m)).toISOString(), date: j, role: 'user', text: t, userId: NUIT });
+  }
+  assert.equal(messagesForDate(j, NUIT).length, 3);
+
+  dansLaZone('UTC', () => {
+    poserMesure({ date: j, source: 'dit', cle: 'coucher_dit', texte: '06:10', userId: NUIT });
+    const bouges = api.recalerLaNuit(j, NUIT);
+    assert.equal(bouges, 2, 'les deux messages d’avant 06:10 doivent partir sur la veille');
+  });
+
+  assert.deepEqual(messagesForDate(hier, NUIT).map(m => m.text),
+                   ['encore debout', 'toujours pas couché']);
+  assert.deepEqual(messagesForDate(j, NUIT).map(m => m.text), ['hello']);
+  // Le texte d'une journée est DÉRIVÉ de ses messages : les deux se refont.
+  assert.match(getEntry(hier, NUIT).text, /toujours pas couché/);
+  assert.doesNotMatch(getEntry(j, NUIT).text, /toujours pas couché/);
+});
+
+test('sans borne connue, le recalage ne déplace rien', () => {
+  const VIDE = 'sans-borne';
+  dansLaZone('UTC', () => {
+    assert.equal(api.recalerLaNuit('2026-06-10', VIDE), 0);
+  });
+});
+
+test('le recalage ne remonte JAMAIS plus d’un jour en arrière', async () => {
+  const UN = 'un-seul-jour';
+  const { addMessage, messagesForDate } = await import('../server/db.js');
+  // Une soirée sur trois jours d'affilée : seule celle du jour visé bouge.
+  for (const d of ['2026-07-01', '2026-07-02', '2026-07-03']) {
+    addMessage({ ts: new Date(a(d, 2, 0)).toISOString(), date: d, role: 'user', text: `nuit ${d}`, userId: UN });
+    poserMesure({ date: d, source: 'dit', cle: 'coucher_dit', texte: '06:00', userId: UN });
+  }
+  dansLaZone('UTC', () => { api.recalerLaNuit('2026-07-02', UN); });
+  // La nuit du 2 rejoint le 1er — UN jour en arrière, celui d'avant seulement.
+  assert.deepEqual(messagesForDate('2026-07-01', UN).map(m => m.text),
+                   ['nuit 2026-07-01', 'nuit 2026-07-02']);
+  assert.deepEqual(messagesForDate('2026-07-02', UN).map(m => m.text), []);
+  assert.deepEqual(messagesForDate('2026-07-03', UN).map(m => m.text), ['nuit 2026-07-03']);
+  const veille = messagesForDate('2026-06-30', UN) ?? [];
+  assert.equal(veille.length, 0, 'rien ne doit atterrir deux jours en arrière');
+});
