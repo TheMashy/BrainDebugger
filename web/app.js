@@ -5172,6 +5172,60 @@ function qsSerieMarkup(s, fin = null) {
 }
 
 /**
+ * LA NUIT, ET LA FORME DE LA JOURNÉE.
+ *
+ * Ce sont les deux questions qu'on se pose vraiment devant des mesures : « j'ai
+ * mal dormi ? » et « ma journée est passée où ? ». Une série de plus n'y répond
+ * pas — « sommeil_h 5,4 » est vrai et ne dit rien tant qu'on ne sait pas ce que
+ * valent SES nuits.
+ *
+ * Tout ce qui est écrit ici est un ÉCART À SA PROPRE NORMALE. Pas de « trop »,
+ * pas de « pas assez » : ces mots supposent une bonne quantité, et personne ici
+ * n'est en position de la fixer.
+ */
+function qsNuitMarkup(nuit, archetype, jour) {
+  if (!nuit && !archetype) return '';
+  const h = v => (v == null ? '—' : v);
+  return `<div class="qsnuit">
+    ${jour ? `<div class="k faint">La dernière journée reçue · ${fmtDay(jour)}</div>` : ''}
+    <div class="qsnuitcorps">
+      ${nuit ? `<div class="qsnuitbloc">
+        <div class="qsnuitch">
+          ${nuit.duree != null ? `<div class="qsch"><span class="qschv mono">${esc(qsDuree(nuit.duree))}</span>
+            <span class="qschk">de sommeil</span></div>` : ''}
+          <div class="qsch"><span class="qschv mono">${esc(h(nuit.coucher))}</span>
+            <span class="qschk">${nuit.coucherMesure ? 'couché' : 'dernière activité'}</span></div>
+          <div class="qsch"><span class="qschv mono">${esc(h(nuit.lever))}</span>
+            <span class="qschk">${nuit.leverMesure ? 'levé' : 'première activité'}</span></div>
+        </div>
+        ${nuit.dit?.length
+          ? `<ul class="qsdits">${nuit.dit.map(p =>
+              `<li class="qsdit ${esc(p.sens)}">${esc(p.texte)}</li>`).join('')}</ul>`
+          : `<p class="qsdit calme">une nuit comme les autres</p>`}
+      </div>` : ''}
+
+      ${archetype ? `<div class="qsarch">
+        <span class="qsarchnom">${esc(archetype.nom)}</span>
+        <ul class="qsarchp">${archetype.preuves.map(p =>
+          `<li><span class="qsarchk">${esc(p.quoi)}</span> ${esc(p.valeur)}</li>`).join('')}</ul>
+        ${/* CE QUE C'EST, ET CE QUE CE N'EST PAS. Sans cette ligne, une
+              étiquette posée par une machine s'installe dans la tête — et ce
+              produit refuse ça depuis le premier jour. */''}
+        <p class="qsarchnote">Ça décrit ta journée d'ordinateur, pas toi.</p>
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+
+/** « 6 h 20 », « 45 min ». Les minutes du serveur, lisibles. */
+function qsDuree(min) {
+  const m = Math.abs(Math.round(min ?? 0));
+  if (m < 60) return `${m} min`;
+  const r = m % 60;
+  return r ? `${Math.floor(m / 60)} h ${String(r).padStart(2, '0')}` : `${Math.floor(m / 60)} h`;
+}
+
+/**
  * LA RECEPTION, EN UNE LIGNE.
  *
  * « Quatre séries » ne dit pas si l'application envoie ENCORE. Un branchement
@@ -5219,6 +5273,20 @@ function qsPanneauMarkup(d) {
     (b.lien ? 1 : 0) - (a.lien ? 1 : 0) || b.n - a.n || a.cle.localeCompare(b.cle));
   const lies = series.filter(s => s.lien).length;
 
+  /*
+   * CE QUI SE MESURE SUR UN CORPS RESTE OUVERT ; LES ROUAGES SE REPLIENT.
+   *
+   * `temps_par_contexte_s_navigateur`, `bascules`, `pauses_nombre` : ce sont les
+   * chiffres qui ont produit la phrase du haut. Les afficher chacun en carte,
+   * c'est dix cartes qui répètent ce qu'on vient de lire — et la page redevient
+   * le mur de chiffres qu'on essayait d'éviter.
+   *
+   * SAUF s'ils vont avec les journées notées : un rouage qui bouge avec la
+   * personne n'est plus un rouage, c'est une trouvaille.
+   */
+  const ouvertes = series.filter(s => !s.detail || s.lien);
+  const rouages = series.filter(s => s.detail && !s.lien);
+
   return `
     <div class="card qspan">
       <div class="qstete">
@@ -5228,16 +5296,26 @@ function qsPanneauMarkup(d) {
       </div>
       ${qsReceptionMarkup(d.reception, d.jours)}
 
-      ${series.length ? `<div class="qsseries">${series.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
+      ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu)}
+
+      ${ouvertes.length ? `<div class="qsseries">${ouvertes.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
+
+      ${rouages.length ? `<details class="qsrouages">
+        <summary>${rouages.length} série${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
+        <div class="qsseries">${rouages.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>
+      </details>` : ''}
 
       ${lies ? `<p class="qsnote">Les séries en couleur vont avec tes journées notées — pas
         « à cause de », <b>avec</b>. Le sens, s'il y en a un, t'appartient.</p>` : ''}
 
       ${d.activite.length ? `<div class="qsact">
-        <div class="k faint">Ce que l'application envoie chaque jour, tel quel</div>
+        <div class="k faint">Ce que l'application envoie chaque jour</div>
+        ${/* La ligne qui referme un jour disait « 7 champs ». Sept champs de
+              quoi ? Elle dit maintenant ce qu'il y a dedans ; le brut reste
+              derrière le clic, entier, pour qui veut vérifier. */''}
         ${d.activite.slice(0, 12).map(j => `<details class="qsjour">
           <summary><span class="mono">${fmtDay(j.date)}</span>
-            <span class="faint">${j.digest ? Object.keys(j.digest).length + ' champs' : 'illisible'}</span></summary>
+            <span class="qsresume">${esc(j.resume || (j.digest ? `${Object.keys(j.digest).length} champs` : 'illisible'))}</span></summary>
           ${j.digest ? qsArbre(j.digest) : `<pre class="qsbrut">${esc(String(j.brut).slice(0, 2000))}</pre>`}
         </details>`).join('')}
       </div>` : ''}

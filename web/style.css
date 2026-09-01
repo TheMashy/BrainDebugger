@@ -3455,3 +3455,70 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 @media (prefers-reduced-motion: reduce) {
   .tsg { animation: none; opacity: 1 }
 }
+
+
+/* ======================================================================
+   LA NUIT ET LA FORME DE LA JOURNÉE.
+
+   Placées AVANT les séries, parce que ce sont les deux questions qu'on se
+   pose vraiment — « j'ai mal dormi ? », « ma journée est passée où ? » —
+   et que les séries sont ce qu'on regarde après, quand on veut vérifier.
+   ====================================================================== */
+.qsnuit { display: flex; flex-direction: column; gap: 9px; }
+.qsnuitcorps { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: stretch; }
+@media (max-width: 760px) { .qsnuitcorps { grid-template-columns: 1fr; } }
+
+.qsnuitbloc {
+  background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 10px;
+  padding: 15px 17px; display: flex; flex-direction: column; gap: 11px; min-width: 0;
+}
+/* Trois chiffres, en grand : combien, couché quand, levé quand. */
+.qsnuitch { display: flex; gap: 26px; flex-wrap: wrap; }
+.qsch { display: flex; flex-direction: column; gap: 2px; }
+.qschv { font-size: 21px; font-weight: 500; color: var(--ink); letter-spacing: -.01em; }
+.qschk { font-size: 11px; color: var(--ink-faint); }
+
+/* Ce qui dépasse, et seulement ce qui dépasse. Une phrase chaque matin est une
+   phrase qu'on n'ouvre plus au bout d'une semaine. */
+.qsdits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.qsdit {
+  font-size: 12.5px; color: var(--ink-dim); padding-left: 13px; position: relative;
+}
+.qsdit::before {
+  content: ''; position: absolute; left: 0; top: .58em;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint);
+}
+/* Une teinte, pas un jugement : elle dit DE QUEL CÔTÉ, pas si c'est bien. */
+.qsdit.moins::before, .qsdit.tard::before { background: var(--warn); }
+.qsdit.plus::before, .qsdit.tot::before { background: var(--accent); }
+.qsdit.calme { margin: 0; color: var(--ink-faint); padding-left: 13px; }
+.qsdit.calme::before { background: var(--line); }
+
+/* L'archétype : le nom, ses preuves, et la ligne qui dit ce que ce n'est pas. */
+.qsarch {
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--accent); border-radius: 10px;
+  padding: 15px 18px; display: flex; flex-direction: column; gap: 8px;
+  min-width: 210px; max-width: 320px;
+}
+@media (max-width: 760px) { .qsarch { max-width: none; } }
+.qsarchnom { font-size: 16px; color: var(--ink); font-weight: 500; }
+.qsarchp { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px;
+           font: 400 12px/1.5 var(--mono); color: var(--ink-dim); }
+.qsarchk { color: var(--ink-faint); }
+.qsarchnote { margin: 3px 0 0; font-size: 11.5px; color: var(--ink-faint); font-style: italic; }
+
+/* Le résumé d'un jour, dans sa ligne repliée. */
+.qsresume { font-size: 11.5px; color: var(--ink-dim); margin-left: auto; text-align: right; }
+
+/* Les rouages, repliés. Même geste que les jours bruts : ce qui a déjà été dit
+   en phrase se range, sans disparaître. */
+.qsrouages > summary {
+  display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none;
+  font-size: 12.5px; color: var(--ink-faint); padding: 4px 0;
+}
+.qsrouages > summary::-webkit-details-marker { display: none; }
+.qsrouages > summary::before { content: '›'; transition: transform .12s; }
+.qsrouages[open] > summary::before { transform: rotate(90deg); }
+.qsrouages > summary:hover { color: var(--ink-dim); }
+.qsrouages .qsseries { margin-top: 10px; }

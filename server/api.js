@@ -23,6 +23,7 @@ import { journee } from './journee.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
+import { nuitDe, archetypeDe, resumeDuJour, estDetail } from './allure.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -1422,6 +1423,12 @@ export const routes = {
          * dire la meme chose aux deux endroits.
          */
         mediane: med == null ? null : Math.round(med * 100) / 100,
+        /*
+         * UN ROUAGE DE LA NUIT OU DE L'ARCHÉTYPE. Il a déjà été dit plus haut,
+         * en phrase ; sa carte se replie plutôt que de répéter. Il ne disparaît
+         * pas : une mesure arrivée a le droit d'être vue.
+         */
+        detail: estDetail(s.cle),
         // Pour une série de texte : combien de valeurs DIFFERENTES. Une seule
         // sur quarante jours dit que la mesure est constante, donc muette.
         distinctes: new Set(s.points.map(p => p.texte).filter(Boolean)).size,
@@ -1463,11 +1470,43 @@ export const routes = {
        * qu'elles etaient toutes bonnes. On accepte quand meme la chaine, au
        * cas ou la base porte une ligne ecrite avant ce parsage.
        */
+      /*
+       * LA NUIT ET LA FORME DU JOUR, calculées sur la fenêtre regardée.
+       *
+       * Elles ne sortent pas d'une série de plus : elles répondent aux deux
+       * questions qu'on se pose vraiment devant ces chiffres — « j'ai mal
+       * dormi ? » et « ma journée est passée où ? ». Sur le DERNIER jour reçu,
+       * pas sur aujourd'hui : un jour sans envoi n'a rien à raconter, et
+       * afficher une nuit vide au lieu de la dernière connue serait perdre la
+       * seule qu'on ait.
+       */
+      ...(() => {
+        const tous = [...par.values()].flatMap(s2 => s2.points.map(p => ({
+          date: p.date, cle: s2.cle, valeur: p.valeur, texte: p.texte, unite: s2.unite
+        })));
+        const dernier = dernierJour;
+        if (!dernier) return { nuit: null, archetype: null };
+        const duJour = tous.filter(x => x.date === dernier);
+        return { jourLu: dernier, nuit: nuitDe(duJour, tous), archetype: archetypeDe(duJour, tous) };
+      })(),
+
+      /*
+       * CHAQUE JOUR PART AVEC SON RÉSUMÉ.
+       *
+       * La ligne qui referme un digest disait « 7 champs ». Sept champs de
+       * quoi ? Elle dit maintenant ce qu'il y a dedans — combien d'écran, où
+       * c'est passé, à quel rythme — et le brut reste derrière le clic, entier,
+       * pour qui veut vérifier.
+       */
       activite: activiteJours(userId, 60).map(j => {
-        if (j.digest && typeof j.digest === 'object') return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null };
+        const duJour = mesuresDuJour(j.date, userId);
+        const resume = resumeDuJour(duJour);
+        if (j.digest && typeof j.digest === 'object') {
+          return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null, resume };
+        }
         let digest = null;
         try { digest = JSON.parse(j.digest); } catch { /* illisible : on le dira */ }
-        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest) };
+        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest), resume };
       })
     };
   },
