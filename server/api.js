@@ -8,7 +8,7 @@ import {
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
-  toutesMesures, signatureQS
+  toutesMesures, signatureQS, activiteJours, mesuresEntre
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -1346,6 +1346,62 @@ export const routes = {
       // La cle est la meme que celle de la lecture : un seul secret a coller
       // dans l'application qui envoie, un seul a revoquer si elle fuit.
       cle: !!getSettings(userId).passerelleCle
+    };
+  },
+
+  /*
+   * TOUT CE QUI EST ARRIVE, AVEC SES VALEURS.
+   *
+   * `GET /api/qs` sert la console de Reglages : elle repond « quelles series
+   * existent, et est-ce que ca rentre ». Celle-ci repond a une autre question,
+   * qui est celle de quelqu'un qui regarde SES donnees : « qu'est-ce qu'il y a
+   * dedans ». D'ou les points eux-memes, et les digests d'activite tels
+   * qu'envoyes.
+   *
+   * Les digests ne se lisaient que par la cle, c'est-a-dire depuis
+   * l'application qui les envoie -- jamais depuis le site. Ils arrivaient donc
+   * et n'etaient visibles nulle part.
+   */
+  'GET /api/qs/contenu': ({ query, userId }) => {
+    const jours = Math.max(7, Math.min(365, Number(query?.jours) || 60));
+    const fin = today();
+    const debut = addDays(fin, -jours + 1);
+
+    const par = new Map();
+    for (const m of mesuresEntre(debut, fin, userId)) {
+      const k = `${m.source} ${m.cle}`;
+      if (!par.has(k)) par.set(k, { source: m.source, cle: m.cle, unite: m.unite ?? null, points: [] });
+      par.get(k).points.push({ date: m.date, valeur: m.valeur, texte: m.texte });
+    }
+    const series = [...par.values()].map(s => {
+      const v = s.points.map(p => p.valeur).filter(x => x != null);
+      return {
+        ...s,
+        n: s.points.length,
+        bas: v.length ? Math.min(...v) : null,
+        haut: v.length ? Math.max(...v) : null,
+        // La moyenne sert d'echelle au trace, pas de verite sur la personne.
+        moyenne: v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 100) / 100 : null
+      };
+    }).sort((a, b) => b.n - a.n || a.cle.localeCompare(b.cle));
+
+    return {
+      depuis: debut, jusqu_au: fin, jours,
+      series,
+      // Le digest est garde tel quel en base : on le rend parse, pas reformate.
+      // Sa forme appartient a l'application qui l'envoie, pas a ce site.
+      /*
+       * `activiteJours` REND DEJA LE DIGEST RELU. Le reparser le faisait
+       * echouer sur un objet, et chaque journee ressortait « illisible » alors
+       * qu'elles etaient toutes bonnes. On accepte quand meme la chaine, au
+       * cas ou la base porte une ligne ecrite avant ce parsage.
+       */
+      activite: activiteJours(userId, 60).map(j => {
+        if (j.digest && typeof j.digest === 'object') return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null };
+        let digest = null;
+        try { digest = JSON.parse(j.digest); } catch { /* illisible : on le dira */ }
+        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest) };
+      })
     };
   },
 

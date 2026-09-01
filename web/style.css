@@ -3285,3 +3285,62 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
    Assez discret pour ne pas attirer l'œil, assez lisible pour répondre à
    « il ne s'est rien passé, ou l'app n'a rien vu ? ». */
 .jvide { margin: 0; font-size: 13px; color: var(--ink-faint); font-style: italic; }
+
+/* ==================================================================
+   LE VISUALISEUR QUANTIFIED SELF, DANS « MOI ».
+   ================================================================== */
+
+.qsbarre { display: flex; margin: 4px 0 0; }
+#qspanneau:empty { display: none; }
+
+.qspan { display: flex; flex-direction: column; gap: 20px; }
+.qstete { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.qstete h2 { margin: 0; display: flex; align-items: center; gap: 8px; }
+
+/* Les séries en petites cartes : on en voit six d'un coup, et la forme de
+   chaque courbe se compare à l'œil sans lire un chiffre. */
+.qsseries { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.qsserie {
+  background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 9px;
+  padding: 11px 13px; display: flex; flex-direction: column; gap: 7px; min-width: 0;
+}
+.qsstete { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.qsstete b { font-size: 13.5px; font-weight: 500; }
+.qsstete .faint { font-size: 11px; }
+.qsn { margin-left: auto; font-size: 11px; color: var(--ink-faint); }
+.qssvg { width: 100%; height: 34px; display: block; color: var(--accent); opacity: .8; }
+.qsbornes { font-size: 11.5px; color: var(--ink-dim); }
+
+/* Les digests : repliés par défaut. Douze jours ouverts d'un coup, c'est un
+   mur ; le jour qu'on cherche s'ouvre d'un clic. */
+.qsact { display: flex; flex-direction: column; gap: 6px; }
+.qsjour { border-top: 1px solid var(--line-soft); padding: 7px 0; }
+.qsjour summary {
+  display: flex; align-items: baseline; gap: 12px; cursor: pointer;
+  font-size: 13.5px; list-style: none;
+}
+.qsjour summary::-webkit-details-marker { display: none; }
+.qsjour summary::before { content: '›'; color: var(--ink-faint); transition: transform .12s; }
+.qsjour[open] summary::before { transform: rotate(90deg); }
+.qsjour summary .faint { font-size: 11.5px; margin-left: auto; }
+
+/* L'arbre générique : une ligne par champ, le nom à gauche, la valeur à
+   droite. Un niveau imbriqué se décale, il ne change pas de forme. */
+.qsniv { display: flex; flex-direction: column; gap: 2px; padding: 8px 0 2px; }
+/* Un niveau imbriqué, marqué par un filet à gauche. Il ne s'appelle PAS
+   `creux` : ce nom est déjà pris par la césure du fil (« 7 h plus tard »),
+   qui met ses spans en capitales et se serait invitée ici. */
+.qsniv.dedans { padding: 4px 0 2px 2px; border-left: 1px solid var(--line-soft); padding-left: 11px; }
+.qsl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline; }
+.qsl:has(> .qsv > .qsniv) { grid-template-columns: 1fr; gap: 0; }
+.qsk { font-size: 12.5px; color: var(--ink-faint); }
+.qsv { font: 500 12.5px/1.5 var(--mono); color: var(--ink-dim); text-align: right; }
+.qsl:has(> .qsv > .qsniv) > .qsv { text-align: left; }
+.qsnul { color: var(--ink-faint); font-style: italic; }
+.qsliste { font: 400 12px/1.5 var(--mono); color: var(--ink-dim); }
+.qsbrut {
+  margin: 8px 0 0; padding: 10px 12px; background: var(--panel-2);
+  border: 1px solid var(--line-soft); border-radius: 7px;
+  font: 400 11.5px/1.6 var(--mono); color: var(--ink-faint);
+  overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+}
