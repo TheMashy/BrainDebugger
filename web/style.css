@@ -3257,15 +3257,23 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   display: grid; grid-template-columns: auto 1fr; gap: 12px;
   align-items: start;
 }
+/* L'icône et, sous elle, l'heure : un petit repère de temps comme celui qui
+   ouvre chaque moment à gauche. Les deux forment la colonne de marque du sujet,
+   alignée sur le DÉBUT du passage — pas centrée sur dix lignes. */
+.jsmarque {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 3px;
+  padding-top: 3px;
+}
 .jsico {
-  display: inline-flex; color: var(--ink-faint); padding-top: 3px;
-  cursor: help;
-  /* L'icône ne descend pas avec le texte : elle marque le DÉBUT du passage,
-     et centrée verticalement sur un bloc de dix lignes elle ne marquerait
-     plus rien. Plus grande, elle porte le sujet ; le curseur « ? » dit qu'on
-     peut la survoler pour en lire le nom. */
+  display: inline-flex; color: var(--ink-faint); cursor: help;
+  /* Plus grande, elle porte le sujet ; le curseur « ? » dit qu'on peut la
+     survoler pour en lire le nom. */
 }
 .jsico:hover { color: var(--ink); }
+.jsheure {
+  font-size: 10.5px; color: var(--ink-faint);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
 /* La même encre que le texte nu qu'il remplace : le découpage change la mise
    en page, il ne doit pas changer la lisibilité de ce qui est écrit. */
 .jstexte {

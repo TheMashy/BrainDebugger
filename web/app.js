@@ -3627,43 +3627,50 @@ function momentMarkup(m) {
  * la règle du produit vaut jusqu'ici.
  */
 function volatiliteMarkup(v) {
-  const rel = v?.releves ?? [], ch = v?.charges ?? [];
-  if (rel.length < 2 && ch.length < 2) return '';
+  /*
+   * CHAQUE POINT EST UNE HUMEUR QUE L'IA A ÉVALUÉE, sur dix, à un moment. C'est
+   * la même valeur que la pastille ≈ du fil à gauche : la courbe colle donc à
+   * l'humeur de la journée au lieu de tracer une charge abstraite. Un point
+   * PLEIN est une note relevée à la main ; un point CONTOURÉ est lu dans les
+   * mots — « ce qui est rempli est mesuré, ce qui est contouré est déclaré ».
+   */
+  const hum = v?.humeurs ?? [];
+  if (hum.length < 2) return '';
   const W = 200, H = 46, PB = 6;
-  // Deux échelles, un seul cadre : les relevés vont de 0 à 10, les charges de
-  // −1 à +1. Les superposer sur une seule graduation ferait croire qu'un point
-  // bas de l'un vaut un point bas de l'autre.
   const xs = n => n <= 1 ? [W / 2] : Array.from({ length: n }, (_, i) => 2 + (i / (n - 1)) * (W - 4));
-  const yRel = val => PB + (1 - val / 10) * (H - PB * 2);
-  const yCh = c => PB + (1 - (c + 1) / 2) * (H - PB * 2);
+  const y = val => PB + (1 - val / 10) * (H - PB * 2);
+  const px = xs(hum.length);
 
-  const px = xs(ch.length);
-  const ligne = ch.length >= 2
-    ? `<path d="${ch.map((c, i) => `${i ? 'L' : 'M'}${px[i].toFixed(1)} ${yCh(c.charge).toFixed(1)}`).join('')}"
-         fill="none" stroke="var(--ink-faint)" stroke-width="1.2" stroke-linejoin="round"/>` : '';
-  const rx = xs(rel.length);
-  const points = rel.map((r, i) =>
-    `<circle cx="${rx[i].toFixed(1)}" cy="${yRel(r.valeur).toFixed(1)}" r="3"
-       fill="${noteColor(r.valeur, 6)}"><title>${esc(r.heure)} · ${r.valeur}/10</title></circle>`).join('');
+  const ligne = `<path d="${hum.map((h, i) => `${i ? 'L' : 'M'}${px[i].toFixed(1)} ${y(h.valeur).toFixed(1)}`).join('')}"
+       fill="none" stroke="var(--line-soft)" stroke-width="1.2" stroke-linejoin="round"/>`;
+  const points = hum.map((h, i) => {
+    const c = noteColor(h.valeur, 6);
+    const mesure = h.dApres === 'releve';
+    const vtxt = String(h.valeur).replace('.', ',');
+    return `<circle cx="${px[i].toFixed(1)}" cy="${y(h.valeur).toFixed(1)}" r="3"
+       fill="${mesure ? c : 'none'}" stroke="${c}" stroke-width="${mesure ? 0 : 1.5}"
+       ><title>${esc(h.heure)} · ${mesure ? '' : '≈'}${vtxt}/10</title></circle>`;
+  }).join('');
 
-  const ecart = v.ecart != null
-    ? `<span class="jvchiffre mono">${v.bas} <span class="faint">→</span> ${v.haut}</span>` : '';
+  // L'amplitude vient des mêmes points que la courbe, pas des seuls relevés :
+  // « 3 → 8 » doit se lire directement sur ce qu'on voit tracé.
+  const vals = hum.map(h => h.valeur);
+  const bas = Math.min(...vals), haut = Math.max(...vals);
+  const fmt = n => String(n).replace('.', ',');
+  const surMesure = hum.some(h => h.dApres === 'releve');
   return `<div class="jvol">
     <div class="k faint">Ce qui a bougé</div>
-    ${/* MINIMALISTE, ET LE CADRE EST PARTI AVEC. La courbe était posée dans une
-          boîte à fond et bordure, ce qui en faisait un petit graphe encadré au
-          milieu d'une colonne de texte. Il ne reste que la médiane pointillée,
-          la ligne et les points — c'est tout ce qui porte l'information, et
-          c'est cette fenêtre qui remplace maintenant la barre « dans la
-          journée ». */''}
+    ${/* MINIMALISTE, ET LE CADRE EST PARTI AVEC. Il ne reste que la médiane
+          pointillée, la ligne et les points — c'est tout ce qui porte
+          l'information. */''}
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="jvsvg" aria-hidden="true">
       <line x1="0" y1="${(H / 2).toFixed(1)}" x2="${W}" y2="${(H / 2).toFixed(1)}"
             stroke="var(--line-soft)" stroke-dasharray="2 4"/>
       ${ligne}${points}
     </svg>
     <div class="jvpied">
-      ${ecart}
-      <span class="faint">${rel.length >= 2 ? 'relevé à la main' : 'lu dans tes mots'}</span>
+      <span class="jvchiffre mono">${fmt(bas)} <span class="faint">→</span> ${fmt(haut)}</span>
+      <span class="faint">${surMesure ? 'relevé à la main' : 'lu dans tes mots'}</span>
     </div>
   </div>`;
 }
@@ -3789,7 +3796,10 @@ function sujetsMarkup(sujets) {
      donne le nom — c'est tout ce qu'on vient chercher ici. */
   return `<div class="jsujets">${sujets.map(s => `
     <div class="jsujet">
-      <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 20)}</span>
+      <span class="jsmarque">
+        <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 20)}</span>
+        ${s.heure ? `<span class="jsheure mono">${esc(s.heure)}</span>` : ''}
+      </span>
       <p class="serif jstexte">${esc(s.texte)}</p>
     </div>`).join('')}</div>`;
 }
