@@ -22,7 +22,7 @@ const DB = join(mkdtempSync(join(tmpdir(), 'bd-qsroute-')), 'test.db');
 process.env.BD_DB = DB;
 
 const { poserCle } = await import('../server/passerelle.js');
-const { OWNER, journalQS, inventaireMesures, mesuresDuJour } = await import('../server/db.js');
+const { OWNER, journalQS, inventaireMesures, mesuresDuJour, activiteJours } = await import('../server/db.js');
 
 const CLE = poserCle(OWNER);
 const PORT = 4000 + Math.floor(Math.random() * 900);
@@ -129,4 +129,85 @@ test('LE JOURNAL NE SORT PAS PAR LA PASSERELLE', async () => {
   for (const interdit of ['text', 'message', 'synthese', 'contenu']) {
     assert.equal(brut.includes(`"${interdit}"`), false, `« ${interdit} » est sorti par la passerelle`);
   }
+});
+
+/* ============ LE DIGEST D'ACTIVITÉ, ET SES CHIFFRES ============
+ *
+ * Le digest de Machi Tool arrivait par sa propre porte et se rangeait TEL QUEL,
+ * dans une colonne de JSON. Il est pourtant plein de nombres quotidiens —
+ * bascules, temps par contexte, nombre de pauses, la plus longue — qui ont
+ * exactement la forme d'une mesure : un nombre, une clé, un jour.
+ *
+ * Les laisser dans du JSON, c'est les rendre invisibles à tout le reste : pas
+ * de courbe, pas de médiane, pas de lien avec la note du soir, rien dans le
+ * compte rendu. Ils passent donc maintenant par le MÊME tuyau que la montre.
+ */
+
+const DIGEST = {
+  date: '2026-05-02',
+  temps_par_contexte_s: { code: 4938, navigateur: 5672, jeu: 420 },
+  bascules: 82,
+  premiere_activite: '08:23',
+  applications: ['Code', 'Chrome', 'Spotify'],
+  pauses: { nombre: 8, plus_longue_s: 4200 }
+};
+
+const pousser = (digest, entetes = { Authorization: `Bearer ${CLE}` }) =>
+  fetch(`${BASE}/api/machitool/activite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Fuseau': 'Europe/Paris', ...entetes },
+    body: JSON.stringify(digest)
+  });
+
+test('les nombres du digest deviennent des mesures', async () => {
+  const r = await pousser(DIGEST);
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.ok(j.mesures >= 6, `seulement ${j.mesures} mesures tirées du digest`);
+
+  const cles = mesuresDuJour('2026-05-02').map(m => m.cle).sort();
+  // Un niveau d'imbrication est aplati : c'est déjà ce que fait le tuyau des
+  // mesures, et « code » tout seul ne voudrait rien dire.
+  assert.ok(cles.includes('temps_par_contexte_s_code'), `clés obtenues : ${cles.join(', ')}`);
+  assert.ok(cles.includes('bascules'));
+  assert.ok(cles.includes('pauses_plus_longue_s'));
+
+  const bascules = mesuresDuJour('2026-05-02').find(m => m.cle === 'bascules');
+  assert.equal(bascules.valeur, 82);
+  assert.equal(bascules.source, 'machitool');
+});
+
+test('le digest brut reste rangé, entier, à côté', async () => {
+  // La dérivation AJOUTE, elle ne remplace pas : c'est le brut que la console
+  // relit, et c'est lui qu'on montre quand on veut voir ce qui est vraiment
+  // arrivé plutôt que ce qu'on en a compris.
+  const jour = activiteJours(OWNER).find(x => x.date === '2026-05-02');
+  assert.ok(jour, 'le digest n’est plus rangé');
+  const d = typeof jour.digest === 'string' ? JSON.parse(jour.digest) : jour.digest;
+  assert.equal(d.bascules, 82);
+  assert.deepEqual(d.applications, ['Code', 'Chrome', 'Spotify']);
+});
+
+test('ce qui n’est pas un nombre ne devient pas un nombre', async () => {
+  const m = mesuresDuJour('2026-05-02');
+  // Un tableau n'est pas une mesure du jour : il est laissé, pas inventé.
+  assert.equal(m.some(x => x.cle === 'applications'), false);
+  // Une heure reste du texte. La ranger en nombre donnerait « 8 » pour 08:23.
+  const heure = m.find(x => x.cle === 'premiere_activite');
+  if (heure) { assert.equal(heure.valeur, null); assert.equal(heure.texte, '08:23'); }
+});
+
+test('le digest renvoyé dans la journée ne double pas les séries', async () => {
+  // Machi Tool réécrit la journée à chaque envoi, puisqu'elle grossit. Trois
+  // envois doivent laisser UNE valeur par clé, la dernière.
+  await pousser({ ...DIGEST, date: '2026-05-03', bascules: 10 });
+  await pousser({ ...DIGEST, date: '2026-05-03', bascules: 40 });
+  await pousser({ ...DIGEST, date: '2026-05-03', bascules: 91 });
+  const inv = inventaireMesures(OWNER).find(x => x.source === 'machitool' && x.cle === 'bascules');
+  assert.equal(inv.n, 2, 'les renvois ont fait des lignes en plus');
+  assert.equal(mesuresDuJour('2026-05-03').find(m => m.cle === 'bascules').valeur, 91);
+});
+
+test('le digest exige la clé, lui aussi', async () => {
+  assert.equal((await pousser(DIGEST, {})).status, 401);
 });

@@ -1383,21 +1383,78 @@ export const routes = {
       if (!par.has(k)) par.set(k, { source: m.source, cle: m.cle, unite: m.unite ?? null, points: [] });
       par.get(k).points.push({ date: m.date, valeur: m.valeur, texte: m.texte });
     }
+    /*
+     * LES LIENS SONT CALCULES SUR TOUT L'HISTORIQUE, PAS SUR LA FENETRE.
+     *
+     * Une correlation demande vingt journees appariees au minimum. La calculer
+     * sur les trente derniers jours la rendrait a la fois fragile et dependante
+     * du reglage de la fenetre -- « je passe de 30 a 90 jours et un lien
+     * apparait » est exactement ce qu'un lien ne doit pas faire. La fenetre
+     * regle ce qu'on REGARDE, pas ce qu'on calcule.
+     */
+    const { liens: trouves } = liensDe(userId);
+
     const series = [...par.values()].map(s => {
       const v = s.points.map(p => p.valeur).filter(x => x != null);
+      const tri = [...v].sort((a, b) => a - b);
+      const med = tri.length
+        ? (tri.length % 2 ? tri[(tri.length - 1) / 2] : (tri[tri.length / 2 - 1] + tri[tri.length / 2]) / 2)
+        : null;
+      // Le dernier point qui porte QUELQUE CHOSE : une série de texte
+      // (« premiere_activite : 08:23 ») en a un, et « 08:23 » est ce qu'on veut
+      // voir. Ne chercher que du numérique la laissait vide.
+      const dernier = [...s.points].reverse().find(p => p.valeur != null || p.texte) ?? null;
+      // Le lien du jour meme passe devant celui du lendemain, comme a cote de
+      // la journee : deux vues du meme fait doivent dire la meme chose.
+      const pour = trouves.filter(l => l.source === s.source && l.cle === s.cle)
+                          .sort((a, b) => a.decalage - b.decalage);
       return {
         ...s,
         n: s.points.length,
         bas: v.length ? Math.min(...v) : null,
         haut: v.length ? Math.max(...v) : null,
         // La moyenne sert d'echelle au trace, pas de verite sur la personne.
-        moyenne: v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 100) / 100 : null
+        moyenne: v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 100) / 100 : null,
+        /*
+         * LA MEDIANE, ET PAS SEULEMENT LA MOYENNE. C'est elle qui sert de
+         * repere sur la courbe et qui decide du COTE d'une valeur -- la meme
+         * convention qu'a cote de la journee, pour que « au-dessus de » veuille
+         * dire la meme chose aux deux endroits.
+         */
+        mediane: med == null ? null : Math.round(med * 100) / 100,
+        // Pour une série de texte : combien de valeurs DIFFERENTES. Une seule
+        // sur quarante jours dit que la mesure est constante, donc muette.
+        distinctes: new Set(s.points.map(p => p.texte).filter(Boolean)).size,
+        dernier,
+        cote: med == null || dernier?.valeur == null ? null
+          : dernier.valeur === med ? 'pile' : dernier.valeur > med ? 'haut' : 'bas',
+        lien: pour[0] ?? null
       };
     }).sort((a, b) => b.n - a.n || a.cle.localeCompare(b.cle));
+
+    /*
+     * LA RECEPTION. « Quatre series » ne dit pas si l'application envoie
+     * encore. Un branchement casse se voit ici, et nulle part ailleurs : le
+     * dernier jour recu, et combien de jours sur la fenetre en portent.
+     */
+    const joursAvecMesure = new Set();
+    for (const s of par.values()) for (const p of s.points) joursAvecMesure.add(p.date);
+    const jourDActivite = new Set(activiteJours(userId, 400).map(j => j.date));
+    const couverts = new Set([...joursAvecMesure, ...[...jourDActivite].filter(d => d >= debut && d <= fin)]);
+    const dernierJour = couverts.size ? [...couverts].sort().at(-1) : null;
 
     return {
       depuis: debut, jusqu_au: fin, jours,
       series,
+      reception: {
+        couverts: couverts.size,
+        attendus: jours,
+        dernier: dernierJour,
+        // Le silence en jours, plutot qu'une date a soustraire de tete.
+        depuis_jours: dernierJour
+          ? Math.round((Date.parse(`${fin}T00:00:00Z`) - Date.parse(`${dernierJour}T00:00:00Z`)) / 86400000)
+          : null
+      },
       // Le digest est garde tel quel en base : on le rend parse, pas reformate.
       // Sa forme appartient a l'application qui l'envoie, pas a ce site.
       /*

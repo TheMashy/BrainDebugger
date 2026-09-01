@@ -271,9 +271,33 @@ async function traiter(req, res) {
         return json(res, 400, { error: 'date du digest illisible' });
       }
       poserActiviteJour(userId, date, digest);
+
+      /*
+       * ET SES NOMBRES DEVIENNENT DES MESURES.
+       *
+       * Le digest etait range tel quel, et rien d'autre. Or il est plein de
+       * chiffres QUOTIDIENS -- bascules, temps par contexte, nombre de pauses,
+       * la plus longue -- qui ont exactement la forme d'une mesure : un nombre,
+       * une cle, un jour. Les laisser dans une colonne de JSON, c'est les
+       * rendre invisibles a tout le reste : pas de courbe, pas de mediane, pas
+       * de lien avec la note du soir, rien dans le compte rendu.
+       *
+       * Ils passent donc par le MEME tuyau que la montre et la balance. Ce
+       * n'est pas une exception pour Machi Tool : c'est le tuyau qui accepte
+       * enfin ce qu'il savait deja lire.
+       *
+       * Le digest brut reste range a cote, entier : c'est lui que la console
+       * relit, et c'est lui qu'on affiche quand on veut voir ce qui est
+       * VRAIMENT arrive plutot que ce qu'on en a compris.
+       */
+      const { gardees: chiffres } = dansLaZone(zone,
+        () => analyser({ ...digest, date }, { source: 'machitool', zone }));
+      for (const m of chiffres) poserMesure({ ...m, userId });
+
       noterEnvoi({ userId, source: 'machitool:activite', statut: 200, recues: 1, gardees: 1,
                    apercu: Object.keys(digest ?? {}).slice(0, 8).join(', ') });
-      return json(res, 200, { ok: true, date, jours: activiteJours(userId).length });
+      return json(res, 200, { ok: true, date, mesures: chiffres.length,
+                              jours: activiteJours(userId).length });
     } catch (err) {
       const pourquoi = String(err.message ?? err).slice(0, 200);
       noterEnvoi({ userId, source: 'machitool:activite', statut: 400, refus: pourquoi });

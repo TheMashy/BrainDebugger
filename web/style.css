@@ -3293,23 +3293,63 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qsbarre { display: flex; margin: 4px 0 0; }
 #qspanneau:empty { display: none; }
 
-.qspan { display: flex; flex-direction: column; gap: 20px; }
-.qstete { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.qspan { display: flex; flex-direction: column; gap: 18px; }
+.qstete { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .qstete h2 { margin: 0; display: flex; align-items: center; gap: 8px; }
+/* La fenêtre pousse à droite : c'est un réglage, pas un titre. */
+.qsfen { margin-left: auto; }
+.qsfen button { padding: 4px 11px; font-size: 12px; }
+
+/* La réception, juste sous le titre. Un branchement cassé ne se voit nulle
+   part ailleurs : les courbes restent belles, elles s'arrêtent simplement. */
+.qsrecept { margin: -10px 0 0; font-size: 12.5px; color: var(--ink-faint); }
+.qsrecept.vieux { color: var(--warn); }
 
 /* Les séries en petites cartes : on en voit six d'un coup, et la forme de
    chaque courbe se compare à l'œil sans lire un chiffre. */
-.qsseries { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.qsseries { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 14px; }
 .qsserie {
   background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 9px;
   padding: 11px 13px; display: flex; flex-direction: column; gap: 7px; min-width: 0;
 }
-.qsstete { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+/* LA COULEUR VEUT DIRE QUELQUE CHOSE. Elle ne marque pas « une série » — elle
+   marque celles qui vont avec les journées notées. Décorative, elle mentirait :
+   partout ailleurs dans cette application, une couleur porte un sens. */
+.qsserie.lie { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-soft)); }
+/* Le compte de points reste EN HAUT À DROITE même quand le nom passe à la
+   ligne. En `flex-wrap` sur toute la ligne, il partait sur une deuxième ligne
+   et décalait toute la carte : treize cartes de hauteurs différentes pour une
+   raison invisible. Le nom et sa source enveloppent entre eux, `pts` non. */
+.qsstete { display: flex; align-items: baseline; gap: 8px; }
+.qsnom { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; flex: 1; }
 .qsstete b { font-size: 13.5px; font-weight: 500; }
 .qsstete .faint { font-size: 11px; }
-.qsn { margin-left: auto; font-size: 11px; color: var(--ink-faint); }
-.qssvg { width: 100%; height: 34px; display: block; color: var(--accent); opacity: .8; }
+.qsn { flex: none; font-size: 11px; color: var(--ink-faint); }
+
+/* La dernière valeur, en grand : c'est la seule qu'on ait en tête. */
+.qsdernier { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.qsval { font-size: 19px; font-weight: 500; color: var(--ink); letter-spacing: -.01em; }
+.qsval i { font-style: normal; font-size: 12px; color: var(--ink-faint); margin-left: 2px; }
+/* Elle n'apparaît que sur une série arrêtée : c'est une alerte discrète, pas
+   une étiquette de date. */
+/* Elle coule dans la ligne au lieu d'être poussée à droite : poussée, elle
+   ouvrait un trou entre la valeur et la courbe pour dire une chose brève. */
+.qsquand { font-size: 11px; color: var(--warn); }
+
+.qssvg { width: 100%; height: 44px; display: block; color: var(--ink-faint); opacity: .75; }
+.qsserie.lie .qssvg { color: var(--accent); opacity: .9; }
+.qsmed { stroke: var(--ink-faint); opacity: .45; }
+.qspoint { fill: currentColor; }
 .qsbornes { font-size: 11.5px; color: var(--ink-dim); }
+
+/* La phrase du lien : la même que celle posée à côté de la journée. Deux vues
+   du même fait doivent dire la même chose, avec les mêmes mots. */
+.qslien {
+  margin: 2px 0 0; padding-top: 8px; border-top: 1px solid var(--line-soft);
+  font-size: 12px; line-height: 1.5; color: var(--ink-dim);
+}
+.qslien b { color: var(--ink); font-weight: 500; }
+.qsnote { margin: -6px 0 0; font-size: 12px; color: var(--ink-faint); max-width: 68ch; }
 
 /* Les digests : repliés par défaut. Douze jours ouverts d'un coup, c'est un
    mur ; le jour qu'on cherche s'ouvre d'un clic. */
