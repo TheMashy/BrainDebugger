@@ -3280,3 +3280,8 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   margin: 0; white-space: pre-wrap; font-size: 15.5px; line-height: 1.65;
   color: var(--ink);
 }
+
+/* Une colonne vide garde sa place et le dit — elle ne se referme pas.
+   Assez discret pour ne pas attirer l'œil, assez lisible pour répondre à
+   « il ne s'est rien passé, ou l'app n'a rien vu ? ». */
+.jvide { margin: 0; font-size: 13px; color: var(--ink-faint); font-style: italic; }
