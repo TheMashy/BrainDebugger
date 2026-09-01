@@ -26,7 +26,7 @@
  * le corpus est retiree, en silence : le theme survit, la preuve fausse non.
  */
 
-import { resolveKey, repliServeur } from './chat.js';
+import { resolveKey, repliServeur, optionsDuModele } from './chat.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
 import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
 import { SCHEMA_HORIZONS, validerHorizons, ecritesParHorizon } from './horizons.js';
@@ -1075,7 +1075,17 @@ export function requeteLecture(corpus, settings) {
      * ne la regarde apparaitre mot a mot. C'est le seul endroit du produit ou
      * l'effort haut se justifie, et celui ou le resultat compte le plus.
      */
-    output_config: { effort: 'high' },
+    /*
+     * L'effort passe par la table des capacites, comme le reste. Reglages
+     * laisse choisir le modele de la lecture aussi, et `output_config.effort`
+     * rend une erreur sur Haiku 4.5 -- le meme 400 que sur le compagnon, sur
+     * un ecran qui retombe sur « Lancer la lecture » sans rien expliquer.
+     *
+     * `repli: false` : l'API des lots refuse le repli serveur meme sur un
+     * modele qui le porte. La lecture directe le remet elle-meme, plus bas.
+     */
+    ...optionsDuModele(settings.anthropicModel || 'claude-opus-5',
+                       { effort: 'high', repli: false }),
     system: [{ type: 'text', text: SYSTEME }],
     tools: [OUTIL],
     tool_choice: { type: 'tool', name: 'rendre_lecture' },

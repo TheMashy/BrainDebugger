@@ -108,11 +108,21 @@ function fausseApi(port) {
     const corps = JSON.parse(Buffer.concat(bouts).toString() || '{}');
     vues.push(corps);
 
-    if ('fallbacks' in corps && !chat.MODELES_AVEC_REPLI.includes(corps.model)) {
+    /*
+     * LES TROIS REFUS QUE LA VRAIE API OPPOSE, avec ses phrases. C'est tout ce
+     * qui distingue ce serveur d'un serveur complaisant — et un serveur
+     * complaisant est la raison pour laquelle la panne est passée deux fois.
+     */
+    const cap = chat.capacitesDe(corps.model);
+    const refus =
+      ('fallbacks' in corps && !cap.repli) ? 'fallbacks: Extra inputs are not permitted'
+      : (corps.thinking?.type === 'adaptive' && !cap.pense) ? 'adaptive thinking is not supported on this model'
+      : (corps.output_config?.effort && !cap.effort) ? 'output_config.effort: not supported on this model'
+      : null;
+    if (refus) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
-        type: 'error',
-        error: { type: 'invalid_request_error', message: 'fallbacks: Extra inputs are not permitted' }
+        type: 'error', error: { type: 'invalid_request_error', message: refus }
       }));
     }
 
@@ -159,6 +169,44 @@ test('sur un modèle qui le porte, le repli part bien', async () => {
   assert.equal(vues.at(-1).fallbacks, 'default');
 });
 
+test('SUR HAIKU AUSSI, LE COMPAGNON RÉPOND', async () => {
+  /*
+   * C'est la panne que l'utilisateur a eue. Haiku 4.5 est proposé dans
+   * Réglages comme « le plus rapide » — c'est-à-dire celui qu'on choisit quand
+   * on regarde la facture — et il n'accepte ni `thinking: adaptive` ni
+   * `output_config.effort`. L'API répondait « adaptive thinking is not
+   * supported on this model » à chaque message.
+   */
+  const r = await chat.reply(fil, reglages('claude-haiku-4-5'));
+  assert.equal(r.degraded, undefined, `le compagnon est tombé en repli : ${r.degraded}`);
+  assert.equal(r.backend, 'anthropic');
+  const envoye = vues.at(-1);
+  assert.equal('thinking' in envoye, false, 'la pensée adaptative est partie vers Haiku');
+  assert.equal('output_config' in envoye, false, 'l’effort est parti vers Haiku');
+  assert.equal('fallbacks' in envoye, false);
+});
+
+test('CHAQUE MODÈLE DU MENU DE RÉGLAGES DOIT PASSER', async () => {
+  /*
+   * Le menu et la table des capacités sont deux listes qui doivent rester
+   * d'accord. Quand elles divergent, ça ne casse pas un test : ça casse le
+   * compagnon de quelqu'un qui a changé un réglage.
+   */
+  for (const { id } of chat.ANTHROPIC_MODELS) {
+    const r = await chat.reply(fil, reglages(id));
+    assert.equal(r.backend, 'anthropic', `${id} → ${r.degraded}`);
+  }
+});
+
+test('un modèle inconnu est servi nu, et répond quand même', async () => {
+  // Le minimum commun marche partout. Ajouter un modèle au menu sans lui
+  // ajouter sa ligne le prive de deux options ; ça ne le fait pas tomber.
+  const r = await chat.reply(fil, reglages('claude-modele-de-2029'));
+  assert.equal(r.backend, 'anthropic');
+  assert.deepEqual(Object.keys(vues.at(-1)).filter(k =>
+    ['thinking', 'output_config', 'fallbacks', 'betas'].includes(k)), []);
+});
+
 test('LE FAUX SERVEUR REFUSE VRAIMENT — sinon ce fichier ne prouve rien', async () => {
   /*
    * Un faux serveur complaisant répond « oui » à une requête que la vraie API
@@ -173,4 +221,17 @@ test('LE FAUX SERVEUR REFUSE VRAIMENT — sinon ce fichier ne prouve rien', asyn
   assert.equal(res.status, 400, 'le faux serveur accepte ce que l’API refuse');
   const j = await res.json();
   assert.match(j.error.message, /fallbacks/);
+
+  // Et les deux autres refus, qui sont ceux qu'on vient de découvrir.
+  for (const [corps, motif] of [
+    [{ model: 'claude-haiku-4-5', thinking: { type: 'adaptive' } }, /adaptive thinking/],
+    [{ model: 'claude-haiku-4-5', output_config: { effort: 'low' } }, /effort/]
+  ]) {
+    const r = await fetch(`http://127.0.0.1:${PORT}/v1/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...corps, messages: [] })
+    });
+    assert.equal(r.status, 400, `le faux serveur accepte ${JSON.stringify(corps)}`);
+    assert.match((await r.json()).error.message, motif);
+  }
 });
