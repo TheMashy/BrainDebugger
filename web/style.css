@@ -3313,10 +3313,58 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qsfen { margin-left: auto; }
 .qsfen button { padding: 4px 11px; font-size: 12px; }
 
-/* La réception, juste sous le titre. Un branchement cassé ne se voit nulle
-   part ailleurs : les courbes restent belles, elles s'arrêtent simplement. */
-.qsrecept { margin: -10px 0 0; font-size: 12.5px; color: var(--ink-faint); }
-.qsrecept.vieux { color: var(--warn); }
+/* LE COMPTE, EN PREMIER ET EN GRAND.
+   C'est la question qu'on pose en ouvrant — combien de journées sont
+   enregistrées — et elle n'avait qu'une petite ligne grise sous un titre.
+   La réception reste collée dessus : un branchement cassé ne se voit nulle
+   part ailleurs, les courbes restent belles, elles s'arrêtent simplement. */
+.qscompte { display: flex; align-items: baseline; gap: 12px; margin: -8px 0 0; }
+.qscn { font-size: 34px; line-height: 1; font-weight: 300; color: var(--ink); }
+.qscq { font-size: 13px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 2px; }
+.qscq .faint { font-size: 11.5px; }
+.qscompte.vieux .qscn { color: var(--warn); }
+
+/* LE DETAIL DU JOUR, EN CELLULES.
+   Une rangée qui traverse toute la largeur met le nom d'un côté et sa valeur
+   à l'autre bout : l'œil traverse le vide pour les rapprocher, six fois de
+   suite. Côte à côte, la valeur d'abord, ça se lit d'un coup. */
+.qscells { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px 18px; }
+.qscell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.qscv { font-size: 16px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qsck { font-size: 11px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* UNE FAMILLE : quatorze titres de pages ne sont pas quatorze mesures.
+   Une ligne pour le paquet, ses plus grosses nommées, et le reste compté —
+   compté, pas effacé : une donnée arrivée a le droit d'être vue. */
+.qsfam {
+  border: 1px solid var(--line-soft); border-radius: 9px; padding: 9px 12px;
+  background: var(--panel-2); display: flex; flex-direction: column; gap: 7px;
+}
+.qsfamtete { display: flex; align-items: baseline; gap: 9px; }
+.qsfamnom { font-size: 13px; font-weight: 500; }
+.qsfamn { font-size: 11px; }
+.qsfamtot { margin-left: auto; font-size: 13px; color: var(--ink-soft); }
+.qsfamt { display: flex; flex-wrap: wrap; gap: 6px; }
+.qsfamx {
+  display: inline-flex; align-items: baseline; gap: 6px; min-width: 0;
+  padding: 3px 9px; border-radius: 999px; font-size: 11.5px;
+  border: 1px solid var(--line-soft); color: var(--ink-soft);
+  max-width: 100%; overflow: hidden;
+}
+.qsfamx b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qsfamx .mono { color: var(--ink-faint); flex: none; }
+/* Le reste n'est pas une entrée : il est le contraire d'une entrée nommée. */
+.qsfamx.reste { border-style: dashed; color: var(--ink-faint); }
+
+/* Les replis : les séries et les journées d'avant répondent à d'autres
+   questions que celle qu'on pose en arrivant. */
+.qsseriesd > summary, .qsjours > summary, .qsbrutd > summary {
+  cursor: pointer; font-size: 12.5px; color: var(--ink-faint); padding: 4px 0;
+}
+.qsseriesd > summary:hover, .qsjours > summary:hover, .qsbrutd > summary:hover { color: var(--ink-soft); }
+.qsseriesd[open] > summary, .qsjours[open] > summary { margin-bottom: 10px; }
+.qsseriesd { display: flex; flex-direction: column; gap: 14px; }
+.qsbrutd { margin-top: 4px; }
 
 /* Les séries en petites cartes : on en voit six d'un coup, et la forme de
    chaque courbe se compare à l'œil sans lire un chiffre. */

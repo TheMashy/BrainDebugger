@@ -5125,6 +5125,49 @@ function qsCourbe(points, { mediane = null } = {}) {
   </svg>`;
 }
 
+/**
+ * LE DIGEST D'UN JOUR, LU.
+ *
+ * Le serveur a regroupé ce qui allait ensemble : quatorze titres de pages ne
+ * sont pas quatorze mesures, c'est une mesure découpée. On rend donc les
+ * familles en une ligne chacune — leur poids, les plus grosses nommées, et le
+ * reste COMPTÉ, jamais effacé en silence — puis tout ce qui n'a pas été
+ * regroupé, tel quel.
+ *
+ * Le brut reste accessible en dessous. On ne remplace pas la donnée par son
+ * résumé : on met le résumé devant.
+ */
+function qsLuMarkup(lu) {
+  if (!lu || (!lu.familles?.length && !lu.lignes?.length)) return '';
+  const fam = (lu.familles ?? []).map(f => `<div class="qsfam">
+    <div class="qsfamtete">
+      <span class="qsfamnom">${esc(qsNom(f.nom))}</span>
+      <span class="qsfamn faint">${f.n} entrées</span>
+      <span class="qsfamtot mono">${esc(qsValeur(f.nom, f.total))}</span>
+    </div>
+    <div class="qsfamt">
+      ${f.tetes.map(t => `<span class="qsfamx"><b>${esc(t.nom)}</b>
+        <span class="mono">${esc(qsValeur(t.cle, t.valeur, f.nom))}</span></span>`).join('')}
+      ${f.reste ? `<span class="qsfamx reste">+ ${f.reste} autres
+        <span class="mono">${esc(qsValeur(f.nom, f.resteTotal))}</span></span>` : ''}
+    </div>
+  </div>`).join('');
+
+  /*
+   * EN CELLULES, PAS EN RANGEES PLEINE LARGEUR.
+   *
+   * Une rangee qui traverse mille pixels met le nom a gauche et sa valeur a
+   * l'autre bout : l'oeil doit traverser le vide pour les rapprocher, six fois
+   * de suite. Six cellules cote a cote se lisent d'un coup.
+   */
+  const lignes = (lu.lignes ?? []).map(l => `<div class="qscell">
+    <span class="qscv mono">${esc(qsValeur(l.cle, l.valeur))}</span>
+    <span class="qsck">${esc(qsNom(l.chemin.join(' ')))}</span>
+  </div>`).join('');
+
+  return `${lignes ? `<div class="qscells">${lignes}</div>` : ''}${fam}`;
+}
+
 /** 30 / 90 / 365 : une semaine ne montre rien, cinq ans ne se lit plus. */
 const QS_FENETRES = [[30, '30 j'], [90, '90 j'], [365, '1 an']];
 
@@ -5242,27 +5285,6 @@ function qsDuree(min) {
   return r ? `${Math.floor(m / 60)} h ${String(r).padStart(2, '0')}` : `${Math.floor(m / 60)} h`;
 }
 
-/**
- * LA RECEPTION, EN UNE LIGNE.
- *
- * « Quatre séries » ne dit pas si l'application envoie ENCORE. Un branchement
- * cassé ne se voit nulle part ailleurs : les courbes restent belles, elles
- * s'arrêtent simplement il y a trois semaines, et rien ne le dit.
- */
-function qsReceptionMarkup(r, jours) {
-  if (!r) return '';
-  const j = r.depuis_jours;
-  const quand = j == null ? 'aucun envoi'
-    : j === 0 ? "dernier envoi aujourd'hui"
-    : j === 1 ? 'dernier envoi hier'
-    : `dernier envoi il y a ${j} jours`;
-  // Une semaine de silence est le seuil où « ça n'envoie plus » devient
-  // l'explication la plus probable. En dessous, c'est un week-end.
-  return `<p class="qsrecept${j != null && j >= 7 ? ' vieux' : ''}">
-    <span class="mono">${r.couverts}</span> jour${r.couverts > 1 ? 's' : ''} reçu${r.couverts > 1 ? 's' : ''}
-    sur ${jours} · ${quand}</p>`;
-}
-
 function qsPanneauMarkup(d) {
   if (!d) return '<div class="card"><p class="jvide">…</p></div>';
 
@@ -5304,39 +5326,90 @@ function qsPanneauMarkup(d) {
   const ouvertes = series.filter(s => !s.detail || s.lien);
   const rouages = series.filter(s => s.detail && !s.lien);
 
+  /*
+   * CE QU'ON VOIT EN OUVRANT : COMBIEN DE JOURNEES, ET LA DERNIERE.
+   *
+   * L'ecran s'ouvrait sur un mur : treize cartes de series, chacune avec sa
+   * courbe et ses bornes, avant la moindre phrase. « Le quantified self ne me
+   * sort rien de vraiment lisible » -- c'etait vrai, et la raison est un ordre
+   * de lecture, pas un manque de donnees.
+   *
+   * On ouvre donc sur les deux choses qu'on vient chercher : COMBIEN de
+   * journees sont enregistrees, et A QUOI RESSEMBLE LA DERNIERE. Les series
+   * restent, entieres, mais repliees : elles repondent a une autre question --
+   * « comment ca evolue » -- qu'on ne pose pas en arrivant.
+   */
+  const dernier = d.activite?.[0] ?? null;
+  const surLeJourLu = d.jourLu && dernier?.date === d.jourLu;
+
   return `
     <div class="card qspan">
       <div class="qstete">
         <h2>${ico('antenne', 15)}Quantified self</h2>
-        <span class="faint mono">${fmtDay(d.depuis)} → ${fmtDay(d.jusqu_au)}</span>
         ${fenetres}
       </div>
-      ${qsReceptionMarkup(d.reception, d.jours)}
+
+      ${qsCompteMarkup(d)}
 
       ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu)}
 
-      ${ouvertes.length ? `<div class="qsseries">${ouvertes.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
+      ${dernier ? `<div class="qsact">
+        <div class="k faint">Le détail de ${surLeJourLu ? 'cette journée' : `la journée du ${fmtDay(dernier.date)}`}</div>
+        ${dernier.digest ? qsLuMarkup(dernier.lu)
+                         : `<pre class="qsbrut">${esc(String(dernier.brut).slice(0, 2000))}</pre>`}
+        ${dernier.digest ? `<details class="qsbrutd">
+          <summary>tel qu'il est arrivé · ${dernier.lu?.champs ?? Object.keys(dernier.digest).length} champs</summary>
+          ${qsArbre(dernier.digest)}
+        </details>` : ''}
+      </div>` : ''}
 
-      ${rouages.length ? `<details class="qsrouages">
-        <summary>${rouages.length} série${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
-        <div class="qsseries">${rouages.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>
+      ${d.activite.length > 1 ? `<details class="qsjours">
+        <summary>les ${Math.min(11, d.activite.length - 1)} journées d'avant</summary>
+        ${d.activite.slice(1, 12).map(j => `<details class="qsjour">
+          <summary><span class="mono">${fmtDay(j.date)}</span>
+            <span class="qsresume">${esc(j.resume || (j.digest ? `${j.lu?.champs ?? Object.keys(j.digest).length} champs` : 'illisible'))}</span></summary>
+          ${j.digest ? qsLuMarkup(j.lu) : `<pre class="qsbrut">${esc(String(j.brut).slice(0, 2000))}</pre>`}
+        </details>`).join('')}
       </details>` : ''}
 
-      ${lies ? `<p class="qsnote">Les séries en couleur vont avec tes journées notées — pas
-        « à cause de », <b>avec</b>. Le sens, s'il y en a un, t'appartient.</p>` : ''}
-
-      ${d.activite.length ? `<div class="qsact">
-        <div class="k faint">Ce que l'application envoie chaque jour</div>
-        ${/* La ligne qui referme un jour disait « 7 champs ». Sept champs de
-              quoi ? Elle dit maintenant ce qu'il y a dedans ; le brut reste
-              derrière le clic, entier, pour qui veut vérifier. */''}
-        ${d.activite.slice(0, 12).map(j => `<details class="qsjour">
-          <summary><span class="mono">${fmtDay(j.date)}</span>
-            <span class="qsresume">${esc(j.resume || (j.digest ? `${Object.keys(j.digest).length} champs` : 'illisible'))}</span></summary>
-          ${j.digest ? qsArbre(j.digest) : `<pre class="qsbrut">${esc(String(j.brut).slice(0, 2000))}</pre>`}
-        </details>`).join('')}
-      </div>` : ''}
+      ${series.length ? `<details class="qsseriesd"${lies ? ' open' : ''}>
+        <summary>${series.length} série${series.length > 1 ? 's' : ''} de mesures${
+          lies ? ` · ${lies} qui ${lies > 1 ? 'vont' : 'va'} avec tes journées` : ''}</summary>
+        ${ouvertes.length ? `<div class="qsseries">${ouvertes.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
+        ${rouages.length ? `<details class="qsrouages">
+          <summary>${rouages.length} série${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
+          <div class="qsseries">${rouages.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>
+        </details>` : ''}
+        ${lies ? `<p class="qsnote">Les séries en couleur vont avec tes journées notées — pas
+          « à cause de », <b>avec</b>. Le sens, s'il y en a un, t'appartient.</p>` : ''}
+      </details>` : ''}
     </div>`;
+}
+
+/**
+ * COMBIEN DE JOURNEES SONT ENREGISTREES.
+ *
+ * C'est la premiere question, et elle n'avait pas de reponse : la ligne de
+ * reception disait « 12 jours reçus sur 90 » en petit, sous un titre, entre
+ * deux blocs. Le chiffre passe donc devant, en grand, avec ce qui le qualifie
+ * -- sur quelle fenetre, et depuis quand ca n'envoie plus s'il y a lieu.
+ */
+function qsCompteMarkup(d) {
+  const r = d.reception;
+  if (!r) return '';
+  const j = r.depuis_jours;
+  const quand = j == null ? 'aucun envoi'
+    : j === 0 ? "dernier envoi aujourd'hui"
+    : j === 1 ? 'dernier envoi hier'
+    : `dernier envoi il y a ${j} jours`;
+  // Une semaine de silence est le seuil ou « ca n'envoie plus » devient
+  // l'explication la plus probable. En dessous, c'est un week-end.
+  const vieux = j != null && j >= 7;
+  return `<div class="qscompte${vieux ? ' vieux' : ''}">
+    <span class="qscn mono">${r.couverts}</span>
+    <span class="qscq">journée${r.couverts > 1 ? 's' : ''} enregistrée${r.couverts > 1 ? 's' : ''}
+      <span class="faint">sur les ${d.jours} derniers jours · ${quand}</span></span>
+  </div>`;
 }
 
 async function ouvrirQS() {

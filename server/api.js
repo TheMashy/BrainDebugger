@@ -24,6 +24,7 @@ import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 import { nuitDe, archetypeDe, resumeDuJour, estDetail } from './allure.js';
+import { lireDigest } from './digest.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
@@ -1543,12 +1544,22 @@ export const routes = {
       activite: activiteJours(userId, 60).map(j => {
         const duJour = mesuresDuJour(j.date, userId);
         const resume = resumeDuJour(duJour);
+        /*
+         * LE DIGEST PART LU, EN PLUS DE PARTIR BRUT.
+         *
+         * Brut, un vrai digest fait vingt lignes dont quatorze sont des titres
+         * de pages : tout est la et rien ne se lit. `lu` dit la meme chose
+         * regroupee -- les titres deviennent une ligne « navigateur, 14 pages,
+         * les deux plus longues » -- et le brut reste, entier, pour verifier.
+         */
         if (j.digest && typeof j.digest === 'object') {
-          return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null, resume };
+          return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null,
+                   resume, lu: lireDigest(j.digest) };
         }
         let digest = null;
         try { digest = JSON.parse(j.digest); } catch { /* illisible : on le dira */ }
-        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest), resume };
+        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest),
+                 resume, lu: lireDigest(digest) };
       })
     };
   },
