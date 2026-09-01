@@ -604,7 +604,7 @@ async function releverLecture(userId) {
     const r = await releverLot(lot.id, corpus, s);
     if (!r.pret) return null;
 
-    recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
     const ecrites = rows.filter(x => x.text && x.text.trim());
     setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
@@ -1839,7 +1839,7 @@ export const routes = {
     let r;
     try { r = await lire(corpus, s); }
     catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
-    recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
     const l = setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
@@ -2204,7 +2204,7 @@ export async function retisser(body, send, userId = OWNER) {
     return;
   }
 
-  recordUsage(userId, r.modele, r.usage.input, r.usage.output);
+  recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
   const l = setLecture({
     contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
     jours: corpus.jours, modele: r.modele, userId
