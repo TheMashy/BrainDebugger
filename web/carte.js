@@ -26,9 +26,43 @@ import { deltaColor } from './charts.js';
 const TOURS = 320;          // itérations calculées avant le premier affichage
 const REPULSION = 5200;
 const RESSORT = 0.028;
-const AMAS_RAPPEL = 0.010;
+const AMAS_RAPPEL = 0.021;
 const CENTRE_RAPPEL = 0.0016;
 const FROTTEMENT = 0.86;
+
+/*
+ * LA REPULSION N'EST PAS LA MEME DEDANS ET DEHORS.
+ *
+ * Elle etait globale : chaque noeud repoussait tous les autres avec la meme
+ * force, quel que soit leur groupe. Le rappel d'amas devait alors lutter contre
+ * elle pour tenir un ilot ensemble -- et il perdait des que l'ilot depassait
+ * quatre ou cinq noeuds. Resultat visible sur une vraie carte : les ilots
+ * NOMMES, ceux qui portent une lecture, fondaient en une seule amibe, pendant
+ * que les grappes anonymes de deux noeuds restaient nettes. L'inverse exact de
+ * ce qu'on veut lire.
+ *
+ * Deux coefficients suffisent. Dedans, on repousse moins : les membres d'un
+ * meme ilot ont le droit d'etre proches, c'est ce que « ilot » veut dire.
+ * Dehors, on repousse plus : c'est le blanc entre deux groupes qui les rend
+ * distincts, et sans lui aucune enveloppe ne sauve le dessin.
+ */
+const REPULSION_DEDANS = 0.55;
+const REPULSION_DEHORS = 1.5;
+
+/*
+ * ET LES RESSORTS NON PLUS.
+ *
+ * La repulsion separee ne suffisait pas : deux ilots relies par trois traits
+ * -- « les deadlines » vers « les nuits blanches », « les anxios » vers « les
+ * deadlines » -- restaient collas l'un a l'autre, parce que le ressort, lui,
+ * ignorait les groupes et tirait de toutes ses forces a travers la frontiere.
+ *
+ * Un lien entre deux ilots tire donc MOINS. Il tire quand meme -- c'est un vrai
+ * lien, et deux ilots qui se parlent doivent rester voisins ; mais il ne doit
+ * pas pouvoir les fondre en un seul. Ce que la carte doit montrer, c'est deux
+ * choses reliees, pas une chose.
+ */
+const RESSORT_DEHORS = 0.4;
 
 /**
  * Un flottant entre 0 et 1, tire d'une chaine. FNV-1a, puis normalisation.
@@ -105,10 +139,14 @@ export function disposer(G, largeur, hauteur) {
       // que le recadrage ne peut qu'agrandir jusqu'a la hauteur -- et il reste
       // un tiers de largeur vide de chaque cote. Le recadrage ne deforme pas
       // (les angles mentiraient) : c'est ici que la forme se decide.
+      // Les ancres partent PLUS LOIN du centre qu'avant (0,34 -> 0,40) : avec
+      // une repulsion desormais plus forte entre groupes, des ancres serrees
+      // faisaient commencer la simulation par une bousculade dont elle ne se
+      // remettait pas dans les trois cents tours.
       const u = 0.72 + 0.28 * hache(cle + '·rayon');
       ancres.set(cle, {
-        x: largeur / 2 + Math.cos(a) * 0.34 * largeur * u,
-        y: hauteur / 2 + Math.sin(a) * 0.34 * hauteur * u
+        x: largeur / 2 + Math.cos(a) * 0.40 * largeur * u,
+        y: hauteur / 2 + Math.sin(a) * 0.40 * hauteur * u
       });
     }
     return ancres.get(cle);
@@ -168,7 +206,8 @@ export function disposer(G, largeur, hauteur) {
         let dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y;
         let d2 = dx * dx + dy * dy;
         if (d2 < 1) { dx = (i - j) || 1; dy = 1; d2 = 1; }
-        const f = REPULSION / d2;
+        const meme = amasDe[i] === amasDe[j];
+        const f = REPULSION * (meme ? REPULSION_DEDANS : REPULSION_DEHORS) / d2;
         const d = Math.sqrt(d2);
         const fx = dx / d * f, fy = dy / d * f;
         pts[i].vx -= fx; pts[i].vy -= fy;
@@ -181,8 +220,11 @@ export function disposer(G, largeur, hauteur) {
       const a = pts[l.s], b = pts[l.t];
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.hypot(dx, dy) || 1;
-      const cible = 120 - 60 * Math.min(1, l.force * 3);
-      const f = (d - cible) * RESSORT * (0.4 + l.force);
+      const traverse = amasDe[l.s] !== amasDe[l.t];
+      // Un lien entre deux ilots vise plus LOIN, en plus de tirer moins : sans
+      // ca les deux enveloppes se touchent meme quand la force est faible.
+      const cible = (120 - 60 * Math.min(1, l.force * 3)) * (traverse ? 1.9 : 1);
+      const f = (d - cible) * RESSORT * (0.4 + l.force) * (traverse ? RESSORT_DEHORS : 1);
       const fx = dx / d * f, fy = dy / d * f;
       a.vx += fx; a.vy += fy;
       b.vx -= fx; b.vy -= fy;
