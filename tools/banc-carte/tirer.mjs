@@ -8,15 +8,54 @@
  * un vrai navigateur. Une reimplementation du dessin ne prouverait rien : c'est
  * precisement le dessin qu'on met en cause.
  */
-import { chromium } from 'playwright';
+/*
+ * PLAYWRIGHT N'EST PAS UNE DEPENDANCE DE CE PROJET, et ne doit pas le devenir :
+ * le produit n'en a aucune, et il tient a ca. On va donc le chercher la ou il
+ * se trouve, en essayant l'installation locale puis la globale, et on dit quoi
+ * faire si aucune ne repond -- plutot qu'un ERR_MODULE_NOT_FOUND brut.
+ */
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+async function playwright() {
+  /* Un chemin de DOSSIER ne s'importe pas en ESM : il faut viser le fichier que
+     le paquet declare. `createRequire().resolve` le fait pour nous, et c'est
+     aussi lui qui trouve une installation globale que `import 'playwright'`
+     ignore. */
+  const req = createRequire(import.meta.url);
+  const essais = [process.env.PLAYWRIGHT, 'playwright',
+                  '/opt/node22/lib/node_modules/playwright'].filter(Boolean);
+  for (const ou of essais) {
+    try { return await import(req.resolve(ou)); } catch { /* suivant */ }
+    try { return await import(ou); } catch { /* suivant */ }
+  }
+  throw new Error('Playwright introuvable. Installe-le (npm i -g playwright) '
+    + 'ou donne son chemin : PLAYWRIGHT=/chemin/vers/playwright node tools/banc-carte/tirer.mjs');
+}
+/* Resolu par `require`, le paquet arrive en CommonJS : ses exports sont sous
+   `.default`. Resolu par son nom, ils sont a plat. On accepte les deux. */
+const pw = await playwright();
+const chromium = pw.chromium ?? pw.default?.chromium;
+if (!chromium) throw new Error('Playwright chargé, mais sans `chromium`.');
 
 const ICI = path.dirname(new URL(import.meta.url).pathname);
 const PAGE = process.argv[2] ?? 'http://127.0.0.1:4289/planche.html';
 const VERS = process.argv[3] ?? path.join(ICI, 'planches');
 
-const nav = await chromium.launch({ executablePath: process.env.CHROMIUM
-  ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+import fs from 'node:fs';
+/* Le navigateur : celui qu'on nous designe, sinon celui que Playwright a
+   installe sous PLAYWRIGHT_BROWSERS_PATH, sinon celui qu'il trouve tout seul. */
+const dossier = process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/opt/pw-browsers';
+const trouve = () => {
+  if (process.env.CHROMIUM) return process.env.CHROMIUM;
+  try {
+    const d = fs.readdirSync(dossier).filter(n => n.startsWith('chromium')).sort().at(-1);
+    const c = d && path.join(dossier, d, 'chrome-linux', 'chrome');
+    if (c && fs.existsSync(c)) return c;
+  } catch { /* Playwright se debrouillera */ }
+  return undefined;
+};
+const nav = await chromium.launch({ executablePath: trouve() });
 const p = await nav.newPage({ viewport: { width: 1220, height: 900 } });
 const erreurs = [];
 p.on('pageerror', e => erreurs.push(e.message));
