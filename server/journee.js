@@ -346,12 +346,15 @@ function themeOuNull(p) {
   return t === DEFAUT_THEME ? null : t;
 }
 
-export function sujetsDuTexte(texte, ref = 5) {
-  const phrases = phrasesDe(texte);
-  if (!phrases.length) return [];
-
-  const lues = phrases.map(p => ({ texte: p, theme: themeOuNull(p), penche: pencheDe(p) }));
-
+/**
+ * LE DÉCOUPAGE EN BLOCS, À PARTIR DE PHRASES DÉJÀ LUES.
+ *
+ * Chaque phrase porte son texte, son thème (ou null), sa pente, et — quand on
+ * découpe à partir des messages plutôt que du pavé — l'horodatage du message
+ * d'où elle vient. Le découpage ne regarde jamais l'heure ; elle voyage juste
+ * dans le bloc, pour qu'on puisse la lui redemander ensuite.
+ */
+function decouperEnBlocs(lues) {
   const blocs = [];
   for (const ph of lues) {
     const b = blocs[blocs.length - 1];
@@ -401,11 +404,18 @@ export function sujetsDuTexte(texte, ref = 5) {
     if (precedent && long < SUJET_CAR && !contredit) { precedent.phrases.push(...b.phrases); continue; }
     fondus.push({ phrases: [...b.phrases] });
   }
+  return fondus;
+}
 
+/**
+ * DES BLOCS AUX SUJETS. `zone` présente => on attache une heure discrète, prise
+ * sur le premier message du bloc, comme le fait le fil des moments à gauche.
+ */
+function blocsEnSujets(fondus, ref, zone = null) {
   const sujets = fondus.map(b => {
     const t = b.phrases.map(x => x.texte).join(' ');
     const penche = pencheDe(t);
-    return {
+    const s = {
       // Le thème du bloc est le PREMIER que ses phrases donnent, pas celui de
       // sa première phrase : un bloc ouvert sur une phrase muette porte quand
       // même l'icône du sujet dont il parle.
@@ -420,6 +430,11 @@ export function sujetsDuTexte(texte, ref = 5) {
        */
       estime: penche == null ? null : { valeur: estimationDe(penche, ref), dApres: 'mots' }
     };
+    if (zone) {
+      const ts = b.phrases.find(x => x.ts)?.ts ?? null;
+      if (ts) s.heure = heureDe(ts, zone);
+    }
+    return s;
   });
 
   /*
@@ -431,9 +446,34 @@ export function sujetsDuTexte(texte, ref = 5) {
   return sujets.slice(0, MAX_SUJETS);
 }
 
-export function sujetsDuJour(date, userId = OWNER, { reference = null } = {}) {
+export function sujetsDuTexte(texte, ref = 5) {
+  const phrases = phrasesDe(texte);
+  if (!phrases.length) return [];
+  const lues = phrases.map(p => ({ texte: p, theme: themeOuNull(p), penche: pencheDe(p) }));
+  return blocsEnSujets(decouperEnBlocs(lues), ref);
+}
+
+/**
+ * LES SUJETS DU JOUR, AVEC UNE HEURE.
+ *
+ * On repart des MESSAGES et non du pavé recollé : `entries.text` est déjà leur
+ * concaténation, donc le découpage est identique, mais chaque phrase garde
+ * cette fois l'horodatage de son message. Un bloc porte alors l'heure de son
+ * premier message — le petit repère de temps que réclame la colonne de droite,
+ * comme l'heure qui ouvre chaque moment à gauche. Sans message (une journée
+ * importée d'un seul tenant), on retombe sur le texte, sans heure.
+ */
+export function sujetsDuJour(date, userId = OWNER, { reference = null, zone = zoneCourante() } = {}) {
   const e = getEntry(date, userId);
-  return sujetsDuTexte(e?.text ?? '', reference ?? e?.note ?? 5);
+  const ref = reference ?? e?.note ?? 5;
+  const msgs = messagesForDate(date, userId).filter(m => m.role === 'user' && m.text?.trim());
+  if (!msgs.length) return sujetsDuTexte(e?.text ?? '', ref);
+
+  const lues = [];
+  for (const m of msgs)
+    for (const p of phrasesDe(m.text))
+      lues.push({ texte: p, theme: themeOuNull(p), penche: pencheDe(p), ts: m.ts });
+  return blocsEnSujets(decouperEnBlocs(lues), ref, zone);
 }
 
 /**
@@ -450,9 +490,24 @@ export function volatiliteDuJour(date, userId = OWNER, { zone = zoneCourante() }
     .map(r => ({ heure: heureDe(r.ts, zone), ts: r.ts, valeur: r.valeur, quoi: r.quoi ?? null }));
   const mo = momentsDuJour(date, userId, { zone });
   const v = rel.map(r => r.valeur);
+  /*
+   * LES HUMEURS : UN POINT PAR MOMENT QUE L'IA A ÉVALUÉ.
+   *
+   * C'est ce que « ce qui a bougé » doit montrer — non pas une charge abstraite
+   * de −1 à +1, mais la note même que la lecture a posée sur chaque moment, sur
+   * dix, EXACTEMENT la valeur de la pastille ≈ du fil à gauche. Un point existe
+   * donc parce qu'un moment a été lu et estimé, et la courbe colle enfin à
+   * l'humeur de la journée. Quand un relevé tombe dans la fenêtre du moment,
+   * `estime` le préfère déjà (dApres: 'releve') : la mesure prime sur la lecture,
+   * ici comme partout.
+   */
+  const humeurs = mo
+    .filter(m => m.estime)
+    .map(m => ({ heure: m.heure, ts: m.ts, valeur: m.estime.valeur, dApres: m.estime.dApres }));
   return {
     releves: rel,
     charges: mo.map(m => ({ heure: m.heure, ts: m.ts, charge: m.charge, scene: m.scene })),
+    humeurs,
     // L'écart n'a de sens qu'à partir de deux points : un seul relevé n'est pas
     // une amplitude, c'est un point.
     ecart: v.length >= 2 ? Math.max(...v) - Math.min(...v) : null,
