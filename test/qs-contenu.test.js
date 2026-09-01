@@ -157,3 +157,38 @@ test('les titres de pages se replient en une famille, sans rien perdre', () => {
   assert.deepEqual(j.lu.lignes.map(l => l.cle), ['trous'],
     'ce qui n’est pas dans la famille reste en ligne, et rien d’autre');
 });
+
+
+/*
+ * CE QUI A ÉTÉ CONSULTÉ PART AVEC L'ARCHÉTYPE.
+ *
+ * L'écran pose une étiquette — « navigation continue » — et ce produit exige
+ * que ses chiffres soient à côté. Ils ne peuvent pas y être si la route ne les
+ * envoie pas : sans `usage`, la page devrait recompter les contextes de son
+ * côté, et une étiquette contredite par ses propres chiffres est pire qu'une
+ * étiquette seule.
+ */
+test('la route porte ce qui a été consulté, avec l’archétype', () => {
+  /* Une journée d'ordinateur, posée ici et pas dans l'échantillon partagé :
+     trois séries de plus durciraient la correction des liens pour les tests
+     d'avant, qui n'ont rien demandé. */
+  const ctx = { navigateur: 21600, code: 3600, discord: 1800 };
+  for (const [quoi, sec] of Object.entries(ctx)) {
+    poserMesure({ date: AUJ, source: 'machitool', cle: `temps_par_contexte_s_${quoi}`,
+                  valeur: sec, unite: 's', userId: OWNER });
+  }
+
+  const d = lire(90);
+  assert.equal(d.jourLu, AUJ);
+  assert.ok(d.usage, 'l’usage manque : l’étiquette partirait sans ses chiffres');
+  assert.ok(d.usage.total > 0);
+  assert.ok(d.usage.parts.length, 'aucune famille');
+  for (const p of d.usage.parts) {
+    assert.ok(p.fam && p.nom, 'une famille sans nom sortirait sa clé à l’écran');
+    assert.ok(p.minutes > 0, 'une famille à zéro n’a rien à afficher');
+    assert.ok(p.part >= 0 && p.part <= 100);
+  }
+  // Trié du plus long au plus court : c'est l'ordre dans lequel on le lit.
+  const min = d.usage.parts.map(p => p.minutes);
+  assert.deepEqual(min, [...min].sort((a, b) => b - a));
+});

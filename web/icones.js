@@ -50,7 +50,34 @@ export const TRAITS = {
   plus:     '<path d="M9 4.2v9.6M4.2 9h9.6"/>',
   // Antenne : un point et deux ondes qui en partent. Ce qui ARRIVE d'ailleurs
   // -- une montre, une balance, un telephone qui pousse ce qu'il a mesure.
-  antenne:  '<circle cx="5" cy="13" r="1.6" fill="currentColor" stroke="none"/><path d="M8.8 13a3.8 3.8 0 0 0-3.8-3.8"/><path d="M13.2 13A8.2 8.2 0 0 0 5 4.8"/>'
+  antenne:  '<circle cx="5" cy="13" r="1.6" fill="currentColor" stroke="none"/><path d="M8.8 13a3.8 3.8 0 0 0-3.8-3.8"/><path d="M13.2 13A8.2 8.2 0 0 0 5 4.8"/>',
+
+  /* ---- la nuit ----
+     Deux bornes, et rien entre les deux. Une lune pour le coucher, un soleil
+     pour le lever : ce sont les seuls dessins que personne n'a besoin
+     d'apprendre, et ils remplacent deux mots qu'on relisait chaque matin. */
+  lune:     '<path d="M14.6 11.4A6.3 6.3 0 0 1 6.6 3.4a6.3 6.3 0 1 0 8 8z"/>',
+  soleil:   '<circle cx="9" cy="9" r="3.3"/><path d="M9 1.7v1.7M9 14.6v1.7M1.7 9h1.7M14.6 9h1.7M3.8 3.8l1.2 1.2M13 13l1.2 1.2M14.2 3.8 13 5M5 13l-1.2 1.2"/>',
+
+  /* ---- la journee d'ordinateur ----
+     UNE FORME D'USAGE, PAS UNE PERSONNE. Ces cinq dessins tiennent la meme
+     ligne que le reste du fichier : ils montrent ce que la machine a compte --
+     un ecran qu'on fait defiler, une loupe, une cible, deux tetes, une pause.
+     Aucun ne porte de jugement, et c'est la condition pour qu'ils existent. */
+  defiler:  '<rect x="5.2" y="1.9" width="7.6" height="14.2" rx="1.7"/><path d="M9 5.3v6.2"/><path d="M6.9 9.4 9 11.5l2.1-2.1"/>',
+  cible:    '<circle cx="9" cy="9" r="6.3"/><circle cx="9" cy="9" r="3"/><circle cx="9" cy="9" r=".95" fill="currentColor" stroke="none"/>',
+  gens:     '<circle cx="6.9" cy="6.1" r="2.6"/><path d="M2.4 15.1c0-2.6 2-4.2 4.5-4.2s4.5 1.6 4.5 4.2"/><path d="M12.4 4a2.6 2.6 0 0 1 0 5.2"/><path d="M13.5 11.2c1.4.5 2.4 1.7 2.4 3.9"/>',
+  pause:    '<path d="M6.9 4.3v9.4M11.1 4.3v9.4"/>',
+
+  /* ---- ce qu'on consulte ----
+     Les familles de contextes qu'une application d'activite envoie. Elles ne
+     sont dessinees que pour tenir en 12 pixels a cote d'une duree : un globe,
+     des chevrons, un ecran de lecture, une manette, une note. */
+  globe:    '<circle cx="9" cy="9" r="6.4"/><path d="M2.6 9h12.8"/><path d="M9 2.6a10 10 0 0 1 0 12.8a10 10 0 0 1 0-12.8z"/>',
+  code:     '<path d="M6.2 5.6 2.6 9l3.6 3.4M11.8 5.6 15.4 9l-3.6 3.4"/><path d="M10.3 3.7 7.7 14.3"/>',
+  video:    '<rect x="1.9" y="4.2" width="10.2" height="9.6" rx="1.6"/><path d="M12.1 8.2l4-2.3v6.2l-4-2.3z"/>',
+  jeu:      '<rect x="1.9" y="5.6" width="14.2" height="6.8" rx="2.6"/><path d="M5.7 8.2v2.4M4.5 9.4h2.4"/><circle cx="12" cy="9" r=".95" fill="currentColor" stroke="none"/><circle cx="14" cy="10.6" r=".95" fill="currentColor" stroke="none"/>',
+  musique:  '<path d="M6.6 13.2V4.5l7.6-1.7v8.7"/><ellipse cx="4.6" cy="13.4" rx="2" ry="1.7"/><ellipse cx="12.2" cy="11.5" rx="2" ry="1.7"/>'
 };
 
 /*
@@ -87,4 +114,32 @@ export function ico(nom, t = 13) {
 /** L'icône de chaque onglet. Le nom de la vue est la clé employée partout ailleurs. */
 export const ICO_VUE = {
   tonight: 'parler', moi: 'moi', mirror: 'carte', year: 'annee', settings: 'reglages'
+};
+
+/**
+ * L'ICÔNE D'UNE FORME DE JOURNÉE D'ORDINATEUR.
+ *
+ * Les clés sont celles du serveur (`ARCHETYPES`), pas des noms d'affichage :
+ * un nom lisible peut être réécrit un jour, la clé non. Une clé sans icône ne
+ * casse rien — `ico()` rend une chaîne vide, et il reste le nom.
+ *
+ * L'icône ne remplace pas le nom, elle le devance : « navigation continue »
+ * reste écrit à côté. Un dessin seul serait une étiquette qu'il faut apprendre,
+ * et ce fichier dit depuis le début qu'on n'en veut pas.
+ */
+export const ICO_ARCHETYPE = {
+  doomscroll: 'defiler', curieux: 'loupe', productif: 'cible',
+  social: 'gens', repose: 'pause'
+};
+
+/**
+ * L'ICÔNE D'UNE FAMILLE DE CONTEXTES — ce qu'on a consulté.
+ *
+ * `autre` a la sienne, et c'est voulu : c'est le temps qu'on n'a PAS su ranger,
+ * il a le droit d'être vu comme les autres. Le masquer ferait des parts qui ne
+ * font pas le total, sans rien dire de pourquoi.
+ */
+export const ICO_FAMILLE = {
+  nav: 'globe', travail: 'code', social: 'gens',
+  video: 'video', jeu: 'jeu', musique: 'musique', autre: 'point'
 };

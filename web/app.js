@@ -8,7 +8,7 @@ import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
-import { ico, ICO_VUE } from './icones.js';
+import { ico, ICO_VUE, ICO_ARCHETYPE, ICO_FAMILLE } from './icones.js';
 import { friseMarkup as friseSVG } from './frise.js';
 import { calMarkup, calClic, moisDe } from './calendrier.js';
 
@@ -3510,15 +3510,6 @@ async function renderMirror(date, { garderCal = false } = {}) {
             veut voir où ce jour tombe dans sa semaine. */''}
       ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
-      ${/* Le bouton vit dans « Moi » parce que c'est la page de ce qu'on SAIT
-            de soi. Réglages garde le branchement et le journal des envois :
-            deux questions différentes, deux endroits. */''}
-      ${moi ? `<div class="qsbarre">
-        <button class="btn" id="qsbouton" aria-pressed="${QS_OUVERT}">
-          ${ico('antenne', 13)}${QS_OUVERT ? 'masquer les données' : 'quantified self'}</button>
-      </div>
-      <div id="qspanneau">${QS_OUVERT ? qsPanneauMarkup(QS_DATA) : ''}</div>` : ''}
-
       ${reperesMarkup(m.reperes, date)}
 
       <div class="card dayread">
@@ -3571,6 +3562,23 @@ async function renderMirror(date, { garderCal = false } = {}) {
       </div>
 
       ${notesDuJourMarkup(m.carnet)}
+
+      ${/* LE QUANTIFIED SELF EST EN DERNIER, ET C'EST L'ORDRE DE LA PAGE.
+            Il s'ouvrait entre le calendrier et la journée : on descendait vers
+            ce qu'on avait ressenti et écrit, et un mur de mesures s'intercalait
+            — trois chiffres de montre AVANT la première humeur du jour. Un
+            journal donne le dernier mot à la personne, pas à la machine : ce
+            qui a été vécu se lit d'abord, ce qu'un appareil en a compté se lit
+            après, quand on va vérifier.
+
+            Le bouton vit dans « Moi » parce que c'est la page de ce qu'on SAIT
+            de soi. Réglages garde le branchement et le journal des envois :
+            deux questions différentes, deux endroits. */''}
+      ${moi ? `<div class="qsbarre">
+        <button class="btn" id="qsbouton" aria-pressed="${QS_OUVERT}">
+          ${ico('antenne', 13)}${QS_OUVERT ? 'masquer les données' : 'quantified self'}</button>
+      </div>
+      <div id="qspanneau">${QS_OUVERT ? qsPanneauMarkup(QS_DATA) : ''}</div>` : ''}
     </div>`;
   const form = $('#cnForm'); if (form) form.dataset.jour = date;
   wireMirror();
@@ -5254,38 +5262,111 @@ function qsSerieMarkup(s, fin = null) {
  * Tout ce qui est écrit ici est un ÉCART À SA PROPRE NORMALE. Pas de « trop »,
  * pas de « pas assez » : ces mots supposent une bonne quantité, et personne ici
  * n'est en position de la fixer.
+ *
+ * ---------------------------------------------------------------------
+ * DEUX LIGNES ET UNE NOTE, LÀ OÙ IL Y AVAIT DEUX CARTES.
+ *
+ * Le bloc s'ouvrait sur deux encadrés et trois chiffres de 21 pixels —
+ * « 9 h 20 · 06:10 · 15:30 », chacun sous son étiquette. C'est le format d'un
+ * tableau de bord : ça annonce que le chiffre est le sujet de la page. Or on ne
+ * vient pas lire son heure de coucher, on vient voir si la nuit et la journée
+ * ont dépassé — et ça tient sur une ligne chacune.
+ *
+ * Reste donc, à taille de texte :
+ *   — LA NUIT : sa durée, ses deux bornes, ce qui a dépassé ;
+ *   — LA JOURNÉE D'ORDINATEUR : son icône, son nom, ses preuves, et ce qui a
+ *     été consulté — une icône et une durée par famille.
+ *
+ * LES ICÔNES REMPLACENT DES MOTS, ELLES N'EN AJOUTENT PAS. Une lune et un
+ * soleil disent « couché » et « levé » sans les écrire ; l'étiquette exacte —
+ * et surtout la différence entre une heure MESURÉE et la dernière activité de
+ * la machine — reste dans l'infobulle et dans le trait sous le chiffre.
  */
-function qsNuitMarkup(nuit, archetype, jour) {
-  if (!nuit && !archetype) return '';
-  const h = v => (v == null ? '—' : v);
-  return `<div class="qsnuit">
+function qsNuitMarkup(nuit, archetype, jour, usage) {
+  if (!nuit && !archetype && !usage) return '';
+  return `<div class="qsallure">
     ${jour ? `<div class="k faint">La dernière journée reçue · ${fmtDay(jour)}</div>` : ''}
-    <div class="qsnuitcorps">
-      ${nuit ? `<div class="qsnuitbloc">
-        <div class="qsnuitch">
-          ${nuit.duree != null ? `<div class="qsch"><span class="qschv mono">${esc(qsDuree(nuit.duree))}</span>
-            <span class="qschk">de sommeil</span></div>` : ''}
-          <div class="qsch"><span class="qschv mono">${esc(h(nuit.coucher))}</span>
-            <span class="qschk">${nuit.coucherMesure ? 'couché' : 'dernière activité'}</span></div>
-          <div class="qsch"><span class="qschv mono">${esc(h(nuit.lever))}</span>
-            <span class="qschk">${nuit.leverMesure ? 'levé' : 'première activité'}</span></div>
-        </div>
-        ${nuit.dit?.length
-          ? `<ul class="qsdits">${nuit.dit.map(p =>
-              `<li class="qsdit ${esc(p.sens)}">${esc(p.texte)}</li>`).join('')}</ul>`
-          : `<p class="qsdit calme">une nuit comme les autres</p>`}
-      </div>` : ''}
+    ${qsNuitLigne(nuit)}
+    ${qsJourneeLigne(archetype, usage)}
+    ${/* CE QUE C'EST, ET CE QUE CE N'EST PAS. Sans cette ligne, une étiquette
+          posée par une machine s'installe dans la tête — et ce produit refuse
+          ça depuis le premier jour. Elle a sa ligne à elle, sous les chiffres
+          qu'elle qualifie, et pas au milieu d'eux. */''}
+    ${archetype ? '<p class="qsarchnote">Ça décrit ta journée d’ordinateur, pas toi.</p>' : ''}
+  </div>`;
+}
 
-      ${archetype ? `<div class="qsarch">
-        <span class="qsarchnom">${esc(archetype.nom)}</span>
-        <ul class="qsarchp">${archetype.preuves.map(p =>
-          `<li><span class="qsarchk">${esc(p.quoi)}</span> ${esc(p.valeur)}</li>`).join('')}</ul>
-        ${/* CE QUE C'EST, ET CE QUE CE N'EST PAS. Sans cette ligne, une
-              étiquette posée par une machine s'installe dans la tête — et ce
-              produit refuse ça depuis le premier jour. */''}
-        <p class="qsarchnote">Ça décrit ta journée d'ordinateur, pas toi.</p>
-      </div>` : ''}
-    </div>
+/**
+ * LA NUIT EN UNE LIGNE : combien, de quand à quand, et ce qui a dépassé.
+ *
+ * L'ORDRE EST CELUI DE LA QUESTION. « J'ai mal dormi ? » se répond par une
+ * durée ; les deux bornes ne viennent qu'après, pour situer cette durée dans la
+ * journée. Elles étaient à égalité de taille avec elle, ce qui obligeait à lire
+ * les trois pour trouver celle qu'on cherchait.
+ *
+ * MESURÉ / DÉDUIT, LA RÈGLE DU PRODUIT TIENT JUSQU'ICI. Une heure relevée par
+ * une montre s'écrit pleine ; une heure déduite de la dernière activité de la
+ * machine porte un trait pointillé, et son infobulle dit ce qu'elle est
+ * vraiment. Faire passer « dernière activité » pour « couché » serait inventer
+ * une heure d'endormissement que personne n'a relevée.
+ */
+function qsNuitLigne(nuit) {
+  if (!nuit) return '';
+  const borne = (heure, mesure, dessin, mot, proxy) => heure == null ? '' : `<span
+    class="qsborne${mesure ? '' : ' lu'}" title="${esc(mesure ? mot : proxy)}">${ico(dessin, 12)}<span
+    class="mono">${esc(heure)}</span></span>`;
+
+  /* Les deux bornes tiennent dans UN seul morceau : « 02:40 → 11:20 » se lit
+     d'un trait, alors que trois morceaux séparés par l'espacement de la ligne
+     donnaient trois choses à rapprocher de l'œil. */
+  const bornes = nuit.coucher == null && nuit.lever == null ? '' : `<span class="qsbornes">
+    ${borne(nuit.coucher, nuit.coucherMesure, 'lune', 'couché', 'dernière activité de la machine — aucune heure de coucher n’a été mesurée')}
+    ${nuit.coucher != null && nuit.lever != null ? '<span class="qsfl">→</span>' : ''}
+    ${borne(nuit.lever, nuit.leverMesure, 'soleil', 'levé', 'première activité de la machine — aucune heure de lever n’a été mesurée')}
+  </span>`;
+
+  return `<div class="qsalig">
+    ${nuit.duree != null
+      ? `<span class="qsadur mono" title="de sommeil">${esc(qsDuree(nuit.duree))}</span>`
+      : ''}
+    ${bornes}
+    ${/* Ce qui dépasse, et seulement ce qui dépasse. Une phrase chaque matin
+          est une phrase qu'on n'ouvre plus au bout d'une semaine — « une nuit
+          comme les autres » se dit donc en trois mots, en gris, à la fin. */''}
+    ${nuit.dit?.length
+      ? `<span class="qsecarts">${nuit.dit.map(p =>
+          `<span class="qsecart ${esc(p.sens)}">${esc(p.texte)}</span>`).join('')}</span>`
+      : '<span class="qsecart calme">une nuit comme les autres</span>'}
+  </div>`;
+}
+
+/**
+ * LA JOURNÉE D'ORDINATEUR : sa forme, et de quoi elle était faite.
+ *
+ * L'ÉTIQUETTE NE VOYAGE JAMAIS SANS SES CHIFFRES. C'est la règle du fichier qui
+ * la calcule, et elle survit au passage en une ligne : les preuves restent
+ * écrites à côté du nom, en gris, et les durées par famille suivent sur la même
+ * ligne. Un mot posé par une machine qu'on ne peut pas contester s'installe
+ * dans la tête ; celui-ci se vérifie en trois secondes.
+ *
+ * CE QU'ON A CONSULTÉ SE DIT EN ICÔNES, PAS EN ÉTIQUETTES. Six familles avec
+ * leur nom écrit feraient six mots pour six durées qu'on lit déjà ; le nom et
+ * la part restent dans l'infobulle, où l'on va quand on ne reconnaît pas un
+ * dessin.
+ */
+function qsJourneeLigne(archetype, usage) {
+  if (!archetype && !usage) return '';
+  /* Brut ici, échappé au moment de l'écrire : joindre des morceaux déjà
+     échappés puis les repasser dans `esc` donnerait « &amp;quot; » à l'écran. */
+  const preuves = (archetype?.preuves ?? []).map(p => `${p.quoi} ${p.valeur}`).join(' · ');
+
+  return `<div class="qsalig qsaligjour">
+    ${archetype ? `<span class="qsarchn">
+      <span class="qsarchi">${ico(ICO_ARCHETYPE[archetype.cle] ?? 'point', 13)}</span>${esc(archetype.nom)}</span>` : ''}
+    ${preuves ? `<span class="qsarchp">${esc(preuves)}</span>` : ''}
+    ${usage ? `<span class="qsctxs">${usage.parts.map(p =>
+      `<span class="qsctx" title="${esc(p.nom)} · ${p.part} % de ${esc(qsDuree(usage.total))} d’écran">${
+        ico(ICO_FAMILLE[p.fam] ?? 'point', 12)}<span class="mono">${esc(qsDuree(p.minutes))}</span></span>`).join('')}</span>` : ''}
   </div>`;
 }
 
@@ -5363,7 +5444,7 @@ function qsPanneauMarkup(d) {
 
       ${qsCompteMarkup(d)}
 
-      ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu)}
+      ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu, d.usage)}
 
       ${dernier ? `<div class="qsact">
         <div class="k faint">Le détail de ${surLeJourLu ? 'cette journée' : `la journée du ${fmtDay(dernier.date)}`}</div>

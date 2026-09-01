@@ -23,7 +23,7 @@ import { journee } from './journee.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
-import { nuitDe, archetypeDe, resumeDuJour, estDetail, enMinutes } from './allure.js';
+import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes } from './allure.js';
 import { lireDigest } from './digest.js';
 import { bornesDitesDans, leversConnus, medianeLever, jourVecuDe,
          SOURCE_DIT, CLE_LEVER, CLE_COUCHER } from './jour-vecu.js';
@@ -1621,9 +1621,18 @@ export const routes = {
           date: p.date, cle: s2.cle, valeur: p.valeur, texte: p.texte, unite: s2.unite
         })));
         const dernier = dernierJour;
-        if (!dernier) return { nuit: null, archetype: null };
+        if (!dernier) return { nuit: null, archetype: null, usage: null };
         const duJour = tous.filter(x => x.date === dernier);
-        return { jourLu: dernier, nuit: nuitDe(duJour, tous), archetype: archetypeDe(duJour, tous) };
+        /*
+         * `usage` PART AVEC L'ARCHETYPE, ET SORT DU MEME COMPTAGE.
+         *
+         * L'archetype nomme la forme de la journee en un mot ; l'usage dit de
+         * quoi elle etait faite. Recalculer l'un des deux ailleurs, plus tard,
+         * ferait deux comptages qui peuvent diverger -- et une etiquette qui
+         * contredit ses propres chiffres est pire qu'une etiquette seule.
+         */
+        return { jourLu: dernier, nuit: nuitDe(duJour, tous),
+                 archetype: archetypeDe(duJour, tous), usage: usageDuJour(duJour) };
       })(),
 
       /*

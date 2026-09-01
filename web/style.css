@@ -3511,50 +3511,76 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
    Placées AVANT les séries, parce que ce sont les deux questions qu'on se
    pose vraiment — « j'ai mal dormi ? », « ma journée est passée où ? » —
    et que les séries sont ce qu'on regarde après, quand on veut vérifier.
+
+   DEUX LIGNES, PAS DEUX CARTES. C'étaient deux encadrés avec fond, bordure et
+   trois chiffres de 21 pixels : la forme d'un tableau de bord, qui annonce que
+   le chiffre est le sujet de la page. Il ne l'est pas. Tout tient maintenant à
+   taille de texte, sur une ligne chacune, et ce qui est en GRAND est ce qu'on
+   vient chercher : la durée de la nuit, et rien d'autre.
    ====================================================================== */
-.qsnuit { display: flex; flex-direction: column; gap: 9px; }
-.qsnuitcorps { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: stretch; }
-@media (max-width: 760px) { .qsnuitcorps { grid-template-columns: 1fr; } }
+.qsallure { display: flex; flex-direction: column; gap: 7px; }
 
-.qsnuitbloc {
-  background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 10px;
-  padding: 15px 17px; display: flex; flex-direction: column; gap: 11px; min-width: 0;
+/* Une ligne d'allure : des morceaux qui se suivent et passent à la ligne
+   ensemble. `baseline` et pas `center` — la durée est plus grande que le reste,
+   et alignée au centre elle décalait tout le texte d'un pixel vers le haut. */
+.qsalig {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 6px 14px; font-size: 12.5px; color: var(--ink-dim);
 }
-/* Trois chiffres, en grand : combien, couché quand, levé quand. */
-.qsnuitch { display: flex; gap: 26px; flex-wrap: wrap; }
-.qsch { display: flex; flex-direction: column; gap: 2px; }
-.qschv { font-size: 21px; font-weight: 500; color: var(--ink); letter-spacing: -.01em; }
-.qschk { font-size: 11px; color: var(--ink-faint); }
+.qsalig .ico { flex: none; }
 
-/* Ce qui dépasse, et seulement ce qui dépasse. Une phrase chaque matin est une
-   phrase qu'on n'ouvre plus au bout d'une semaine. */
-.qsdits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.qsdit {
-  font-size: 12.5px; color: var(--ink-dim); padding-left: 13px; position: relative;
+/* LA DURÉE DE LA NUIT est le seul chiffre agrandi de tout le bloc. C'est la
+   réponse à « j'ai mal dormi ? » ; les bornes ne font que la situer. */
+.qsadur { font-size: 16px; color: var(--ink); letter-spacing: -.01em; }
+
+/* Une borne : son icône, son heure. La lune et le soleil remplacent « couché »
+   et « levé » — deux mots qu'on relisait chaque matin sans les lire.
+   Les deux bornes sont un seul morceau : « 02:40 → 11:20 » se lit d'un trait. */
+.qsbornes { display: inline-flex; align-items: center; gap: 8px; }
+.qsborne { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); }
+.qsborne .ico { color: var(--ink-faint); }
+/* MESURÉ / DÉDUIT. Une heure relevée par une montre est pleine ; une heure
+   déduite de la dernière activité de la machine est pointillée — « ce qui est
+   rempli est mesuré, ce qui est contouré est déclaré ». L'infobulle dit
+   laquelle des deux on lit. */
+.qsborne.lu { color: var(--ink-dim); }
+.qsborne.lu .mono {
+  border-bottom: 1px dotted var(--line); cursor: help;
 }
-.qsdit::before {
-  content: ''; position: absolute; left: 0; top: .58em;
+.qsfl { color: var(--ink-faint); font-size: 11px; }
+
+/* Ce qui a dépassé, et seulement ça. Une pastille de couleur dit DE QUEL CÔTÉ,
+   jamais si c'est bien : ce produit ne note pas les nuits. */
+.qsecarts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
+.qsecart { position: relative; padding-left: 12px; color: var(--ink-dim); }
+.qsecart::before {
+  content: ''; position: absolute; left: 0; top: .5em;
   width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint);
 }
-/* Une teinte, pas un jugement : elle dit DE QUEL CÔTÉ, pas si c'est bien. */
-.qsdit.moins::before, .qsdit.tard::before { background: var(--warn); }
-.qsdit.plus::before, .qsdit.tot::before { background: var(--accent); }
-.qsdit.calme { margin: 0; color: var(--ink-faint); padding-left: 13px; }
-.qsdit.calme::before { background: var(--line); }
+.qsecart.moins::before, .qsecart.tard::before { background: var(--warn); }
+.qsecart.plus::before, .qsecart.tot::before { background: var(--accent); }
+.qsecart.calme { color: var(--ink-faint); }
+.qsecart.calme::before { background: var(--line); }
 
-/* L'archétype : le nom, ses preuves, et la ligne qui dit ce que ce n'est pas. */
-.qsarch {
-  background: var(--panel-2); border: 1px solid var(--line-soft);
-  border-left: 2px solid var(--accent); border-radius: 10px;
-  padding: 15px 18px; display: flex; flex-direction: column; gap: 8px;
-  min-width: 210px; max-width: 320px;
-}
-@media (max-width: 760px) { .qsarch { max-width: none; } }
-.qsarchnom { font-size: 16px; color: var(--ink); font-weight: 500; }
-.qsarchp { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px;
-           font: 400 12px/1.5 var(--mono); color: var(--ink-dim); }
-.qsarchk { color: var(--ink-faint); }
-.qsarchnote { margin: 3px 0 0; font-size: 11.5px; color: var(--ink-faint); font-style: italic; }
+/* La forme de la journée d'ordinateur. Le liséré tient ce que la carte tenait :
+   il dit « ceci est une lecture de la machine », sans l'encadrer. */
+.qsaligjour { border-left: 2px solid var(--accent); padding-left: 11px; }
+.qsarchn { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13.5px; }
+.qsarchi { display: inline-flex; color: var(--accent); }
+/* LES PREUVES NE QUITTENT JAMAIS L'ÉTIQUETTE. Une étiquette posée par une
+   machine qu'on ne peut pas contester s'installe dans la tête ; celle-ci se
+   vérifie sur la même ligne. */
+.qsarchp { font: 400 11.5px/1.5 var(--mono); color: var(--ink-faint); }
+
+/* Ce qui a été consulté : une icône, une durée. Le nom de la famille et sa part
+   sont dans l'infobulle — écrits, ils feraient six étiquettes pour six chiffres
+   qu'on lit déjà. */
+.qsctxs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 11px; }
+.qsctx { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-dim); cursor: help; }
+.qsctx .ico { color: var(--ink-faint); }
+.qsctx .mono { font-size: 11.5px; }
+
+.qsarchnote { margin: 0; font-size: 11.5px; color: var(--ink-faint); font-style: italic; }
 
 /* Le résumé d'un jour, dans sa ligne repliée. */
 .qsresume { font-size: 11.5px; color: var(--ink-dim); margin-left: auto; text-align: right; }

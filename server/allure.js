@@ -257,6 +257,46 @@ export function contextes(duJour) {
 }
 
 /**
+ * LE NOM LISIBLE D'UNE FAMILLE. Un seul endroit : le résumé d'un jour et
+ * l'écran s'en servaient chacun du sien, et les deux ont divergé une fois.
+ */
+export const NOM_FAMILLE = {
+  nav: 'navigateur', travail: 'travail', social: 'échanges',
+  video: 'vidéo', jeu: 'jeu', musique: 'musique', autre: 'autre'
+};
+
+/**
+ * CE QUE LA JOURNÉE A CONSULTÉ, PAR FAMILLES.
+ *
+ * L'archétype dit la FORME de la journée en un mot ; celui-ci dit de quoi elle
+ * était faite, en minutes. Les deux sortent du même comptage — donc l'un ne
+ * peut pas contredire l'autre — et c'est ce qui permet à l'écran de poser une
+ * étiquette : ses chiffres sont juste à côté, et on peut ne pas être d'accord.
+ *
+ * Trié par durée, `autre` compris : le temps qu'on n'a pas su ranger est du
+ * temps quand même, et le retirer donnerait des parts qui ne font pas le total.
+ *
+ * @returns {{total: number, parts: Array<{fam, nom, minutes, part}>} | null}
+ *          les minutes, jamais les secondes : personne ne lit 22 400.
+ */
+export function usageDuJour(duJour) {
+  const c = contextes(duJour);
+  if (!c.total) return null;
+  const parts = Object.entries(c)
+    .filter(([k, v]) => k !== 'total' && v > 0)
+    .map(([fam, sec]) => ({
+      fam, nom: NOM_FAMILLE[fam] ?? fam,
+      minutes: Math.round(sec / 60),
+      part: Math.round((sec / c.total) * 100)
+    }))
+    /* Sous une minute, une famille n'apporte rien et affiche « 0 min » : on la
+       laisse dans le total, on ne lui donne pas de ligne. */
+    .filter(p => p.minutes > 0)
+    .sort((a, b) => b.minutes - a.minutes || a.fam.localeCompare(b.fam));
+  return parts.length ? { total: Math.round(c.total / 60), parts } : null;
+}
+
+/**
  * LES ARCHÉTYPES, ET CE QU'ILS SONT.
  *
  * Chacun a une CONDITION mesurable et une PREUVE : les chiffres qui l'ont
@@ -368,9 +408,7 @@ export function resumeDuJour(duJour) {
     .filter(([k]) => k !== 'total' && k !== 'autre')
     .sort((a, b) => b[1] - a[1])[0];
   if (fam && fam[1] > 0 && c.total) {
-    const NOMS = { nav: 'navigateur', travail: 'travail', social: 'échanges',
-                   video: 'vidéo', jeu: 'jeu', musique: 'musique' };
-    bouts.push(`${Math.round(fam[1] / c.total * 100)} % ${NOMS[fam[0]]}`);
+    bouts.push(`${Math.round(fam[1] / c.total * 100)} % ${NOM_FAMILLE[fam[0]]}`);
   }
   const b = trouver(duJour, ['bascule', 'switch']);
   if (b?.valeur != null) bouts.push(`${b.valeur} bascules`);
