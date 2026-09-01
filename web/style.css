@@ -3313,10 +3313,58 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qsfen { margin-left: auto; }
 .qsfen button { padding: 4px 11px; font-size: 12px; }
 
-/* La réception, juste sous le titre. Un branchement cassé ne se voit nulle
-   part ailleurs : les courbes restent belles, elles s'arrêtent simplement. */
-.qsrecept { margin: -10px 0 0; font-size: 12.5px; color: var(--ink-faint); }
-.qsrecept.vieux { color: var(--warn); }
+/* LE COMPTE, EN PREMIER ET EN GRAND.
+   C'est la question qu'on pose en ouvrant — combien de journées sont
+   enregistrées — et elle n'avait qu'une petite ligne grise sous un titre.
+   La réception reste collée dessus : un branchement cassé ne se voit nulle
+   part ailleurs, les courbes restent belles, elles s'arrêtent simplement. */
+.qscompte { display: flex; align-items: baseline; gap: 12px; margin: -8px 0 0; }
+.qscn { font-size: 34px; line-height: 1; font-weight: 300; color: var(--ink); }
+.qscq { font-size: 13px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 2px; }
+.qscq .faint { font-size: 11.5px; }
+.qscompte.vieux .qscn { color: var(--warn); }
+
+/* LE DETAIL DU JOUR, EN CELLULES.
+   Une rangée qui traverse toute la largeur met le nom d'un côté et sa valeur
+   à l'autre bout : l'œil traverse le vide pour les rapprocher, six fois de
+   suite. Côte à côte, la valeur d'abord, ça se lit d'un coup. */
+.qscells { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px 18px; }
+.qscell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.qscv { font-size: 16px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qsck { font-size: 11px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* UNE FAMILLE : quatorze titres de pages ne sont pas quatorze mesures.
+   Une ligne pour le paquet, ses plus grosses nommées, et le reste compté —
+   compté, pas effacé : une donnée arrivée a le droit d'être vue. */
+.qsfam {
+  border: 1px solid var(--line-soft); border-radius: 9px; padding: 9px 12px;
+  background: var(--panel-2); display: flex; flex-direction: column; gap: 7px;
+}
+.qsfamtete { display: flex; align-items: baseline; gap: 9px; }
+.qsfamnom { font-size: 13px; font-weight: 500; }
+.qsfamn { font-size: 11px; }
+.qsfamtot { margin-left: auto; font-size: 13px; color: var(--ink-soft); }
+.qsfamt { display: flex; flex-wrap: wrap; gap: 6px; }
+.qsfamx {
+  display: inline-flex; align-items: baseline; gap: 6px; min-width: 0;
+  padding: 3px 9px; border-radius: 999px; font-size: 11.5px;
+  border: 1px solid var(--line-soft); color: var(--ink-soft);
+  max-width: 100%; overflow: hidden;
+}
+.qsfamx b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qsfamx .mono { color: var(--ink-faint); flex: none; }
+/* Le reste n'est pas une entrée : il est le contraire d'une entrée nommée. */
+.qsfamx.reste { border-style: dashed; color: var(--ink-faint); }
+
+/* Les replis : les séries et les journées d'avant répondent à d'autres
+   questions que celle qu'on pose en arrivant. */
+.qsseriesd > summary, .qsjours > summary, .qsbrutd > summary {
+  cursor: pointer; font-size: 12.5px; color: var(--ink-faint); padding: 4px 0;
+}
+.qsseriesd > summary:hover, .qsjours > summary:hover, .qsbrutd > summary:hover { color: var(--ink-soft); }
+.qsseriesd[open] > summary, .qsjours[open] > summary { margin-bottom: 10px; }
+.qsseriesd { display: flex; flex-direction: column; gap: 14px; }
+.qsbrutd { margin-top: 4px; }
 
 /* Les séries en petites cartes : on en voit six d'un coup, et la forme de
    chaque courbe se compare à l'œil sans lire un chiffre. */
@@ -3522,3 +3570,55 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qsrouages[open] > summary::before { transform: rotate(90deg); }
 .qsrouages > summary:hover { color: var(--ink-dim); }
 .qsrouages .qsseries { margin-top: 10px; }
+
+/* Une carte absente le DIT, au lieu de laisser un trou qui a l'air normal. */
+.cartevide {
+  border: 1px dashed var(--line); border-radius: 12px;
+  padding: 26px 24px; display: flex; flex-direction: column; gap: 6px;
+  color: var(--ink-dim); font-size: 13.5px; max-width: 56ch;
+}
+.cartevide .sub { margin: 0; font-size: 12.5px; }
+
+/* ---- le retissage v2 : la jauge, le pourcentage, les trouvailles ---- */
+
+/* Un trait fin tout en haut, pas une barre de chargement au milieu : ce qu'on
+   regarde est la toile, et une barre au centre lui prendrait la place. */
+.tsjauge {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
+}
+.tsjauge i {
+  display: block; height: 100%; background: var(--accent);
+  transition: width .5s cubic-bezier(.2,.7,.3,1);
+}
+.tspct {
+  position: absolute; top: 14px; right: 20px;
+  font-size: 12px; color: var(--ink-faint); letter-spacing: .06em;
+}
+
+/* Les trouvailles : une bande en bas, ce qui arrive à droite. Chaque pastille
+   est un nom que le modèle vient d'écrire — rien n'est deviné. */
+.tstrouves {
+  position: absolute; bottom: 4vh; left: 0; right: 0;
+  display: flex; gap: 7px; flex-wrap: wrap; justify-content: center;
+  padding: 0 26px; max-height: 22vh; overflow: hidden; align-content: flex-end;
+}
+.tstr {
+  font-size: 12px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-dim); background: var(--panel-2);
+  animation: tstrarrive .5s ease-out;
+  white-space: nowrap; max-width: 42ch; overflow: hidden; text-overflow: ellipsis;
+}
+/* Trois genres, trois teintes — les mêmes que sur la carte : un mécanisme, un
+   groupe, une chose ne se lisent pas pareil et n'ont pas à se ressembler. */
+.tstr.theme { border-color: hsl(288 55% 58% / .45); color: hsl(288 62% 74%); }
+.tstr.piste { border-color: hsl(212 55% 58% / .5);  color: hsl(212 62% 76%); }
+.tstr.noeud { border-color: hsl(162 45% 52% / .4);  color: hsl(162 45% 68%); }
+@keyframes tstrarrive {
+  from { opacity: 0; transform: translateY(7px) scale(.96) }
+  to   { opacity: 1; transform: none }
+}
+@media (prefers-reduced-motion: reduce) { .tstr { animation: none } }
+
+/* Quand les groupes arrivent, les trouvailles s'effacent : elles ont servi. */
+.tissage:has(.tsgroupes) .tstrouves { opacity: 0; transition: opacity .6s; }

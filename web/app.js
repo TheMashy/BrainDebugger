@@ -1148,7 +1148,15 @@ async function send() {
     const res = await fetch('/api/message/stream', {
       method: 'POST',
       headers: enTetes(true),
-      body: JSON.stringify({ text, date: S.today, pieces })
+      /*
+       * PAS DE DATE : C'EST LE SERVEUR QUI SAIT QUELLE JOURNEE ON EST.
+       *
+       * Elle commence au lever, pas a minuit, et l'onglet peut etre reste
+       * ouvert toute la nuit. La date envoyee d'ici serait celle du chargement
+       * de la page — et un message ecrit a 9 h se rangerait dans la soiree de
+       * la veille. Le serveur renvoie celle qu'il a retenue, dans `done`.
+       */
+      body: JSON.stringify({ text, pieces })
     });
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
@@ -1230,6 +1238,10 @@ async function send() {
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
         if (data.motifs) S.motifs = data.motifs;
+        // La journée que le serveur a retenue pour ce message. Elle peut avoir
+        // changé depuis l'ouverture de la page : « aujourd'hui » commence au
+        // lever, et on a pu se lever pendant que l'onglet était ouvert.
+        if (data.jour) S.today = data.jour;
         // Le décor suit la conversation. Il ne changeait qu'au rechargement de
         // la page : on pouvait parler d'un deuil pendant une heure devant le
         // même fond neutre, et découvrir la pyramide le lendemain, sur une
@@ -1772,14 +1784,14 @@ function wireReperes(year) {
   if (bdate) bdate.onclick = () => {
     if (POP === 'date') { POP = null; return redessiner(); }
     ouvrirCal('date', { debut: EV.debut, fin: EV.fin, plage: !!EV.fin,
-                        min: '1900-01-01', max: S.today });
+                        min: '1900-01-01', max: jourCivil() });
     redessiner();
   };
 
   $('#naissbtn').onclick = () => {
     if (POP === 'naiss') { POP = null; return redessiner(); }
     ouvrirCal('naiss', { debut: S.settings.naissance ?? '1990-01-01', fin: null,
-                         plage: false, min: '1900-01-01', max: S.today });
+                         plage: false, min: '1900-01-01', max: jourCivil() });
     redessiner();
   };
   // Le panneau de naissance vit hors du formulaire : on le pose à côté du bouton.
@@ -1919,7 +1931,7 @@ function noteFormMarkup() {
              d'un jour precis, ou de nulle part. Elle ne compte JAMAIS comme
              une journee ecrite -- ni datee, ni libre. */''}
       <label class="fl">de quel jour ?
-        <input type="date" id="cnjour" max="${S.today}">
+        <input type="date" id="cnjour" max="${jourCivil()}">
       </label>
       <span class="sub" style="margin:0;flex:1;min-width:180px">Sans date, elle est rangée à part. Elle ne comptera jamais comme une journée écrite.</span>
       <button class="btn primary" type="submit">${ico('ranger')}Ranger</button>
@@ -2264,7 +2276,7 @@ function moisRuban(m, date) {
   const [an, mo] = mois.split('-').map(Number);
   const precedent = mo === 1 ? `${an - 1}-12` : `${an}-${String(mo - 1).padStart(2, '0')}`;
   const suivant = mo === 12 ? `${an + 1}-01` : `${an}-${String(mo + 1).padStart(2, '0')}`;
-  const apresAujourdhui = suivant > S.today.slice(0, 7);
+  const apresAujourdhui = suivant > jourCivil().slice(0, 7);
 
   return `<div class="moisbar">
     <button class="moisfl" data-mois="${precedent}" aria-label="Mois précédent">‹</button>
@@ -2274,7 +2286,7 @@ function moisRuban(m, date) {
   <div class="moisruban" style="--n:${cases.length}">
     ${cases.map(c => {
       const note = c.note !== null && c.note !== undefined;
-      const futur = c.date > S.today;
+      const futur = c.date > jourCivil();
       return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}"
         data-cal="jour" data-d="${c.date}" ${futur ? 'disabled' : ''}
         ${note ? `style="background:${deltaColor(c.delta ?? 0)}"` : ''}
@@ -2869,7 +2881,24 @@ function noeudMarkup() {
 }
 
 function carteMarkup(carte) {
-  if (!carte?.noeuds?.length) return '';
+  /*
+   * UNE CARTE VIDE LE DIT. Elle disparaissait en silence : la page s'ouvrait
+   * sur les mécanismes seuls, et rien ne distinguait « cette lecture n'a pas
+   * fait de carte » de « il n'y a pas de carte ici ». C'est le défaut le plus
+   * désagréable qu'une vue puisse avoir — elle a l'air normale, et il manque
+   * la moitié.
+   *
+   * Ça arrive pour de vraies raisons : une lecture enregistrée avant que la
+   * carte existe, ou un modèle qui a rendu des nœuds sans nom. Dans les deux
+   * cas, la réparation est la même et elle tient en un bouton.
+   */
+  if (!carte?.noeuds?.length) {
+    return `<div class="cartevide">
+      <p>Cette lecture n'a pas de toile — soit elle est plus vieille que la carte,
+         soit la relecture n'a rendu aucun nœud.</p>
+      <p class="sub">Les mécanismes ci-dessous viennent bien d'elle. Retisser en refait une.</p>
+    </div>`;
+  }
   return `<div class="cartewrap">
     <canvas id="cartec" aria-label="La carte de ce qui revient et de ce qui le relie"></canvas>
     ${/* Trois commandes, et le point du milieu est celle qui compte : après
@@ -3377,7 +3406,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
   const nav = `<div class="daynav">
       <button class="wide" data-lecture title="Revenir à la vue d'ensemble">‹ ma carte</button>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
-      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      <button data-goto="${next}" ${next > jourCivil() ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button class="wide" data-goto="${S.today}">${ico('point', 12)}aujourd'hui</button>` : ''}
     </div>`;
 
@@ -3469,7 +3498,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
       ${moi ? '' : '<button data-lecture>‹ ma carte</button>'}
       <span class="faint">${fmtDay(date)}${date === S.today ? " · aujourd'hui" : ''}</span>
       <button data-goto="${prev}" aria-label="Jour précédent">‹</button>
-      <button data-goto="${next}" ${next > S.today ? 'disabled' : ''} aria-label="Jour suivant">›</button>
+      <button data-goto="${next}" ${next > jourCivil() ? 'disabled' : ''} aria-label="Jour suivant">›</button>
       ${date !== S.today ? `<button data-goto="${S.today}">aujourd'hui</button>` : ''}
     </div>`;
   $('#view').innerHTML = `
@@ -3916,7 +3945,7 @@ function calendarMarkup(m, date) {
     vue: MIR_CAL.vue,
     curseur: MIR_CAL.curseur ?? date.slice(0, 7),
     debut: date,
-    min: '1900-01-01', max: S.today, aujourdhui: S.today,
+    min: '1900-01-01', max: jourCivil(), aujourdhui: S.today,
     /*
      * Une journée notée porte la couleur de son écart, exactement celle de sa
      * case dans la grille de l'Année. Une journée écrite mais non notée porte
@@ -5108,6 +5137,49 @@ function qsCourbe(points, { mediane = null } = {}) {
   </svg>`;
 }
 
+/**
+ * LE DIGEST D'UN JOUR, LU.
+ *
+ * Le serveur a regroupé ce qui allait ensemble : quatorze titres de pages ne
+ * sont pas quatorze mesures, c'est une mesure découpée. On rend donc les
+ * familles en une ligne chacune — leur poids, les plus grosses nommées, et le
+ * reste COMPTÉ, jamais effacé en silence — puis tout ce qui n'a pas été
+ * regroupé, tel quel.
+ *
+ * Le brut reste accessible en dessous. On ne remplace pas la donnée par son
+ * résumé : on met le résumé devant.
+ */
+function qsLuMarkup(lu) {
+  if (!lu || (!lu.familles?.length && !lu.lignes?.length)) return '';
+  const fam = (lu.familles ?? []).map(f => `<div class="qsfam">
+    <div class="qsfamtete">
+      <span class="qsfamnom">${esc(qsNom(f.nom))}</span>
+      <span class="qsfamn faint">${f.n} entrées</span>
+      <span class="qsfamtot mono">${esc(qsValeur(f.nom, f.total))}</span>
+    </div>
+    <div class="qsfamt">
+      ${f.tetes.map(t => `<span class="qsfamx"><b>${esc(t.nom)}</b>
+        <span class="mono">${esc(qsValeur(t.cle, t.valeur, f.nom))}</span></span>`).join('')}
+      ${f.reste ? `<span class="qsfamx reste">+ ${f.reste} autres
+        <span class="mono">${esc(qsValeur(f.nom, f.resteTotal))}</span></span>` : ''}
+    </div>
+  </div>`).join('');
+
+  /*
+   * EN CELLULES, PAS EN RANGEES PLEINE LARGEUR.
+   *
+   * Une rangee qui traverse mille pixels met le nom a gauche et sa valeur a
+   * l'autre bout : l'oeil doit traverser le vide pour les rapprocher, six fois
+   * de suite. Six cellules cote a cote se lisent d'un coup.
+   */
+  const lignes = (lu.lignes ?? []).map(l => `<div class="qscell">
+    <span class="qscv mono">${esc(qsValeur(l.cle, l.valeur))}</span>
+    <span class="qsck">${esc(qsNom(l.chemin.join(' ')))}</span>
+  </div>`).join('');
+
+  return `${lignes ? `<div class="qscells">${lignes}</div>` : ''}${fam}`;
+}
+
 /** 30 / 90 / 365 : une semaine ne montre rien, cinq ans ne se lit plus. */
 const QS_FENETRES = [[30, '30 j'], [90, '90 j'], [365, '1 an']];
 
@@ -5225,27 +5297,6 @@ function qsDuree(min) {
   return r ? `${Math.floor(m / 60)} h ${String(r).padStart(2, '0')}` : `${Math.floor(m / 60)} h`;
 }
 
-/**
- * LA RECEPTION, EN UNE LIGNE.
- *
- * « Quatre séries » ne dit pas si l'application envoie ENCORE. Un branchement
- * cassé ne se voit nulle part ailleurs : les courbes restent belles, elles
- * s'arrêtent simplement il y a trois semaines, et rien ne le dit.
- */
-function qsReceptionMarkup(r, jours) {
-  if (!r) return '';
-  const j = r.depuis_jours;
-  const quand = j == null ? 'aucun envoi'
-    : j === 0 ? "dernier envoi aujourd'hui"
-    : j === 1 ? 'dernier envoi hier'
-    : `dernier envoi il y a ${j} jours`;
-  // Une semaine de silence est le seuil où « ça n'envoie plus » devient
-  // l'explication la plus probable. En dessous, c'est un week-end.
-  return `<p class="qsrecept${j != null && j >= 7 ? ' vieux' : ''}">
-    <span class="mono">${r.couverts}</span> jour${r.couverts > 1 ? 's' : ''} reçu${r.couverts > 1 ? 's' : ''}
-    sur ${jours} · ${quand}</p>`;
-}
-
 function qsPanneauMarkup(d) {
   if (!d) return '<div class="card"><p class="jvide">…</p></div>';
 
@@ -5287,39 +5338,90 @@ function qsPanneauMarkup(d) {
   const ouvertes = series.filter(s => !s.detail || s.lien);
   const rouages = series.filter(s => s.detail && !s.lien);
 
+  /*
+   * CE QU'ON VOIT EN OUVRANT : COMBIEN DE JOURNEES, ET LA DERNIERE.
+   *
+   * L'ecran s'ouvrait sur un mur : treize cartes de series, chacune avec sa
+   * courbe et ses bornes, avant la moindre phrase. « Le quantified self ne me
+   * sort rien de vraiment lisible » -- c'etait vrai, et la raison est un ordre
+   * de lecture, pas un manque de donnees.
+   *
+   * On ouvre donc sur les deux choses qu'on vient chercher : COMBIEN de
+   * journees sont enregistrees, et A QUOI RESSEMBLE LA DERNIERE. Les series
+   * restent, entieres, mais repliees : elles repondent a une autre question --
+   * « comment ca evolue » -- qu'on ne pose pas en arrivant.
+   */
+  const dernier = d.activite?.[0] ?? null;
+  const surLeJourLu = d.jourLu && dernier?.date === d.jourLu;
+
   return `
     <div class="card qspan">
       <div class="qstete">
         <h2>${ico('antenne', 15)}Quantified self</h2>
-        <span class="faint mono">${fmtDay(d.depuis)} → ${fmtDay(d.jusqu_au)}</span>
         ${fenetres}
       </div>
-      ${qsReceptionMarkup(d.reception, d.jours)}
+
+      ${qsCompteMarkup(d)}
 
       ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu)}
 
-      ${ouvertes.length ? `<div class="qsseries">${ouvertes.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
+      ${dernier ? `<div class="qsact">
+        <div class="k faint">Le détail de ${surLeJourLu ? 'cette journée' : `la journée du ${fmtDay(dernier.date)}`}</div>
+        ${dernier.digest ? qsLuMarkup(dernier.lu)
+                         : `<pre class="qsbrut">${esc(String(dernier.brut).slice(0, 2000))}</pre>`}
+        ${dernier.digest ? `<details class="qsbrutd">
+          <summary>tel qu'il est arrivé · ${dernier.lu?.champs ?? Object.keys(dernier.digest).length} champs</summary>
+          ${qsArbre(dernier.digest)}
+        </details>` : ''}
+      </div>` : ''}
 
-      ${rouages.length ? `<details class="qsrouages">
-        <summary>${rouages.length} série${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
-        <div class="qsseries">${rouages.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>
+      ${d.activite.length > 1 ? `<details class="qsjours">
+        <summary>les ${Math.min(11, d.activite.length - 1)} journées d'avant</summary>
+        ${d.activite.slice(1, 12).map(j => `<details class="qsjour">
+          <summary><span class="mono">${fmtDay(j.date)}</span>
+            <span class="qsresume">${esc(j.resume || (j.digest ? `${j.lu?.champs ?? Object.keys(j.digest).length} champs` : 'illisible'))}</span></summary>
+          ${j.digest ? qsLuMarkup(j.lu) : `<pre class="qsbrut">${esc(String(j.brut).slice(0, 2000))}</pre>`}
+        </details>`).join('')}
       </details>` : ''}
 
-      ${lies ? `<p class="qsnote">Les séries en couleur vont avec tes journées notées — pas
-        « à cause de », <b>avec</b>. Le sens, s'il y en a un, t'appartient.</p>` : ''}
-
-      ${d.activite.length ? `<div class="qsact">
-        <div class="k faint">Ce que l'application envoie chaque jour</div>
-        ${/* La ligne qui referme un jour disait « 7 champs ». Sept champs de
-              quoi ? Elle dit maintenant ce qu'il y a dedans ; le brut reste
-              derrière le clic, entier, pour qui veut vérifier. */''}
-        ${d.activite.slice(0, 12).map(j => `<details class="qsjour">
-          <summary><span class="mono">${fmtDay(j.date)}</span>
-            <span class="qsresume">${esc(j.resume || (j.digest ? `${Object.keys(j.digest).length} champs` : 'illisible'))}</span></summary>
-          ${j.digest ? qsArbre(j.digest) : `<pre class="qsbrut">${esc(String(j.brut).slice(0, 2000))}</pre>`}
-        </details>`).join('')}
-      </div>` : ''}
+      ${series.length ? `<details class="qsseriesd"${lies ? ' open' : ''}>
+        <summary>${series.length} série${series.length > 1 ? 's' : ''} de mesures${
+          lies ? ` · ${lies} qui ${lies > 1 ? 'vont' : 'va'} avec tes journées` : ''}</summary>
+        ${ouvertes.length ? `<div class="qsseries">${ouvertes.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
+        ${rouages.length ? `<details class="qsrouages">
+          <summary>${rouages.length} série${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
+          <div class="qsseries">${rouages.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>
+        </details>` : ''}
+        ${lies ? `<p class="qsnote">Les séries en couleur vont avec tes journées notées — pas
+          « à cause de », <b>avec</b>. Le sens, s'il y en a un, t'appartient.</p>` : ''}
+      </details>` : ''}
     </div>`;
+}
+
+/**
+ * COMBIEN DE JOURNEES SONT ENREGISTREES.
+ *
+ * C'est la premiere question, et elle n'avait pas de reponse : la ligne de
+ * reception disait « 12 jours reçus sur 90 » en petit, sous un titre, entre
+ * deux blocs. Le chiffre passe donc devant, en grand, avec ce qui le qualifie
+ * -- sur quelle fenetre, et depuis quand ca n'envoie plus s'il y a lieu.
+ */
+function qsCompteMarkup(d) {
+  const r = d.reception;
+  if (!r) return '';
+  const j = r.depuis_jours;
+  const quand = j == null ? 'aucun envoi'
+    : j === 0 ? "dernier envoi aujourd'hui"
+    : j === 1 ? 'dernier envoi hier'
+    : `dernier envoi il y a ${j} jours`;
+  // Une semaine de silence est le seuil ou « ca n'envoie plus » devient
+  // l'explication la plus probable. En dessous, c'est un week-end.
+  const vieux = j != null && j >= 7;
+  return `<div class="qscompte${vieux ? ' vieux' : ''}">
+    <span class="qscn mono">${r.couverts}</span>
+    <span class="qscq">journée${r.couverts > 1 ? 's' : ''} enregistrée${r.couverts > 1 ? 's' : ''}
+      <span class="faint">sur les ${d.jours} derniers jours · ${quand}</span></span>
+  </div>`;
 }
 
 async function ouvrirQS() {
@@ -5335,6 +5437,19 @@ async function ouvrirQS() {
 }
 
 /* ============================= routage ============================= */
+
+/**
+ * LA BORNE CIVILE, LA OU « AUJOURD'HUI » NE SUFFIT PAS.
+ *
+ * `S.today` est la journée VÉCUE : à 2 h du matin, c'est encore la veille, et
+ * c'est ce qu'on veut partout où l'on parle de sa journée. Mais une date
+ * MAXIMALE — celle d'un repère, celle d'une note de carnet, le jour suivant
+ * dans la navigation — est celle du calendrier : bornée à la journée vécue, la
+ * journée d'après deviendrait injoignable toutes les nuits.
+ *
+ * Le repli sur `S.today` couvre un état servi par une version d'avant.
+ */
+const jourCivil = () => S?.jourCivil ?? S?.today;
 
 const VIEWS = {
   tonight: renderTonight,
@@ -5592,7 +5707,7 @@ boot();
    À la fin, les groupes se nomment, un par un.
    ========================================================================== */
 
-let TISSAGE = null;         // { phase, corpus, signes, G, sim, vue, lueurs, groupes, err }
+let TISSAGE = null;         // { phase, corpus, G, sim, vue, lueurs, trouves, pct, ancienne, groupes, err }
 /* Le nombre de tours d'une disposition complète : c'est le travail à étaler. */
 const TOURS_TISSAGE = 320;
 let TISSAGE_BOUCLE = 0;
@@ -5657,6 +5772,14 @@ function tissageMarkup() {
   const titre = t.err ? 'ça n’a pas abouti' : (PHASES[t.phase] ?? 'ta toile');
   return `<div class="tissage" id="tissage">
     <canvas id="tissagecv"></canvas>
+    ${/* LE POURCENTAGE, en trait fin tout en haut. Il ne compte pas le temps —
+          on ne sait pas combien le modèle va prendre — il compte ce qui est
+          ARRIVÉ : les thèmes, les pistes, les nœuds, puis les tours de
+          simulation. Un pourcentage tiré d'une horloge avance quand rien ne se
+          passe, et ment donc pile au moment où l'on doute. */''}
+    <div class="tsjauge"><i id="tsjaugei" style="width:0%"></i></div>
+    <div class="tspct mono" id="tspct">0 %</div>
+    <div class="tstrouves" id="tstrouves"></div>
     <div class="tsdessus">
       <div class="tstitre">${esc(titre)}</div>
       <div class="tsdit" id="tsdit">${esc(t.dit ?? '')}</div>
@@ -5670,6 +5793,54 @@ function tissageMarkup() {
   </div>`;
 }
 
+/**
+ * LE POURCENTAGE, ET IL NE RECULE JAMAIS.
+ *
+ * Il vient de deux sources — la structure reçue pendant la lecture, puis les
+ * tours de simulation — et deux sources qui se relaient peuvent se croiser. Un
+ * chiffre qui redescend fait douter de tout le reste, alors qu'il ne dit que
+ * « j'ai changé de règle ». On garde donc le maximum atteint.
+ */
+function tissagePct(p) {
+  if (!TISSAGE || !Number.isFinite(p)) return;
+  TISSAGE.pct = Math.max(TISSAGE.pct ?? 0, Math.min(100, Math.round(p)));
+  const j = $('#tsjaugei'), t = $('#tspct');
+  if (j) j.style.width = `${TISSAGE.pct}%`;
+  if (t) t.textContent = `${TISSAGE.pct} %`;
+}
+
+/**
+ * UNE TROUVAILLE ARRIVE.
+ *
+ * C'est un nom que le modèle vient d'écrire, cueilli dans son JSON au moment
+ * où il le referme. Rien n'est deviné : si la pastille dit « pensée de fin de
+ * nuit », c'est que ces mots-là viennent d'être écrits.
+ */
+const GENRE_TROUVE = { theme: 'mécanisme', piste: 'groupe', noeud: 'chose' };
+function tissageTrouve({ genre, nom }) {
+  if (!TISSAGE) return;
+  (TISSAGE.trouves ??= []).push({ genre, nom });
+  const hote = $('#tstrouves');
+  if (!hote) return;
+  const el = document.createElement('span');
+  el.className = `tstr ${genre}`;
+  el.title = GENRE_TROUVE[genre] ?? '';
+  el.textContent = nom;
+  hote.appendChild(el);
+  /*
+   * LA BANDE DEBORDE, ET CE N'EST PAS N'IMPORTE QUOI QU'ON RETIRE.
+   *
+   * Les mécanismes et les groupes arrivent EN PREMIER dans le JSON, les choses
+   * ensuite et en nombre. Un simple « on garde les vingt derniers » effaçait
+   * donc exactement ce que l'utilisateur voulait voir apparaître -- les
+   * patterns -- pour laisser une bande de noms d'objets. On ne fait rouler que
+   * les choses ; les patterns restent, ils sont le sujet.
+   */
+  const roulants = [...hote.children].filter(x => x.classList.contains('noeud'));
+  const trop = hote.children.length - 20;
+  for (let i = 0; i < trop && i < roulants.length; i++) hote.removeChild(roulants[i]);
+}
+
 /** Le texte sous le titre, réécrit sans reconstruire la vue : elle porte un canvas. */
 function tissageDit(texte) {
   if (TISSAGE) TISSAGE.dit = texte;
@@ -5677,6 +5848,26 @@ function tissageDit(texte) {
   if (el) el.textContent = texte;
   const ti = $('.tstitre');
   if (ti && TISSAGE) ti.textContent = TISSAGE.err ? 'ça n’a pas abouti' : (PHASES[TISSAGE.phase] ?? 'ta toile');
+}
+
+/**
+ * L'ANCIENNE TOILE, RECADREE POUR L'ECRAN OU ELLE S'EFFACE.
+ *
+ * Elle a ete disposee dans le cadre du Miroir, qui est plus petit et pas au
+ * meme endroit que le voile plein ecran. Rejouee telle quelle, elle se tassait
+ * dans un coin -- on voyait bien quelque chose s'en aller, mais pas SA carte.
+ * On la refait donc tenir dans l'ecran, centree, avant de la disperser.
+ */
+function cadrerAncienne(pts, L, H) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+    if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+  }
+  if (!Number.isFinite(x0)) return { k: 1, x: 0, y: 0 };
+  const l = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  const k = Math.min(L * 0.78 / l, H * 0.72 / h);
+  return { k, x: L / 2 - (x0 + x1) / 2 * k, y: H / 2 - (y0 + y1) / 2 * k };
 }
 
 /**
@@ -5706,6 +5897,55 @@ function tissageBoucle() {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, L, H);
+
+  /* ---- 0. l'ancienne toile, qui s'efface ----
+     Six secondes pour se dissoudre : le temps de la reconnaître avant qu'elle
+     s'en aille. Les nœuds se dispersent en s'éteignant — ils ne « fondent »
+     pas, ils s'écartent, ce qui est ce qu'on va leur refaire faire juste
+     après. */
+  if (t.ancienne) {
+    /*
+     * SIX SECONDES DE MONTRE, PAS CENT QUATRE-VINGTS IMAGES.
+     *
+     * Compté par image, l'effacement durait six secondes sur une machine à
+     * trente images et vingt-cinq sur une machine lente — et la vieille toile
+     * était encore là, par-dessus la neuve, quand celle-ci finissait de se
+     * poser. C'est le même piège que pour le tissage : on mesure le temps.
+     */
+    const now = performance.now();
+    t.effDepuis = (t.effDepuis ?? 0) + Math.min(120, now - (t.horlogeE ?? now));
+    t.horlogeE = now;
+    t.effacee = Math.min(1, t.effDepuis / 6000);
+    const o = 1 - t.effacee;
+    if (o > 0.01) {
+      const a = t.ancienne;
+      const v = (a.cadre ??= cadrerAncienne(a.pts, L, H));
+      const dansLa = p => ({ x: p.x * v.k + v.x, y: p.y * v.k + v.y });
+      const derive = t.effacee * 70;
+      const cx = L / 2, cy = H / 2;
+      ctx.globalAlpha = o * 0.5;
+      ctx.lineCap = 'round';
+      for (const l of a.G.liens ?? []) {
+        const p1 = dansLa(a.pts[l.s]), p2 = dansLa(a.pts[l.t]);
+        if (!p1 || !p2) continue;
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = `hsl(${TEINTE_GENRE[a.G.noeuds[l.s]?.genre] ?? 288} 45% 46%)`;
+        ctx.lineWidth = 0.8; ctx.stroke();
+      }
+      for (let i = 0; i < a.G.noeuds.length; i++) {
+        const p = dansLa(a.pts[i]);
+        if (!p) continue;
+        // Chacun s'écarte du centre, un peu plus à chaque image.
+        const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1;
+        const x = p.x + dx / d * derive, y = p.y + dy / d * derive;
+        const r = (4 + Math.log2(1 + (a.G.noeuds[i].jours ?? 1)) * 2.2) * v.k * (1 - t.effacee * 0.5);
+        ctx.globalAlpha = o;
+        ctx.strokeStyle = `hsl(${TEINTE_GENRE[a.G.noeuds[i].genre] ?? 288} 50% 56%)`;
+        ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.arc(x, y, Math.max(0.5, r), 0, 7); ctx.stroke();
+      }
+    } else if (t.effacee >= 1) t.ancienne = null;
+  }
 
   /* ---- la simulation avance, si elle a commencé ---- */
   if (t.sim && !t.pose) {
@@ -5745,7 +5985,8 @@ function tissageBoucle() {
     // Une fois posée, on cesse de poursuivre : la vue se cale sur le cadrage
     // exact. Sinon elle s'arrête là où le rattrapage en était, et la toile
     // finit de travers pour une raison invisible.
-    if (t.pose) { t.arrivee = t.image; t.vue = cible; }
+    tissagePct(70 + 30 * Math.min(1, 1 - t.sim.restant() / TOURS_TISSAGE));
+    if (t.pose) { t.arrivee = t.image; t.vue = cible; tissagePct(100); }
   }
   const v = t.vue ?? vueNeutre();
   const dansLaVue = p => ({ x: p.x * v.k + v.x, y: p.y * v.k + v.y });
@@ -5875,8 +6116,24 @@ function accrocherLueurs(t) {
 
 async function retisser() {
   if (TISSAGE) return;
+  /*
+   * ON NE PART PAS D'UNE PAGE NOIRE.
+   *
+   * Le voile s'ouvrait sur du vide, et la carte qu'on regardait disparaissait
+   * d'un coup — comme si elle avait été effacée avant qu'on décide. Ce qui se
+   * passe est l'inverse : on REFAIT celle-là. Elle est donc reprise telle
+   * qu'elle est à l'écran, positions comprises, et elle se dissout pendant que
+   * les journées s'allument.
+   *
+   * On copie les points : la simulation d'après écrit dans le même tableau, et
+   * sans copie l'ancienne toile se mettrait à bouger avec la nouvelle.
+   */
+  const ancienne = (RELA?.noeuds?.length && RELA_DISPO?.pts?.length)
+    ? { G: RELA, pts: RELA_DISPO.pts.map(p => ({ x: p.x, y: p.y })), cadre: null }
+    : null;
   TISSAGE = { phase: 'rassemble', dit: 'je rassemble ton journal…', lueurs: null, nees: 0,
-              G: null, sim: null, vue: null, groupes: null, err: null, image: 0 };
+              G: null, sim: null, vue: null, groupes: null, err: null, image: 0,
+              pct: 0, trouves: [], ancienne, effacee: 0 };
   await renderLecture();
   cancelAnimationFrame(TISSAGE_BOUCLE);
   TISSAGE_BOUCLE = requestAnimationFrame(tissageBoucle);
@@ -5905,10 +6162,25 @@ async function retisser() {
         TISSAGE.lueurs = poserLueurs(d.jours ?? [], L, H);
         TISSAGE.nees = 0;
         tissageDit(`${d.journees} journées · ${d.ecrites} écrites · ${d.reperes} repères · ${d.motifs} motifs`);
+      } else if (ev === 'trouve') {
+        if (TISSAGE.phase !== 'lit') TISSAGE.phase = 'lit';
+        tissageTrouve(d);
+        tissagePct(d.pourcent);
       } else if (ev === 'lit') {
         if (TISSAGE.phase !== 'lit') { TISSAGE.phase = 'lit'; }
-        // Le nombre de signes, pas un pourcentage : c'est ce qu'on sait.
-        tissageDit(`${new Intl.NumberFormat('fr-FR').format(d.signes)} signes écrits`);
+        tissagePct(d.pourcent);
+        /*
+         * CE QU'ELLE A TROUVÉ, pas combien de signes elle a tapés. « 14 208
+         * signes » était honnête et vide — personne ne se demande combien de
+         * signes. « 4 mécanismes, 11 choses » dit où en est le travail.
+         */
+        const c = d.comptes ?? {};
+        const bouts = [];
+        if (c.theme) bouts.push(`${c.theme} mécanisme${c.theme > 1 ? 's' : ''}`);
+        if (c.piste) bouts.push(`${c.piste} groupe${c.piste > 1 ? 's' : ''}`);
+        if (c.noeud) bouts.push(`${c.noeud} chose${c.noeud > 1 ? 's' : ''}`);
+        tissageDit(bouts.length ? bouts.join(' · ')
+                                : `${new Intl.NumberFormat('fr-FR').format(d.signes)} signes`);
       } else if (ev === 'toile') {
         LECTURE = { ...(LECTURE ?? {}), ...d, possible: true, perime: false, arelire: false };
         MOI = null;

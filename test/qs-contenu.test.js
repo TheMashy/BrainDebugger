@@ -123,3 +123,37 @@ test('la fenêtre est bornée des deux côtés', () => {
   assert.equal(lire(9000).jours, 365);
   assert.equal(lire().jours, 90);
 });
+
+/*
+ * LE DIGEST PART LU, PAS SEULEMENT BRUT.
+ *
+ * Un vrai digest fait vingt lignes dont quatorze sont des titres de pages :
+ * tout est là et rien ne se lit. La route porte donc `lu` à côté de `digest` —
+ * l'un pour la page, l'autre pour vérifier.
+ */
+test('chaque journée d’activité part avec son digest LU', () => {
+  const j = lire().activite[0];
+  assert.ok(j.lu, 'la lecture du digest manque');
+  assert.equal(j.lu.champs, 2, 'deux champs dans ce digest de test');
+  assert.deepEqual(j.lu.familles, [], 'deux clés ne font pas une famille');
+  assert.ok(j.digest, 'le brut reste, entier');
+});
+
+test('les titres de pages se replient en une famille, sans rien perdre', () => {
+  const d = {};
+  d['web:summer'] = 4200;
+  d['web:(7)'] = 3100;
+  for (let i = 0; i < 12; i++) d[`web:page${i}`] = 100 - i * 5;
+  d.trous = 3;
+  poserActiviteJour(OWNER, AUJ, d);
+
+  const j = lire().activite[0];
+  assert.equal(j.date, AUJ);
+  const [web] = j.lu.familles;
+  assert.equal(web.nom, 'web');
+  assert.equal(web.n, 14);
+  assert.equal(web.tetes.length + web.reste, 14, 'tout est soit nommé, soit compté');
+  assert.equal(web.tetes.reduce((a, t) => a + t.valeur, 0) + web.resteTotal, web.total);
+  assert.deepEqual(j.lu.lignes.map(l => l.cle), ['trous'],
+    'ce qui n’est pas dans la famille reste en ligne, et rien d’autre');
+});

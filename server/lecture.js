@@ -27,6 +27,7 @@
  */
 
 import { resolveKey, repliServeur, optionsDuModele } from './chat.js';
+import { cueilleur } from './trouvailles.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
 import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
 import { SCHEMA_HORIZONS, validerHorizons, ecritesParHorizon } from './horizons.js';
@@ -1156,6 +1157,15 @@ export async function lireEnFlux(corpus, settings, onAvance = () => {}) {
 
   let signes = 0;
   let pense = false;
+  /*
+   * LE JSON DE L'APPEL D'OUTIL S'ACCUMULE A PART.
+   *
+   * C'est lui qui porte la lecture, et c'est dedans qu'on cueille les noms au
+   * fur et a mesure. La reflexion du modele, elle, ne s'accumule pas : elle ne
+   * contient pas de lecture, et la garder ferait grossir une chaine pour rien.
+   */
+  let json = '';
+  const cueille = cueilleur();
   for await (const ev of stream) {
     if (ev.type === 'content_block_start' && ev.content_block?.type === 'thinking') pense = true;
     if (ev.type !== 'content_block_delta') continue;
@@ -1166,7 +1176,12 @@ export async function lireEnFlux(corpus, settings, onAvance = () => {}) {
     if (!bout) continue;
     if (d.type === 'thinking_delta') pense = true;
     signes += bout.length;
-    onAvance({ signes, pense });
+    let trouves = [];
+    if (d.type === 'input_json_delta') {
+      json += bout;
+      trouves = cueille.cueillir(json);
+    }
+    onAvance({ signes, pense, trouves, pourcent: cueille.pourcent(), comptes: cueille.comptes });
   }
   return depouiller(await stream.finalMessage(), corpus, settings);
 }

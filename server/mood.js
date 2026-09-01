@@ -95,6 +95,50 @@ const LEXIQUES = {
         'avance', 'reussi', 'termine'],
     1: ['ok', 'correct', 'agreable', 'sympa', 'chouette', 'cool']
   },
+  aube: {    // L'AUBE. L'espoir : quelque chose s'ouvre, et c'est tourne vers ce qui vient.
+    /*
+     * LE CALME ET L'ESPOIR NE SONT PAS LA MEME CHOSE, et c'est tout l'interet
+     * d'avoir les deux. « brume » dit une journee qui tient -- rien ne presse,
+     * rien ne manque. Celle-ci dit que quelque chose s'ouvre : un debut, une
+     * envie, une nouvelle qu'on attendait. Les mots du calme decrivent un
+     * ETAT, ceux-ci une DIRECTION.
+     *
+     * Les racines qui pourraient tomber des deux cotes -- « bien », « mieux »,
+     * « content » -- restent a « brume » : elles disent d'abord que ca va, et
+     * ce produit ne promet jamais un lendemain a la place de quelqu'un.
+     */
+    3: ['espoir', 'espere', 'esperer', 'optimiste', 'euphorie', 'euphorique',
+        'emerveille', 'emerveillee', 'gratitude', 'reconnaissant', 'reconnaissante',
+        'ca y est', 'j ai reussi', 'je suis pris', 'je suis prise'],
+    2: ['bonheur', 'joie', 'joyeux', 'joyeuse', 'radieux', 'radieuse', 'leger',
+        'legere', 'confiance', 'confiant', 'confiante', 'motive', 'motivee',
+        'enthousiaste', 'excite', 'excitee', 'impatient', 'impatiente', 'hate',
+        'nouveau depart', 'ca repart', 'ca s ouvre', 'ca s arrange', 'ca s eclaircit',
+        'bonne nouvelle', 'ca va aller', 'j y crois', 'envie de', 'projet qui',
+        'demain', 'l avenir', 'la suite', 'recommencer', 'premiere fois'],
+    1: ['sourire', 'souri', 'ri', 'rire', 'chance', 'cadeau', 'soleil', 'matin',
+        'printemps', 'reveil']
+  },
+  pluie: {   // LA PLUIE. Ce qui se relache : ca sort, ca coule, et on est a l'abri.
+    /*
+     * ELLE NE DIT PAS « TU VAS MAL » -- « eclipse » porte deja le chagrin, et
+     * une pluie qui voudrait dire la tristesse serait un verdict peint sur le
+     * fond. Celle-ci porte le RELACHEMENT : quelque chose sort enfin, la
+     * tension retombe, le corps lache. Ca peut arriver un tres bon jour.
+     *
+     * D'ou le vocabulaire : pleurer y est, mais « craque », « vide mon sac »,
+     * « ca fait du bien de » et « enfin » aussi. Ce sont les mots d'un
+     * relachement, pas ceux d'une chute -- et la difference est justement ce
+     * que ce decor a de particulier a dire.
+     */
+    3: ['craque', 'craquee', 'j ai craque', 'lache prise', 'vide mon sac',
+        'tout sorti', 'ca sort enfin', 'ca fait du bien de'],
+    2: ['pleure', 'pleurer', 'pleurs', 'sanglots', 'larmes', 'relache', 'relachee',
+        'souffle enfin', 'ca retombe', 'la tension retombe', 'soulagement',
+        'j ai tout dit', 'je me suis confie', 'je me suis confiee', 'enfin dit',
+        'ca coule', 'il pleut', 'la pluie', 'orage', 'gris dehors'],
+    1: ['enfin', 'vide', 'lourd', 'trempe', 'dehors']
+  },
   drift: {   // LES ETOILES. Etre perdu : ne pas savoir ou on va, flotter.
     /*
      * Le seul lexique ajoute apres coup, et il repare un vrai trou. « drift »
@@ -132,14 +176,17 @@ export const SENS = {
   voidwell: 'le vide — un puits sans fond',
   monolith: 'l\'épreuve — une pierre dressée devant soi',
   grain:    'rien ne tient en place — le sol qui grouille',
-  mandel:   'la pensée qui se replie — une figure sans fin'
+  mandel:   'la pensée qui se replie — une figure sans fin',
+  aube:     'ce qui s\'ouvre — le soleil qui se lève sur des champs',
+  pluie:    'ce qui se relâche — la pluie, et on est à l\'abri'
 };
 
 /** La scene quand rien ne ressort. Et, depuis qu'elle a un lexique, une reponse. */
 export const DEFAUT = 'drift';
 
 /** Toutes les scenes connues du shader, dans l'ordre ou il les compile. */
-export const SCENES = ['drift', 'brume', 'abyss', 'eclipse', 'voidwell', 'monolith', 'grain', 'mandel'];
+export const SCENES = ['drift', 'brume', 'abyss', 'eclipse', 'voidwell', 'monolith', 'grain', 'mandel',
+                       'aube', 'pluie'];
 
 /**
  * Sous ce nombre de mots ecrits, on ne change rien.

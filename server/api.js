@@ -8,7 +8,7 @@ import {
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
-  toutesMesures, signatureQS, activiteJours, mesuresEntre
+  toutesMesures, signatureQS, activiteJours, mesuresEntre, poserMesure
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -23,7 +23,11 @@ import { journee } from './journee.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
-import { nuitDe, archetypeDe, resumeDuJour, estDetail } from './allure.js';
+import { nuitDe, archetypeDe, resumeDuJour, estDetail, enMinutes } from './allure.js';
+import { lireDigest } from './digest.js';
+import { bornesDitesDans, leversConnus, medianeLever, jourVecuDe,
+         SOURCE_DIT, CLE_LEVER, CLE_COUCHER } from './jour-vecu.js';
+import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -38,7 +42,7 @@ import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
 import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
-import { jourLocal, etatDuTemps } from './temps.js';
+import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -269,6 +273,72 @@ export function publicUser(userId) {
  * machine -- le cas nominal de ce produit.
  */
 export const today = () => jourLocal(Date.now());
+
+/* ==================================================================
+   LA JOURNEE VECUE : celle qui commence au lever, pas a minuit.
+   ================================================================== */
+
+/** Sur quelle fenetre on cherche ses levers. Assez pour une mediane stable. */
+const FENETRE_LEVERS = 120;
+
+const MEMO_LEVERS = new Map();
+
+/**
+ * SES LEVERS, RELUS UNE FOIS PAR CHANGEMENT DE MESURES.
+ *
+ * La question « a quelle journee appartient cet instant ? » se pose a chaque
+ * message ; recharger cent vingt jours de mesures a chaque fois serait cent
+ * vingt jours pour une seule heure. Comme pour les liens, l'invalidation se
+ * fait a la SIGNATURE et pas au temps : une borne qu'on vient d'enregistrer
+ * doit compter tout de suite, et c'est justement le moment ou quelqu'un ecrit.
+ */
+export function leversDe(userId = OWNER) {
+  const sig = signatureQS(userId);
+  const vu = MEMO_LEVERS.get(userId);
+  if (vu?.sig === sig) return vu.out;
+  const fin = today();
+  const levers = leversConnus(mesuresEntre(addDays(fin, -FENETRE_LEVERS + 1), fin, userId));
+  const out = { levers, med: medianeLever(levers) };
+  MEMO_LEVERS.set(userId, { sig, out });
+  return out;
+}
+
+/**
+ * LA JOURNEE A LAQUELLE APPARTIENT MAINTENANT.
+ *
+ * C'est ce qui remplace `today()` pour un message qui arrive : quelqu'un qui
+ * ecrit a 2 h du matin finit sa soiree, il ne commence pas sa journee. Sans
+ * lever connu, `jourVecuDe` rend la journee civile -- on ne deplace rien sur
+ * une supposition.
+ *
+ * CE QUI EST DEJA ECRIT NE BOUGE PAS. Une borne enregistree a 8 h ne va pas
+ * rechercher les messages de 7 h pour les redater : la grille de quelqu'un ne
+ * doit pas se reecrire derriere lui.
+ */
+export const jourVecu = (userId = OWNER, quand = Date.now()) => {
+  const { levers, med } = leversDe(userId);
+  return jourVecuDe(quand, { levers, medLever: med }) ?? today();
+};
+
+/**
+ * CE QUE CE MESSAGE DIT DE SON LEVER OU DE SON COUCHER, ENREGISTRE.
+ *
+ * Le chemin sans modele et sans application tierce : « je viens de me lever »
+ * suffit. L'heure vient de la phrase quand elle y est, sinon de l'instant du
+ * message -- quelqu'un qui ecrit « je viens de me lever » vient de se lever.
+ *
+ * @returns {boolean} vrai si une borne a ete posee.
+ */
+export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
+  const b = bornesDitesDans(texte);
+  if (!b) return false;
+  const heure = b.heure ?? heureLocale(quand);
+  const date = jourLocal(quand);
+  if (!heure || !date) return false;
+  poserMesure({ date, source: SOURCE_DIT, cle: b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER,
+                texte: heure, userId });
+  return true;
+}
 
 /* ==================================================================
    LES LIENS ENTRE LES MESURES ET LES NOTES, CALCULES UNE FOIS.
@@ -574,11 +644,25 @@ export const routes = {
   'GET /api/state': ({ userId }) => {
     const s = getSettings(userId);
     const { series: ser, byDate, textCount } = series(userId);
-    const t = today();
+    /*
+     * « AUJOURD'HUI » EST SA JOURNEE, PAS CELLE DU CALENDRIER.
+     *
+     * A 2 h du matin, quelqu'un finit sa soiree : la note qu'il pose, ce qu'il
+     * ecrit et les sujets qu'il aborde appartiennent a la journee qui se
+     * termine. Sans lever connu, `jourVecu` rend la journee civile -- rien ne
+     * bouge tant qu'on ne sait rien.
+     *
+     * `jourCivil` part a cote parce que les BORNES restent civiles : la date
+     * maximale d'un repere ou d'une note de carnet est ce que dit le
+     * calendrier, sinon la journee d'apres devient injoignable pendant la nuit.
+     */
+    const t = jourVecu(userId);
+    const civil = today();
     const entry = getEntry(t, userId);
     const last = ser.length ? ser[ser.length - 1] : null;
     return {
       today: t,
+      jourCivil: civil,
       // De quoi verifier a l'ecran que la chaine tient : la zone que le serveur
       // a retenue et l'heure qu'il en tire. Si ca ne colle pas avec l'horloge du
       // navigateur, c'est que l'en-tete ne passe pas.
@@ -631,7 +715,18 @@ export const routes = {
   'POST /api/message': async ({ body, userId }) => {
     const text = String(body.text ?? '').trim();
     if (!text) return { error: 'texte vide' };
-    const date = body.date ?? today();
+    /*
+     * SA JOURNEE, PAS CELLE DU CALENDRIER.
+     *
+     * `body.date` est explicite quand la personne ecrit DANS un jour passe
+     * qu'elle a ouvert : ce choix-la l'emporte sur tout. Sans lui, la journee
+     * est celle qu'elle vit -- a 2 h du matin, c'est encore hier.
+     *
+     * La borne se pose AVANT de dater : « je viens de me lever » a 11 h doit
+     * ouvrir la journee de 11 h, pas se ranger dans celle d'avant.
+     */
+    noterBornesDites(text, userId);
+    const date = body.date ?? jourVecu(userId);
     const now = new Date().toISOString();
 
     addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
@@ -661,7 +756,27 @@ export const routes = {
     return { entry: getEntry(date, userId) };
   },
 
-  'GET /api/year': ({ query, userId }) => yearGrid(series(userId).series, Number(query.year ?? today().slice(0, 4))),
+  /*
+   * L'ANNÉE PORTE LES SIGNES, ELLE AUSSI.
+   *
+   * C'est la seule vue où l'on voit une PÉRIODE : trois rouges en une semaine
+   * ne se lisent pas en feuilletant les jours un par un, et c'est justement la
+   * forme qu'on est venu chercher ici.
+   *
+   * Les signes se calculent sur l'année demandée, pas sur tout le journal :
+   * relire quatre ans de messages pour peindre une grille de trois cent
+   * soixante-cinq cases coûterait une seconde à chaque changement d'année.
+   */
+  'GET /api/year': ({ query, userId }) => {
+    const an = Number(query.year ?? today().slice(0, 4));
+    const grille = yearGrid(series(userId).series, an);
+    for (const mo of grille.months) {
+      for (const j of mo.days) {
+        if (j?.date) j.veille = veilleDuJour(j.date, userId)?.niveau ?? null;
+      }
+    }
+    return grille;
+  },
 
   /** Serie compacte pour les courbes : tableaux paralleles, ~5x plus leger que des objets. */
   'GET /api/series': ({ userId }) => {
@@ -706,7 +821,18 @@ export const routes = {
 
     // Ce que le Miroir montrait le moins bien : la journee qu'on regarde. On se
     // baladait dans l'historique sans jamais voir ce qu'on avait ecrit CE jour-la.
-    const jour = { date, note, text: entry?.text ?? '' };
+    /*
+     * SUR LA JOURNÉE OUVERTE, LE SIGNE ARRIVE AVEC SA PREUVE.
+     *
+     * Un signe sans la phrase qui l'a produit serait un verdict de machine.
+     * Avec elle, c'est un rappel de ce qu'on a écrit — et si le signe est faux,
+     * ça se voit tout de suite, ce qu'il faut pour qu'on continue à le croire
+     * quand il est juste.
+     */
+    const veille = veilleDuJour(date, userId);
+    const jour = { date, note, text: entry?.text ?? '',
+                   veille: veille ? { ...veille, dit: VEILLE_DIT[veille.niveau],
+                                      aide: veille.niveau === 'rouge' ? VEILLE_AIDE : null } : null };
 
     // Le mois affiche, pour le calendrier. Il ne suit PAS forcement le jour
     // ouvert : on feuillette mars sans quitter la journee qu'on lisait.
@@ -724,7 +850,17 @@ export const routes = {
         date: j,
         note: e?.note ?? null,
         delta: pt?.delta ?? null,
-        texte: !!(e?.text && e.text.trim())
+        texte: !!(e?.text && e.text.trim()),
+        /*
+         * LE SIGNE DE VEILLE, SUR LE RUBAN DU MOIS.
+         *
+         * Une pastille « crise 5 » avait le même poids visuel qu'une pastille
+         * « création 3 » : cinq passages sur une crise et trois sur un projet,
+         * rangés côte à côte comme deux sujets de conversation. Ici le mois
+         * porte le NIVEAU, et rien d'autre — le détail s'ouvre en cliquant le
+         * jour, avec la phrase qui l'a déclenché.
+         */
+        veille: veilleDuJour(j, userId)?.niveau ?? null
       });
     }
 
@@ -1501,12 +1637,22 @@ export const routes = {
       activite: activiteJours(userId, 60).map(j => {
         const duJour = mesuresDuJour(j.date, userId);
         const resume = resumeDuJour(duJour);
+        /*
+         * LE DIGEST PART LU, EN PLUS DE PARTIR BRUT.
+         *
+         * Brut, un vrai digest fait vingt lignes dont quatorze sont des titres
+         * de pages : tout est la et rien ne se lit. `lu` dit la meme chose
+         * regroupee -- les titres deviennent une ligne « navigateur, 14 pages,
+         * les deux plus longues » -- et le brut reste, entier, pour verifier.
+         */
         if (j.digest && typeof j.digest === 'object') {
-          return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null, resume };
+          return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null,
+                   resume, lu: lireDigest(j.digest) };
         }
         let digest = null;
         try { digest = JSON.parse(j.digest); } catch { /* illisible : on le dira */ }
-        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest), resume };
+        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest),
+                 resume, lu: lireDigest(digest) };
       })
     };
   },
@@ -2037,14 +2183,21 @@ export async function retisser(body, send, userId = OWNER) {
 
   let r;
   try {
-    // Un evenement par tranche, pas par delta : le modele rend des centaines de
-    // fragments par seconde, et autant d'ecritures SSE encombreraient le tuyau
-    // pour une information qui ne se lit pas a cette vitesse.
+    /*
+     * DEUX RYTHMES, PARCE QUE CE SONT DEUX CHOSES.
+     *
+     * Une TROUVAILLE part tout de suite : c'est un nom que le modele vient
+     * d'ecrire, et l'attendre pour l'annoncer avec le compteur suivant le
+     * ferait arriver apres coup. Le compteur, lui, se calme -- le modele rend
+     * des centaines de fragments par seconde, et autant d'ecritures SSE
+     * encombreraient le tuyau pour un chiffre qui ne se lit pas si vite.
+     */
     let dernier = 0;
-    r = await lireEnFlux(corpus, s, ({ signes, pense }) => {
+    r = await lireEnFlux(corpus, s, ({ signes, pense, trouves, pourcent, comptes }) => {
+      for (const t of trouves ?? []) send('trouve', { ...t, pourcent });
       if (signes - dernier < 400) return;
       dernier = signes;
-      send('lit', { signes, pense });
+      send('lit', { signes, pense, pourcent, comptes });
     });
   } catch (err) {
     send('erreur', { error: String(err?.message ?? err).slice(0, 300) });
@@ -2063,7 +2216,7 @@ export async function retisser(body, send, userId = OWNER) {
   const lecture = decorerCarte(l.contenu, series(userId).byDate, textesParJour(userId));
   // La toile d'abord — c'est elle qui se tisse à l'écran. Les groupes ensuite,
   // parce qu'ils n'ont de sens qu'une fois la toile posée.
-  send('toile', { lecture, fait_le: l.fait_le, jours: l.jours, modele: l.modele });
+  send('toile', { lecture, fait_le: l.fait_le, jours: l.jours, modele: l.modele, pourcent: 70 });
   send('fini', {
     attente: RETISSAGE_ATTENTE,
     groupes: (l.contenu?.pistes ?? []).map(p => ({ nom: p.nom, teinte: p.teinte ?? null,
@@ -2080,7 +2233,10 @@ export async function streamMessage(body, send, userId = OWNER) {
   // ligne il s'enregistrerait vide, et le fil montrerait une bulle blanche.
   if (!text) text = pieces.map(p => `[${p.nom}]`).join(' ');
 
-  const date = body.date ?? today();
+  // Voir `POST /api/message` : la borne se pose avant de dater, et une date
+  // explicite -- un jour passe ouvert a l'ecran -- l'emporte sur tout.
+  noterBornesDites(text, userId);
+  const date = body.date ?? jourVecu(userId);
   const messageId = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
   invalidate(userId);
   send('user', { messages: recentMessages(80, userId) });
@@ -2110,6 +2266,15 @@ export async function streamMessage(body, send, userId = OWNER) {
   send('done', {
     messages: recentMessages(80, userId),
     motifs: motifsDuFil(userId),
+    /*
+     * LA JOURNEE OU CE MESSAGE EST TOMBE.
+     *
+     * C'est le serveur qui la decide -- elle commence au lever, pas a minuit --
+     * et l'onglet peut etre reste ouvert toute la nuit. Sans ce renvoi, le fil
+     * continuerait a ecrire « aujourd'hui » sur la journee d'avant, et la note
+     * du soir se poserait sur la mauvaise case.
+     */
+    jour: date,
     /*
      * LE DECOR CHANGE PENDANT LA CONVERSATION, PAS AU RECHARGEMENT.
      *
@@ -2392,6 +2557,24 @@ export function outilsPour(userId, messageId, send = () => {}) {
         return `${etiq} ${t}`;
       }).filter(Boolean);
       return { message: `${lignes.length} note(s) de son carnet sur « ${m} » :\n${lignes.join('\n')}` };
+    },
+
+    /*
+     * L'HEURE DE SON LEVER, RANGEE COMME UNE MESURE.
+     *
+     * Elle rejoint les mesures du quantified self plutot qu'une table a elle :
+     * c'est la meme donnee, elle repond a la meme question, et `nuitDe` la
+     * relit sans rien savoir d'ou elle vient. Ce que la personne DIT passe
+     * devant ce que la machine mesure -- voir `jour-vecu.js`.
+     */
+    noter_bornes: ({ genre, heure, jour }) => {
+      const g = genre === 'coucher' ? 'coucher' : genre === 'lever' ? 'lever' : null;
+      if (!g) return { erreur: 'Le genre doit être « lever » ou « coucher ».' };
+      if (enMinutes(heure) == null) return { erreur: 'Donne une heure en HH:MM, sur 24 heures.' };
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(String(jour ?? '')) ? jour : today();
+      poserMesure({ date: d, source: SOURCE_DIT, cle: g === 'lever' ? CLE_LEVER : CLE_COUCHER,
+                    texte: String(heure).trim(), userId });
+      return { message: `Noté : ${g} à ${heure} le ${d}.` };
     },
 
     marquer_motif: ({ id }) => {
