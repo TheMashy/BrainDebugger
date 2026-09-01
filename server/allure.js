@@ -145,8 +145,9 @@ export function nuitDe(duJour, toutes = []) {
 
   /* --- la durée --- */
   const dm = trouver(duJour, DUREE_NUIT);
-  const duree = nuitEnMinutes(dm);
-  const dureeMed = mediane(jours.map(j => nuitEnMinutes(trouver(j, DUREE_NUIT))));
+  let duree = nuitEnMinutes(dm);
+  let dureeMed = mediane(jours.map(j => nuitEnMinutes(trouver(j, DUREE_NUIT))));
+  let dureeDeduite = false;
 
   /* --- le coucher et le lever ---
      Mesurés s'ils existent ; sinon l'activité de la machine, et on DIT que
@@ -165,11 +166,45 @@ export function nuitDe(duJour, toutes = []) {
   const medCoucher = mediane(jours.map(j => surLaNuit(heureDe(j, COUCHER, DERNIERE).min)));
   const medLever = mediane(jours.map(j => heureDe(j, LEVER, PREMIERE).min));
 
+  /*
+   * LA DURÉE SE DÉDUIT DU COUCHER ET DU LEVER QUAND RIEN NE LA MESURE.
+   *
+   * Personne n'envoie forcément « sommeil_h ». Mais quelqu'un qui dit « je vais
+   * me coucher » à 06:10 puis « je viens de me lever » à 15:30 vient de dire
+   * neuf heures vingt, et ne pas le compter revient à jeter la seule chose
+   * qu'on ait sur sa nuit — et à laisser la case vide alors que la réponse
+   * était sous la main.
+   *
+   * CE N'EST PAS UNE MESURE, ET ON LE DIT (`dureeDeduite`). Entre se coucher et
+   * s'endormir il y a un trou qu'aucune de ces deux heures ne connaît ; c'est du
+   * temps AU LIT, pas du sommeil, et l'écran ne les confondra pas.
+   */
+  const entre = (a, b) => (a == null || b == null ? null : ((b - a) + 1440) % 1440);
+  /*
+   * SEULEMENT ENTRE DEUX HEURES RÉELLES. « Dernière activité » n'est pas
+   * « couché » : entre le moment où l'écran s'éteint et celui où l'on s'endort
+   * il y a un trou qu'aucune de ces deux heures ne connaît. Les soustraire
+   * fabriquerait une durée de sommeil que rien n'a relevée, et quelqu'un qui
+   * lit « six heures trente » la croira. On ne déduit donc que d'un coucher et
+   * d'un lever, dits ou mesurés — jamais des repères de la machine.
+   */
+  const vraies = x => x.c.mesure && x.l.mesure;
+  if (duree == null && vraies({ c, l })) {
+    duree = entre(c.min, l.min);
+    if (duree != null) dureeDeduite = true;
+  }
+  if (dureeMed == null) {
+    dureeMed = mediane(jours.map(j => {
+      const jc = heureDe(j, COUCHER, DERNIERE), jl = heureDe(j, LEVER, PREMIERE);
+      return vraies({ c: jc, l: jl }) ? entre(jc.min, jl.min) : null;
+    }));
+  }
+
   const ecart = (v, m) => (v == null || m == null ? null : Math.round(v - m));
 
   const nuit = {
     duree, dureeMediane: dureeMed == null ? null : Math.round(dureeMed),
-    dureeEcart: ecart(duree, dureeMed),
+    dureeEcart: ecart(duree, dureeMed), dureeDeduite,
     coucher: c.min == null ? null : enHeure(c.min), coucherMesure: c.mesure,
     coucherEcart: ecart(surLaNuit(c.min), medCoucher),
     lever: l.min == null ? null : enHeure(l.min), leverMesure: l.mesure,
@@ -223,15 +258,37 @@ export function phrasesDeLaNuit(n) {
  * range par mots reconnus ; ce qui n'est pas reconnu va dans `autre` et ne
  * pèse sur aucun archétype, ce qui est la bonne façon de ne pas se tromper.
  */
+/*
+ * L'ORDRE COMPTE, ET `nav` EST EN DERNIER.
+ *
+ * Une cle reelle ressemble a `titres web:youtube.com youtube - ...` : elle
+ * contient « web » ET « youtube ». Le premier rang qui matche gagne, donc avec
+ * `nav` en tete tout ce qui passe par un navigateur devenait « navigation » --
+ * y compris deux heures de video et une soiree sur Discord. Le navigateur est
+ * le CONTENANT ; ce qu'on y fait est plus precis que lui, et passe devant.
+ */
 const FAMILLES = {
-  nav:     ['navigateur', 'browser', 'web', 'chrome', 'firefox', 'safari', 'edge'],
+  video:   ['youtube', 'netflix', 'twitch', 'stream', 'video'],
+  social:  ['discord', 'slack', 'whatsapp', 'telegram', 'twitter', 'reddit',
+            'social', 'chat', 'message', 'mail'],
+  jeu:     ['jeu', 'game', 'steam'],
+  musique: ['musique', 'music', 'spotify', 'deezer'],
   travail: ['code', 'dev', 'ide', 'terminal', 'editeur', 'editor', 'travail', 'work',
             'design', 'blender', 'premiere', 'photoshop', 'creation'],
-  social:  ['social', 'chat', 'discord', 'slack', 'message', 'mail', 'whatsapp', 'telegram'],
-  video:   ['video', 'youtube', 'netflix', 'twitch', 'stream'],
-  jeu:     ['jeu', 'game', 'steam'],
-  musique: ['musique', 'music', 'spotify', 'deezer']
+  nav:     ['navigateur', 'browser', 'web', 'chrome', 'firefox', 'safari', 'edge']
 };
+
+/*
+ * LES CLES QUI PORTENT DU TEMPS PASSE.
+ *
+ * `temps_par_contexte_s`, `duree_app_min` -- et `titres`, qui est ce
+ * qu'envoient les traqueurs qui comptent par TITRE DE FENETRE plutot que par
+ * application. C'est le cas du vrai : `titres web:summer summer s...` vaut
+ * 1072, et la somme de ces cles-la retombe sur les minutes actives de la
+ * journee. Sans ce mot, aucun temps d'ecran n'etait compte du tout, donc aucun
+ * archetype ne se declenchait jamais -- l'ecran restait vide sans rien dire.
+ */
+const PORTE_DU_TEMPS = ['temps', 'contexte', 'duree_app', 'titre', 'title', 'fenetre', 'window'];
 
 /** Les secondes passées par famille, à partir des clés `temps_par_contexte_*`. */
 export function contextes(duJour) {
@@ -239,7 +296,10 @@ export function contextes(duJour) {
   for (const m of duJour ?? []) {
     if (m.valeur == null) continue;
     const k = norm(m.cle);
-    if (!k.includes('temps') && !k.includes('contexte') && !k.includes('duree_app')) continue;
+    if (!PORTE_DU_TEMPS.some(mot => k.includes(mot))) continue;
+    // « bascules fenetre » contient « fenetre » et n'est pas un temps : c'est un
+    // COMPTE. L'additionner aux secondes ferait une journee de plus qu'elle n'a.
+    if (contient(k, ['bascule', 'switch', 'nombre', 'count'])) continue;
     /*
      * TOUT SE COMPTE EN SECONDES. La clé porte son unité (`temps_par_contexte_s`,
      * `duree_app_min`) ; sans elle, on suppose des secondes, qui est ce
@@ -301,10 +361,26 @@ export function archetypeDe(duJour, toutes = []) {
   }
   const jours = [...parJour.values()];
 
+  /*
+   * ON NE SE COMPARE PAS À UN SEUL JOUR.
+   *
+   * Les seuils se lisent contre SA propre médiane. Sur une seule journée reçue,
+   * la médiane EST cette journée : l'écart vaut exactement 1, aucune condition
+   * ne se déclenche, et l'écran reste vide sans rien dire — ce qui est le
+   * premier écran que voit quelqu'un qui vient de brancher son quantified self.
+   *
+   * En dessous de trois jours on déclare donc les médianes ABSENTES. Les
+   * conditions qui savent faire sans (`agite == null`) répondent sur la part
+   * seule, qui est déjà un fait ; celles qui ne savent pas se taisent. C'est la
+   * même règle que partout : on ne compare à rien tant qu'on n'a rien.
+   */
+  const ASSEZ = 3;
+  const compare = jours.length >= ASSEZ;
+
   const val = (mesures, mots) => trouver(mesures, mots)?.valeur ?? null;
   const bascules = val(duJour, ['bascule', 'switch']);
-  const medBascules = mediane(jours.map(j => val(j, ['bascule', 'switch'])));
-  const medTotal = mediane(jours.map(j => contextes(j).total || null));
+  const medBascules = compare ? mediane(jours.map(j => val(j, ['bascule', 'switch']))) : null;
+  const medTotal = compare ? mediane(jours.map(j => contextes(j).total || null)) : null;
 
   const pNav = part(c.nav + c.video, c.total);
   const pTravail = part(c.travail, c.total);
@@ -350,6 +426,57 @@ export function archetypeDe(duJour, toutes = []) {
   const g = scores[0];
   return { cle: g.cle, nom: NOM_ARCHETYPE[g.cle], force: Math.round(g.force * 100) / 100,
            preuves: g.preuves };
+}
+
+/**
+ * LES CHIFFRES DE LA JOURNÉE, PRÊTS À ÊTRE DES PUCES.
+ *
+ * Une valeur, ce qu'elle est, et son écart à SA propre normale. Rien de plus :
+ * ni courbe, ni bornes, ni moyenne — ce sont des réponses à d'autres questions.
+ *
+ * Ce qui n'existe pas rend `null` et ne s'affiche pas. Un tiret ou un zéro à la
+ * place d'un chiffre absent se lit comme une mesure, et il ne s'agit pas d'une
+ * mesure ; c'est le contraire d'une mesure.
+ *
+ * @param {Array} duJour  les mesures de la journée
+ * @param {Array} toutes  les mesures de la fenêtre, pour les médianes
+ */
+export function chiffresDuJour(duJour, toutes = []) {
+  const parJour = new Map();
+  for (const m of toutes ?? []) {
+    if (!parJour.has(m.date)) parJour.set(m.date, []);
+    parJour.get(m.date).push(m);
+  }
+  const jours = [...parJour.values()];
+  // Même règle qu'ailleurs : on ne se compare pas à un seul jour, la médiane
+  // serait la journée elle-même et l'écart vaudrait zéro par construction.
+  const compare = jours.length >= 3;
+
+  const c = contextes(duJour);
+  const ecran = c.total || null;
+  const medEcran = compare ? mediane(jours.map(j => contextes(j).total || null)) : null;
+
+  const NOMS = { nav: 'de navigation', travail: 'sur des outils de travail',
+                 social: "d'échanges", video: 'de vidéo', jeu: 'de jeu',
+                 musique: 'de musique' };
+  const fam = Object.entries(c)
+    .filter(([k]) => k !== 'total' && k !== 'autre' && NOMS[k])
+    .sort((a, b) => b[1] - a[1])[0];
+  const ou = fam && fam[1] > 0 && c.total
+    ? { cle: fam[0], nom: NOMS[fam[0]], sec: fam[1], part: fam[1] / c.total } : null;
+
+  const val = (mesures, mots) => trouver(mesures, mots)?.valeur ?? null;
+  const bascules = val(duJour, ['bascule', 'switch']);
+  const medBascules = compare ? mediane(jours.map(j => val(j, ['bascule', 'switch']))) : null;
+
+  return {
+    ecran,
+    ecranEcart: ecran != null && medEcran ? Math.round((ecran - medEcran) / 60) : null,
+    ou,
+    bascules,
+    basculesFois: bascules != null && medBascules ? bascules / medBascules : null,
+    pauses: val(duJour, ['pauses_nombre', 'pause_nombre', 'breaks', 'trous'])
+  };
 }
 
 /**

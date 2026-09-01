@@ -2307,7 +2307,17 @@ async function renderMoi(date, { garderCal = false, rafraichir = false } = {}) {
     try { MOI = await api('/api/moi'); }
     catch { MOI = null; }
   }
-  return renderMirror(date ?? MIRROR_DATE ?? S.today, { garderCal });
+  const vue = renderMirror(date ?? MIRROR_DATE ?? S.today, { garderCal });
+  /*
+   * LE QUANTIFIED SELF SE CHARGE TOUT SEUL, ET APRÈS LA JOURNÉE.
+   *
+   * Il vivait derrière un bouton, donc il ne partait que si on le demandait. Il
+   * est maintenant toujours à l'écran — et il se charge SANS attendre, pour que
+   * la journée s'affiche tout de suite : elle est en haut, on la lit d'abord,
+   * et le panneau se remplit dessous quand il arrive.
+   */
+  chargerQS();
+  return vue;
 }
 
 /* ============================= vue : miroir ============================= */
@@ -3513,11 +3523,12 @@ async function renderMirror(date, { garderCal = false } = {}) {
       ${/* Le bouton vit dans « Moi » parce que c'est la page de ce qu'on SAIT
             de soi. Réglages garde le branchement et le journal des envois :
             deux questions différentes, deux endroits. */''}
-      ${moi ? `<div class="qsbarre">
-        <button class="btn" id="qsbouton" aria-pressed="${QS_OUVERT}">
-          ${ico('antenne', 13)}${QS_OUVERT ? 'masquer les données' : 'quantified self'}</button>
-      </div>
-      <div id="qspanneau">${QS_OUVERT ? qsPanneauMarkup(QS_DATA) : ''}</div>` : ''}
+      ${/* TOUJOURS LÀ, PLUS DERRIÈRE UN BOUTON. C'était « quantified self »,
+             puis « masquer les données » : deux clics pour voir ce qui est
+             arrivé pendant la nuit, et un écran qui n'existait que si on
+             pensait à le demander. Ce qu'on mesure de soi fait partie de la
+             journée, il se lit avec elle. */''}
+      ${moi ? `<div id="qspanneau">${qsPanneauMarkup(QS_DATA)}</div>` : ''}
 
       ${reperesMarkup(m.reperes, date)}
 
@@ -3974,36 +3985,6 @@ function wireMirror() {
     const mb = e.target.closest('[data-mois]');
     if (mb) { MIR_CAL.curseur = mb.dataset.mois; return renderMoi(MIRROR_DATE, { garderCal: true }); }
 
-    /*
-     * Le panneau quantified self s'ouvre SANS redessiner la journée : elle est
-     * juste au-dessus, et la reconstruire ferait clignoter ce qu'on est en
-     * train de lire pour montrer autre chose plus bas.
-     */
-    if (e.target.closest('#qsbouton')) {
-      if (QS_OUVERT) {
-        QS_OUVERT = false;
-        $('#qspanneau').innerHTML = '';
-        $('#qsbouton').setAttribute('aria-pressed', 'false');
-        $('#qsbouton').innerHTML = ico('antenne', 13) + 'quantified self';
-      } else {
-        $('#qsbouton').setAttribute('aria-pressed', 'true');
-        $('#qsbouton').innerHTML = ico('antenne', 13) + 'masquer les données';
-        await ouvrirQS();
-      }
-      return;
-    }
-
-    /*
-     * La fenêtre du panneau. Elle ne change QUE le panneau : reconstruire la
-     * journée ferait clignoter ce qu'on lit juste au-dessus pour montrer autre
-     * chose plus bas, exactement comme pour l'ouverture.
-     */
-    const fen = e.target.closest('[data-qsjours]');
-    if (fen) {
-      QS_JOURS = Number(fen.dataset.qsjours);
-      await ouvrirQS();
-      return;
-    }
 
     // La note de la journée ouverte : l'échelle s'ouvre, puis se pose.
     if (e.target.closest('#dayNote')) {
@@ -5010,9 +4991,7 @@ function drawNotesPreview(p) {
    lui donne, quelle que soit sa forme.
    ================================================================== */
 
-let QS_OUVERT = false;
 let QS_DATA = null;
-let QS_JOURS = 90;
 
 const qsNb = v => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(v);
 
@@ -5180,9 +5159,6 @@ function qsLuMarkup(lu) {
   return `${lignes ? `<div class="qscells">${lignes}</div>` : ''}${fam}`;
 }
 
-/** 30 / 90 / 365 : une semaine ne montre rien, cinq ans ne se lit plus. */
-const QS_FENETRES = [[30, '30 j'], [90, '90 j'], [365, '1 an']];
-
 /**
  * Une série, sa dernière valeur, son côté, et son lien s'il en a un.
  *
@@ -5297,101 +5273,66 @@ function qsDuree(min) {
   return r ? `${Math.floor(m / 60)} h ${String(r).padStart(2, '0')}` : `${Math.floor(m / 60)} h`;
 }
 
+/**
+ * =====================================================================
+ * LE PANNEAU, EN QUELQUES LIGNES.
+ *
+ * Il montrait treize cartes de séries avec leurs courbes et leurs bornes,
+ * derrière un bouton, avec un sélecteur de fenêtre. Sur des données réelles ça
+ * donnait quarante lignes de titres de pages : tout était là, rien ne se
+ * lisait, et il fallait deux clics pour y arriver.
+ *
+ * Il ne reste que ce qu'on vient chercher, et ça tient en trois blocs :
+ *
+ *   1. LA NUIT — combien de temps, couché quand, levé quand, et l'écart à SA
+ *      propre normale.
+ *   2. LA FORME DE LA JOURNÉE — un archétype, avec les chiffres qui l'ont
+ *      produit, parce qu'une étiquette sans ses chiffres ne se conteste pas.
+ *   3. QUELQUES PUCES — le temps d'écran, où il est passé, le rythme.
+ *
+ * Le reste — les séries, les journées d'avant, le digest brut — se replie. Il
+ * n'est pas supprimé : une donnée arrivée a le droit d'être vue, et la cacher
+ * sans le dire ferait croire qu'elle n'est pas arrivée.
+ * =====================================================================
+ */
 function qsPanneauMarkup(d) {
-  if (!d) return '<div class="card"><p class="jvide">…</p></div>';
-
-  const fenetres = `<div class="horizons qsfen">${QS_FENETRES.map(([n, nom]) =>
-    `<button data-qsjours="${n}" aria-pressed="${d.jours === n}">${nom}</button>`).join('')}</div>`;
+  if (!d) return '<div class="card qspan"><p class="jvide">…</p></div>';
 
   const rien = !d.series.length && !d.activite.length;
   if (rien) {
     return `<div class="card qspan">
-      <div class="qstete"><h2>${ico('antenne', 15)}Quantified self</h2>${fenetres}</div>
-      <p class="sub" style="margin:0">Rien n'est arrivé sur les ${d.jours} derniers jours.
-      Le branchement et le journal des envois sont dans <b>Réglages › Quantified self</b>.</p></div>`;
+      <div class="qstete"><h2>${ico('antenne', 15)}Quantified self</h2></div>
+      <p class="sub" style="margin:0">Rien n'est arrivé. Le branchement est dans
+      <b>Réglages › Quantified self</b>.</p></div>`;
   }
 
-  /*
-   * LES SERIES LIEES AU JOURNAL D'ABORD.
-   *
-   * Sur dix séries, celles qui bougent avec les journées sont les seules qui
-   * apprennent quelque chose ; les autres sont des chiffres. Elles passent donc
-   * devant, et l'accent de couleur ne sert QU'A ÇA — la couleur veut dire
-   * quelque chose partout ailleurs dans l'application, elle ne va pas devenir
-   * décorative ici.
-   */
   const series = [...d.series].sort((a, b) =>
     (b.lien ? 1 : 0) - (a.lien ? 1 : 0) || b.n - a.n || a.cle.localeCompare(b.cle));
   const lies = series.filter(s => s.lien).length;
-
-  /*
-   * CE QUI SE MESURE SUR UN CORPS RESTE OUVERT ; LES ROUAGES SE REPLIENT.
-   *
-   * `temps_par_contexte_s_navigateur`, `bascules`, `pauses_nombre` : ce sont les
-   * chiffres qui ont produit la phrase du haut. Les afficher chacun en carte,
-   * c'est dix cartes qui répètent ce qu'on vient de lire — et la page redevient
-   * le mur de chiffres qu'on essayait d'éviter.
-   *
-   * SAUF s'ils vont avec les journées notées : un rouage qui bouge avec la
-   * personne n'est plus un rouage, c'est une trouvaille.
-   */
-  const ouvertes = series.filter(s => !s.detail || s.lien);
-  const rouages = series.filter(s => s.detail && !s.lien);
-
-  /*
-   * CE QU'ON VOIT EN OUVRANT : COMBIEN DE JOURNEES, ET LA DERNIERE.
-   *
-   * L'ecran s'ouvrait sur un mur : treize cartes de series, chacune avec sa
-   * courbe et ses bornes, avant la moindre phrase. « Le quantified self ne me
-   * sort rien de vraiment lisible » -- c'etait vrai, et la raison est un ordre
-   * de lecture, pas un manque de donnees.
-   *
-   * On ouvre donc sur les deux choses qu'on vient chercher : COMBIEN de
-   * journees sont enregistrees, et A QUOI RESSEMBLE LA DERNIERE. Les series
-   * restent, entieres, mais repliees : elles repondent a une autre question --
-   * « comment ca evolue » -- qu'on ne pose pas en arrivant.
-   */
   const dernier = d.activite?.[0] ?? null;
-  const surLeJourLu = d.jourLu && dernier?.date === d.jourLu;
 
   return `
     <div class="card qspan">
       <div class="qstete">
         <h2>${ico('antenne', 15)}Quantified self</h2>
-        ${fenetres}
       </div>
 
-      ${qsCompteMarkup(d)}
-
       ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu)}
+      ${qsPucesMarkup(d)}
 
-      ${dernier ? `<div class="qsact">
-        <div class="k faint">Le détail de ${surLeJourLu ? 'cette journée' : `la journée du ${fmtDay(dernier.date)}`}</div>
-        ${dernier.digest ? qsLuMarkup(dernier.lu)
-                         : `<pre class="qsbrut">${esc(String(dernier.brut).slice(0, 2000))}</pre>`}
-        ${dernier.digest ? `<details class="qsbrutd">
-          <summary>tel qu'il est arrivé · ${dernier.lu?.champs ?? Object.keys(dernier.digest).length} champs</summary>
-          ${qsArbre(dernier.digest)}
-        </details>` : ''}
-      </div>` : ''}
-
-      ${d.activite.length > 1 ? `<details class="qsjours">
-        <summary>les ${Math.min(11, d.activite.length - 1)} journées d'avant</summary>
-        ${d.activite.slice(1, 12).map(j => `<details class="qsjour">
-          <summary><span class="mono">${fmtDay(j.date)}</span>
-            <span class="qsresume">${esc(j.resume || (j.digest ? `${j.lu?.champs ?? Object.keys(j.digest).length} champs` : 'illisible'))}</span></summary>
-          ${j.digest ? qsLuMarkup(j.lu) : `<pre class="qsbrut">${esc(String(j.brut).slice(0, 2000))}</pre>`}
-        </details>`).join('')}
+      ${/* TOUT LE RESTE SE REPLIE. Les séries répondent à « comment ça
+            évolue », le brut à « qu'est-ce qui est arrivé exactement » : deux
+            questions qu'on ne pose pas en ouvrant. */''}
+      ${dernier?.digest ? `<details class="qsbrutd">
+        <summary>ce qui est arrivé le ${fmtDay(dernier.date)} · ${dernier.lu?.champs ?? Object.keys(dernier.digest).length} champs</summary>
+        ${qsLuMarkup(dernier.lu)}
+        <details class="qsbrutd"><summary>tel quel</summary>${qsArbre(dernier.digest)}</details>
       </details>` : ''}
 
-      ${series.length ? `<details class="qsseriesd"${lies ? ' open' : ''}>
+      ${series.length ? `<details class="qsseriesd">
         <summary>${series.length} série${series.length > 1 ? 's' : ''} de mesures${
           lies ? ` · ${lies} qui ${lies > 1 ? 'vont' : 'va'} avec tes journées` : ''}</summary>
-        ${ouvertes.length ? `<div class="qsseries">${ouvertes.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
-        ${rouages.length ? `<details class="qsrouages">
-          <summary>${rouages.length} série${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
-          <div class="qsseries">${rouages.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>
-        </details>` : ''}
+        <div class="qsseries">${series.map(x => qsSerieMarkup(x, d.jusqu_au)).join('')}</div>
         ${lies ? `<p class="qsnote">Les séries en couleur vont avec tes journées notées — pas
           « à cause de », <b>avec</b>. Le sens, s'il y en a un, t'appartient.</p>` : ''}
       </details>` : ''}
@@ -5399,38 +5340,66 @@ function qsPanneauMarkup(d) {
 }
 
 /**
- * COMBIEN DE JOURNEES SONT ENREGISTREES.
+ * QUELQUES PUCES, ET PAS UNE DE PLUS.
  *
- * C'est la premiere question, et elle n'avait pas de reponse : la ligne de
- * reception disait « 12 jours reçus sur 90 » en petit, sous un titre, entre
- * deux blocs. Le chiffre passe donc devant, en grand, avec ce qui le qualifie
- * -- sur quelle fenetre, et depuis quand ca n'envoie plus s'il y a lieu.
+ * Une valeur, ce qu'elle est, et son écart à SA normale quand on en a une. Pas
+ * de courbe, pas de bornes, pas de moyenne : ce sont des réponses à d'autres
+ * questions, et elles sont repliées plus bas.
+ *
+ * Une puce ne s'écrit que si son chiffre existe. Une ligne vide, un tiret, un
+ * zéro qui veut dire « on ne sait pas » : chacun apprend à ne plus lire.
  */
-function qsCompteMarkup(d) {
-  const r = d.reception;
-  if (!r) return '';
-  const j = r.depuis_jours;
-  const quand = j == null ? 'aucun envoi'
-    : j === 0 ? "dernier envoi aujourd'hui"
-    : j === 1 ? 'dernier envoi hier'
-    : `dernier envoi il y a ${j} jours`;
-  // Une semaine de silence est le seuil ou « ca n'envoie plus » devient
-  // l'explication la plus probable. En dessous, c'est un week-end.
-  const vieux = j != null && j >= 7;
-  return `<div class="qscompte${vieux ? ' vieux' : ''}">
-    <span class="qscn mono">${r.couverts}</span>
-    <span class="qscq">journée${r.couverts > 1 ? 's' : ''} enregistrée${r.couverts > 1 ? 's' : ''}
-      <span class="faint">sur les ${d.jours} derniers jours · ${quand}</span></span>
-  </div>`;
+function qsPucesMarkup(d) {
+  const p = [];
+  const j = d.jour ?? {};
+
+  if (j.ecran != null) {
+    p.push({ v: qsDuree(Math.round(j.ecran / 60)), k: 'devant un écran',
+             note: j.ecranEcart != null && Math.abs(j.ecranEcart) >= 30
+               ? `${qsDuree(Math.abs(j.ecranEcart))} de ${j.ecranEcart > 0 ? 'plus' : 'moins'} que d'habitude`
+               : null,
+             sens: j.ecranEcart > 0 ? 'plus' : j.ecranEcart < 0 ? 'moins' : null });
+  }
+  if (j.ou?.part != null) {
+    p.push({ v: `${Math.round(j.ou.part * 100)} %`, k: j.ou.nom,
+             note: `${qsDuree(Math.round(j.ou.sec / 60))} sur la journée` });
+  }
+  if (j.bascules != null) {
+    p.push({ v: qsNb(j.bascules), k: 'bascules de fenêtre',
+             note: j.basculesFois != null
+               ? `${j.basculesFois.toFixed(1).replace('.', ',')}× ta normale` : null,
+             sens: j.basculesFois > 1.15 ? 'plus' : j.basculesFois < 0.85 ? 'moins' : null });
+  }
+  if (j.pauses != null) p.push({ v: qsNb(j.pauses), k: 'pauses' });
+
+  if (!p.length) return '';
+  return `<ul class="qspuces">${p.map(x => `<li class="qspuce${x.sens ? ' ' + x.sens : ''}">
+    <span class="qspv mono">${esc(x.v)}</span>
+    <span class="qspk">${esc(x.k)}</span>
+    ${x.note ? `<span class="qspn">${esc(x.note)}</span>` : ''}
+  </li>`).join('')}</ul>`;
 }
 
-async function ouvrirQS() {
-  QS_OUVERT = true;
+/**
+ * QUATRE-VINGT-DIX JOURS, ET PLUS DE SÉLECTEUR.
+ *
+ * Il y en avait trois — 30 j, 90 j, 1 an — et ils réglaient quelque chose que
+ * personne ne vient régler : ce qu'on regarde ici est SA JOURNÉE, pas une
+ * tendance. La fenêtre ne sert plus qu'à donner aux médianes de quoi être des
+ * médianes, et quatre-vingt-dix jours suffisent pour ça.
+ */
+const QS_FENETRE = 90;
+
+async function chargerQS() {
+  const vide = !QS_DATA;
   const hote = $('#qspanneau');
-  if (hote) hote.innerHTML = qsPanneauMarkup(null);
-  try { QS_DATA = await api(`/api/qs/contenu?jours=${QS_JOURS}`); }
+  // Au premier chargement seulement : ensuite on garde ce qui est affiché
+  // plutôt que de le faire clignoter pour le remettre identique.
+  if (hote && vide) hote.innerHTML = qsPanneauMarkup(null);
+  try { QS_DATA = await api(`/api/qs/contenu?jours=${QS_FENETRE}`); }
   catch (err) { QS_DATA = null;
-    if (hote) hote.innerHTML = `<div class="card"><p class="warn">${esc(err.message)}</p></div>`;
+    const h = $('#qspanneau');
+    if (h) h.innerHTML = `<div class="card"><p class="warn">${esc(err.message)}</p></div>`;
     return; }
   const h = $('#qspanneau');
   if (h) h.innerHTML = qsPanneauMarkup(QS_DATA);

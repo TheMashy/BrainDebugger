@@ -24,7 +24,7 @@ import { journee } from './journee.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
-import { nuitDe, archetypeDe, resumeDuJour, estDetail, enMinutes } from './allure.js';
+import { nuitDe, archetypeDe, resumeDuJour, estDetail, enMinutes, chiffresDuJour } from './allure.js';
 import { lireDigest } from './digest.js';
 import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, veilleDe,
          SOURCE_DIT, CLE_LEVER, CLE_COUCHER } from './jour-vecu.js';
@@ -1663,7 +1663,10 @@ export const routes = {
         const dernier = dernierJour;
         if (!dernier) return { nuit: null, archetype: null };
         const duJour = tous.filter(x => x.date === dernier);
-        return { jourLu: dernier, nuit: nuitDe(duJour, tous), archetype: archetypeDe(duJour, tous) };
+        return { jourLu: dernier, nuit: nuitDe(duJour, tous), archetype: archetypeDe(duJour, tous),
+                 // Les quelques chiffres qui font les puces : le temps d'écran,
+                 // où il est passé, le rythme. Chacun avec son écart à SA normale.
+                 jour: chiffresDuJour(duJour, tous) };
       })(),
 
       /*

@@ -3313,6 +3313,28 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qsfen { margin-left: auto; }
 .qsfen button { padding: 4px 11px; font-size: 12px; }
 
+/* LES PUCES : une valeur, ce qu'elle est, son écart à la normale.
+   Pas de courbe, pas de bornes — ce sont d'autres questions, et elles sont
+   repliées plus bas. */
+.qspuces {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 16px 24px;
+}
+.qspuce {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+  column-gap: 10px; align-items: baseline; min-width: 0;
+}
+.qspv { grid-row: 1 / 3; font-size: 21px; color: var(--ink); align-self: center; }
+.qspk { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* La note a le droit de passer à la ligne : coupée, « 1 h 58 de plus que
+   d'… » ne dit plus rien, et c'est justement la moitié qui informe. */
+.qspn { font-size: 11.5px; color: var(--ink-faint); line-height: 1.4; }
+/* LA COULEUR NE DIT PAS « BIEN » OU « MAL ». Elle dit le SENS de l'écart —
+   au-dessus, en dessous — et rien d'autre : personne ici n'est en position de
+   décider qu'une heure d'écran de plus est une mauvaise nouvelle. */
+.qspuce.plus .qspn { color: var(--warn); }
+.qspuce.moins .qspn { color: var(--accent); }
+
 /* LE COMPTE, EN PREMIER ET EN GRAND.
    C'est la question qu'on pose en ouvrant — combien de journées sont
    enregistrées — et elle n'avait qu'une petite ligne grise sous un titre.
