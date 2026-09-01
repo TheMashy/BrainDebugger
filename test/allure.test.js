@@ -12,8 +12,10 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nuitDe, archetypeDe, contextes, resumeDuJour, mediane, enMinutes, enHeure,
-         surLaNuit, duree, phrasesDeLaNuit, NOM_ARCHETYPE } from '../server/allure.js';
+import { nuitDe, archetypeDe, contextes, usageDuJour, resumeDuJour, mediane, enMinutes,
+         enHeure, surLaNuit, duree, phrasesDeLaNuit, NOM_ARCHETYPE,
+         NOM_FAMILLE, ARCHETYPES } from '../server/allure.js';
+import { TRAITS, ICO_ARCHETYPE, ICO_FAMILLE, ico } from '../web/icones.js';
 
 const m = (date, cle, valeur, extra = {}) => ({ date, cle, valeur, texte: null, unite: null, source: 'x', ...extra });
 const t = (date, cle, texte) => ({ date, cle, valeur: null, texte, unite: null, source: 'x' });
@@ -216,6 +218,75 @@ test('aucun archétype ne parle de la personne', () => {
     for (const mot of interdits) {
       assert.equal(nom.toLowerCase().includes(mot), false, `« ${nom} » contient « ${mot} »`);
     }
+  }
+});
+
+/* ====================== ce qui a été consulté ====================== */
+
+/*
+ * L'ARCHÉTYPE DIT LA FORME EN UN MOT ; L'USAGE DIT DE QUOI ELLE ÉTAIT FAITE.
+ *
+ * Les deux sortent du même comptage, et c'est la seule chose qui compte ici :
+ * une étiquette dont les chiffres d'à côté la contredisent est pire qu'une
+ * étiquette seule, et c'est exactement ce qui arriverait si l'écran
+ * recomptait de son côté.
+ */
+test('l’usage rend des minutes, triées, avec leur part', () => {
+  const j = jourType('2026-06-21', { nav: 21600, code: 3600, social: 1800, bascules: 90 });
+  const u = usageDuJour(j);
+  assert.equal(u.total, 27000 / 60);
+  assert.deepEqual(u.parts.map(p => p.fam), ['nav', 'travail', 'social']);
+  assert.deepEqual(u.parts.map(p => p.minutes), [360, 60, 30]);
+  // La part se lit en pourcentage : « 21 600 s » ne dit à personne si c'est
+  // la moitié de la journée ou le quart.
+  assert.equal(u.parts[0].part, 80);
+  assert.equal(u.parts[0].nom, NOM_FAMILLE.nav);
+});
+
+test('l’usage et l’archétype comptent la MÊME journée', () => {
+  const j = jourType('2026-06-21', { nav: 21600, code: 1800, bascules: 190 });
+  const a = archetypeDe(j, [...ordinaires, ...j]);
+  const u = usageDuJour(j);
+  // « 6 h 30 sur 6 h 30 » dans la preuve, et le même total dans l'usage.
+  assert.match(a.preuves.map(p => p.valeur).join(' '), new RegExp(duree(u.total)));
+});
+
+test('ce qu’on n’a pas su ranger garde sa ligne', () => {
+  // On ne replie pas ce qu'on n'a pas compris : sans `autre`, les parts ne
+  // feraient pas le total et rien ne dirait pourquoi.
+  const j = [m('j', 'temps_par_contexte_s_chrome', 3600),
+             m('j', 'temps_par_contexte_s_zzz', 3600)];
+  const u = usageDuJour(j);
+  assert.deepEqual(u.parts.map(p => p.fam).sort(), ['autre', 'nav']);
+  assert.equal(u.parts.reduce((a, p) => a + p.part, 0), 100);
+});
+
+test('sans écran, il n’y a pas d’usage — pas un usage à zéro', () => {
+  assert.equal(usageDuJour([]), null);
+  assert.equal(usageDuJour([m('j', 'poids', 72)]), null);
+  // Sous la minute, une famille n'a pas de ligne : « 0 min » n'apprend rien.
+  assert.equal(usageDuJour([m('j', 'temps_par_contexte_s_chrome', 20)]), null);
+});
+
+test('chaque famille et chaque archétype ont un nom lisible, et une icône', () => {
+  /*
+   * L'ÉCRAN LES DESSINE, ET RIEN NE LE DIRAIT S'IL MANQUAIT UNE ICÔNE.
+   *
+   * Les clés vivent ici, les dessins vivent dans `web/icones.js` : renommer un
+   * archétype d'un côté laisse l'autre muet, et une icône vide ne casse rien —
+   * elle disparaît, sans un mot, sur la seule ligne qui montre la journée
+   * d'ordinateur. C'est le genre de panne qu'on ne voit qu'en la cherchant.
+   */
+  for (const fam of Object.keys(contextes([]))) {
+    if (fam === 'total') continue;
+    assert.ok(NOM_FAMILLE[fam], `la famille « ${fam} » n'a pas de nom`);
+    assert.ok(TRAITS[ICO_FAMILLE[fam]], `la famille « ${fam} » n'a pas d'icône`);
+    assert.match(ico(ICO_FAMILLE[fam], 12), /^<svg/);
+  }
+  for (const cle of ARCHETYPES) {
+    assert.ok(NOM_ARCHETYPE[cle], `l'archétype « ${cle} » n'a pas de nom`);
+    assert.ok(TRAITS[ICO_ARCHETYPE[cle]], `l'archétype « ${cle} » n'a pas d'icône`);
+    assert.match(ico(ICO_ARCHETYPE[cle], 13), /^<svg/);
   }
 });
 
