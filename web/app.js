@@ -64,12 +64,22 @@ async function api(path, body) {
 let S = null;              // /api/state
 let view = 'tonight';
 
-function toast(msg) {
+/**
+ * @param {string} msg
+ * @param {{duree?: number}} [opts]  combien de temps il reste. Voir ci-dessous.
+ *
+ * DEUX SECONDES SUFFISENT POUR « Clé copiée », PAS POUR UNE PANNE.
+ *
+ * Un message d'erreur doit se lire ET se retenir : il nomme un réglage à
+ * changer. À 2,2 s, on voit qu'il s'est passé quelque chose et on a déjà perdu
+ * ce que c'était — il ne reste qu'à refaire le geste pour le relire.
+ */
+function toast(msg, { duree = 2200 } = {}) {
   const el = $('#toast');
   el.textContent = msg;
   el.classList.add('on');
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('on'), 2200);
+  el._t = setTimeout(() => el.classList.remove('on'), duree);
 }
 
 /* --------- infobulle globale (data-tip) --------- */
@@ -1230,7 +1240,15 @@ async function send() {
           toast('Le modèle a décliné — le compagnon hors-ligne a pris la main.');
           showHelpline();
         } else if (data.degraded) {
-          toast(`Modèle injoignable — repli hors-ligne (${String(data.degraded).slice(0, 60)})`);
+          /*
+           * PAS DE TRONCATURE. Elle coupait à soixante signes, c'est-à-dire
+           * pile avant la phrase utile : on lisait
+           * « (400 {"type":"error","error":{"type":"invalid_request_error", »
+           * et pas un mot de ce que l'API reprochait. Le serveur envoie
+           * maintenant une phrase française déjà lisible — la couper serait
+           * refaire la même chose sur un texte plus court.
+           */
+          toast(`Modèle injoignable — repli hors-ligne. ${data.degraded}`, { duree: 9000 });
         }
       }
     });
@@ -3765,11 +3783,14 @@ function thematiquesMarkup(ts) {
  */
 function sujetsMarkup(sujets) {
   if (!sujets?.length) return '';
+  /* PAS D'ESTIMATION ICI. Cette colonne sert à VOIR LES SUJETS, pas à relire une
+     note : le chiffre du passage se lit déjà dans les moments à gauche et dans
+     la note de la journée. L'icône, plus grande, porte le sujet ; la survoler en
+     donne le nom — c'est tout ce qu'on vient chercher ici. */
   return `<div class="jsujets">${sujets.map(s => `
     <div class="jsujet">
-      <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 16)}</span>
+      <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 20)}</span>
       <p class="serif jstexte">${esc(s.texte)}</p>
-      ${estimeMarkup(s.estime)}
     </div>`).join('')}</div>`;
 }
 
@@ -3785,7 +3806,7 @@ function journeeMarkup(m) {
 
   return `<div class="jgrille">
     ${moments.length ? `<div class="jcol jfil">
-      <div class="k faint">Ce qui s'est dit</div>
+      <div class="k faint">Humeurs de la journée</div>
       <ol class="jmoments">${moments.map(momentMarkup).join('')}</ol>
     </div>` : ''}
     ${cote ? `<div class="jcol jcote">${cote}</div>` : ''}

@@ -747,6 +747,30 @@ const SOURCE_LABEL = { stored: 'la clé enregistrée dans l\'app', env: 'la vari
  * une cle collee dans l'interface l'emporte sur la variable d'environnement,
  * ce qui est la source de confusion la plus frequente.
  */
+/**
+ * LA PHRASE DE L'API, PAS SON ENVELOPPE.
+ *
+ * Le message d'une erreur du SDK ressemble a
+ * `400 {"type":"error","error":{"type":"invalid_request_error","message":"…"}}`.
+ * Tout ce qui a de la valeur est dans `message`, tout au bout -- et c'est
+ * exactement ce qu'une troncature coupe. On va donc le chercher.
+ */
+function messageDeLApi(err) {
+  const direct = err?.error?.error?.message ?? err?.error?.message;
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  const brut = String(err?.message ?? err ?? '');
+  // Le SDK ne donne pas toujours l'objet : on repeche le JSON dans le texte.
+  const m = /\{[\s\S]*\}/.exec(brut);
+  if (m) {
+    try {
+      const j = JSON.parse(m[0]);
+      const t = j?.error?.message ?? j?.message;
+      if (typeof t === 'string' && t.trim()) return t.trim();
+    } catch { /* pas du JSON : on rendra le texte brut */ }
+  }
+  return brut;
+}
+
 export function explainApiError(err, source) {
   const status = err?.status ?? err?.statusCode;
   const which = SOURCE_LABEL[source] ?? 'la clé';
@@ -754,8 +778,17 @@ export function explainApiError(err, source) {
   if (status === 403) return `Accès refusé (403). ${which} n'a pas accès à ce modèle.`;
   if (status === 429) return 'Limite de débit atteinte (429). Réessaie dans un instant.';
   if (status === 404) return "Modèle inconnu (404). Vérifie le modèle choisi dans Réglages.";
+  /*
+   * LE 400 MANQUAIT, ET C'EST CELUI QU'ON A EU.
+   *
+   * Il ne vient jamais de la cle ni du reseau : il vient de CE QU'ON A ENVOYE.
+   * Un parametre que le modele choisi ne porte pas, un schema d'outil refuse.
+   * La seule chose utile est la phrase de l'API, et il faut la montrer entiere
+   * -- c'est elle qui nomme le champ fautif.
+   */
+  if (status === 400) return `Requête refusée (400) : ${messageDeLApi(err)}`;
   if (status >= 500) return `L'API est indisponible (${status}). Réessaie plus tard.`;
-  return String(err?.message ?? err).slice(0, 160);
+  return messageDeLApi(err);
 }
 
 /** Test de la clé sans consommer de jetons : on interroge l'API des modèles. */
@@ -771,6 +804,39 @@ export async function testKey(settings) {
     return { ok: false, source, reason: explainApiError(err, source) };
   }
 }
+
+/*
+ * =====================================================================
+ * LE REPLI SERVEUR NE SE DEMANDE PAS A N'IMPORTE QUEL MODELE.
+ *
+ * `fallbacks: 'default'` fait repartir une requete declinee par un
+ * classificateur sur un autre modele, dans le meme appel. C'est une bonne chose
+ * sur ce produit : un refus tombe pile au pire moment, quelqu'un qui ecrit une
+ * soiree difficile.
+ *
+ * MAIS C'EST UNE FONCTION D'UNE FAMILLE DE MODELES, pas de l'API en general.
+ * Envoyee ailleurs, elle fait repondre 400 -- et un 400 sur la route du chat,
+ * ce n'est pas une fonctionnalite en moins, c'est le compagnon entier qui
+ * tombe en repli hors-ligne.
+ *
+ * C'EST EXACTEMENT CE QUI EST ARRIVE. Le parametre a ete ecrit quand le
+ * compagnon tournait sur Opus 5 ; le chantier sur le cout l'a bascule sur
+ * Sonnet 5 pour economiser, et a laisse le repli derriere lui. Personne ne l'a
+ * vu : les tests parlent a un faux serveur qui accepte n'importe quel corps.
+ *
+ * LES DEUX ECHECS NE SE VALENT PAS, et c'est ce qui decide de la valeur par
+ * defaut. Ne pas envoyer le repli coute un filet de securite sur un refus, qui
+ * est rare. L'envoyer ou il n'est pas compris coute toutes les conversations.
+ * Un modele inconnu de cette liste n'a donc pas de repli.
+ * =====================================================================
+ */
+export const MODELES_AVEC_REPLI = ['claude-opus-5', 'claude-fable-5', 'claude-mythos-5'];
+
+/** Les deux champs du repli serveur, ou rien du tout. A etaler dans la requete. */
+export const repliServeur = model =>
+  MODELES_AVEC_REPLI.includes(String(model ?? '').trim())
+    ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }
+    : {};
 
 export const ANTHROPIC_MODELS = [
   { id: 'claude-opus-5',   label: 'Opus 5',   note: 'le plus capable' },
@@ -867,12 +933,10 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
     let stream;
     try {
       stream = client.beta.messages.stream({
-        // Repli serveur : si un classificateur decline, la requete repart sur un
-        // autre modele dans le meme appel. Sur ce produit, un refus tombe pile au
-        // pire moment -- quelqu'un qui ecrit une soiree difficile. Le silence n'est
-        // pas une option acceptable.
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
+        // Repli serveur, MAIS SEULEMENT SI LE MODELE LE CONNAIT. Voir
+        // `repliServeur` : demande a un modele qui ne le porte pas, il rend 400
+        // et fait tomber tout le compagnon.
+        ...repliServeur(s.anthropicModelChat || 'claude-sonnet-5'),
         /*
          * LE COMPAGNON ET LA LECTURE N'ONT PAS BESOIN DE LA MEME TETE.
          *
@@ -1294,6 +1358,17 @@ export async function reply(history, settings, { memory = null, echos = null, on
   } catch (err) {
     const text = scriptedReply(history);
     onText?.(text);
-    return { text, backend: 'scripted', degraded: String(err.message ?? err) };
+    /*
+     * ON EXPLIQUE, ON NE RECOPIE PAS. `String(err.message)` remontait
+     * l'enveloppe JSON du SDK jusqu'a l'ecran, ou elle etait tronquee avant
+     * d'arriver a la phrase utile. `explainApiError` sait ou elle est.
+     *
+     * Et on la journalise entiere cote serveur : le bandeau doit tenir sur une
+     * ligne, la trace n'a pas cette contrainte, et c'est elle qu'on relit quand
+     * ca recommence.
+     */
+    console.error('[chat]', err?.status ?? '', err?.message ?? err);
+    const { source } = resolveKey(settings);
+    return { text, backend: 'scripted', degraded: explainApiError(err, source) };
   }
 }

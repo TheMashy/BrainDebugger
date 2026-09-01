@@ -26,7 +26,7 @@
  * le corpus est retiree, en silence : le theme survit, la preuve fausse non.
  */
 
-import { resolveKey } from './chat.js';
+import { resolveKey, repliServeur } from './chat.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
 import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
 import { SCHEMA_HORIZONS, validerHorizons, ecritesParHorizon } from './horizons.js';
@@ -1104,10 +1104,17 @@ function depouiller(res, corpus, settings) {
 export async function lire(corpus, settings) {
   const client = await clientDe(settings);
   const res = await client.beta.messages.create({
-    // Repli serveur : un refus sur une lecture de fond renverrait l'ecran a
-    // « Lancer la lecture », sans rien dire de ce qui s'est passe.
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
+    /*
+     * Repli serveur : un refus sur une lecture de fond renverrait l'ecran a
+     * « Lancer la lecture », sans rien dire de ce qui s'est passe.
+     *
+     * MEME GARDE QUE POUR LE COMPAGNON, et pour la meme raison : la lecture se
+     * regle dans Reglages, on peut y choisir Sonnet ou Haiku, et le repli
+     * demande a un modele qui ne le porte pas rend 400. Le modele est lu ici
+     * exactement comme `requeteLecture` le lit, sinon la garde protegerait un
+     * autre appel que celui qui part.
+     */
+    ...repliServeur(settings.anthropicModel || 'claude-opus-5'),
     ...requeteLecture(corpus, settings)
   });
   return depouiller(res, corpus, settings);
