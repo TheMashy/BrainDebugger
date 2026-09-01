@@ -2,7 +2,7 @@ import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
 import { disposer } from './carte.js';
 import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
-         vueNeutre, zoomer, poidsDuNoeud, ilotDesNoeuds,
+         vueNeutre, zoomer, poidsDuNoeud, ilotDesNoeuds, contour,
          NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
@@ -3185,6 +3185,12 @@ async function renderLecture() {
              ? 'Partie en tâche de fond, à moitié prix. Elle arrive dans l’heure.' : ''}">
              <span class="spin petit"></span> il relit${L.enLot ? ' — en fond' : ''}</span>`
         : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus, tout de suite.">${ico('refaire')}relire</button>`) : ''}
+      ${/* RETISSER : la même lecture, mais REGARDÉE. Deux fois par jour, parce
+             que rien ne change en une heure, et qu'une toile qu'on rejoue
+             jusqu'à ce qu'elle plaise n'est plus une lecture. */''}
+      ${L.lecture && !LECTURE_EN_COURS && !L.enLot ? (L.retissage > 0
+        ? `<span class="lecmeta faint" title="Deux fois par jour, pas plus.">retisser — dans ${enClair(L.retissage)}</span>`
+        : `<button class="btn" id="retisser" title="Tout est relu, et tu regardes la toile se refaire.">${ico('carte', 13)}retisser</button>`) : ''}
     </div>
     ${/* Une relecture qui échoue par-dessus une lecture existante ne peut pas
           prendre l'écran — l'ancienne vaut mieux que rien — mais elle ne peut
@@ -3195,7 +3201,7 @@ async function renderLecture() {
           apercevoir est de remarquer que la date ne bouge plus. */''}
     ${!LECTURE_ERR && L.lotErreur ? `<p class="sub lecterr lecterrhaut">La lecture de fond n'a pas abouti — ${esc(L.lotErreur)} Tu peux relancer avec « relire ».</p>` : ''}
     ${corps}
-  </div>`;
+  </div>${tissageMarkup()}`;
 
   wireLecture();
   wireIlots();
@@ -3333,6 +3339,8 @@ function wireLecture() {
     }
 
     if (e.target.closest('[data-lire]')) return lancerLecture();
+    if (e.target.closest('#retisser')) return retisser();
+    if (e.target.closest('#tsfin')) return fermerTissage();
     if (e.target.closest('[data-aller-reglages]')) { view = 'settings'; syncNav(); return renderSettings(); }
     const j = e.target.closest('[data-jour]');
     if (j) return ouvrirJour(j.dataset.jour);
@@ -5476,3 +5484,474 @@ async function boot() {
 }
 
 boot();
+
+
+/* ==========================================================================
+   RETISSER LA TOILE — ET LA REGARDER SE FAIRE.
+
+   « Relire » existait : un bouton, deux minutes de sablier, une carte qui
+   apparaît d'un coup. Or ce qui se passe entre les deux est ce que cette
+   application fait de plus rare — tout le journal est relu, et une forme en
+   sort. Le cacher derrière un sablier, c'est jeter la seule chose qu'elle a de
+   spectaculaire.
+
+   TROIS TEMPS, ET AUCUN N'EST DÉCORATIF.
+
+   1. On rassemble. Une lueur par journée relue — pas « des particules », le
+      nombre exact des journées, et leur écart donne leur couleur. Regarder
+      quatre ans de sa vie s'allumer point par point est déjà quelque chose.
+
+   2. Il lit. Les lueurs respirent, et un compteur dit combien de signes le
+      modèle a écrits. Pas de barre de progression : on ne sait pas quand ça
+      s'arrête, et une barre qui avance vers une fin inventée ment à chaque
+      seconde.
+
+   3. Ça se tisse. Chaque lueur rejoint LA CHOSE QUI LA RÉCLAME — un nœud porte
+      ses journées, c'est ce qu'il est. Puis la simulation tourne à l'image :
+      ce qu'on regarde alors est la disposition en train de se faire, quatre
+      tours par image, pas une animation qui l'imiterait.
+
+   À la fin, les groupes se nomment, un par un.
+   ========================================================================== */
+
+let TISSAGE = null;         // { phase, corpus, signes, G, sim, vue, lueurs, groupes, err }
+/* Le nombre de tours d'une disposition complète : c'est le travail à étaler. */
+const TOURS_TISSAGE = 320;
+let TISSAGE_BOUCLE = 0;
+
+const PHASES = {
+  rassemble: 'je relis tout',
+  lit:       'elle lit',
+  tisse:     'ça se tisse',
+  fini:      null
+};
+
+/** Le temps restant, en clair. « dans 4 h 20 » se lit ; « 15 600 000 » non. */
+function enClair(ms) {
+  const m = Math.ceil(ms / 60000);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return `${h} h ${String(m % 60).padStart(2, '0')}`;
+}
+
+/**
+ * La place de départ d'une lueur : une spirale de tournesol.
+ *
+ * L'angle d'or répartit n points sans jamais former de rangée ni de rayon —
+ * c'est la disposition la plus régulière qui n'ait pas l'air rangée. Une grille
+ * dirait « voici un tableau de données » ; une spirale dit « voici beaucoup de
+ * jours », ce qui est vrai.
+ */
+const OR = Math.PI * (3 - Math.sqrt(5));
+function spirale(i, n, L, H) {
+  const r = Math.sqrt((i + 0.5) / n) * Math.min(L, H) * 0.42;
+  const a = i * OR;
+  return { x: L / 2 + Math.cos(a) * r, y: H / 2 + Math.sin(a) * r };
+}
+
+/** La vue qui fait tenir un nuage de points dans le cadre, sans le déformer. */
+function vuePour(pts, L, H, marge = 72) {
+  if (!pts.length) return vueNeutre();
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+    if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+  }
+  /*
+   * LE HAUT ET LE BAS SONT PRIS. Le titre occupe le premier cinquième de
+   * l'écran, les groupes le dernier ; une toile centrée dans TOUT le cadre
+   * passe donc dessous et sous les deux. On cadre dans ce qui reste.
+   */
+  const haut = H * 0.20, bas = H * 0.18;
+  const dispo = H - haut - bas;
+  const k = Math.min((L - marge * 2) / Math.max(1, x1 - x0),
+                     (dispo - marge) / Math.max(1, y1 - y0), 1.5);
+  return { k,
+    x: marge + (L - marge * 2 - (x1 - x0) * k) / 2 - x0 * k,
+    y: haut + (dispo - (y1 - y0) * k) / 2 - y0 * k };
+}
+
+const versLa = (a, b, t) => a + (b - a) * t;
+
+function tissageMarkup() {
+  const t = TISSAGE;
+  if (!t) return '';
+  const titre = t.err ? 'ça n’a pas abouti' : (PHASES[t.phase] ?? 'ta toile');
+  return `<div class="tissage" id="tissage">
+    <canvas id="tissagecv"></canvas>
+    <div class="tsdessus">
+      <div class="tstitre">${esc(titre)}</div>
+      <div class="tsdit" id="tsdit">${esc(t.dit ?? '')}</div>
+      ${t.err ? `<p class="tserr">${esc(t.err)}</p>` : ''}
+      ${t.phase === 'fini' || t.err
+        ? `<button class="btn" id="tsfin">${t.err ? 'revenir' : 'voir ma carte'}</button>` : ''}
+    </div>
+    ${t.groupes?.length ? `<div class="tsgroupes">${t.groupes.map((g, i) =>
+      `<span class="tsg" style="--p:${g.teinte ?? TEINTES_DECLAREES[i % TEINTES_DECLAREES.length]};
+              --d:${(i * 0.45).toFixed(2)}s">${esc(g.nom)}</span>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+/** Le texte sous le titre, réécrit sans reconstruire la vue : elle porte un canvas. */
+function tissageDit(texte) {
+  if (TISSAGE) TISSAGE.dit = texte;
+  const el = $('#tsdit');
+  if (el) el.textContent = texte;
+  const ti = $('.tstitre');
+  if (ti && TISSAGE) ti.textContent = TISSAGE.err ? 'ça n’a pas abouti' : (PHASES[TISSAGE.phase] ?? 'ta toile');
+}
+
+/**
+ * LA BOUCLE. Une image, trois couches : les lueurs, les liens, les nœuds.
+ *
+ * Elle tourne du premier événement à la fin, et c'est la même boucle qui montre
+ * les journées puis la toile — sans coupure, parce que ce sont les mêmes points.
+ */
+function tissageBoucle() {
+  const cv = $('#tissagecv');
+  if (!cv || !TISSAGE) { TISSAGE_BOUCLE = 0; return; }
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const L = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== L * dpr) { cv.width = L * dpr; cv.height = H * dpr; }
+  const ctx = cv.getContext('2d');
+  const t = TISSAGE;
+  t.image = (t.image ?? 0) + 1;
+
+  // Les lueurs s'allument en deux secondes et demie, quel que soit le nombre de
+  // journées et quelle que soit la machine — même raison que pour le tissage.
+  if (t.lueurs && t.nees < t.lueurs.length) {
+    const now = performance.now();
+    t.neesDepuis = (t.neesDepuis ?? 0) + Math.min(120, now - (t.horlogeL ?? now));
+    t.horlogeL = now;
+    t.nees = Math.min(t.lueurs.length, Math.ceil(t.lueurs.length * (t.neesDepuis / 2500)));
+  }
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, L, H);
+
+  /* ---- la simulation avance, si elle a commencé ---- */
+  if (t.sim && !t.pose) {
+    /*
+     * LE TISSAGE DURE SIX SECONDES. PAS TROIS CENT VINGT IMAGES.
+     *
+     * Le débit était compté PAR IMAGE. Sur une machine à soixante images par
+     * seconde ça donnait les six secondes voulues ; sur une machine lente —
+     * un vieux téléphone, un navigateur qui rame — la même chose prenait
+     * cinquante secondes. Le spectacle n'a pas à punir celui qui a le moins de
+     * puissance : c'est exactement l'inverse de ce qu'on veut.
+     *
+     * On mesure donc le TEMPS écoulé, et on rattrape ce qu'il faut de tours.
+     * Et on garde la courbe : le début, où tout bouge et où c'est beau, prend
+     * son temps ; la fin, où les points ne font que se caler au pixel près,
+     * passe vite.
+     */
+    const DUREE = 6000;
+    const now = performance.now();
+    const dt = Math.min(120, now - (t.horloge ?? now));   // un onglet en fond ne rattrape pas tout d'un coup
+    t.horloge = now;
+    t.ecoule = (t.ecoule ?? 0) + dt;
+    const avance = Math.min(1, t.ecoule / DUREE);
+    // La vitesse va du simple au quintuple ; son intégrale sur la durée vaut
+    // les 320 tours, quel que soit le nombre d'images qu'on a eues pour ça.
+    const vitesse = TOURS_TISSAGE / DUREE * (0.4 + 1.2 * avance);
+    t.debit = (t.debit ?? 0) + vitesse * dt;
+    const n = Math.floor(t.debit);
+    t.debit -= n;
+    if (n > 0 && t.sim.pas(n)) t.pose = true;
+    const cible = vuePour(t.sim.pts, L, H);
+    // La vue rejoint sa cible au lieu d'y sauter : le cadre bouge à chaque tour
+    // tant que la toile s'étale, et sauter donnerait un tremblement.
+    t.vue = t.vue ? { k: versLa(t.vue.k, cible.k, 0.08),
+                      x: versLa(t.vue.x, cible.x, 0.08),
+                      y: versLa(t.vue.y, cible.y, 0.08) } : cible;
+    // Une fois posée, on cesse de poursuivre : la vue se cale sur le cadrage
+    // exact. Sinon elle s'arrête là où le rattrapage en était, et la toile
+    // finit de travers pour une raison invisible.
+    if (t.pose) { t.arrivee = t.image; t.vue = cible; }
+  }
+  const v = t.vue ?? vueNeutre();
+  const dansLaVue = p => ({ x: p.x * v.k + v.x, y: p.y * v.k + v.y });
+
+  /* ---- 1. les lueurs : une par journée relue ---- */
+  const resp = 0.5 + 0.5 * Math.sin(t.image / 26);
+  for (let i = 0; i < (t.nees ?? 0); i++) {
+    const g = t.lueurs[i];
+    if (g.cible) {
+      // Elle rejoint la chose qui la réclame. Un nœud PORTE ses journées :
+      // ce trajet n'est pas une transition, c'est ce que la carte veut dire.
+      const c = dansLaVue(t.sim.pts[g.cible.i]);
+      const a = g.cible.a;
+      g.x = versLa(g.x, c.x + Math.cos(a) * g.cible.r * v.k, 0.055);
+      g.y = versLa(g.y, c.y + Math.sin(a) * g.cible.r * v.k, 0.055);
+    } else if (g.perdue) {
+      g.o = Math.max(0, (g.o ?? 1) - 0.012);      // aucune chose ne la réclame
+    }
+    const o = (g.o ?? 1) * (g.cible ? 0.85 : 0.34 + 0.3 * resp);
+    if (o <= 0.01) continue;
+    ctx.globalAlpha = o;
+    ctx.fillStyle = g.c;
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, g.cible ? 1.5 : 1.9, 0, 7);
+    ctx.fill();
+  }
+
+  /* ---- 2. les liens, puis 3. les nœuds — ils entrent quand la toile arrive ---- */
+  if (t.G && t.sim) {
+    const entree = Math.min(1, (t.image - (t.debutToile ?? t.image)) / 90);
+    ctx.globalAlpha = entree * 0.5;
+    ctx.lineCap = 'round';
+    for (const l of t.G.liens) {
+      const a = dansLaVue(t.sim.pts[l.s]), b = dansLaVue(t.sim.pts[l.t]);
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.quadraticCurveTo(mx - dy * 0.13, my + dx * 0.13, b.x, b.y);
+      ctx.strokeStyle = `hsl(${TEINTE_GENRE[t.G.noeuds[l.s].genre] ?? 288} 55% 58%)`;
+      ctx.lineWidth = (0.7 + l.force * 2) * v.k;
+      ctx.stroke();
+    }
+
+    /* Les enveloppes, tout à la fin : un îlot n'est un îlot qu'une fois posé. */
+    if (t.pose && t.arrivee) {
+      const ilots = Math.min(1, (t.image - t.arrivee) / 45);
+      for (const a of t.G.ilots ?? []) {
+        const dedans = t.G.noeuds.map((n, i) => [n, i]).filter(([n]) => n.ilot === a.i)
+          .map(([, i]) => dansLaVue(t.sim.pts[i]));
+        if (dedans.length < 2) continue;
+        const forme = contour(dedans, 34 * v.k);
+        ctx.globalAlpha = ilots * (a.nom ? 0.16 : 0.08);
+        ctx.fillStyle = `hsl(${a.teinte ?? 288} 55% 58%)`;
+        /* EN COURBES, comme sur la vraie carte : un polygone se lit comme un
+           schéma, une forme lissée se lit comme un groupe. C'est le même tracé
+           des deux côtés — ce qu'on regarde se faire doit ressembler à ce qu'on
+           trouvera après. */
+        ctx.beginPath();
+        const mi = (x, y) => ({ x: (x.x + y.x) / 2, y: (x.y + y.y) / 2 });
+        let m = mi(forme.at(-1), forme[0]);
+        ctx.moveTo(m.x, m.y);
+        for (let k = 0; k < forme.length; k++) {
+          const suiv = mi(forme[k], forme[(k + 1) % forme.length]);
+          ctx.quadraticCurveTo(forme[k].x, forme[k].y, suiv.x, suiv.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    for (let i = 0; i < t.G.noeuds.length; i++) {
+      const n = t.G.noeuds[i], p = dansLaVue(t.sim.pts[i]);
+      const r = (4 + Math.log2(1 + (n.jours ?? 1)) * 2.2) * v.k * entree;
+      if (r < 0.4) continue;
+      ctx.globalAlpha = entree;
+      ctx.fillStyle = '#0a0c0b';
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill();
+      ctx.strokeStyle = `hsl(${TEINTE_GENRE[n.genre] ?? 288} 58% 64%)`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.stroke();
+    }
+  }
+
+  TISSAGE_BOUCLE = requestAnimationFrame(tissageBoucle);
+}
+
+/**
+ * Les lueurs, une par journée, colorées par l'ÉCART de leur journée.
+ *
+ * L'écart vient du serveur, avec la date. Il venait d'un cache du client qui
+ * n'existe que dans « Année » et n'a pas cette forme : toutes les lueurs
+ * sortaient donc de la même couleur, et on regardait une pluie de points
+ * identiques au lieu de ses années dans les couleurs qu'elles ont eues.
+ */
+function poserLueurs(jours, L, H) {
+  const n = jours.length || 1;
+  return jours.map((j, i) => {
+    const p = spirale(i, n, L, H);
+    return { date: j.d, x: p.x, y: p.y, o: 1,
+             c: deltaColor(j.e) ?? 'rgb(120,130,124)' };
+  });
+}
+
+/**
+ * LES LUEURS TROUVENT LEUR CHOSE.
+ *
+ * Chaque nœud porte ses journées. On répartit donc chaque lueur sur l'anneau du
+ * nœud qui la réclame — le premier qui la réclame : une journée peut appartenir
+ * à plusieurs choses, et la dupliquer en ferait deux journées.
+ */
+function accrocherLueurs(t) {
+  const parDate = new Map();
+  t.G.noeuds.forEach((n, i) => {
+    const jours = (n.occurrences ?? []).map(j => (typeof j === 'string' ? j : j?.d)).filter(Boolean);
+    jours.forEach((d, k) => {
+      if (parDate.has(d)) return;
+      parDate.set(d, { i, a: (k / Math.max(1, jours.length)) * Math.PI * 2,
+                       r: 9 + Math.log2(1 + jours.length) * 3.4 });
+    });
+  });
+  for (const g of t.lueurs) {
+    const c = parDate.get(g.date);
+    if (c) g.cible = c; else g.perdue = true;
+  }
+}
+
+async function retisser() {
+  if (TISSAGE) return;
+  TISSAGE = { phase: 'rassemble', dit: 'je rassemble ton journal…', lueurs: null, nees: 0,
+              G: null, sim: null, vue: null, groupes: null, err: null, image: 0 };
+  await renderLecture();
+  cancelAnimationFrame(TISSAGE_BOUCLE);
+  TISSAGE_BOUCLE = requestAnimationFrame(tissageBoucle);
+
+  /*
+   * LA BOUCLE NE S'ARRETE PAS AVEC LE FLUX.
+   *
+   * Elle etait coupee a la fin du flux -- ce qui semblait propre, et ne l'etait
+   * pas : le serveur a fini d'envoyer bien AVANT que la toile ait fini de se
+   * poser. La simulation a trois cent vingt tours a jouer apres le dernier
+   * evenement, et la couper la fige en six images. La boucle appartient a
+   * l'ecran ; elle s'arrete quand on ferme le tissage, pas quand le serveur se
+   * tait.
+   */
+
+  try {
+    await fluxSSE('/api/lecture/retisser', {}, (ev, d) => {
+      const cv = $('#tissagecv');
+      const L = cv?.clientWidth || 900, H = cv?.clientHeight || 600;
+      if (ev === 'refus') {
+        TISSAGE.err = `Tu as retissé il y a peu — reviens dans ${enClair(d.attente)}.`;
+        tissageDit('');
+        rejouerTissage();
+      } else if (ev === 'corpus') {
+        TISSAGE.corpus = d;
+        TISSAGE.lueurs = poserLueurs(d.jours ?? [], L, H);
+        TISSAGE.nees = 0;
+        tissageDit(`${d.journees} journées · ${d.ecrites} écrites · ${d.reperes} repères · ${d.motifs} motifs`);
+      } else if (ev === 'lit') {
+        if (TISSAGE.phase !== 'lit') { TISSAGE.phase = 'lit'; }
+        // Le nombre de signes, pas un pourcentage : c'est ce qu'on sait.
+        tissageDit(`${new Intl.NumberFormat('fr-FR').format(d.signes)} signes écrits`);
+      } else if (ev === 'toile') {
+        LECTURE = { ...(LECTURE ?? {}), ...d, possible: true, perime: false, arelire: false };
+        MOI = null;
+        const pistes = d.lecture?.pistes ?? [];
+        const G = versGraphe(d.lecture?.carte, pistes);
+        /*
+         * LA TOILE ATTEND QUE TOUTES LES JOURNEES SOIENT LA.
+         *
+         * Sur un journal court -- ou un modele rapide -- la lecture revient
+         * avant que les lueurs aient fini de s'allumer, et la toile se posait
+         * par-dessus des journees a moitie arrivees. On ne saute pas le premier
+         * temps parce que le second est pret : ce qu'on relit merite d'etre vu
+         * en entier, meme quand ca va vite.
+         */
+        const poser = () => {
+          if (!TISSAGE) return;
+          if (TISSAGE.lueurs && TISSAGE.nees < TISSAGE.lueurs.length) return setTimeout(poser, 120);
+          TISSAGE.phase = 'tisse';
+          TISSAGE.G = G;
+          TISSAGE.sim = disposer(G, L, H, { progressif: true });
+          TISSAGE.sim.pas(1);                    // un tour, pour que les centres existent
+          TISSAGE.debutToile = TISSAGE.image;
+          accrocherLueurs(TISSAGE);
+          tissageDit(`${G.noeuds.length} choses, ${G.liens.length} liens`);
+        };
+        poser();
+      } else if (ev === 'fini') {
+        TISSAGE.groupes = d.groupes ?? [];
+        if (d.usage) { S.usage = d.usage; syncGauge(); }
+        // Les groupes ne se nomment qu'une fois la toile POSÉE : les annoncer
+        // sur une toile qui bouge encore, c'est nommer ce qui n'a pas de forme.
+        const attendre = () => {
+          if (TISSAGE?.pose) { TISSAGE.phase = 'fini'; rejouerTissage(); }
+          else if (TISSAGE) setTimeout(attendre, 200);
+        };
+        attendre();
+      } else if (ev === 'erreur' || ev === 'error') {
+        TISSAGE.err = d.error ?? 'la lecture n’a pas abouti';
+        rejouerTissage();
+      }
+    });
+  } catch (err) {
+    if (TISSAGE) { TISSAGE.err = err.message; rejouerTissage(); }
+  }
+}
+
+/* Redessine l'habillage SANS toucher au canvas : le reconstruire perdrait la
+   toile en cours de tissage, qui vit dans son contexte. */
+function rejouerTissage() {
+  const hote = $('#tissage');
+  if (!hote || !TISSAGE) return;
+  const dessus = hote.querySelector('.tsdessus');
+  const t = TISSAGE;
+  if (dessus) {
+    dessus.innerHTML = `<div class="tstitre">${esc(t.err ? 'ça n’a pas abouti' : (PHASES[t.phase] ?? 'ta toile'))}</div>
+      <div class="tsdit" id="tsdit">${esc(t.dit ?? '')}</div>
+      ${t.err ? `<p class="tserr">${esc(t.err)}</p>` : ''}
+      ${t.phase === 'fini' || t.err
+        ? `<button class="btn" id="tsfin">${t.err ? 'revenir' : 'voir ma carte'}</button>` : ''}`;
+  }
+  let g = hote.querySelector('.tsgroupes');
+  if (t.groupes?.length && t.phase === 'fini') {
+    if (!g) { g = document.createElement('div'); g.className = 'tsgroupes'; hote.appendChild(g); }
+    g.innerHTML = t.groupes.map((x, i) =>
+      `<span class="tsg" style="--p:${x.teinte ?? TEINTES_DECLAREES[i % TEINTES_DECLAREES.length]};
+              --d:${(i * 0.45).toFixed(2)}s">${esc(x.nom)}</span>`).join('');
+  }
+}
+
+/** Fermer le tissage : la toile est déjà en base, on affiche la vraie carte. */
+async function fermerTissage() {
+  cancelAnimationFrame(TISSAGE_BOUCLE);
+  TISSAGE_BOUCLE = 0;
+  TISSAGE = null;
+  await renderLecture();
+}
+
+/**
+ * UN FLUX SSE, LU À LA MAIN.
+ *
+ * `EventSource` ne sait pas faire de POST. Le compagnon lit déjà son flux comme
+ * ça ; celui-ci suit la même forme — un événement par ligne `event:`, sa charge
+ * sur la ligne `data:` qui suit.
+ */
+async function fluxSSE(url, corps, onEvent) {
+  const res = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(corps ?? {})
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.slice(0, 200));
+  const lecteur = res.body.getReader();
+  const dec = new TextDecoder();
+  let tampon = '';
+  for (;;) {
+    const { value, done } = await lecteur.read();
+    if (done) break;
+    tampon += dec.decode(value, { stream: true });
+    const blocs = tampon.split('\n\n');
+    tampon = blocs.pop() ?? '';
+    for (const bloc of blocs) {
+      let ev = 'message', data = '';
+      for (const ligne of bloc.split('\n')) {
+        if (ligne.startsWith('event: ')) ev = ligne.slice(7).trim();
+        else if (ligne.startsWith('data: ')) data += ligne.slice(6);
+      }
+      if (!data) continue;
+      /*
+       * ON SÉPARE LA LECTURE DU TRAITEMENT, ET C'EST TOUT L'ENJEU.
+       *
+       * Les deux étaient dans le même `try` : un bloc partiel et un bug dans le
+       * gestionnaire tombaient dans le même `catch` vide. Résultat, une erreur
+       * dans le traitement d'un événement disparaissait sans trace — pas de
+       * message, pas de ligne en console, juste un écran qui n'avance plus.
+       *
+       * Le `catch` ne couvre donc plus que l'analyse, qui est la seule chose
+       * dont l'échec soit normal. Ce que fait le gestionnaire de la donnée,
+       * lui, a le droit de casser bruyamment.
+       */
+      let charge;
+      try { charge = JSON.parse(data); } catch { continue; }   // bloc partiel
+      onEvent(ev, charge);
+    }
+  }
+}

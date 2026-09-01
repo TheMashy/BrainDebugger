@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { routes, streamMessage, ambiance } from './api.js';
+import { routes, streamMessage, retisser, ambiance } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle } from './passerelle.js';
 import { analyser, apercuDe } from './mesures.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
@@ -410,7 +410,13 @@ async function traiter(req, res) {
 
   /* ---------- flux SSE ---------- */
   // Traite avant `routes` : ecrit lui-meme dans la reponse au lieu de rendre du JSON.
-  if (key === 'POST /api/message/stream') {
+  /*
+   * DEUX FLUX, LE MEME TUYAU. Le compagnon qui parle et la toile qui se tisse
+   * sont deux choses qu'on REGARDE se faire : dans les deux cas, attendre en
+   * silence la fin d'un appel de deux minutes serait perdre ce qui se passe
+   * pendant.
+   */
+  if (key === 'POST /api/message/stream' || key === 'POST /api/lecture/retisser') {
     try {
       const body = await readBody(req);
       res.writeHead(200, {
@@ -420,7 +426,8 @@ async function traiter(req, res) {
         'X-Accel-Buffering': 'no'
       });
       const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-      await streamMessage(body, send, currentUser(req));
+      if (key === 'POST /api/lecture/retisser') await retisser(body, send, currentUser(req));
+      else await streamMessage(body, send, currentUser(req));
       res.end();
     } catch (err) {
       console.error('[stream]', err);

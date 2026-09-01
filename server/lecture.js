@@ -1130,6 +1130,47 @@ export async function lire(corpus, settings) {
   return depouiller(res, corpus, settings);
 }
 
+/**
+ * LA MEME LECTURE, MAIS QUI DIT OU ELLE EN EST.
+ *
+ * `lire` attend deux minutes en silence et rend tout d'un coup. C'est le bon
+ * comportement pour la relecture de fond, que personne ne regarde. Ce n'est pas
+ * le bon quand quelqu'un vient de demander a retisser sa toile et la regarde se
+ * faire : deux minutes de rien, c'est deux minutes ou l'on croit que c'est
+ * casse.
+ *
+ * Le flux ne rend pas la lecture plus tot -- le JSON n'est utilisable que
+ * complet, c'est un appel d'outil. Il rend une chose, et elle est vraie :
+ * COMBIEN LE MODELE A DEJA ECRIT. Ce n'est pas un pourcentage invente, c'est le
+ * nombre de signes recus. On ne sait pas ou ca s'arretera, et l'ecran ne le
+ * pretend pas.
+ *
+ * @param {(av: {signes:number, pense:boolean}) => void} onAvance
+ */
+export async function lireEnFlux(corpus, settings, onAvance = () => {}) {
+  const client = await clientDe(settings);
+  const stream = client.beta.messages.stream({
+    ...repliServeur(settings.anthropicModel || 'claude-opus-5'),
+    ...requeteLecture(corpus, settings)
+  });
+
+  let signes = 0;
+  let pense = false;
+  for await (const ev of stream) {
+    if (ev.type === 'content_block_start' && ev.content_block?.type === 'thinking') pense = true;
+    if (ev.type !== 'content_block_delta') continue;
+    const d = ev.delta ?? {};
+    // Les trois formes que prend « le modele ecrit » : sa reflexion, du texte,
+    // et le JSON de l'appel d'outil -- c'est ce dernier qui porte la lecture.
+    const bout = d.thinking ?? d.text ?? d.partial_json ?? '';
+    if (!bout) continue;
+    if (d.type === 'thinking_delta') pense = true;
+    signes += bout.length;
+    onAvance({ signes, pense });
+  }
+  return depouiller(await stream.finalMessage(), corpus, settings);
+}
+
 /* ------------------------------ la lecture en lot ------------------------------ */
 
 /**
