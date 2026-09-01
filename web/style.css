@@ -3522,3 +3522,11 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .qsrouages[open] > summary::before { transform: rotate(90deg); }
 .qsrouages > summary:hover { color: var(--ink-dim); }
 .qsrouages .qsseries { margin-top: 10px; }
+
+/* Une carte absente le DIT, au lieu de laisser un trou qui a l'air normal. */
+.cartevide {
+  border: 1px dashed var(--line); border-radius: 12px;
+  padding: 26px 24px; display: flex; flex-direction: column; gap: 6px;
+  color: var(--ink-dim); font-size: 13.5px; max-width: 56ch;
+}
+.cartevide .sub { margin: 0; font-size: 12.5px; }

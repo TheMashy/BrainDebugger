@@ -2869,7 +2869,24 @@ function noeudMarkup() {
 }
 
 function carteMarkup(carte) {
-  if (!carte?.noeuds?.length) return '';
+  /*
+   * UNE CARTE VIDE LE DIT. Elle disparaissait en silence : la page s'ouvrait
+   * sur les mécanismes seuls, et rien ne distinguait « cette lecture n'a pas
+   * fait de carte » de « il n'y a pas de carte ici ». C'est le défaut le plus
+   * désagréable qu'une vue puisse avoir — elle a l'air normale, et il manque
+   * la moitié.
+   *
+   * Ça arrive pour de vraies raisons : une lecture enregistrée avant que la
+   * carte existe, ou un modèle qui a rendu des nœuds sans nom. Dans les deux
+   * cas, la réparation est la même et elle tient en un bouton.
+   */
+  if (!carte?.noeuds?.length) {
+    return `<div class="cartevide">
+      <p>Cette lecture n'a pas de toile — soit elle est plus vieille que la carte,
+         soit la relecture n'a rendu aucun nœud.</p>
+      <p class="sub">Les mécanismes ci-dessous viennent bien d'elle. Retisser en refait une.</p>
+    </div>`;
+  }
   return `<div class="cartewrap">
     <canvas id="cartec" aria-label="La carte de ce qui revient et de ce qui le relie"></canvas>
     ${/* Trois commandes, et le point du milieu est celle qui compte : après

@@ -24,6 +24,7 @@ import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 import { nuitDe, archetypeDe, resumeDuJour, estDetail } from './allure.js';
+import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -661,7 +662,27 @@ export const routes = {
     return { entry: getEntry(date, userId) };
   },
 
-  'GET /api/year': ({ query, userId }) => yearGrid(series(userId).series, Number(query.year ?? today().slice(0, 4))),
+  /*
+   * L'ANNÉE PORTE LES SIGNES, ELLE AUSSI.
+   *
+   * C'est la seule vue où l'on voit une PÉRIODE : trois rouges en une semaine
+   * ne se lisent pas en feuilletant les jours un par un, et c'est justement la
+   * forme qu'on est venu chercher ici.
+   *
+   * Les signes se calculent sur l'année demandée, pas sur tout le journal :
+   * relire quatre ans de messages pour peindre une grille de trois cent
+   * soixante-cinq cases coûterait une seconde à chaque changement d'année.
+   */
+  'GET /api/year': ({ query, userId }) => {
+    const an = Number(query.year ?? today().slice(0, 4));
+    const grille = yearGrid(series(userId).series, an);
+    for (const mo of grille.months) {
+      for (const j of mo.days) {
+        if (j?.date) j.veille = veilleDuJour(j.date, userId)?.niveau ?? null;
+      }
+    }
+    return grille;
+  },
 
   /** Serie compacte pour les courbes : tableaux paralleles, ~5x plus leger que des objets. */
   'GET /api/series': ({ userId }) => {
@@ -706,7 +727,18 @@ export const routes = {
 
     // Ce que le Miroir montrait le moins bien : la journee qu'on regarde. On se
     // baladait dans l'historique sans jamais voir ce qu'on avait ecrit CE jour-la.
-    const jour = { date, note, text: entry?.text ?? '' };
+    /*
+     * SUR LA JOURNÉE OUVERTE, LE SIGNE ARRIVE AVEC SA PREUVE.
+     *
+     * Un signe sans la phrase qui l'a produit serait un verdict de machine.
+     * Avec elle, c'est un rappel de ce qu'on a écrit — et si le signe est faux,
+     * ça se voit tout de suite, ce qu'il faut pour qu'on continue à le croire
+     * quand il est juste.
+     */
+    const veille = veilleDuJour(date, userId);
+    const jour = { date, note, text: entry?.text ?? '',
+                   veille: veille ? { ...veille, dit: VEILLE_DIT[veille.niveau],
+                                      aide: veille.niveau === 'rouge' ? VEILLE_AIDE : null } : null };
 
     // Le mois affiche, pour le calendrier. Il ne suit PAS forcement le jour
     // ouvert : on feuillette mars sans quitter la journee qu'on lisait.
@@ -724,7 +756,17 @@ export const routes = {
         date: j,
         note: e?.note ?? null,
         delta: pt?.delta ?? null,
-        texte: !!(e?.text && e.text.trim())
+        texte: !!(e?.text && e.text.trim()),
+        /*
+         * LE SIGNE DE VEILLE, SUR LE RUBAN DU MOIS.
+         *
+         * Une pastille « crise 5 » avait le même poids visuel qu'une pastille
+         * « création 3 » : cinq passages sur une crise et trois sur un projet,
+         * rangés côte à côte comme deux sujets de conversation. Ici le mois
+         * porte le NIVEAU, et rien d'autre — le détail s'ouvre en cliquant le
+         * jour, avec la phrase qui l'a déclenché.
+         */
+        veille: veilleDuJour(j, userId)?.niveau ?? null
       });
     }
 
