@@ -5438,6 +5438,19 @@ async function ouvrirQS() {
 
 /* ============================= routage ============================= */
 
+/**
+ * LA BORNE CIVILE, LA OU « AUJOURD'HUI » NE SUFFIT PAS.
+ *
+ * `S.today` est la journée VÉCUE : à 2 h du matin, c'est encore la veille, et
+ * c'est ce qu'on veut partout où l'on parle de sa journée. Mais une date
+ * MAXIMALE — celle d'un repère, celle d'une note de carnet, le jour suivant
+ * dans la navigation — est celle du calendrier : bornée à la journée vécue, la
+ * journée d'après deviendrait injoignable toutes les nuits.
+ *
+ * Le repli sur `S.today` couvre un état servi par une version d'avant.
+ */
+const jourCivil = () => S?.jourCivil ?? S?.today;
+
 const VIEWS = {
   tonight: renderTonight,
   moi: () => renderMoi(),
