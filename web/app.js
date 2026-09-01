@@ -3932,6 +3932,18 @@ function wireMirror() {
       return;
     }
 
+    /*
+     * La fenêtre du panneau. Elle ne change QUE le panneau : reconstruire la
+     * journée ferait clignoter ce qu'on lit juste au-dessus pour montrer autre
+     * chose plus bas, exactement comme pour l'ouverture.
+     */
+    const fen = e.target.closest('[data-qsjours]');
+    if (fen) {
+      QS_JOURS = Number(fen.dataset.qsjours);
+      await ouvrirQS();
+      return;
+    }
+
     // La note de la journée ouverte : l'échelle s'ouvre, puis se pose.
     if (e.target.closest('#dayNote')) {
       DAY_NOTE_OUVERT = !DAY_NOTE_OUVERT;
@@ -4939,11 +4951,30 @@ function drawNotesPreview(p) {
 
 let QS_OUVERT = false;
 let QS_DATA = null;
+let QS_JOURS = 90;
 
 const qsNb = v => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(v);
 
-/** L'unité est portée par le NOM de la clé : `_s` des secondes, `_min` des minutes. */
-const UNITE = /_(s|min)$/;
+/**
+ * L'unité est portée par le NOM de la clé : un segment `s` des secondes, `min`
+ * des minutes.
+ *
+ * Elle n'est pas toujours À LA FIN. L'aplatissement d'un objet imbriqué la
+ * met AU MILIEU : `temps_par_contexte_s` + `navigateur` donne
+ * `temps_par_contexte_s_navigateur`, et une règle ancrée sur la fin y lit un
+ * nombre de secondes brut — « 2 087 » au lieu de « 35 min ». On cherche donc le
+ * segment où qu'il soit.
+ *
+ * `h` n'en est pas : la valeur reste un nombre d'heures, rien à convertir, et
+ * le « h » du nom est alors la seule chose qui dise l'unité.
+ */
+const UNITES = new Set(['s', 'min']);
+const segmentsDe = k => String(k ?? '').split('_').filter(Boolean);
+const uniteDuNom = k => {
+  const seg = segmentsDe(k);
+  // Une clé qui n'est QUE « s » est un nom, pas une unité : on ne la vide pas.
+  return seg.length > 1 ? seg.find(x => UNITES.has(x)) ?? null : null;
+};
 
 /**
  * Les secondes en durée lisible. `temps_par_contexte_s` est un nom qui dit son
@@ -4959,22 +4990,32 @@ function qsValeur(cle, v, herite = '') {
   if (v == null) return '—';
   if (typeof v === 'boolean') return v ? 'oui' : 'non';
   if (typeof v !== 'number') return String(v);
-  const nom = UNITE.test(cle) ? cle : herite;
-  if (/_s$/.test(nom) && v >= 60) {
+  const u = uniteDuNom(cle) ?? uniteDuNom(herite);
+  if (u === 's' && v >= 60) {
     const h = Math.floor(v / 3600), m = Math.round((v % 3600) / 60);
     return h ? `${h} h ${String(m).padStart(2, '0')}` : `${m} min`;
   }
-  if (/_min$/.test(nom) && v >= 60) return `${Math.floor(v / 60)} h ${String(Math.round(v % 60)).padStart(2, '0')}`;
+  if (u === 'min' && v >= 60) return `${Math.floor(v / 60)} h ${String(Math.round(v % 60)).padStart(2, '0')}`;
   return qsNb(v);
 }
 
 /**
- * Le nom d'une clé, lisible. Le `_s` final n'est pas un mot, c'est l'unité —
- * et elle est déjà dans la valeur en face (« 1 h 22 ») : l'afficher deux fois
- * donne « temps par contexte s », qui se lit comme une faute de frappe.
- * `_min` reste : il peut vouloir dire « minimum » autant que « minutes ».
+ * Le nom d'une clé, lisible.
+ *
+ * Le `s` n'est pas un mot, c'est l'unité — et elle est déjà dans la valeur en
+ * face (« 1 h 22 ») : l'afficher deux fois donne « temps par contexte s
+ * navigateur », qui se lit comme une faute de frappe. On retire donc le segment
+ * qu'on a pris pour unité, et LUI SEUL : ce qui n'a pas servi à formater la
+ * valeur reste écrit, parce que cacher un morceau du nom que la personne a
+ * choisi n'est pas à nous.
  */
-const qsNom = k => k.replace(/_s$/, '').replace(/_/g, ' ');
+function qsNom(k) {
+  const u = uniteDuNom(k);
+  const seg = segmentsDe(k);
+  if (!u) return seg.join(' ');
+  const i = seg.indexOf(u);
+  return [...seg.slice(0, i), ...seg.slice(i + 1)].join(' ');
+}
 
 /** Descend dans un objet de forme inconnue. Deux niveaux, puis on replie. */
 function qsArbre(obj, profondeur = 0, herite = '') {
@@ -4990,7 +5031,7 @@ function qsArbre(obj, profondeur = 0, herite = '') {
 
   const lignes = Object.entries(obj).map(([k, v]) => {
     const feuille = v == null || typeof v !== 'object';
-    const suivante = UNITE.test(k) ? k : herite;
+    const suivante = uniteDuNom(k) ? k : herite;
     return `<div class="qsl">
       <span class="qsk">${esc(qsNom(k))}</span>
       ${feuille ? `<span class="qsv">${esc(qsValeur(k, v, herite))}</span>`
@@ -5000,55 +5041,168 @@ function qsArbre(obj, profondeur = 0, herite = '') {
   return `<div class="qsniv${profondeur ? ' dedans' : ''}">${lignes.join('')}</div>`;
 }
 
-/** Une série en courbe. Trente points suffisent à voir une forme. */
-function qsCourbe(points) {
-  const v = points.map(p => p.valeur).filter(x => x != null);
-  if (v.length < 2) return '';
-  const W = 260, H = 34, bas = Math.min(...v), haut = Math.max(...v);
+/**
+ * Une série en courbe, avec sa médiane.
+ *
+ * La courbe seule dit la forme et rien d'autre : montée, descente, dents de
+ * scie. Ce qu'on veut savoir en la regardant, c'est OU ON EN EST par rapport à
+ * d'habitude — donc le trait de la médiane, en pointillé, et le dernier point
+ * marqué. Sans lui, il faut compter les crêtes pour trouver la droite.
+ *
+ * Le dernier point est PLEIN, comme partout ailleurs dans l'application : ce
+ * qui est rempli est mesuré, ce qui est contouré est déclaré. Une mesure venue
+ * d'une montre est mesurée.
+ */
+function qsCourbe(points, { mediane = null } = {}) {
+  const pts = points.filter(p => p.valeur != null);
+  if (pts.length < 2) return '';
+  const v = pts.map(p => p.valeur);
+  const W = 260, H = 44, M = 4;
+  const bas = Math.min(...v, mediane ?? Infinity), haut = Math.max(...v, mediane ?? -Infinity);
   const etendue = haut - bas || 1;
-  const d = points.filter(p => p.valeur != null).map((p, i, a) => {
-    const x = (i / Math.max(1, a.length - 1)) * W;
-    const y = H - ((p.valeur - bas) / etendue) * (H - 6) - 3;
-    return `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
-  }).join(' ');
+  const yDe = val => H - M - ((val - bas) / etendue) * (H - M * 2);
+  const xDe = i => (i / Math.max(1, pts.length - 1)) * W;
+
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${xDe(i).toFixed(1)} ${yDe(p.valeur).toFixed(1)}`).join(' ');
+  const yMed = mediane == null ? null : yDe(mediane).toFixed(1);
+  const dx = xDe(pts.length - 1).toFixed(1), dy = yDe(pts.at(-1).valeur).toFixed(1);
+
   return `<svg class="qssvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    ${yMed != null ? `<line class="qsmed" x1="0" y1="${yMed}" x2="${W}" y2="${yMed}"
+                            stroke-dasharray="3 4" stroke-width="1"/>` : ''}
     <path d="${d}" fill="none" stroke="currentColor" stroke-width="1.3"
           stroke-linejoin="round" stroke-linecap="round"/>
+    <circle class="qspoint" cx="${dx}" cy="${dy}" r="2.6"/>
   </svg>`;
+}
+
+/** 30 / 90 / 365 : une semaine ne montre rien, cinq ans ne se lit plus. */
+const QS_FENETRES = [[30, '30 j'], [90, '90 j'], [365, '1 an']];
+
+/**
+ * Une série, sa dernière valeur, son côté, et son lien s'il en a un.
+ *
+ * L'ORDRE DE LECTURE EST VOULU : le nom, puis la dernière valeur — c'est la
+ * seule qu'on ait en tête —, puis où elle tombe par rapport à d'habitude, puis
+ * la forme, puis les bornes. Le lien vient en dernier parce qu'il est la seule
+ * ligne qui parle du JOURNAL, et qu'on ne le lit qu'après avoir compris le
+ * chiffre.
+ */
+function qsSerieMarkup(s, fin = null) {
+  const phrase = phraseLien(s.lien);
+  const numerique = s.bas != null;
+  /*
+   * LA DATE NE S'AFFICHE QUE QUAND ELLE APPREND QUELQUE CHOSE.
+   *
+   * Écrite sur chaque carte, c'est treize fois « 1 sep 2026 » : du bruit, et
+   * une ligne de plus qui passait à la ligne sur les noms longs. Écrite quand
+   * la série s'arrête AVANT la fin de la fenêtre, c'est la seule chose qui
+   * distingue « la montre n'a rien envoyé depuis trois semaines » de « tout va
+   * bien » — et cette différence, aucune courbe ne la montre.
+   */
+  const arretee = s.dernier && fin && s.dernier.date < fin;
+  return `<div class="qsserie${s.lien ? ' lie' : ''}">
+    <div class="qsstete">
+      <span class="qsnom"><b>${esc(qsNom(s.cle))}</b>
+        <span class="faint">${esc(s.source)}</span></span>
+      <span class="qsn mono">${s.n} pts</span>
+    </div>
+
+    ${s.dernier ? `<div class="qsdernier">
+      <span class="qsval mono">${numerique
+        ? `${esc(qsValeur(s.cle, s.dernier.valeur))}${s.unite ? `<i>${esc(s.unite)}</i>` : ''}`
+        : esc(String(s.dernier.texte ?? '—'))}</span>
+      ${s.cote ? `<span class="jmcote ${s.cote}">${s.cote === 'pile' ? '=' : s.cote === 'haut' ? '↑' : '↓'}
+        <span class="faint">${s.cote === 'pile' ? 'ta médiane'
+          : `${s.cote === 'haut' ? 'au-dessus de' : 'sous'} ${esc(qsValeur(s.cle, s.mediane))}`}</span></span>` : ''}
+      ${arretee ? `<span class="qsquand mono">jusqu'au ${fmtDay(s.dernier.date)}</span>` : ''}
+    </div>` : ''}
+
+    ${qsCourbe(s.points, { mediane: s.mediane })}
+
+    ${/* Une série de texte n'a ni courbe ni bornes. Ce qu'elle a, c'est sa
+          dernière valeur et le nombre de valeurs DIFFÉRENTES : « 08:23, une
+          seule valeur sur 40 jours » dit tout de suite que la mesure est
+          constante, donc qu'elle n'apprend rien — et le dire vaut mieux que
+          l'écrire « texte », qui n'est pas une information. */''}
+    <div class="qsbornes mono">
+      ${numerique ? `${esc(qsValeur(s.cle, s.bas))} → ${esc(qsValeur(s.cle, s.haut))}${s.unite ? ` ${esc(s.unite)}` : ''}
+        ${/* La moyenne passe par le MÊME formateur que les bornes : « 22 min →
+              1 h 58 · moy. 4 139,88 » donne deux unités dans la même ligne, et
+              l'œil bute avant de comprendre pourquoi. */''}
+        <span class="faint">· moy. ${esc(qsValeur(s.cle, s.moyenne))}</span>`
+      : `<span class="faint">${s.distinctes === 1 ? 'toujours la même valeur'
+          : `${s.distinctes} valeurs différentes`}</span>`}
+    </div>
+
+    ${phrase ? `<p class="qslien">${phrase}</p>` : ''}
+  </div>`;
+}
+
+/**
+ * LA RECEPTION, EN UNE LIGNE.
+ *
+ * « Quatre séries » ne dit pas si l'application envoie ENCORE. Un branchement
+ * cassé ne se voit nulle part ailleurs : les courbes restent belles, elles
+ * s'arrêtent simplement il y a trois semaines, et rien ne le dit.
+ */
+function qsReceptionMarkup(r, jours) {
+  if (!r) return '';
+  const j = r.depuis_jours;
+  const quand = j == null ? 'aucun envoi'
+    : j === 0 ? "dernier envoi aujourd'hui"
+    : j === 1 ? 'dernier envoi hier'
+    : `dernier envoi il y a ${j} jours`;
+  // Une semaine de silence est le seuil où « ça n'envoie plus » devient
+  // l'explication la plus probable. En dessous, c'est un week-end.
+  return `<p class="qsrecept${j != null && j >= 7 ? ' vieux' : ''}">
+    <span class="mono">${r.couverts}</span> jour${r.couverts > 1 ? 's' : ''} reçu${r.couverts > 1 ? 's' : ''}
+    sur ${jours} · ${quand}</p>`;
 }
 
 function qsPanneauMarkup(d) {
   if (!d) return '<div class="card"><p class="jvide">…</p></div>';
+
+  const fenetres = `<div class="horizons qsfen">${QS_FENETRES.map(([n, nom]) =>
+    `<button data-qsjours="${n}" aria-pressed="${d.jours === n}">${nom}</button>`).join('')}</div>`;
+
   const rien = !d.series.length && !d.activite.length;
   if (rien) {
-    return `<div class="card"><h2>${ico('antenne', 15)}Quantified self</h2>
-      <p class="sub" style="margin:0">Rien n'est encore arrivé sur les ${d.jours} derniers jours.
+    return `<div class="card qspan">
+      <div class="qstete"><h2>${ico('antenne', 15)}Quantified self</h2>${fenetres}</div>
+      <p class="sub" style="margin:0">Rien n'est arrivé sur les ${d.jours} derniers jours.
       Le branchement et le journal des envois sont dans <b>Réglages › Quantified self</b>.</p></div>`;
   }
+
+  /*
+   * LES SERIES LIEES AU JOURNAL D'ABORD.
+   *
+   * Sur dix séries, celles qui bougent avec les journées sont les seules qui
+   * apprennent quelque chose ; les autres sont des chiffres. Elles passent donc
+   * devant, et l'accent de couleur ne sert QU'A ÇA — la couleur veut dire
+   * quelque chose partout ailleurs dans l'application, elle ne va pas devenir
+   * décorative ici.
+   */
+  const series = [...d.series].sort((a, b) =>
+    (b.lien ? 1 : 0) - (a.lien ? 1 : 0) || b.n - a.n || a.cle.localeCompare(b.cle));
+  const lies = series.filter(s => s.lien).length;
+
   return `
     <div class="card qspan">
       <div class="qstete">
         <h2>${ico('antenne', 15)}Quantified self</h2>
         <span class="faint mono">${fmtDay(d.depuis)} → ${fmtDay(d.jusqu_au)}</span>
+        ${fenetres}
       </div>
+      ${qsReceptionMarkup(d.reception, d.jours)}
 
-      ${d.series.length ? `<div class="qsseries">
-        ${d.series.map(s => `<div class="qsserie">
-          <div class="qsstete">
-            <b>${esc(s.cle.replace(/_/g, ' '))}</b>
-            <span class="faint">${esc(s.source)}</span>
-            <span class="qsn mono">${s.n} pts</span>
-          </div>
-          ${qsCourbe(s.points)}
-          <div class="qsbornes mono">
-            ${s.bas != null ? `${qsNb(s.bas)} → ${qsNb(s.haut)}${s.unite ? ` ${esc(s.unite)}` : ''}
-              <span class="faint">· moy. ${qsNb(s.moyenne)}</span>` : 'texte'}
-          </div>
-        </div>`).join('')}
-      </div>` : ''}
+      ${series.length ? `<div class="qsseries">${series.map(s => qsSerieMarkup(s, d.jusqu_au)).join('')}</div>` : ''}
+
+      ${lies ? `<p class="qsnote">Les séries en couleur vont avec tes journées notées — pas
+        « à cause de », <b>avec</b>. Le sens, s'il y en a un, t'appartient.</p>` : ''}
 
       ${d.activite.length ? `<div class="qsact">
-        <div class="k faint">Ce que l'application envoie chaque jour</div>
+        <div class="k faint">Ce que l'application envoie chaque jour, tel quel</div>
         ${d.activite.slice(0, 12).map(j => `<details class="qsjour">
           <summary><span class="mono">${fmtDay(j.date)}</span>
             <span class="faint">${j.digest ? Object.keys(j.digest).length + ' champs' : 'illisible'}</span></summary>
@@ -5062,7 +5216,7 @@ async function ouvrirQS() {
   QS_OUVERT = true;
   const hote = $('#qspanneau');
   if (hote) hote.innerHTML = qsPanneauMarkup(null);
-  try { QS_DATA = await api('/api/qs/contenu?jours=60'); }
+  try { QS_DATA = await api(`/api/qs/contenu?jours=${QS_JOURS}`); }
   catch (err) { QS_DATA = null;
     if (hote) hote.innerHTML = `<div class="card"><p class="warn">${esc(err.message)}</p></div>`;
     return; }
