@@ -5609,7 +5609,7 @@ boot();
    À la fin, les groupes se nomment, un par un.
    ========================================================================== */
 
-let TISSAGE = null;         // { phase, corpus, signes, G, sim, vue, lueurs, groupes, err }
+let TISSAGE = null;         // { phase, corpus, G, sim, vue, lueurs, trouves, pct, ancienne, groupes, err }
 /* Le nombre de tours d'une disposition complète : c'est le travail à étaler. */
 const TOURS_TISSAGE = 320;
 let TISSAGE_BOUCLE = 0;
@@ -5674,6 +5674,14 @@ function tissageMarkup() {
   const titre = t.err ? 'ça n’a pas abouti' : (PHASES[t.phase] ?? 'ta toile');
   return `<div class="tissage" id="tissage">
     <canvas id="tissagecv"></canvas>
+    ${/* LE POURCENTAGE, en trait fin tout en haut. Il ne compte pas le temps —
+          on ne sait pas combien le modèle va prendre — il compte ce qui est
+          ARRIVÉ : les thèmes, les pistes, les nœuds, puis les tours de
+          simulation. Un pourcentage tiré d'une horloge avance quand rien ne se
+          passe, et ment donc pile au moment où l'on doute. */''}
+    <div class="tsjauge"><i id="tsjaugei" style="width:0%"></i></div>
+    <div class="tspct mono" id="tspct">0 %</div>
+    <div class="tstrouves" id="tstrouves"></div>
     <div class="tsdessus">
       <div class="tstitre">${esc(titre)}</div>
       <div class="tsdit" id="tsdit">${esc(t.dit ?? '')}</div>
@@ -5687,6 +5695,54 @@ function tissageMarkup() {
   </div>`;
 }
 
+/**
+ * LE POURCENTAGE, ET IL NE RECULE JAMAIS.
+ *
+ * Il vient de deux sources — la structure reçue pendant la lecture, puis les
+ * tours de simulation — et deux sources qui se relaient peuvent se croiser. Un
+ * chiffre qui redescend fait douter de tout le reste, alors qu'il ne dit que
+ * « j'ai changé de règle ». On garde donc le maximum atteint.
+ */
+function tissagePct(p) {
+  if (!TISSAGE || !Number.isFinite(p)) return;
+  TISSAGE.pct = Math.max(TISSAGE.pct ?? 0, Math.min(100, Math.round(p)));
+  const j = $('#tsjaugei'), t = $('#tspct');
+  if (j) j.style.width = `${TISSAGE.pct}%`;
+  if (t) t.textContent = `${TISSAGE.pct} %`;
+}
+
+/**
+ * UNE TROUVAILLE ARRIVE.
+ *
+ * C'est un nom que le modèle vient d'écrire, cueilli dans son JSON au moment
+ * où il le referme. Rien n'est deviné : si la pastille dit « pensée de fin de
+ * nuit », c'est que ces mots-là viennent d'être écrits.
+ */
+const GENRE_TROUVE = { theme: 'mécanisme', piste: 'groupe', noeud: 'chose' };
+function tissageTrouve({ genre, nom }) {
+  if (!TISSAGE) return;
+  (TISSAGE.trouves ??= []).push({ genre, nom });
+  const hote = $('#tstrouves');
+  if (!hote) return;
+  const el = document.createElement('span');
+  el.className = `tstr ${genre}`;
+  el.title = GENRE_TROUVE[genre] ?? '';
+  el.textContent = nom;
+  hote.appendChild(el);
+  /*
+   * LA BANDE DEBORDE, ET CE N'EST PAS N'IMPORTE QUOI QU'ON RETIRE.
+   *
+   * Les mécanismes et les groupes arrivent EN PREMIER dans le JSON, les choses
+   * ensuite et en nombre. Un simple « on garde les vingt derniers » effaçait
+   * donc exactement ce que l'utilisateur voulait voir apparaître -- les
+   * patterns -- pour laisser une bande de noms d'objets. On ne fait rouler que
+   * les choses ; les patterns restent, ils sont le sujet.
+   */
+  const roulants = [...hote.children].filter(x => x.classList.contains('noeud'));
+  const trop = hote.children.length - 20;
+  for (let i = 0; i < trop && i < roulants.length; i++) hote.removeChild(roulants[i]);
+}
+
 /** Le texte sous le titre, réécrit sans reconstruire la vue : elle porte un canvas. */
 function tissageDit(texte) {
   if (TISSAGE) TISSAGE.dit = texte;
@@ -5694,6 +5750,26 @@ function tissageDit(texte) {
   if (el) el.textContent = texte;
   const ti = $('.tstitre');
   if (ti && TISSAGE) ti.textContent = TISSAGE.err ? 'ça n’a pas abouti' : (PHASES[TISSAGE.phase] ?? 'ta toile');
+}
+
+/**
+ * L'ANCIENNE TOILE, RECADREE POUR L'ECRAN OU ELLE S'EFFACE.
+ *
+ * Elle a ete disposee dans le cadre du Miroir, qui est plus petit et pas au
+ * meme endroit que le voile plein ecran. Rejouee telle quelle, elle se tassait
+ * dans un coin -- on voyait bien quelque chose s'en aller, mais pas SA carte.
+ * On la refait donc tenir dans l'ecran, centree, avant de la disperser.
+ */
+function cadrerAncienne(pts, L, H) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+    if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+  }
+  if (!Number.isFinite(x0)) return { k: 1, x: 0, y: 0 };
+  const l = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  const k = Math.min(L * 0.78 / l, H * 0.72 / h);
+  return { k, x: L / 2 - (x0 + x1) / 2 * k, y: H / 2 - (y0 + y1) / 2 * k };
 }
 
 /**
@@ -5723,6 +5799,55 @@ function tissageBoucle() {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, L, H);
+
+  /* ---- 0. l'ancienne toile, qui s'efface ----
+     Six secondes pour se dissoudre : le temps de la reconnaître avant qu'elle
+     s'en aille. Les nœuds se dispersent en s'éteignant — ils ne « fondent »
+     pas, ils s'écartent, ce qui est ce qu'on va leur refaire faire juste
+     après. */
+  if (t.ancienne) {
+    /*
+     * SIX SECONDES DE MONTRE, PAS CENT QUATRE-VINGTS IMAGES.
+     *
+     * Compté par image, l'effacement durait six secondes sur une machine à
+     * trente images et vingt-cinq sur une machine lente — et la vieille toile
+     * était encore là, par-dessus la neuve, quand celle-ci finissait de se
+     * poser. C'est le même piège que pour le tissage : on mesure le temps.
+     */
+    const now = performance.now();
+    t.effDepuis = (t.effDepuis ?? 0) + Math.min(120, now - (t.horlogeE ?? now));
+    t.horlogeE = now;
+    t.effacee = Math.min(1, t.effDepuis / 6000);
+    const o = 1 - t.effacee;
+    if (o > 0.01) {
+      const a = t.ancienne;
+      const v = (a.cadre ??= cadrerAncienne(a.pts, L, H));
+      const dansLa = p => ({ x: p.x * v.k + v.x, y: p.y * v.k + v.y });
+      const derive = t.effacee * 70;
+      const cx = L / 2, cy = H / 2;
+      ctx.globalAlpha = o * 0.5;
+      ctx.lineCap = 'round';
+      for (const l of a.G.liens ?? []) {
+        const p1 = dansLa(a.pts[l.s]), p2 = dansLa(a.pts[l.t]);
+        if (!p1 || !p2) continue;
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = `hsl(${TEINTE_GENRE[a.G.noeuds[l.s]?.genre] ?? 288} 45% 46%)`;
+        ctx.lineWidth = 0.8; ctx.stroke();
+      }
+      for (let i = 0; i < a.G.noeuds.length; i++) {
+        const p = dansLa(a.pts[i]);
+        if (!p) continue;
+        // Chacun s'écarte du centre, un peu plus à chaque image.
+        const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1;
+        const x = p.x + dx / d * derive, y = p.y + dy / d * derive;
+        const r = (4 + Math.log2(1 + (a.G.noeuds[i].jours ?? 1)) * 2.2) * v.k * (1 - t.effacee * 0.5);
+        ctx.globalAlpha = o;
+        ctx.strokeStyle = `hsl(${TEINTE_GENRE[a.G.noeuds[i].genre] ?? 288} 50% 56%)`;
+        ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.arc(x, y, Math.max(0.5, r), 0, 7); ctx.stroke();
+      }
+    } else if (t.effacee >= 1) t.ancienne = null;
+  }
 
   /* ---- la simulation avance, si elle a commencé ---- */
   if (t.sim && !t.pose) {
@@ -5762,7 +5887,8 @@ function tissageBoucle() {
     // Une fois posée, on cesse de poursuivre : la vue se cale sur le cadrage
     // exact. Sinon elle s'arrête là où le rattrapage en était, et la toile
     // finit de travers pour une raison invisible.
-    if (t.pose) { t.arrivee = t.image; t.vue = cible; }
+    tissagePct(70 + 30 * Math.min(1, 1 - t.sim.restant() / TOURS_TISSAGE));
+    if (t.pose) { t.arrivee = t.image; t.vue = cible; tissagePct(100); }
   }
   const v = t.vue ?? vueNeutre();
   const dansLaVue = p => ({ x: p.x * v.k + v.x, y: p.y * v.k + v.y });
@@ -5892,8 +6018,24 @@ function accrocherLueurs(t) {
 
 async function retisser() {
   if (TISSAGE) return;
+  /*
+   * ON NE PART PAS D'UNE PAGE NOIRE.
+   *
+   * Le voile s'ouvrait sur du vide, et la carte qu'on regardait disparaissait
+   * d'un coup — comme si elle avait été effacée avant qu'on décide. Ce qui se
+   * passe est l'inverse : on REFAIT celle-là. Elle est donc reprise telle
+   * qu'elle est à l'écran, positions comprises, et elle se dissout pendant que
+   * les journées s'allument.
+   *
+   * On copie les points : la simulation d'après écrit dans le même tableau, et
+   * sans copie l'ancienne toile se mettrait à bouger avec la nouvelle.
+   */
+  const ancienne = (RELA?.noeuds?.length && RELA_DISPO?.pts?.length)
+    ? { G: RELA, pts: RELA_DISPO.pts.map(p => ({ x: p.x, y: p.y })), cadre: null }
+    : null;
   TISSAGE = { phase: 'rassemble', dit: 'je rassemble ton journal…', lueurs: null, nees: 0,
-              G: null, sim: null, vue: null, groupes: null, err: null, image: 0 };
+              G: null, sim: null, vue: null, groupes: null, err: null, image: 0,
+              pct: 0, trouves: [], ancienne, effacee: 0 };
   await renderLecture();
   cancelAnimationFrame(TISSAGE_BOUCLE);
   TISSAGE_BOUCLE = requestAnimationFrame(tissageBoucle);
@@ -5922,10 +6064,25 @@ async function retisser() {
         TISSAGE.lueurs = poserLueurs(d.jours ?? [], L, H);
         TISSAGE.nees = 0;
         tissageDit(`${d.journees} journées · ${d.ecrites} écrites · ${d.reperes} repères · ${d.motifs} motifs`);
+      } else if (ev === 'trouve') {
+        if (TISSAGE.phase !== 'lit') TISSAGE.phase = 'lit';
+        tissageTrouve(d);
+        tissagePct(d.pourcent);
       } else if (ev === 'lit') {
         if (TISSAGE.phase !== 'lit') { TISSAGE.phase = 'lit'; }
-        // Le nombre de signes, pas un pourcentage : c'est ce qu'on sait.
-        tissageDit(`${new Intl.NumberFormat('fr-FR').format(d.signes)} signes écrits`);
+        tissagePct(d.pourcent);
+        /*
+         * CE QU'ELLE A TROUVÉ, pas combien de signes elle a tapés. « 14 208
+         * signes » était honnête et vide — personne ne se demande combien de
+         * signes. « 4 mécanismes, 11 choses » dit où en est le travail.
+         */
+        const c = d.comptes ?? {};
+        const bouts = [];
+        if (c.theme) bouts.push(`${c.theme} mécanisme${c.theme > 1 ? 's' : ''}`);
+        if (c.piste) bouts.push(`${c.piste} groupe${c.piste > 1 ? 's' : ''}`);
+        if (c.noeud) bouts.push(`${c.noeud} chose${c.noeud > 1 ? 's' : ''}`);
+        tissageDit(bouts.length ? bouts.join(' · ')
+                                : `${new Intl.NumberFormat('fr-FR').format(d.signes)} signes`);
       } else if (ev === 'toile') {
         LECTURE = { ...(LECTURE ?? {}), ...d, possible: true, perime: false, arelire: false };
         MOI = null;

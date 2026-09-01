@@ -2079,14 +2079,21 @@ export async function retisser(body, send, userId = OWNER) {
 
   let r;
   try {
-    // Un evenement par tranche, pas par delta : le modele rend des centaines de
-    // fragments par seconde, et autant d'ecritures SSE encombreraient le tuyau
-    // pour une information qui ne se lit pas a cette vitesse.
+    /*
+     * DEUX RYTHMES, PARCE QUE CE SONT DEUX CHOSES.
+     *
+     * Une TROUVAILLE part tout de suite : c'est un nom que le modele vient
+     * d'ecrire, et l'attendre pour l'annoncer avec le compteur suivant le
+     * ferait arriver apres coup. Le compteur, lui, se calme -- le modele rend
+     * des centaines de fragments par seconde, et autant d'ecritures SSE
+     * encombreraient le tuyau pour un chiffre qui ne se lit pas si vite.
+     */
     let dernier = 0;
-    r = await lireEnFlux(corpus, s, ({ signes, pense }) => {
+    r = await lireEnFlux(corpus, s, ({ signes, pense, trouves, pourcent, comptes }) => {
+      for (const t of trouves ?? []) send('trouve', { ...t, pourcent });
       if (signes - dernier < 400) return;
       dernier = signes;
-      send('lit', { signes, pense });
+      send('lit', { signes, pense, pourcent, comptes });
     });
   } catch (err) {
     send('erreur', { error: String(err?.message ?? err).slice(0, 300) });
@@ -2105,7 +2112,7 @@ export async function retisser(body, send, userId = OWNER) {
   const lecture = decorerCarte(l.contenu, series(userId).byDate, textesParJour(userId));
   // La toile d'abord — c'est elle qui se tisse à l'écran. Les groupes ensuite,
   // parce qu'ils n'ont de sens qu'une fois la toile posée.
-  send('toile', { lecture, fait_le: l.fait_le, jours: l.jours, modele: l.modele });
+  send('toile', { lecture, fait_le: l.fait_le, jours: l.jours, modele: l.modele, pourcent: 70 });
   send('fini', {
     attente: RETISSAGE_ATTENTE,
     groupes: (l.contenu?.pistes ?? []).map(p => ({ nom: p.nom, teinte: p.teinte ?? null,

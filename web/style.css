@@ -3530,3 +3530,47 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   color: var(--ink-dim); font-size: 13.5px; max-width: 56ch;
 }
 .cartevide .sub { margin: 0; font-size: 12.5px; }
+
+/* ---- le retissage v2 : la jauge, le pourcentage, les trouvailles ---- */
+
+/* Un trait fin tout en haut, pas une barre de chargement au milieu : ce qu'on
+   regarde est la toile, et une barre au centre lui prendrait la place. */
+.tsjauge {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
+}
+.tsjauge i {
+  display: block; height: 100%; background: var(--accent);
+  transition: width .5s cubic-bezier(.2,.7,.3,1);
+}
+.tspct {
+  position: absolute; top: 14px; right: 20px;
+  font-size: 12px; color: var(--ink-faint); letter-spacing: .06em;
+}
+
+/* Les trouvailles : une bande en bas, ce qui arrive à droite. Chaque pastille
+   est un nom que le modèle vient d'écrire — rien n'est deviné. */
+.tstrouves {
+  position: absolute; bottom: 4vh; left: 0; right: 0;
+  display: flex; gap: 7px; flex-wrap: wrap; justify-content: center;
+  padding: 0 26px; max-height: 22vh; overflow: hidden; align-content: flex-end;
+}
+.tstr {
+  font-size: 12px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-dim); background: var(--panel-2);
+  animation: tstrarrive .5s ease-out;
+  white-space: nowrap; max-width: 42ch; overflow: hidden; text-overflow: ellipsis;
+}
+/* Trois genres, trois teintes — les mêmes que sur la carte : un mécanisme, un
+   groupe, une chose ne se lisent pas pareil et n'ont pas à se ressembler. */
+.tstr.theme { border-color: hsl(288 55% 58% / .45); color: hsl(288 62% 74%); }
+.tstr.piste { border-color: hsl(212 55% 58% / .5);  color: hsl(212 62% 76%); }
+.tstr.noeud { border-color: hsl(162 45% 52% / .4);  color: hsl(162 45% 68%); }
+@keyframes tstrarrive {
+  from { opacity: 0; transform: translateY(7px) scale(.96) }
+  to   { opacity: 1; transform: none }
+}
+@media (prefers-reduced-motion: reduce) { .tstr { animation: none } }
+
+/* Quand les groupes arrivent, les trouvailles s'effacent : elles ont servi. */
+.tissage:has(.tsgroupes) .tstrouves { opacity: 0; transition: opacity .6s; }
