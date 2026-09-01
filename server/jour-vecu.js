@@ -9,15 +9,21 @@
  * coupee en deux, et le lendemain s'ouvrait avec l'humeur de la veille.
  *
  * ---------------------------------------------------------------------
- * LA COUPURE EST LE LEVER, ET IL VIENT DE TROIS ENDROITS.
+ * LA COUPURE EST LE COUCHER, ET ELLE VIENT DE TROIS ENDROITS.
  *
- *   1. CE QUE LA PERSONNE DIT. « je viens de me lever », « je vais me
- *      coucher » : c'est la source la plus sure, et la seule qui n'ait besoin
+ *   1. CE QUE LA PERSONNE DIT. « je vais me coucher », « je viens de me
+ *      lever » : c'est la source la plus sure, et la seule qui n'ait besoin
  *      d'aucune application tierce.
- *   2. LE QUANTIFIED SELF. L'heure de reveil mesuree, a defaut la premiere
- *      activite de la machine -- ce n'est pas une heure de reveil et on ne la
- *      fera jamais passer pour telle, mais elle borne la journee aussi bien.
+ *   2. LE QUANTIFIED SELF. L'heure de coucher ou de reveil mesuree, a defaut
+ *      la premiere activite de la machine -- ce n'est pas une heure de reveil
+ *      et on ne la fera jamais passer pour telle, mais elle borne la journee
+ *      aussi bien.
  *   3. SA PROPRE MEDIANE, pour les jours ou ni l'un ni l'autre n'existe.
+ *
+ * LE COUCHER PASSE DEVANT LE LEVER, et c'est ce qui rend le cas du couche-tard
+ * lisible : couche a 06:10, leve a 15:30. Le lever ne peut pas servir de
+ * frontiere -- a 15 h 30 il rattacherait toute la matinee des autres jours a la
+ * veille -- alors que le coucher, a 06:10, en est une parfaitement nette.
  *
  * SANS AUCUNE DES TROIS, ON NE DEPLACE RIEN. Une coupure inventee ferait
  * glisser des journees entieres d'une case, et personne ne saurait pourquoi.
@@ -34,7 +40,7 @@
  * =====================================================================
  */
 import { jourLocal, heureLocale, zoneCourante } from './temps.js';
-import { enMinutes, mediane, LEVER, PREMIERE, contient, norm } from './allure.js';
+import { enMinutes, mediane, COUCHER, LEVER, PREMIERE, contient, norm } from './allure.js';
 
 /** Au-dela, un lever ne sert plus de frontiere. Voir l'en-tete. */
 export const MIDI = 720;
@@ -150,21 +156,37 @@ function heureDeMesure(m) {
 }
 
 /**
- * LES LEVERS CONNUS, PAR DATE.
+ * LES BORNES CONNUES, PAR DATE.
  *
- * Trois rangs, du plus sur au moins sur : ce que la personne a dit, l'heure de
- * reveil mesuree, la premiere activite de la machine. Le premier trouve gagne
- * -- et on ne melange jamais les rangs dans une meme journee.
+ * LE COUCHER MARQUE LA JOURNEE, ET IL PASSE DEVANT LE LEVER.
+ *
+ * C'est la correction d'une premiere version qui ne regardait que le lever, et
+ * qui se trompait sur le cas le plus courant chez un couche-tard : quelqu'un se
+ * couche a 06:10 et se leve a 15:30. Le lever, a 15 h 30, ne peut pas servir de
+ * frontiere -- s'en servir rattacherait toute la matinee des AUTRES jours a la
+ * veille. Il n'en restait donc aucune, et ce qui avait ete ecrit a 01:56 et a
+ * 05:43 restait range sur la journee d'apres, alors que ces heures-la sont la
+ * fin de la soiree precedente.
+ *
+ * Le coucher, lui, tombe a 06:10 : c'est une frontiere parfaitement lisible.
+ * « Je vais me coucher » ferme la journee qu'on vient de vivre, et tout ce qui
+ * precede cette heure-la, ce jour-la, lui appartient.
+ *
+ * Cinq rangs, du plus sur au moins sur. Ce que la personne DIT passe devant ce
+ * qu'une machine mesure, et dans chaque groupe le coucher passe devant le lever.
+ * Le premier trouve gagne -- on ne melange jamais les rangs dans une journee.
  *
  * @param {Array} mesures  des lignes {date, source, cle, valeur, texte}
  * @returns {Map<string, number>} date -> minutes depuis minuit
  */
-export function leversConnus(mesures = []) {
+export function bornesConnues(mesures = []) {
   const rangs = new Map();       // date -> {rang, min}
   const rangDe = m => {
-    if (m.source === SOURCE_DIT && contient(m.cle, ['lever'])) return 0;
-    if (contient(m.cle, LEVER)) return 1;
-    if (contient(m.cle, PREMIERE)) return 2;
+    if (m.source === SOURCE_DIT && contient(m.cle, ['coucher'])) return 0;
+    if (m.source === SOURCE_DIT && contient(m.cle, ['lever'])) return 1;
+    if (contient(m.cle, COUCHER)) return 2;
+    if (contient(m.cle, LEVER)) return 3;
+    if (contient(m.cle, PREMIERE)) return 4;
     return null;
   };
   for (const m of mesures) {
@@ -181,9 +203,17 @@ export function leversConnus(mesures = []) {
   return out;
 }
 
-/** La mediane de SES levers. C'est le repli, et il n'est jamais une norme. */
-export function medianeLever(levers) {
-  return mediane([...(levers?.values?.() ?? levers ?? [])]);
+/**
+ * LA MEDIANE DE SES BORNES. C'est le repli, et il n'est jamais une norme.
+ *
+ * Elle melange des couchers et des levers, ce qui serait sale si on cherchait
+ * « son heure de coucher ». Ce n'est pas ce qu'on cherche : chaque valeur est
+ * deja L'HEURE OU SA JOURNEE BASCULE, quel que soit ce qui l'a fait basculer.
+ * En prendre la mediane, c'est demander a quelle heure ca bascule d'habitude --
+ * exactement la question posee.
+ */
+export function medianeBorne(bornes) {
+  return mediane([...(bornes?.values?.() ?? bornes ?? [])]);
 }
 
 /**
@@ -191,10 +221,10 @@ export function medianeLever(levers) {
  *
  * @returns {number|null} minutes depuis minuit, ou null si on ne sait rien.
  */
-export function coupureDe(dateCivile, levers, medLever = null) {
-  const propre = levers?.get?.(dateCivile);
+export function coupureDe(dateCivile, bornes, medBorne = null) {
+  const propre = bornes?.get?.(dateCivile);
   if (propre != null && propre < MIDI) return propre;
-  return medLever != null && medLever < MIDI ? medLever : null;
+  return medBorne != null && medBorne < MIDI ? medBorne : null;
 }
 
 /** La veille d'une date civile. */
@@ -208,15 +238,15 @@ export function veilleDe(date) {
  * LA JOURNEE VECUE A LAQUELLE APPARTIENT UN INSTANT.
  *
  * @param {string|number|Date} ts
- * @param {{levers?: Map, medLever?: number|null, zone?: string}} opts
+ * @param {{bornes?: Map, medBorne?: number|null, zone?: string}} opts
  * @returns {string|null} « 2026-09-01 », ou null si l'instant est illisible.
  */
-export function jourVecuDe(ts, { levers = new Map(), medLever = null, zone = zoneCourante() } = {}) {
+export function jourVecuDe(ts, { bornes = new Map(), medBorne = null, zone = zoneCourante() } = {}) {
   const civil = jourLocal(ts, zone);
   if (!civil) return null;
   const h = enMinutes(heureLocale(ts, zone));
   if (h == null) return civil;
-  const c = coupureDe(civil, levers, medLever);
+  const c = coupureDe(civil, bornes, medBorne);
   // Sans coupure connue, la journee civile. Voir l'en-tete : on ne devine pas.
   if (c == null) return civil;
   return h < c ? veilleDe(civil) : civil;
