@@ -2605,6 +2605,30 @@ function noeudChip(n) {
 }
 
 /**
+ * LES CHOSES D'UN GROUPE, DERRIERE UN CLIC.
+ *
+ * Sous la carte s'affichaient les MECANISMES et les NOEUDS, tous ouverts. Trois
+ * pistes de douze noeuds chacune, ce sont trente-six pastilles a lire avant
+ * d'arriver au deuxieme titre — et les noeuds, on les a deja sous les yeux :
+ * ils sont sur la carte, juste au-dessus, dessines.
+ *
+ * Ce qui n'est nulle part ailleurs, c'est le MECANISME : « minimiser ce qui
+ * vient de se passer » ne se dessine pas. Il reste donc ouvert, et les choses
+ * se replient derriere leur compte.
+ *
+ * Sauf quand le groupe n'a AUCUN mecanisme : replier le seul contenu d'un
+ * groupe donnerait un titre suivi de rien, et on croirait le groupe vide.
+ */
+function chosesMarkup(noeuds, ouvert = false) {
+  if (!noeuds.length) return '';
+  const n = noeuds.length;
+  return `<details class="ncdetails"${ouvert ? ' open' : ''}>
+    <summary>${n} chose${n > 1 ? 's' : ''} sur la carte</summary>
+    <div class="ncartes">${noeuds.map(noeudChip).join('')}</div>
+  </details>`;
+}
+
+/**
  * SOUS LA CARTE, CE QUE LA CARTE CONTIENT.
  *
  * On y listait les MECANISMES pendant que la toile montrait des NOEUDS. Les
@@ -2669,8 +2693,8 @@ function mecaGroupes(lecture) {
     bloc.push(`<div class="mecagroupe" style="--p:${teinte}" data-ilot="${i}">
       <button class="mecatitre" data-ilot-voir="${i}"
               title="Le montrer sur la carte"><span></span>${esc(p.nom)}</button>
-      ${dedans.length ? `<div class="ncartes">${dedans.map(noeudChip).join('')}</div>` : ''}
       ${meca.length ? `<div class="mecasous">${meca.map(mecaMarkup).join('')}</div>` : ''}
+      ${chosesMarkup(dedans, !meca.length)}
     </div>`);
   });
 
@@ -2684,8 +2708,8 @@ function mecaGroupes(lecture) {
   if (libres.length || seuls.length) {
     bloc.push(`<div class="mecagroupe seuls">
       <div class="mecatitre"><span></span>pas encore regroupé</div>
-      ${libres.length ? `<div class="ncartes">${libres.map(noeudChip).join('')}</div>` : ''}
       ${seuls.length ? `<div class="mecasous">${seuls.map(mecaMarkup).join('')}</div>` : ''}
+      ${chosesMarkup(libres, !seuls.length)}
     </div>`);
   }
   return bloc.join('');

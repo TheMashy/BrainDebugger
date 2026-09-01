@@ -25,18 +25,40 @@
 
 import { TEINTES_DECLAREES, ICONES } from './reperes.js';
 
-/* Une teinte par genre, prise dans la bande DECLAREE (229-337) partagee avec les
-   reperes et les motifs. Elle ne peut donc pas se confondre avec la rampe des
-   notes, qui occupe le reste du cercle. */
+/*
+ * UNE TEINTE PAR GENRE — CELLE QUE LE RESTE DE L'APPLICATION EMPLOIE DEJA.
+ *
+ * Elles tenaient toutes dans la bande 229-337, pour ne pas se confondre avec la
+ * rampe des notes. Le resultat sur une vraie carte : huit genres a treize
+ * degres d'ecart, tous au meme bleu-violet. La legende annonce huit types, l'oeil
+ * en voit un. « Mon amas c'est un amas de points. »
+ *
+ * CE QU'ELLES DOIVENT EVITER n'est pas « sortir de la bande » : c'est la RAMPE
+ * DES ECARTS, celle des pastilles de journees dessinees autour de chaque noeud.
+ * Elle va de 18 a 128 degres -- rouge, orange, jaune, vert (voir
+ * `couleurEcart`). Un anneau orange a cote de pastilles oranges melangerait ce
+ * qui est declare et ce qui est mesure, et c'est la seule confusion qui compte
+ * ici.
+ *
+ * Reste 129-360 : deux fois plus large que l'ancienne bande. Huit genres s'y
+ * posent a vingt-cinq degres les uns des autres, ce qui se distingue vraiment,
+ * et quatre gardent la teinte que leur theme porte deja ailleurs dans
+ * l'application -- `travail` a l'identique, `corps` sur `sante`, `personne`
+ * entre `rupture` et `amour`, `mecanisme` sur `creation`.
+ *
+ * `dependance` perd l'orange de `conso` : l'orange EST la rampe. Elle ne perd
+ * rien a l'oeil pour autant -- c'est le seul noeud a porter un double anneau et
+ * l'icone de consommation, ce qui la rend reconnaissable avant sa couleur.
+ */
 export const TEINTE_GENRE = {
-  personne:   336,
-  lieu:       258,
-  travail:    232,
-  corps:      310,
-  mecanisme:  284,
-  periode:    246,
-  activite:   272,
-  dependance: 296
+  activite:   162,   // ce qu'on fait
+  corps:      188,   // le corps et le soin — celle de `sante`
+  travail:    212,   // celle de `travail`, a l'identique
+  periode:    238,   // un moment
+  lieu:       262,   // le lieu ou ca se passe
+  mecanisme:  288,   // celle de `creation` — le seul genre sans theme jumeau
+  dependance: 315,   // elle a en plus son double anneau et son icone
+  personne:   344    // les gens — entre `rupture` et `amour`
 };
 
 export const NOM_GENRE = {
@@ -751,6 +773,7 @@ export function dessinerRelations(ctx, G, dispo,
   }
 
   /* --- les noeuds : des anneaux, parce que tout ceci est declare --- */
+  const libelles = [];
   for (let i = 0; i < G.noeuds.length; i++) {
     const n = G.noeuds[i], p = pts[i];
     const actif = (survol < 0 || proches.has(i)) && dedans(i);
@@ -855,13 +878,86 @@ export function dessinerRelations(ctx, G, dispo,
     // noeud seul garde son nom, il n'a personne pour parler a sa place.
     const opa = (actif ? 1 : 0.2) * (n.ilot != null ? aNoeud : 1);
     if (opa < 0.06) continue;
-    ctx.globalAlpha = opa;
-    const nom = mot(n.nom);
-    const lw = ctx.measureText(nom).width;
-    // Le bornage suit le CADRE VISIBLE, pas le canvas : sous zoom, « largeur »
-    // n'est plus la limite droite de ce qu'on voit, et les libelles se
-    // seraient tasses contre un bord invisible.
-    ctx.fillText(nom, Math.max(g0 + lw / 2 + 4, Math.min(g1 - lw / 2 - 4, p.x)), ly);
+    // Le libelle n'est pas peint ici : il part dans la file, et c'est une
+    // deuxieme passe qui decide lesquels tiennent. Voir plus bas.
+    libelles.push({ texte: mot(n.nom), x: p.x, y: ly, nx: p.x, ny: p.y, ry,
+                    opa, actif, poids: n.jours ?? 0 });
+  }
+
+  /*
+   * LES NOMS QUI SE CHEVAUCHENT NE S'AFFICHENT PAS TOUS.
+   *
+   * Chaque noeud ecrivait son nom, sans regarder les autres. Sur une carte
+   * dense, ca donne « le dimanche mLéa », « la ldе sport », « le telephonles
+   * tutos » : des mots imbriques qu'on ne lit ni l'un ni l'autre. Deux noms
+   * superposes ne valent pas un nom et demi, ils valent zero.
+   *
+   * On les pose donc du PLUS LOURD au plus leger -- le noeud qui porte quarante
+   * journees gagne sur celui qui en porte trois -- et un nom qui heurterait un
+   * nom deja pose est simplement omis. Il n'est pas perdu : il revient au
+   * survol, qui est peint en dernier et gagne tout.
+   *
+   * C'est une carte, pas une legende exhaustive. Ce qu'on lui demande de loin,
+   * c'est de reconnaitre des groupes et quelques noms ; le detail se demande en
+   * pointant.
+   */
+  {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.font = `400 ${(11 * Math.max(0.82, ech) / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
+    const h = 13 / v.k;                 // la hauteur d'une ligne, en coordonnees carte
+    /*
+     * LES NOEUDS OCCUPENT LA PLACE, EUX AUSSI.
+     *
+     * Un nom qui evite les autres noms mais traverse un anneau reste illisible :
+     * « la salle de sport » barrait le noeud voisin, et on lisait un mot coupe
+     * par un cercle. La file part donc deja pleine des disques -- le cercle
+     * seul, pas son halo : le halo couvre cinq fois le rayon, et rien ne
+     * pourrait plus s'ecrire nulle part.
+     */
+    const poses = G.noeuds.map((nd, k) => {
+      const r = RAYON(nd), q = pts[k];
+      return { x0: q.x - r, x1: q.x + r, y0: q.y - r, y1: q.y + r };
+    });
+    /*
+     * QUATRE PLACES, PAS UNE.
+     *
+     * Avec la seule place au-dessus, refuser les collisions effacait dix-huit
+     * noms sur vingt-quatre : dans un ilot serre, le dessus d'un noeud est
+     * presque toujours le voisin. Une carte sans noms n'est plus une carte.
+     *
+     * On essaie donc dessus, dessous, a droite, a gauche, et on prend la
+     * premiere place libre. Dessus d'abord parce que c'est la place qu'on lit
+     * le plus vite ; les trois autres sauvent la grande majorite du reste.
+     */
+    const libre = r => !poses.some(o => r.x0 < o.x1 && r.x1 > o.x0 && r.y0 < o.y1 && r.y1 > o.y0);
+    const boite = (cx, cy, lw) => ({
+      x0: cx - lw / 2 - 3 / v.k, x1: cx + lw / 2 + 3 / v.k, y0: cy - h, y1: cy + 2 / v.k
+    });
+    for (const l of [...libelles].sort((a, b) => b.poids - a.poids)) {
+      const lw = ctx.measureText(l.texte).width;
+      // Le bornage suit le CADRE VISIBLE, pas le canvas : sous zoom, « largeur »
+      // n'est plus la limite droite de ce qu'on voit, et les libelles se
+      // seraient tasses contre un bord invisible.
+      const borne = cx => Math.max(g0 + lw / 2 + 4, Math.min(g1 - lw / 2 - 4, cx));
+      const marge = 7 / v.k;
+      const places = [
+        [l.x, l.y],                                        // dessus
+        [l.x, l.ny + l.ry + h],                            // dessous
+        [l.nx + l.ry + lw / 2 + marge, l.ny + h * 0.35],   // a droite
+        [l.nx - l.ry - lw / 2 - marge, l.ny + h * 0.35]    // a gauche
+      ];
+      let pose = null;
+      for (const [cx, cy] of places) {
+        const r = boite(borne(cx), cy, lw);
+        if (libre(r)) { pose = { r, x: borne(cx), y: cy }; break; }
+      }
+      if (!pose) continue;
+      poses.push(pose.r);
+      ctx.globalAlpha = l.opa;
+      ctx.fillStyle = l.actif ? '#e9efeb' : '#93a099';
+      ctx.fillText(l.texte, pose.x, pose.y);
+    }
   }
 
   // La date de la journee visee. Sans elle, un point qui grossit sous le curseur

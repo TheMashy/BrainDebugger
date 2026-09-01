@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
          contour, poidsDuNoeud, ilotDesNoeuds, LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+import { disposer } from '../web/carte.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
 
@@ -52,13 +53,59 @@ test('chaque genre du serveur a une teinte et un nom lisible', () => {
   }
 });
 
-test('les teintes des genres restent dans la bande DÉCLARÉE', () => {
-  // « Ce qui est rempli est mesuré, ce qui est contouré est déclaré. » Cette
-  // carte est entièrement déclarée : ses teintes ne doivent pas pouvoir se
-  // confondre avec la rampe des notes, qui occupe le reste du cercle.
-  const lo = Math.min(...TEINTES_DECLAREES), hi = Math.max(...TEINTES_DECLAREES);
+/*
+ * CE QUE CE TEST GARDAIT, ET CE QU'IL GARDE MAINTENANT.
+ *
+ * Il exigeait que les teintes des genres tiennent dans la bande des teintes
+ * DÉCLARÉES (232-336). C'était un raccourci : ce qu'on protège vraiment, c'est
+ * que la couleur d'un genre — déclarée — ne puisse pas se confondre avec celle
+ * d'un écart de journée — mesurée. La bande servait de proxy pour « pas la
+ * rampe », et elle était bien plus étroite que la propriété.
+ *
+ * Assez étroite pour causer un défaut réel : huit genres à treize degrés
+ * d'écart, tous au même bleu-violet. La légende annonçait huit types, l'œil en
+ * voyait un — « mon amas c'est un amas de points ».
+ *
+ * Le test mesure donc maintenant les DEUX propriétés, et la rampe est lue là où
+ * elle est écrite plutôt que devinée :
+ *   — aucune teinte de genre dans la rampe des écarts ;
+ *   — et des genres assez ÉCARTÉS entre eux pour se distinguer.
+ * La seconde n'était testée nulle part, et c'est celle qui avait cassé.
+ */
+const RAMPE = { bas: 18, haut: 128 };   // cf. `couleurEcart` : hsl(18 + (t+1)*55 …)
+
+test('aucune teinte de genre ne tombe dans la rampe des écarts', () => {
+  // « Ce qui est rempli est mesuré, ce qui est contouré est déclaré. » Les
+  // journées sont des pastilles PLEINES à la couleur de leur écart, autour de
+  // chaque nœud ; un anneau de la même teinte, à côté, brouillerait les deux.
+  const MARGE = 12;
   for (const [g, t] of Object.entries(TEINTE_GENRE)) {
-    assert.ok(t >= lo - 12 && t <= hi + 12, `${g} = ${t}°, hors de la bande ${lo}-${hi}`);
+    assert.ok(t < RAMPE.bas - MARGE || t > RAMPE.haut + MARGE,
+      `${g} = ${t}°, dans la rampe des écarts (${RAMPE.bas}-${RAMPE.haut})`);
+  }
+});
+
+test('les genres se distinguent les uns des autres', () => {
+  /*
+   * C'est LE défaut que l'ancienne bande produisait. Vingt degrés est le
+   * minimum où deux teintes de même saturation se lisent comme deux couleurs
+   * plutôt que comme deux nuances — en dessous, une légende de huit entrées
+   * annonce huit choses qu'on ne peut pas retrouver sur le dessin.
+   */
+  const tri = Object.entries(TEINTE_GENRE).sort((a, b) => a[1] - b[1]);
+  for (let i = 1; i < tri.length; i++) {
+    const d = tri[i][1] - tri[i - 1][1];
+    assert.ok(d >= 20, `${tri[i - 1][0]} (${tri[i - 1][1]}°) et ${tri[i][0]} (${tri[i][1]}°) : ${d}° d'écart`);
+  }
+  // Et l'ensemble occupe une vraie étendue, pas un coin du cercle.
+  assert.ok(tri.at(-1)[1] - tri[0][1] >= 150, 'toutes les teintes sont dans le même quartier');
+});
+
+test('les teintes déclarées de l’application restent hors de la rampe, elles aussi', () => {
+  // Les repères et les motifs partagent cette contrainte : une pastille de
+  // repère verte se lirait comme une bonne journée.
+  for (const t of TEINTES_DECLAREES) {
+    assert.ok(t < RAMPE.bas - 12 || t > RAMPE.haut + 12, `${t}° est dans la rampe`);
   }
 });
 
@@ -527,4 +574,65 @@ test('ce qui n’est dans aucune piste est quand même sur la carte, sans titre'
                    ['la salle de sport', 'le mardi']);
   // Le nœud qui n'a aucun voisin libre reste seul : deux, c'est un groupe, un, non.
   assert.equal(G.noeuds.find(n => n.nom === 'le dimanche soir').ilot, null);
+});
+
+
+/* ==================== LES ÎLOTS SE SERRENT VRAIMENT ====================
+ *
+ * « Les patterns ne sont pas regroupés en îlot. Pour l'instant ma carte c'est
+ * un amas de points. » C'était vrai, et rien ne le voyait : les îlots étaient
+ * CALCULÉS correctement — les tests plus haut le vérifient — puis la simulation
+ * les refondait en une seule masse.
+ *
+ * La répulsion et les ressorts étaient GLOBAUX : deux nœuds se repoussaient
+ * pareil qu'ils soient du même îlot ou non, et un lien tirait pareil qu'il
+ * reste dedans ou traverse. Le rappel d'amas devait lutter seul contre les
+ * deux, et il perdait dès que l'îlot dépassait quatre ou cinq nœuds —
+ * c'est-à-dire sur les îlots NOMMÉS, les seuls qui portent une lecture.
+ *
+ * CE QUE CE TEST MESURE, ET CE QU'IL NE MESURE PAS. Il mesure le RAPPORT entre
+ * la distance moyenne dedans et la distance moyenne dehors. Mesuré sur une
+ * carte de la densité réelle : 3,9 avant, 6,0 après — les îlots se sont serrés
+ * (86 px → 56 px de distance interne moyenne), pas éloignés (leurs centres
+ * n'ont pas bougé). C'est bien ce qu'on voulait : sur un cadre fixe, la place
+ * gagnée est celle qu'on prend à l'intérieur des groupes.
+ *
+ * Le seuil est posé ENTRE les deux mesures, et le test a été vérifié dans les
+ * deux sens — avec les anciens coefficients réintroduits, il tombe.
+ */
+test('après la simulation, un îlot est nettement plus serré que l’espace entre îlots', () => {
+  /*
+   * La densité compte. Sur trois groupes de cinq bien séparés, les ANCIENS
+   * coefficients passaient déjà : le défaut n'apparaît qu'à la densité d'une
+   * vraie carte — huit amas, des tailles inégales, et des liens qui traversent.
+   */
+  const GROUPES = [
+    ['a1', 'a2', 'a3', 'a4', 'a5'], ['b1', 'b2', 'b3', 'b4', 'b5'],
+    ['c1', 'c2', 'c3', 'c4'], ['d1', 'd2', 'd3'], ['e1', 'e2', 'e3'],
+    ['f1', 'f2'], ['g1', 'g2'], ['h1', 'h2']
+  ];
+  const noeuds = [];
+  GROUPES.forEach((g, k) => g.forEach((nom, j) =>
+    noeuds.push({ nom, amas: `piste:${k}`, jours: 3 + (j * 7) % 20 })));
+  const idx = nom => noeuds.findIndex(n => n.nom === nom);
+
+  const liens = [];
+  for (const g of GROUPES) for (let i = 1; i < g.length; i++) {
+    liens.push({ s: idx(g[i - 1]), t: idx(g[i]), force: 0.8 });
+  }
+  // Les liens qui TRAVERSENT : c'est eux qui fondaient deux îlots en un.
+  for (const [a, b] of [['a1', 'b1'], ['a5', 'b5'], ['b3', 'c1'], ['c4', 'd1'], ['a3', 'c3']]) {
+    liens.push({ s: idx(a), t: idx(b), force: 0.7 });
+  }
+
+  const dispo = disposer({ noeuds, liens }, 1180, 720);
+  const moy = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const dedans = [], dehors = [];
+  for (let i = 0; i < noeuds.length; i++) for (let j = i + 1; j < noeuds.length; j++) {
+    const d = Math.hypot(dispo.pts[i].x - dispo.pts[j].x, dispo.pts[i].y - dispo.pts[j].y);
+    (noeuds[i].amas === noeuds[j].amas ? dedans : dehors).push(d);
+  }
+  const rapport = moy(dehors) / moy(dedans);
+  assert.ok(rapport > 5,
+    `les îlots ne se serrent pas : dedans ${moy(dedans).toFixed(0)} px, dehors ${moy(dehors).toFixed(0)} px (rapport ${rapport.toFixed(2)})`);
 });

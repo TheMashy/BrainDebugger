@@ -2763,6 +2763,19 @@ button.amasrow:hover { background: var(--panel); }
    Meme teinte que l'ilot sur la carte et que la piste dans « Moi » : trois vues,
    un seul code couleur, et un nom lu quelque part se retrouve ailleurs. */
 .mecagroupe { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+
+/* Les choses du groupe, repliées. Le mécanisme reste ouvert : lui n'est nulle
+   part ailleurs, alors que les nœuds sont déjà dessinés juste au-dessus. */
+.ncdetails { margin-top: 3px; }
+.ncdetails summary {
+  display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
+  font-size: 11.5px; color: var(--ink-faint); padding: 2px 0;
+}
+.ncdetails summary::-webkit-details-marker { display: none; }
+.ncdetails summary::before { content: '›'; transition: transform .12s; }
+.ncdetails[open] summary::before { transform: rotate(90deg); }
+.ncdetails summary:hover { color: var(--ink-dim); }
+.ncdetails .ncartes { margin-top: 5px; }
 .mecagroupe:last-child { margin-bottom: 0; }
 /* Le titre d'un groupe est un BOUTON : il renvoie à son îlot sur la carte,
    parce que le geste évident quand on lit un nom en bas est de vouloir le voir
