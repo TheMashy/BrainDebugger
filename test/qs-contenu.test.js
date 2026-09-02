@@ -192,3 +192,86 @@ test('la route porte ce qui a été consulté, avec l’archétype', () => {
   const min = d.usage.parts.map(p => p.minutes);
   assert.deepEqual(min, [...min].sort((a, b) => b - a));
 });
+
+
+/* ===================== LE PANNEAU DÉCRIT LE JOUR OUVERT =====================
+ *
+ * LE BUG, TEL QU'IL SE VOYAIT. Ouvert au 2 septembre, le bloc annonçait « la
+ * dernière journée reçue · 1 sep » et affichait la nuit du 1er, juste sous
+ * « rien n'a été dit ce jour-là ». Deux journées différentes sur la même page,
+ * et rien pour les distinguer.
+ *
+ * Une journée sans envoi et une journée vide se ressemblent à l'écran ; elles
+ * disent le contraire l'une de l'autre. « Rien n'est arrivé » se vérifie,
+ * « tu n'as rien fait » non.
+ */
+
+const contenu = (jour, jours = 60) =>
+  api.routes['GET /api/qs/contenu']({ query: { jours: String(jours), jour }, userId: OWNER });
+
+test('le contenu décrit le jour demandé, pas le dernier reçu', () => {
+  const d = moins(3);
+  const r = contenu(d);
+  assert.equal(r.jourLu, d);
+  assert.equal(r.recu, true);
+  assert.ok(r.nuit, 'la nuit de CE jour-là');
+});
+
+test('un jour sans rien le dit, au lieu d’emprunter la journée d’à côté', () => {
+  // Une date hors de tout envoi : le jeu d'essai commence il y a 59 jours.
+  const r = contenu(moins(300));
+  assert.equal(r.jourLu, moins(300));
+  assert.equal(r.recu, false);
+  assert.equal(r.nuit, null);
+  assert.equal(r.archetype, null);
+  assert.equal(r.jour, null);
+  assert.equal(r.jourActivite, null);
+});
+
+test('deux jours différents ne rendent pas la même nuit', () => {
+  const a = contenu(moins(3)), b = contenu(moins(4));
+  assert.equal(a.jourLu, moins(3));
+  assert.equal(b.jourLu, moins(4));
+  // Le jeu d'essai tire un sommeil différent chaque jour : deux journées qui
+  // rendraient la même durée signeraient un retour au « dernier jour reçu ».
+  assert.notEqual(a.nuit?.duree, b.nuit?.duree);
+});
+
+test('sans jour demandé, c’est aujourd’hui — et pas le dernier reçu', () => {
+  const r = api.routes['GET /api/qs/contenu']({ query: {}, userId: OWNER });
+  assert.equal(r.jourLu, AUJ);
+});
+
+test('un jour mal formé retombe sur aujourd’hui plutôt que de casser', () => {
+  for (const faux of ['hier', '2026-13-45x', '', null]) {
+    assert.equal(contenu(faux).jourLu, AUJ, `« ${faux} »`);
+  }
+});
+
+test('le digest du jour part avec, relu', () => {
+  const d = moins(2);
+  poserActiviteJour(OWNER, d, {
+    temps_par_contexte_s: { machitool: 360, lightshot: 180, code: 60, mail: 30 },
+    titres_web: { summer: 1072, reddit: 428, w: 304, autre: 96 }
+  });
+  const r = contenu(d);
+  assert.equal(r.jourActivite?.date, d);
+  const noms = (r.jourActivite?.lu?.familles ?? []).map(f => f.nom);
+  assert.ok(noms.includes('temps_par_contexte_s'), `familles : ${noms}`);
+  assert.ok(noms.includes('titres_web'), `familles : ${noms}`);
+});
+
+test('la synchro dit quand la machine a parlé pour la dernière fois', () => {
+  const r = contenu(AUJ);
+  assert.ok(r.synchro, 'la ligne existe');
+  assert.ok(r.synchro.recu_le, 'un horodatage, pas une date de journée');
+  assert.equal(typeof r.synchro.depuis_min, 'number');
+  assert.ok(r.synchro.depuis_min >= 0);
+  /*
+   * `recu_le` est l'heure de l'ENVOI, `dernierJour` la dernière journée
+   * COUVERTE : les deux se cassent séparément, et c'est pour ça qu'elles
+   * voyagent toutes les deux. Une passerelle muette depuis deux jours laisse
+   * un historique parfaitement couvert jusqu'à avant-hier.
+   */
+  assert.ok('dernierJour' in r.synchro);
+});

@@ -2316,7 +2316,13 @@ async function renderMoi(date, { garderCal = false, rafraichir = false } = {}) {
    * la journée s'affiche tout de suite : elle est en haut, on la lit d'abord,
    * et le panneau se remplit dessous quand il arrive.
    */
-  chargerQS();
+  /*
+   * LE QS SUIT LE JOUR OUVERT. `renderMirror` pose `MIRROR_DATE` avant son
+   * premier `await`, mais s'appuyer là-dessus serait s'appuyer sur l'ordre des
+   * instructions d'une autre fonction : la date est donc calculée ici et passée
+   * en clair. Deux vues du même jour ne peuvent plus se désynchroniser.
+   */
+  chargerQS(date ?? MIRROR_DATE ?? S.today);
   return vue;
 }
 
@@ -5095,6 +5101,10 @@ function drawNotesPreview(p) {
    ================================================================== */
 
 let QS_DATA = null;
+/* Le jour que le panneau décrit. Distinct du jour ouvert tant que la réponse
+   n'est pas rentrée : c'est lui qui dit si une réponse en retard est encore
+   la bonne. */
+let QS_JOUR = null;
 
 const qsNb = v => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(v);
 
@@ -5353,10 +5363,127 @@ function qsSerieMarkup(s, fin = null) {
  * et surtout la différence entre une heure MESURÉE et la dernière activité de
  * la machine — reste dans l'infobulle et dans le trait sous le chiffre.
  */
+/*
+ * DEPUIS QUAND LA MACHINE S'EST TUE.
+ *
+ * Trois heures : Machi Tool renvoie la journée en cours à mesure qu'elle
+ * grossit, donc un silence plus long pendant qu'on est devant l'écran n'est
+ * pas un creux, c'est une panne. Le seuil est écrit ici pour être discuté ;
+ * la puce, elle, affiche la DURÉE RÉELLE, de sorte que personne n'ait à faire
+ * confiance à ce chiffre pour se faire son idée.
+ */
+const SYNCHRO_FRAICHE = 180;
+
+/** « il y a 12 min », « il y a 5 h », « il y a 3 j ». */
+function depuisMot(min) {
+  if (min == null) return null;
+  if (min < 2) return 'à l’instant';
+  if (min < 60) return `il y a ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 36) return `il y a ${h} h`;
+  return `il y a ${Math.round(min / 1440)} j`;
+}
+
+/**
+ * EST-CE QUE ÇA ARRIVE ENCORE ?
+ *
+ * Sans cette ligne, une journée sans mesures se lit « je n'ai rien fait » alors
+ * qu'elle veut dire « rien n'est arrivé ». Ce sont deux phrases opposées, et
+ * seule la seconde est vérifiable.
+ *
+ * Le repos n'a pas besoin d'être annoncé : quand ça arrive, la puce est
+ * discrète. Elle passe en orange quand ça ne vient plus — c'est le seul moment
+ * où elle a quelque chose à dire.
+ */
+function qsSynchroMarkup(sy) {
+  if (!sy) return '';
+  if (sy.depuis_min == null) {
+    return `<span class="qssync muet" title="Aucun envoi n’a jamais été reçu">${
+      ico('antenne', 11)}jamais reçu</span>`;
+  }
+  const frais = sy.depuis_min < SYNCHRO_FRAICHE;
+  const quand = depuisMot(sy.depuis_min);
+  return `<span class="qssync${frais ? '' : ' tard'}"
+    title="Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}">${
+    ico('antenne', 11)}${frais ? 'à jour' : `désynchronisé · dernière synchro ${esc(quand)}`}</span>`;
+}
+
+/* ===================== CE QUI A ETE REGARDE, ET AVEC QUOI =====================
+ *
+ * LA DONNEE ETAIT DEJA LA, ET PERSONNE NE LA VOYAIT. Le digest de Machi Tool
+ * porte deux familles qui repondent tout de suite a « ma journee est passee
+ * ou ? » -- les titres de pages web d'un cote, le temps par application de
+ * l'autre. Elles n'existaient qu'au fond de « ce qui est arrive · 75 champs »,
+ * derriere deux replis, melangees a soixante-treize autres lignes.
+ *
+ * ON NE RECALCULE RIEN : `lireDigest` a deja fait le regroupement cote serveur,
+ * avec ses tetes et son « + 21 autres ». On remonte simplement les deux
+ * familles qu'on sait nommer, telles quelles, en haut du panneau.
+ *
+ * DES BARRES, PAS DES CHIFFRES SEULS. On ne sait pas ce que compte la famille
+ * « web » -- des secondes, des echantillons, des visites : l'application qui
+ * envoie ne le dit pas, et `digest.js` refuse de le supposer. Une barre
+ * proportionnelle au total de la famille se lit sans unite, et le nombre reste
+ * ecrit a cote pour qui veut le sien.
+ *
+ * LE RESTE N'EST PAS EFFACE. « + 21 autres » garde sa ligne, avec son poids :
+ * une donnee arrivee a le droit d'etre vue, et cacher sans le dire ferait
+ * croire qu'elle n'est pas arrivee.
+ */
+const FAM_WEB = ['web', 'navigateur', 'browser', 'site', 'page', 'onglet', 'url', 'titre'];
+const FAM_APP = ['contexte', 'application', 'app', 'fenetre', 'window', 'process', 'programme', 'logiciel'];
+
+const familleEst = (nom, mots) => {
+  const k = String(nom ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return mots.some(m => k.includes(m));
+};
+
+/** Une famille du digest, en lignes avec leur barre. */
+function qsFamVue(f, titre, icone) {
+  if (!f) return '';
+  const total = f.total || 1;
+  const ligne = (nom, valeur, cle, reste = false) => {
+    const part = Math.max(2, Math.round((valeur / total) * 100));
+    return `<div class="qsvl${reste ? ' reste' : ''}">
+      <span class="qsvn" title="${esc(nom)}">${esc(nom)}</span>
+      <span class="qsvb"><i style="width:${part}%"></i></span>
+      <span class="qsvv mono">${esc(qsValeur(cle, valeur, f.nom))}</span>
+    </div>`;
+  };
+  /*
+   * NOTRE TITRE, ET LE SIEN. Le nôtre parce que « temps par contexte » ne dit
+   * rien à qui ouvre la page ; le sien à côté parce que ce n'est pas à nous de
+   * renommer ce que l'application a choisi d'appeler comme ça — `digest.js`
+   * s'en tient à cette règle, et l'affichage ne va pas la défaire.
+   */
+  const sien = qsNom(f.nom);
+  return `<div class="qsvue">
+    <div class="qsvt">${ico(icone, 12)}<span>${esc(titre)}</span>
+      <span class="faint">${esc(sien)} · ${f.n} entrée${f.n > 1 ? 's' : ''}</span>
+      <span class="qsvtot mono">${esc(qsValeur(f.nom, f.total))}</span></div>
+    ${f.tetes.map(t => ligne(t.nom, t.valeur, t.cle)).join('')}
+    ${f.reste ? ligne(`+ ${f.reste} autres`, f.resteTotal, f.nom, true) : ''}
+  </div>`;
+}
+
+function qsVuMarkup(lu) {
+  const fams = lu?.familles ?? [];
+  /* Le contexte AVANT le web : « avec quoi » cadre « quoi ». Et les deux
+     familles se cherchent par leur nom parce que c'est l'application qui
+     envoie qui le choisit -- elle peut l'appeler « temps par contexte »
+     aujourd'hui et autrement demain. */
+  const app = fams.find(f => familleEst(f.nom, FAM_APP));
+  const web = fams.find(f => f !== app && familleEst(f.nom, FAM_WEB));
+  if (!app && !web) return '';
+  return `<div class="qsvues">
+    ${qsFamVue(app, 'Les applications', 'code')}
+    ${qsFamVue(web, 'Ce que tu as regardé', 'globe')}
+  </div>`;
+}
+
 function qsNuitMarkup(nuit, archetype, jour, usage) {
   if (!nuit && !archetype && !usage) return '';
   return `<div class="qsallure">
-    ${jour ? `<div class="k faint">La dernière journée reçue · ${fmtDay(jour)}</div>` : ''}
     ${qsNuitLigne(nuit)}
     ${qsJourneeLigne(archetype, usage)}
     ${/* CE QUE C'EST, ET CE QUE CE N'EST PAS. Sans cette ligne, une étiquette
@@ -5485,24 +5612,43 @@ function qsPanneauMarkup(d) {
   const series = [...d.series].sort((a, b) =>
     (b.lien ? 1 : 0) - (a.lien ? 1 : 0) || b.n - a.n || a.cle.localeCompare(b.cle));
   const lies = series.filter(s => s.lien).length;
-  const dernier = d.activite?.[0] ?? null;
+  const brut = d.jourActivite ?? null;
 
+  /*
+   * LE PANNEAU DECRIT LE JOUR OUVERT, ET LE DIT.
+   *
+   * Il annoncait « la derniere journee recue · 1 sep » sous le titre du 2, et
+   * affichait la nuit du 1er a cote de « rien n'a ete dit ce jour-la ». Deux
+   * journees differentes sur la meme page, sans que rien ne les distingue.
+   *
+   * Quand rien n'est arrive, on l'ecrit -- et la puce de synchro dit si c'est
+   * parce qu'il ne s'est rien passe ou parce que plus rien n'arrive. Ce sont
+   * deux phrases opposees, et seule la seconde se verifie.
+   */
+  const vide = d.recu === false;
   return `
     <div class="card qspan">
       <div class="qstete">
         <h2>${ico('antenne', 15)}Quantified self</h2>
+        ${qsSynchroMarkup(d.synchro)}
       </div>
+      ${d.jourLu ? `<div class="qsjour k faint">${fmtDay(d.jourLu)}</div>` : ''}
 
-      ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu, d.usage)}
-      ${qsPucesMarkup(d)}
+      ${vide ? `<p class="jvide qsrien">Rien n'est arrivé ce jour-là.</p>` : `
+        ${qsNuitMarkup(d.nuit, d.archetype, d.jourLu, d.usage)}
+        ${qsPucesMarkup(d)}
+        ${qsVuMarkup(d.jourActivite?.lu)}
+      `}
 
       ${/* TOUT LE RESTE SE REPLIE. Les séries répondent à « comment ça
             évolue », le brut à « qu'est-ce qui est arrivé exactement » : deux
             questions qu'on ne pose pas en ouvrant. */''}
-      ${dernier?.digest ? `<details class="qsbrutd">
-        <summary>ce qui est arrivé le ${fmtDay(dernier.date)} · ${dernier.lu?.champs ?? Object.keys(dernier.digest).length} champs</summary>
-        ${qsLuMarkup(dernier.lu)}
-        <details class="qsbrutd"><summary>tel quel</summary>${qsArbre(dernier.digest)}</details>
+      ${/* LE BRUT AUSSI SUIT LE JOUR OUVERT. Il montrait la dernière journée
+            reçue pendant que le reste du panneau en décrivait une autre. */''}
+      ${brut?.digest ? `<details class="qsbrutd">
+        <summary>ce qui est arrivé le ${fmtDay(brut.date)} · ${brut.lu?.champs ?? Object.keys(brut.digest).length} champs</summary>
+        ${qsLuMarkup(brut.lu)}
+        <details class="qsbrutd"><summary>tel quel</summary>${qsArbre(brut.digest)}</details>
       </details>` : ''}
 
       ${series.length ? `<details class="qsseriesd">
@@ -5572,17 +5718,30 @@ function qsPucesMarkup(d) {
  */
 const QS_FENETRE = 90;
 
-async function chargerQS() {
-  const vide = !QS_DATA;
+async function chargerQS(jour = null) {
+  const vise = jour ?? QS_JOUR ?? S.today;
+  /*
+   * ON REDEMANDE QUAND LE JOUR CHANGE. Le panneau était chargé une fois et
+   * gardé : en feuilletant le calendrier, il continuait à décrire la journée
+   * d'où l'on venait, sous le titre de celle qu'on regardait.
+   */
+  const vide = !QS_DATA || QS_JOUR !== vise;
+  QS_JOUR = vise;
   const hote = $('#qspanneau');
   // Au premier chargement seulement : ensuite on garde ce qui est affiché
   // plutôt que de le faire clignoter pour le remettre identique.
   if (hote && vide) hote.innerHTML = qsPanneauMarkup(null);
-  try { QS_DATA = await api(`/api/qs/contenu?jours=${QS_FENETRE}`); }
+  try { QS_DATA = await api(`/api/qs/contenu?jours=${QS_FENETRE}&jour=${encodeURIComponent(vise)}`); }
   catch (err) { QS_DATA = null;
     const h = $('#qspanneau');
     if (h) h.innerHTML = `<div class="card"><p class="warn">${esc(err.message)}</p></div>`;
     return; }
+  /*
+   * UNE REPONSE EN RETARD N'ECRASE PAS UN JOUR PLUS RECENT. Trois clics rapides
+   * sur « jour suivant » lancent trois requêtes ; si la première rentre en
+   * dernier, elle repeint le panneau avec une journée qu'on a déjà quittée.
+   */
+  if (QS_JOUR !== vise) return;
   const h = $('#qspanneau');
   if (h) h.innerHTML = qsPanneauMarkup(QS_DATA);
 }

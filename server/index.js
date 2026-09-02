@@ -4,7 +4,8 @@ import { randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { routes, streamMessage, retisser, ambiance } from './api.js';
+import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
+         reprendreLesNuits } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle } from './passerelle.js';
 import { analyser, apercuDe } from './mesures.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
@@ -227,6 +228,16 @@ async function traiter(req, res) {
       const charge = await readBody(req);
       const { gardees, laissees, vues } = dansLaZone(zone, () => analyser(charge, { zone }));
       for (const m of gardees) poserMesure({ ...m, userId });
+      /*
+       * UNE HEURE DE COUCHER QUI ARRIVE ICI RANGE SA NUIT, COMME AILLEURS.
+       *
+       * Elle etait enregistree, elle s'affichait, elle servait meme a calculer
+       * la coupure -- et elle ne deplacait rien, parce que le recalage n'etait
+       * branche que sur les deux chemins qui passent par le compagnon. La
+       * regle du produit vaut quelle que soit la porte : `recalerSurBornes` est
+       * la meme fonction que celle qu'appelle la phrase « je vais me coucher ».
+       */
+      dansLaZone(zone, () => recalerSurBornes(gardees, userId));
       const refus = laissees.length ? laissees.slice(0, 4).map(l => l.cle ? `${l.cle} : ${l.pourquoi}` : l.pourquoi).join(' · ') : null;
       noterEnvoi({ userId, source: gardees[0]?.source ?? null, statut: 200,
                    recues: gardees.length + laissees.length, gardees: gardees.length,
@@ -510,6 +521,19 @@ server.on('error', err => {
   ].join('\n'));
   process.exit(1);
 });
+
+/*
+ * Les nuits que le recalage n'avait pas rangées à l'époque, rattrapées une
+ * fois. Bornée, idempotente, annoncée — voir `reprendreLesNuits`.
+ */
+try {
+  const bouges = reprendreLesNuits();
+  if (bouges) console.log(`  ${bouges} message(s) de nuit rangés sur la journée qu'ils terminaient`);
+} catch (e) {
+  // Une reprise qui échoue ne doit pas empêcher le site de démarrer : elle
+  // rattrape un retard, elle ne conditionne rien.
+  console.log(`  reprise des nuits ignorée : ${e.message}`);
+}
 
 server.listen(PORT, HOST, () => {
   const local = auth.isLoopback(HOST);

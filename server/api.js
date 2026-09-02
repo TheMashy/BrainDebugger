@@ -8,7 +8,8 @@ import {
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
-  toutesMesures, signatureQS, activiteJours, mesuresEntre, poserMesure,
+  toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro,
+  mesuresEntre, poserMesure,
   redaterMessages, rebuildEntryText
 } from './db.js';
 import { usageFor, record as recordUsage } from './usage.js';
@@ -25,7 +26,7 @@ import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
 import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
-         chiffresDuJour } from './allure.js';
+         chiffresDuJour, contient, COUCHER, LEVER, DERNIERE, PREMIERE } from './allure.js';
 import { lireDigest } from './digest.js';
 import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, veilleDe,
          SOURCE_DIT, CLE_LEVER, CLE_COUCHER } from './jour-vecu.js';
@@ -379,6 +380,66 @@ export function recalerLaNuit(date, userId = OWNER) {
   rebuildEntryText(veille, userId);
   invalidate(userId);
   return bouges;
+}
+
+/**
+ * UNE BORNE RECALE LA NUIT, QUELLE QUE SOIT LA PORTE PAR LAQUELLE ELLE ENTRE.
+ *
+ * Le recalage n'etait declenche que par les deux chemins qui passent par le
+ * compagnon : la phrase (« je vais me coucher ») et l'outil `noter_bornes`. Une
+ * heure de coucher qui arrivait par la PASSERELLE -- le JSON que Machi Tool ou
+ * une montre pousse -- etait enregistree, s'affichait dans « ce qui a ete
+ * mesure », servait a `coupureDe`... et ne deplacait rien.
+ *
+ * Le resultat se voyait a l'ecran : coucher dit 06:10 le 1er septembre, et les
+ * messages de 01:56 et 05:43 toujours ranges sur le 1er, alors que la regle du
+ * produit les met au 31 aout. La borne etait la, la regle etait juste, et la
+ * grille montrait autre chose -- ce qui revient a n'avoir rien fait.
+ *
+ * Une seule regle, un seul endroit : toute mesure qui peut deplacer la coupure
+ * d'une journee fait rejouer le recalage de cette journee-la.
+ *
+ * @param {Array<{date: string, cle: string}>} mesures
+ * @returns {number} combien de messages ont change de journee.
+ */
+export function recalerSurBornes(mesures, userId = OWNER) {
+  const jours = new Set();
+  for (const m of mesures ?? []) {
+    if (!m?.date || !m?.cle) continue;
+    // Les memes familles de cles que `bornesConnues` sait lire. Une cle qui ne
+    // pese pas sur la coupure ne doit pas faire rejouer un deplacement.
+    if (contient(m.cle, [...COUCHER, ...LEVER, ...DERNIERE, ...PREMIERE])
+        || m.cle === CLE_COUCHER || m.cle === CLE_LEVER) jours.add(m.date);
+  }
+  let bouges = 0;
+  for (const d of jours) bouges += recalerLaNuit(d, userId);
+  return bouges;
+}
+
+/**
+ * LA REPRISE : LES NUITS QU'ON N'A PAS RANGEES A L'EPOQUE.
+ *
+ * Brancher le recalage sur la passerelle ne soigne que ce qui arrivera. Une
+ * base qui porte deja « coucher 06:10 » le 1er septembre garde ses deux
+ * messages de la nuit sur le 1er, indefiniment -- la borne est la, la regle est
+ * juste, et l'ecran continue de montrer autre chose.
+ *
+ * On rejoue donc la regle une fois au demarrage, sur la fenetre ou les bornes
+ * comptent. C'est BORNE (jamais plus d'un jour en arriere, jamais au-dela de la
+ * fenetre), IDEMPOTENT (un message deja range est du bon cote de la coupure et
+ * ne bouge plus), et ANNONCE : le compte part dans le journal de demarrage
+ * plutot que de se faire en silence.
+ *
+ * Ce n'est pas « la grille se reecrit toute seule » : c'est la meme regle,
+ * appliquee aux memes bornes, au seul moment ou l'on peut encore rattraper ce
+ * qui a ete manque.
+ *
+ * @returns {number} combien de messages ont change de journee.
+ */
+export function reprendreLesNuits(userId = OWNER) {
+  const fin = today();
+  const debut = addDays(fin, -FENETRE_LEVERS + 1);
+  return recalerSurBornes(mesuresEntre(debut, fin, userId), userId);
 }
 
 /* ==================================================================
@@ -1567,6 +1628,21 @@ export const routes = {
     const jours = Math.max(7, Math.min(365, Number(query?.jours) || 60));
     const fin = today();
     const debut = addDays(fin, -jours + 1);
+    /*
+     * LE JOUR REGARDE, ET PAS LE DERNIER RECU.
+     *
+     * Le bloc decrivait toujours la derniere journee arrivee, ou qu'on soit
+     * dans le calendrier. Ouvert au 2 septembre, il annoncait « la derniere
+     * journee recue · 1 sep » et affichait la nuit du 1er sous le titre du 2 :
+     * a cote de « rien n'a ete dit ce jour-la », la page racontait deux
+     * journees differentes en meme temps.
+     *
+     * On decrit donc LE jour demande. Quand rien n'est arrive ce jour-la, on le
+     * dit -- c'est une information, pas un trou a combler avec la journee
+     * d'a cote.
+     */
+    const jourVise = /^\d{4}-\d{2}-\d{2}$/.test(String(query?.jour ?? ''))
+      ? String(query.jour) : fin;
 
     const par = new Map();
     for (const m of mesuresEntre(debut, fin, userId)) {
@@ -1665,18 +1741,26 @@ export const routes = {
        *
        * Elles ne sortent pas d'une série de plus : elles répondent aux deux
        * questions qu'on se pose vraiment devant ces chiffres — « j'ai mal
-       * dormi ? » et « ma journée est passée où ? ». Sur le DERNIER jour reçu,
-       * pas sur aujourd'hui : un jour sans envoi n'a rien à raconter, et
-       * afficher une nuit vide au lieu de la dernière connue serait perdre la
-       * seule qu'on ait.
+       * dormi ? » et « ma journée est passée où ? ». Sur LE JOUR REGARDÉ, et
+       * sur aucun autre.
        */
       ...(() => {
         const tous = [...par.values()].flatMap(s2 => s2.points.map(p => ({
           date: p.date, cle: s2.cle, valeur: p.valeur, texte: p.texte, unite: s2.unite
         })));
-        const dernier = dernierJour;
-        if (!dernier) return { nuit: null, archetype: null, usage: null, jour: null };
-        const duJour = tous.filter(x => x.date === dernier);
+        const duJour = tous.filter(x => x.date === jourVise);
+        const act = activiteDuJour(jourVise, userId);
+        /*
+         * `recu` DIT S'IL EST ARRIVE QUELQUE CHOSE, et il se calcule sur les
+         * deux sources : la montre peut avoir envoyé sans Machi Tool, ou
+         * l'inverse. Sans lui, une journée vide et une journée jamais reçue
+         * s'affichent pareil — or l'une dit « tu n'as rien fait » et l'autre
+         * « on ne sait pas », ce qui n'est pas du tout la même chose.
+         */
+        if (!duJour.length && !act) {
+          return { jourLu: jourVise, recu: false,
+                   nuit: null, archetype: null, usage: null, jour: null, jourActivite: null };
+        }
         /*
          * `usage` PART AVEC L'ARCHETYPE, ET SORT DU MEME COMPTAGE.
          *
@@ -1686,11 +1770,47 @@ export const routes = {
          * une etiquette qui contredit ses propres chiffres est pire qu'une
          * etiquette seule. `jour` sort du meme comptage, pour la meme raison.
          */
-        return { jourLu: dernier, nuit: nuitDe(duJour, tous),
+        return { jourLu: jourVise, recu: true,
+                 nuit: nuitDe(duJour, tous),
                  archetype: archetypeDe(duJour, tous), usage: usageDuJour(duJour),
                  // Les quelques chiffres qui font les puces : le temps d'écran,
                  // où il est passé, le rythme. Chacun avec son écart à SA normale.
-                 jour: chiffresDuJour(duJour, tous) };
+                 jour: chiffresDuJour(duJour, tous),
+                 /*
+                  * LE DIGEST DU JOUR PART AVEC, RELU.
+                  *
+                  * `activite` n'en porte que soixante ; une journée plus
+                  * ancienne serait ouverte sans rien à montrer alors que la
+                  * base l'a. Une requête ciblée coûte une ligne et vaut pour
+                  * toute la profondeur de l'historique.
+                  */
+                 jourActivite: act
+                   ? { date: act.date, recu_le: act.recu_le, digest: act.digest,
+                       lu: lireDigest(act.digest) }
+                   : null };
+      })(),
+
+      /*
+       * EST-CE QUE C'EST A JOUR ?
+       *
+       * `reception` répond « quels jours sont couverts » — c'est la DONNÉE.
+       * Ici on répond « quand la machine a-t-elle parlé pour la dernière
+       * fois », ce qui est la LIAISON, et les deux se cassent séparément : une
+       * passerelle muette depuis deux jours laisse un historique parfaitement
+       * couvert jusqu'à avant-hier. Sans cette ligne, une journée vide se lit
+       * comme « je n'ai rien fait » alors qu'elle veut dire « rien n'est
+       * arrivé ».
+       */
+      synchro: (() => {
+        const ts = derniereSynchro(userId);
+        return {
+          recu_le: ts,
+          // En minutes : l'écran choisit lui-même s'il dit « il y a 20 min »
+          // ou « il y a deux jours ». Le serveur ne met pas en français une
+          // durée dont il ne sait pas comment elle sera affichée.
+          depuis_min: ts ? Math.max(0, Math.round((Date.now() - Date.parse(ts)) / 60000)) : null,
+          dernierJour
+        };
       })(),
 
       /*

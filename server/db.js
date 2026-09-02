@@ -1391,6 +1391,38 @@ export const activiteJours = (userId = OWNER, limite = 120) =>
     return { date: r.date, recu_le: r.recu_le, digest: d };
   });
 
+/** Une journée d'activité précise, digest déjà relu. `null` si rien n'est arrivé ce jour-là. */
+export function activiteDuJour(date, userId = OWNER) {
+  const r = db.prepare(
+    'SELECT date, recu_le, digest FROM activite_jours WHERE user_id = ? AND date = ?'
+  ).get(userId, date);
+  if (!r) return null;
+  let d = null;
+  try { d = JSON.parse(r.digest); } catch { d = null; }
+  return { date: r.date, recu_le: r.recu_le, digest: d };
+}
+
+/**
+ * QUAND LA MACHINE A PARLE POUR LA DERNIERE FOIS.
+ *
+ * Pas « quel jour est couvert » -- ca, c'est la donnee. Ici c'est l'HEURE DE
+ * L'ENVOI, et les deux ne disent pas la meme chose : un digest du 1er septembre
+ * recu le 1er a 23 h et un digest du 1er recu le 3 a midi couvrent la meme
+ * journee, mais dans le second cas la passerelle est restee muette deux jours.
+ * C'est cette panne-la qu'on veut voir, et elle est invisible dans les dates
+ * des mesures.
+ *
+ * Les deux tables comptent : `mesures` porte ce que la montre envoie,
+ * `activite_jours` ce que Machi Tool envoie, et l'une peut se taire sans
+ * l'autre.
+ */
+export function derniereSynchro(userId = OWNER) {
+  const m = db.prepare('SELECT MAX(recu_le) t FROM mesures WHERE user_id = ?').get(userId);
+  const a = db.prepare('SELECT MAX(recu_le) t FROM activite_jours WHERE user_id = ?').get(userId);
+  const ts = [m?.t, a?.t].filter(Boolean).sort();
+  return ts.length ? ts.at(-1) : null;
+}
+
 /* ---------- séances ---------- */
 
 export const allSeances = (userId = OWNER) => db.prepare(
