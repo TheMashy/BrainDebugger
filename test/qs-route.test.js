@@ -22,7 +22,8 @@ const DB = join(mkdtempSync(join(tmpdir(), 'bd-qsroute-')), 'test.db');
 process.env.BD_DB = DB;
 
 const { poserCle } = await import('../server/passerelle.js');
-const { OWNER, journalQS, inventaireMesures, mesuresDuJour, activiteJours } = await import('../server/db.js');
+const { OWNER, journalQS, inventaireMesures, mesuresDuJour, activiteJours,
+        addMessage, messagesForDate } = await import('../server/db.js');
 
 const CLE = poserCle(OWNER);
 const PORT = 4000 + Math.floor(Math.random() * 900);
@@ -210,4 +211,52 @@ test('le digest renvoyé dans la journée ne double pas les séries', async () =
 
 test('le digest exige la clé, lui aussi', async () => {
   assert.equal((await pousser(DIGEST, {})).status, 401);
+});
+
+
+/*
+ * UNE BORNE QUI ARRIVE PAR LE JSON RANGE SA NUIT, comme celle qui arrive par
+ * une phrase.
+ *
+ * LE BUG, TEL QU'IL SE VOYAIT. Coucher dit 06:10 le 1er septembre, affiché dans
+ * « ce qui a été mesuré », servant même à calculer la coupure — et les moments
+ * de 01:56 et 05:43 toujours rangés sur le 1er, alors que la règle du produit
+ * les met au 31 août. Le recalage n'était branché que sur les deux chemins qui
+ * passent par le compagnon : la phrase et l'outil `noter_bornes`. La passerelle
+ * enregistrait la borne et ne déplaçait rien.
+ *
+ * Ce test passe par le SITE, en HTTP, parce que c'est là que le branchement
+ * manquait — appeler la fonction aurait vérifié une règle qui était déjà juste.
+ */
+test('un coucher poussé par la passerelle range la nuit sur la veille', async () => {
+  // Paris est en UTC+2 début septembre : 01:56 locales = 23:56 UTC la veille.
+  const soir = { ts: '2026-08-31T23:56:00.000Z', heure: '01:56' };
+  const nuit = { ts: '2026-09-01T03:43:00.000Z', heure: '05:43' };
+  const jour = { ts: '2026-09-01T14:24:00.000Z', heure: '16:24' };
+  for (const m of [soir, nuit, jour]) {
+    addMessage({ ts: m.ts, date: '2026-09-01', role: 'user',
+                 text: `écrit à ${m.heure}`, userId: OWNER });
+  }
+  assert.equal(messagesForDate('2026-09-01', OWNER).length, 3, 'les trois partent du 1er');
+
+  const r = await envoyer({ date: '2026-09-01', coucher: '06:10' });
+  assert.equal(r.status, 200);
+
+  const restes = messagesForDate('2026-09-01', OWNER).map(m => m.text);
+  const veille = messagesForDate('2026-08-31', OWNER).map(m => m.text);
+  assert.deepEqual(restes, ['écrit à 16:24'],
+    'seul ce qui suit le coucher reste sur le 1er');
+  assert.deepEqual(veille.sort(), ['écrit à 01:56', 'écrit à 05:43'].sort(),
+    'la nuit rejoint la journée qu’elle terminait');
+});
+
+test('une mesure ordinaire ne déplace aucun message', async () => {
+  // La contrepartie : le recalage ne doit se déclencher que sur une borne. Un
+  // nombre de pas qui redate une soirée serait bien pire que le bug d'origine.
+  addMessage({ ts: '2026-09-10T02:10:00.000Z', date: '2026-09-10', role: 'user',
+               text: 'une nuit sans borne', userId: OWNER });
+  const avant = messagesForDate('2026-09-10', OWNER).length;
+  assert.equal((await envoyer({ date: '2026-09-10', pas: 8421 })).status, 200);
+  assert.equal(messagesForDate('2026-09-10', OWNER).length, avant,
+    'rien ne bouge sans borne');
 });

@@ -3634,6 +3634,66 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 
 .qsarchnote { margin: 0; font-size: 11.5px; color: var(--ink-faint); font-style: italic; }
 
+/* ---------------------------------------------------------------------
+   LA JOURNÉE DÉCRITE, ET SI ÇA ARRIVE ENCORE.
+
+   La date sous le titre n'est pas une décoration : le panneau décrivait la
+   dernière journée reçue quel que soit le jour ouvert, et rien à l'écran ne
+   permettait de s'en apercevoir. */
+.qsjour { margin: -8px 0 0; font-size: 12px; letter-spacing: .04em; }
+.qsrien { margin: 0; font-size: 13px; }
+
+/* La puce de synchro pousse à droite, avec la fenêtre. Discrète quand ça
+   arrive — le repos n'a pas besoin d'être annoncé — et orange quand ça ne
+   vient plus, qui est le seul moment où elle a quelque chose à dire. */
+.qssync {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--ink-faint);
+  border: 1px solid var(--line-soft); border-radius: 999px; padding: 3px 10px;
+}
+.qssync.tard { color: var(--warn); border-color: #4a3a18; background: #241c0c; }
+.qssync.muet { font-style: italic; }
+.qsfen + .qssync, .qssync + .qsfen { margin-left: 0; }
+
+/* ---------------------------------------------------------------------
+   CE QUI A ÉTÉ REGARDÉ, ET AVEC QUOI.
+
+   Deux colonnes sur large, empilées sur téléphone. Chaque ligne est un nom,
+   une barre, une valeur — la barre porte la proportion, le nombre reste écrit
+   parce qu'on ne sait pas ce qu'il compte et qu'une barre seule le cacherait. */
+.qsvues { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 860px) { .qsvues { grid-template-columns: 1fr 1fr; } }
+
+.qsvue {
+  border: 1px solid var(--line-soft); border-radius: 9px; padding: 10px 12px;
+  background: var(--panel-2); display: flex; flex-direction: column; gap: 6px;
+  min-width: 0;
+}
+.qsvt {
+  display: flex; align-items: center; gap: 8px; font-size: 12px;
+  color: var(--ink-soft); margin-bottom: 2px;
+}
+.qsvt > span:first-of-type { font-weight: 500; color: var(--ink); }
+.qsvt .faint { font-size: 11px; }
+.qsvtot { margin-left: auto; font-size: 12px; color: var(--ink-soft); }
+
+/* `minmax(0, …)` sur le nom : sans lui, un titre de page long pousse la barre
+   et la valeur hors de la carte au lieu de se faire couper. */
+.qsvl {
+  display: grid; grid-template-columns: minmax(0, 8.5em) 1fr auto;
+  align-items: center; gap: 10px; font-size: 12px;
+}
+.qsvn {
+  color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.qsvb { height: 4px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.qsvb i { display: block; height: 100%; background: var(--ink-faint); border-radius: 999px; }
+.qsvv { color: var(--ink-soft); font-size: 11.5px; }
+/* Le reste garde sa ligne et son poids, en retrait : une donnée arrivée a le
+   droit d'être vue, et la cacher ferait croire qu'elle n'est pas arrivée. */
+.qsvl.reste .qsvn { font-style: italic; color: var(--ink-faint); }
+.qsvl.reste .qsvb i { background: var(--line); }
+
 /* Le résumé d'un jour, dans sa ligne repliée. */
 .qsresume { font-size: 11.5px; color: var(--ink-dim); margin-left: auto; text-align: right; }
 
