@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
-         contour, poidsDuNoeud, ilotDesNoeuds, appuyer, tenueDe, SEUIL_APPUI, SEUIL_PART,
+         contour, poidsDuNoeud, ilotDesNoeuds, appuyer, siensDe, tenueDe, SEUIL_APPUI, SEUIL_PART,
          LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { disposer } from '../web/carte.js';
 import { GENRES } from '../server/lecture.js';
@@ -303,15 +303,39 @@ test('sans pistes, on retombe sur le regroupement par genre', () => {
   assert.deepEqual(G.ilots, []);
 });
 
-test('un nœud ne tombe que dans un seul îlot', () => {
-  // Deux enveloppes qui se traversent effacent exactement ce qu'on venait
-  // chercher sur la carte : des groupes qu'on distingue.
+test('un nœud réclamé par deux pistes appartient aux deux, et se pose dans une', () => {
+  /*
+   * LE PREMIER ARRIVÉ NE GARDE PLUS LE NŒUD. Une chose qui appartient à deux
+   * endroits est souvent celle qui compte le plus, et la ranger d'un seul côté
+   * efface exactement ce qui la rend intéressante.
+   *
+   * `ilots` est l'APPARTENANCE et peut valoir pour deux ; `ilot` est la PLACE,
+   * et il n'y en a qu'une : un point sur la toile tiré vers deux ancres
+   * finirait entre les deux, dans un endroit qui n'est ni l'un ni l'autre.
+   */
   const G = versGraphe(CARTE, [
     { nom: 'a', noeuds: ['Léa'] },
     { nom: 'b', noeuds: ['Léa', 'le dimanche soir'] }
   ]);
-  assert.equal(G.noeuds[0].ilot, 0, 'le premier îlot garde le nœud');
-  assert.equal(G.noeuds[2].ilot, 1);
+  assert.deepEqual(G.noeuds[0].ilots, [0, 1], 'Léa est dans les deux');
+  assert.equal(G.noeuds[0].ilot, 0, 'et se pose dans la première');
+  assert.deepEqual(G.noeuds[2].ilots, [1]);
+  assert.equal(G.ilots.length, 2, 'les deux pistes deviennent des îlots');
+});
+
+test('les deux îlots d’un nœud partagé le comptent chacun', () => {
+  // Sinon l'un des deux serait mesuré sur un membre qu'il n'a pas, et son
+  // enveloppe dirait autre chose que ce qu'elle entoure.
+  const noeuds = ['a', 'b', 'c'].map(nom => ({ nom, genre: 'activite', poids: 1, jours: [] }));
+  const liens = [{ de: 'a', vers: 'b', quoi: 'précède', force: 2 },
+                 { de: 'b', vers: 'c', quoi: 'précède', force: 2 }];
+  const G = versGraphe({ noeuds, liens }, [
+    { nom: 'un', teinte: 200, noeuds: ['a', 'b'] },
+    { nom: 'deux', teinte: 300, noeuds: ['b', 'c'] }
+  ]);
+  for (const a of G.ilots) assert.equal(a.n, 2, `« ${a.nom} » compte ses deux membres`);
+  // Et « b » n'est plus un pont : il est DANS les deux, il ne les relie pas.
+  assert.deepEqual(G.noeuds[1].ilots, [0, 1]);
 });
 
 test('une piste qui ne place aucun nœud ne devient pas un îlot vide', () => {
@@ -531,24 +555,25 @@ test('la liste sous la carte et l’enveloppe sur la carte tiennent les mêmes n
    */
   const pistes = [
     { nom: 'dépendance', noeuds: ['Léa', 'les nuits courtes', 'un nœud disparu'] },
-    { nom: 'vide au travail', noeuds: ['le dimanche soir', 'Léa'] } // Léa est déjà prise
+    { nom: 'vide au travail', noeuds: ['le dimanche soir', 'Léa'] } // Léa est dans les deux
   ];
   const ilotDe = ilotDesNoeuds(CARTE, pistes);
   const G = versGraphe(CARTE, pistes);
 
   for (const a of G.ilots) {
-    const surLaCarte = G.noeuds.filter(n => n.ilot === a.i).map(n => n.nom).sort();
+    const surLaCarte = G.noeuds.filter(n => siensDe(n).includes(a.i)).map(n => n.nom).sort();
     // Ce que la liste écrit sous ce titre : le même filtre, depuis la carte brute.
     const enListe = CARTE.noeuds
-      .filter(n => ilotDe.get(String(n.nom).toLowerCase()) === a.i)
+      .filter(n => (ilotDe.get(String(n.nom).toLowerCase()) ?? []).includes(a.i))
       .map(n => n.nom).sort();
     assert.deepEqual(surLaCarte, enListe,
                      `« ${a.nom ?? 'sans nom'} » ne tient pas la même chose des deux côtés`);
   }
   // Et un nom que la carte ne porte pas ne compte nulle part.
   assert.equal(ilotDe.has('un nœud disparu'), false);
-  // Un nœud revendiqué deux fois reste au premier qui l'a nommé, des deux côtés.
-  assert.equal(ilotDe.get('léa'), 0);
+  // Un nœud revendiqué deux fois est dans les deux, des deux côtés — c'est
+  // exactement ce recouvrement que la partition effaçait sans le dire.
+  assert.deepEqual(ilotDe.get('léa'), [0, 1]);
 });
 
 test('ce qui n’est dans aucune piste est quand même sur la carte, sans titre', () => {

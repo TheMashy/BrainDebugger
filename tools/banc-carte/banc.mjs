@@ -12,7 +12,7 @@
  *   - la DISPOSITION : les enveloppes se traversent-elles, les noeuds se
  *     superposent-ils, en combien de temps.
  */
-import { versGraphe, ilotDesNoeuds, LIBRE, contour, cadrer } from '../../web/relations.js';
+import { versGraphe, ilotDesNoeuds, LIBRE, contour, cadrer, siensDe } from '../../web/relations.js';
 import { disposer } from '../../web/carte.js';
 import { CAS, fabriquer, rng } from './echantillons.mjs';
 
@@ -36,8 +36,8 @@ function recouvrementPerdu(carte, pistes) {
 /** Les liens qui traversent deux ilots, et les noeuds qui les portent. */
 function ponts(G) {
   const cr = G.liens.filter(l => {
-    const a = G.noeuds[l.s].ilot, b = G.noeuds[l.t].ilot;
-    return a != null && b != null && a !== b;
+    const a = siensDe(G.noeuds[l.s]), b = siensDe(G.noeuds[l.t]);
+    return a.length && b.length && !a.some(k => b.includes(k));
   });
   const porteurs = new Set();
   for (const l of cr) { porteurs.add(l.s); porteurs.add(l.t); }
@@ -80,9 +80,12 @@ function stabiliteGrappes(carte, pistes, { tirages = 100, retire = 0.2, graine =
 function croisementEnveloppes(G, pts) {
   const parIlot = new Map();
   G.noeuds.forEach((n, i) => {
-    if (n.ilot == null) return;
-    if (!parIlot.has(n.ilot)) parIlot.set(n.ilot, []);
-    parIlot.get(n.ilot).push(pts[i]);
+    // Un noeud dans deux ilots est dans les DEUX enveloppes : c'est le
+    // recouvrement, et c'est precisement ce que cette mesure doit voir.
+    for (const k of siensDe(n)) {
+      if (!parIlot.has(k)) parIlot.set(k, []);
+      parIlot.get(k).push(pts[i]);
+    }
   });
   const formes = [...parIlot].map(([i, p]) => ({ i, bord: contour(p, 30) })).filter(f => f.bord?.length >= 3);
   const dedans = (bord, x, y) => {

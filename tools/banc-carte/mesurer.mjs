@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { valider } from '../../server/lecture.js';
-import { versGraphe, ilotDesNoeuds, LIBRE, contour, cadrer } from '../../web/relations.js';
+import { versGraphe, ilotDesNoeuds, LIBRE, contour, cadrer, siensDe } from '../../web/relations.js';
 import { disposer } from '../../web/carte.js';
 
 const ICI = path.dirname(new URL(import.meta.url).pathname);
@@ -65,8 +65,8 @@ export function recouvrementBrut(brut) {
 
 export function ponts(G) {
   const cr = G.liens.filter(l => {
-    const a = G.noeuds[l.s].ilot, b = G.noeuds[l.t].ilot;
-    return a != null && b != null && a !== b;
+    const a = siensDe(G.noeuds[l.s]), b = siensDe(G.noeuds[l.t]);
+    return a.length && b.length && !a.some(k => b.includes(k));
   });
   const porteurs = new Set();
   for (const l of cr) { porteurs.add(l.s); porteurs.add(l.t); }
@@ -104,9 +104,10 @@ export function boucles(brut) {
 export function appuiDesIlots(G) {
   const par = new Map();
   G.noeuds.forEach((n, i) => {
-    if (n.ilot == null) return;
-    if (!par.has(n.ilot)) par.set(n.ilot, new Set());
-    par.get(n.ilot).add(i);
+    for (const k of siensDe(n)) {
+      if (!par.has(k)) par.set(k, new Set());
+      par.get(k).add(i);
+    }
   });
   return [...par].map(([i, m]) => {
     let dedans = 0, dehors = 0;

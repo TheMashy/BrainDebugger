@@ -2,7 +2,7 @@ import { PETS, petMarkup } from './pets.js';
 import { Ambiance } from './ambiance.js';
 import { disposer } from './carte.js';
 import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
-         vueNeutre, zoomer, poidsDuNoeud, ilotDesNoeuds, contour,
+         vueNeutre, zoomer, poidsDuNoeud, ilotDesNoeuds, siensDe, contour,
          NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
@@ -2695,11 +2695,24 @@ function mecaGroupes(lecture) {
   });
   const ilotDuMeca = m => {
     const k = String(m.nom).toLowerCase();
-    return parTheme.get(k) ?? ilotDe.get(k) ?? null;
+    // `ilotDe` rend maintenant TOUS les ilots d'un noeud. Un mecanisme, lui, se
+    // range sous UN titre : la liste d'en dessous est une liste, pas une carte,
+    // et le meme nom ecrit sous deux titres se lirait comme deux choses. Le
+    // premier qui l'a nomme le garde ici -- c'est aussi celui ou son noeud se
+    // pose sur la toile, donc les deux moities designent bien le meme endroit.
+    return parTheme.get(k) ?? (ilotDe.get(k) ?? [])[0] ?? null;
   };
 
   pistes.forEach((p, i) => {
-    const dedans = noeuds.filter(n => ilotDe.get(String(n.nom).toLowerCase()) === i);
+    /*
+     * `.includes` et plus `===` : un noeud peut appartenir a deux pistes, et il
+     * doit alors apparaitre sous les deux titres. C'est la moitie « liste » du
+     * recouvrement -- si elle continuait a le ranger dans la premiere venue,
+     * l'enveloppe et la colonne d'en dessous se remettraient a diverger, ce
+     * qu'on ne peut pas se permettre : c'est la meme lecture regardee de deux
+     * facons.
+     */
+    const dedans = noeuds.filter(n => (ilotDe.get(String(n.nom).toLowerCase()) ?? []).includes(i));
     const meca = tous.filter(m => restant.has(m.cle) && ilotDuMeca(m) === i);
     if (!dedans.length && !meca.length) return;
     for (const m of meca) restant.delete(m.cle);
@@ -2836,7 +2849,11 @@ function noeudMarkup() {
     </div>
     <h3 class="ncnom">${esc(p.nom)}</h3>
     <p class="ncjours">${p.jours.length} journée${p.jours.length > 1 ? 's' : ''}${
-      p.ilot ? ` · dans <b>${esc(p.ilot.nom)}</b>` : ' · hors des pistes'}</p>
+      /* TOUS ses îlots, pas le premier. Une chose qui appartient à deux
+         directions est celle sur laquelle on clique justement pour comprendre
+         pourquoi — n'en nommer qu'une effacerait la réponse. */
+      p.ilots?.length ? ` · dans ${p.ilots.map(x => `<b>${esc(x.nom)}</b>`).join(' et ')}`
+                      : ' · hors des pistes'}</p>
 
     ${/*
        * UN NŒUD SE PRÉSENTE COMME UN MÉCANISME.
@@ -6169,7 +6186,7 @@ function tissageBoucle() {
     if (t.pose && t.arrivee) {
       const ilots = Math.min(1, (t.image - t.arrivee) / 45);
       for (const a of t.G.ilots ?? []) {
-        const dedans = t.G.noeuds.map((n, i) => [n, i]).filter(([n]) => n.ilot === a.i)
+        const dedans = t.G.noeuds.map((n, i) => [n, i]).filter(([n]) => siensDe(n).includes(a.i))
           .map(([, i]) => dansLaVue(t.sim.pts[i]));
         if (dedans.length < 2) continue;
         const forme = contour(dedans, 34 * v.k);

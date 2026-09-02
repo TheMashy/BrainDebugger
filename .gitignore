@@ -17,5 +17,6 @@ tools/banc-carte/corpus/
 tools/banc-carte/journaux/
 tools/banc-carte/lectures/
 tools/banc-carte/planches/
+tools/banc-carte/synth/
 tools/banc-carte/systeme.txt
 tools/banc-carte/lectures.json

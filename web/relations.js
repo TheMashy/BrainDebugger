@@ -124,6 +124,25 @@ const couleur = (g, l = 62, a = 1) => `hsl(${teinte(g)} 58% ${l}% / ${a})`;
  */
 export const LIBRE = 1000;
 
+/*
+ * UN NOEUD PEUT APPARTENIR A DEUX ILOTS, ET LA CARTE DOIT LE MONTRER.
+ *
+ * Le premier arrive gardait le noeud, pour que deux enveloppes ne se traversent
+ * jamais. C'etait vrai a l'oeil et faux sur le fond : le verre du soir tient a
+ * la fois de ce dont on a du mal a se passer et de la facon dont on rend ses
+ * soirees supportables, et le ranger d'un seul cote efface exactement ce qui le
+ * rend interessant. Deux enveloppes qui se recouvrent sont plus honnetes qu'une
+ * partition propre -- c'est la chose que le decoupage ne sait pas dire.
+ *
+ * Cette ligne n'etait d'ailleurs plus la vraie serrure : sur les vingt lectures
+ * du banc, ZERO noeud sur cinq cent trente-sept etait reclame deux fois, parce
+ * que le prompt l'interdisait plus haut et que `validerPistes` le refaisait au
+ * milieu. Trois couches pour la meme regle ; elles sont levees ensemble.
+ *
+ * @returns {Map<string, number[]>} nom en minuscules -> index de ses pistes,
+ *   dans l'ordre ou elles le reclament. Le premier reste le principal : c'est
+ *   lui qui decide ou le noeud se POSE, puisqu'un noeud n'a qu'une place.
+ */
 export function ilotDesNoeuds(carte, pistes = []) {
   const noeuds = carte?.noeuds ?? [];
   const surLaCarte = new Set(noeuds.map(n => String(n.nom).toLowerCase()));
@@ -134,9 +153,10 @@ export function ilotDesNoeuds(carte, pistes = []) {
       // Un nom qui n'est PAS sur la carte est ignore : une lecture enregistree
       // avant un changement de carte peut nommer un noeud disparu, et l'ilot
       // dessinerait alors une enveloppe autour de rien, avec un titre flottant
-      // au-dessus. Le premier arrive garde le noeud : deux enveloppes qui se
-      // traversent effacent ce qu'on venait chercher.
-      if (surLaCarte.has(k) && !ilotDe.has(k)) ilotDe.set(k, i);
+      // au-dessus.
+      if (!surLaCarte.has(k)) continue;
+      if (!ilotDe.has(k)) ilotDe.set(k, []);
+      if (!ilotDe.get(k).includes(i)) ilotDe.get(k).push(i);
     }
   });
   return ilotDe;
@@ -200,13 +220,19 @@ export const SEUIL_PART = 0.75;
 export const tenueDe = a => (a?.part ?? 0) < SEUIL_PART ? 0
   : Math.max(0, Math.min(1, ((a?.appui ?? 0) - SEUIL_APPUI) / (1 - SEUIL_APPUI)));
 
+/** Les ilots d'un noeud, en tolerant l'ancienne forme a un seul `ilot`. */
+export const siensDe = n => n?.ilots?.length ? n.ilots : (n?.ilot != null ? [n.ilot] : []);
+
 /** Ajoute a chaque ilot ce qui l'appuie. Rend le meme tableau, complete. */
 export function appuyer(ilots, noeuds, liens) {
   const membres = new Map();
   noeuds.forEach((n, i) => {
-    if (n.ilot == null) return;
-    if (!membres.has(n.ilot)) membres.set(n.ilot, new Set());
-    membres.get(n.ilot).add(i);
+    // Un noeud qui appartient a deux ilots compte dans les deux : chacun est
+    // mesure sur ce qu'il contient VRAIMENT, y compris ce qu'il partage.
+    for (const k of siensDe(n)) {
+      if (!membres.has(k)) membres.set(k, new Set());
+      membres.get(k).add(i);
+    }
   });
   for (const a of ilots) {
     const m = membres.get(a.i) ?? new Set();
@@ -269,7 +295,7 @@ export function versGraphe(carte, pistes = []) {
   const noeuds = carte?.noeuds ?? [];
   const index = new Map(noeuds.map((n, i) => [n.nom, i]));
   const ilotDe = ilotDesNoeuds(carte, pistes);
-  const utilises = new Set([...ilotDe.values()]);
+  const utilises = new Set([...ilotDe.values()].flat());
 
   /*
    * CE QUI N'A PAS ENCORE DE NOM SE GROUPE QUAND MEME.
@@ -328,12 +354,24 @@ export function versGraphe(carte, pistes = []) {
    * dessous ; ici on prepare seulement de quoi la faire.
    */
   const lesNoeuds = noeuds.map(n => {
-    const pi = ilotDe.get(String(n.nom).toLowerCase());
+    const siens = ilotDe.get(String(n.nom).toLowerCase()) ?? [];
+    /*
+     * `ilots` porte TOUS ceux auxquels il appartient ; `ilot` n'en garde qu'un.
+     *
+     * Les deux sont necessaires et ne disent pas la meme chose. `ilots` est
+     * l'appartenance -- c'est elle qui decide quelles enveloppes l'entourent, et
+     * c'est elle qui peut valoir pour deux. `ilot` est la PLACE : un noeud n'a
+     * qu'un point sur la toile, donc un seul amas d'origine, sinon la
+     * simulation le tirerait vers deux ancres a la fois et il finirait entre
+     * les deux, dans un endroit qui n'est ni l'un ni l'autre.
+     */
+    const pi = siens.length ? siens[0] : undefined;
     const gr = grappeDe.get(n.nom);
     return {
       ...n,
       occurrences: n.jours ?? [],
       jours: n.jours?.length || n.poids,
+      ilots: siens.length ? siens : (gr != null ? [LIBRE + gr] : []),
       ilot: pi ?? (gr != null ? LIBRE + gr : null),
       /*
        * L'AMAS EST NOMME, PAS NUMEROTE.
@@ -506,10 +544,18 @@ export function poidsDuNoeud(lecture, nom) {
     sortant: String(l.de).toLowerCase() === cle
   })).sort((a, b) => b.force - a.force);
 
-  // L'ilot auquel il APPARTIENT, s'il en a un. C'est le titre ecrit au-dessus
-  // de lui sur la carte, et ce n'est pas la meme chose que ce qu'il pese
-  // ailleurs : on peut appartenir a une piste et peser plus lourd dans une autre.
-  const ilot = pistes.find(p => (p.noeuds ?? []).some(x => String(x).toLowerCase() === cle)) ?? null;
+  /*
+   * LES ilots AUXQUELS IL APPARTIENT. Ce sont les titres ecrits au-dessus de
+   * lui sur la carte, et ce n'est pas la meme chose que ce qu'il pese ailleurs :
+   * on peut appartenir a une piste et peser plus lourd dans une autre.
+   *
+   * Ils sont au PLURIEL depuis que le recouvrement existe. Un noeud dans deux
+   * pistes est justement celui qu'on vient regarder de pres -- afficher un seul
+   * de ses deux titres serait cacher la seule chose que ce panneau a de plus
+   * que la carte.
+   */
+  const siens = pistes.filter(p => (p.noeuds ?? []).some(x => String(x).toLowerCase() === cle));
+  const ilot = siens[0] ?? null;
 
   return {
     nom: n.nom, genre: n.genre, jours: [...jours].sort(),
@@ -519,6 +565,7 @@ export function poidsDuNoeud(lecture, nom) {
     quoi: n.quoi ?? null,
     extraits: (n.extraits ?? []).filter(x => x?.date && x?.extrait),
     ilot: ilot ? { nom: ilot.nom, teinte: ilot.teinte ?? null } : null,
+    ilots: siens.map(p => ({ nom: p.nom, teinte: p.teinte ?? null })),
     liens, pesees
   };
 }
@@ -771,7 +818,7 @@ export function dessinerRelations(ctx, G, dispo,
   const ilots = [];
   for (const a of G.ilots ?? []) {
     const membres = [];
-    G.noeuds.forEach((n, i) => { if (n.ilot === a.i && pts[i]) membres.push(pts[i]); });
+    G.noeuds.forEach((n, i) => { if (siensDe(n).includes(a.i) && pts[i]) membres.push(pts[i]); });
     if (membres.length < 2) continue;   // un ilot d'un seul noeud est ce noeud
     /*
      * UNE GRAPPE SANS NOM PREND PLUS LARGE. Ses membres ne sont retenus par
@@ -803,7 +850,7 @@ export function dessinerRelations(ctx, G, dispo,
   // Un noeud EN DEHORS de l'ilot vise s'efface avec le reste : sans ca, la
   // moitie de la carte reste a pleine encre autour d'un groupe qu'on vient de
   // designer, et on ne voit pas ce qu'on a designe.
-  const dedans = i => !focalise || G.noeuds[i]?.ilot === ilotVise;
+  const dedans = i => !focalise || siensDe(G.noeuds[i]).includes(ilotVise);
 
   /* --- l'enveloppe des ilots, sous tout le reste --- */
   if (aIlot > 0.02 || focalise) {
@@ -878,9 +925,18 @@ export function dessinerRelations(ctx, G, dispo,
    * Ils sortent donc de cette boucle et se dessinent APRES les noeuds, avec
    * leur verbe ecrit sans qu'on ait rien a survoler.
    */
+  /*
+   * UN PONT RELIE DEUX ILOTS QUI N'ONT RIEN EN COMMUN.
+   *
+   * Depuis que le recouvrement existe, deux noeuds peuvent partager un ilot
+   * tout en appartenant chacun a un autre. Le lien entre eux n'est alors pas
+   * une traversee -- il passe DEDANS, dans l'ilot qu'ils ont tous les deux --
+   * et le dessiner par-dessus les halos le ferait passer pour ce qu'il n'est
+   * pas. On ne compte donc comme pont que ce qui ne partage aucun ilot.
+   */
   const estPont = l => {
-    const x = G.noeuds[l.s]?.ilot, y = G.noeuds[l.t]?.ilot;
-    return x != null && y != null && x !== y;
+    const x = siensDe(G.noeuds[l.s]), y = siensDe(G.noeuds[l.t]);
+    return x.length && y.length && !x.some(k => y.includes(k));
   };
   const ponts = [];
 
@@ -987,7 +1043,7 @@ export function dessinerRelations(ctx, G, dispo,
     const t = 0.5, u = 1 - t;
     versPonts.push({
       lien: l,
-      paire: [G.noeuds[l.s].ilot, G.noeuds[l.t].ilot].sort((x, y) => x - y).join('|'),
+      paire: [siensDe(G.noeuds[l.s])[0], siensDe(G.noeuds[l.t])[0]].sort((x, y) => x - y).join('|'),
       texte: mot(l.quoi),
       x: u * u * a.x + 2 * t * u * cx + t * t * b.x,
       y: u * u * a.y + 2 * t * u * cy + t * t * b.y

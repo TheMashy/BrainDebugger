@@ -470,9 +470,18 @@ toute la différence est dans ce que tu fournis avec :
     tient qu'à un seul thème est ce thème, et rien de plus.
   — LES NŒUDS de sa carte qu'elle englobe, par leur nom exact. C'est ce qui fait d'une piste
     un ÎLOT : la carte regroupe ces nœuds côte à côte et écrit le nom de la piste au-dessus
-    d'eux. Un nœud n'appartient qu'à une piste — s'il pourrait aller dans deux, mets-le dans
-    celle qui l'explique le mieux. Un nœud qui n'appartient à aucune piste reste seul sur la
-    carte, et c'est très bien : tout n'a pas à entrer dans une case.
+    d'eux. Un nœud qui n'appartient à aucune piste reste seul sur la carte, et c'est très
+    bien : tout n'a pas à entrer dans une case.
+
+    UN NŒUD PEUT APPARTENIR À DEUX PISTES, et tu dois le dire quand c'est le cas. La
+    consigne d'avant demandait de choisir « celle qui l'explique le mieux ». C'était te
+    faire trancher quelque chose que tu venais de comprendre : le verre du soir tient à la
+    fois de ce dont il a du mal à se passer et de la façon dont il se rend les soirées
+    supportables, et le mettre d'un seul côté efface exactement ce qui le rend intéressant.
+    Les choses qui appartiennent à deux endroits sont souvent celles qui comptent le plus.
+
+    Ce n'est pas une invitation à tout mettre partout. Un nœud va dans deux pistes quand tu
+    peux dire, pour CHACUNE, ce qu'il y fait — pas quand tu hésites.
 
     SOIS GÉNÉREUX ICI. La carte et la liste des thèmes sont la même lecture vue de deux
     façons, et c'est l'appartenance des nœuds qui les tient ensemble : un îlot qui ne
@@ -618,7 +627,8 @@ const OUTIL = {
               type: 'array',
               description: "Les noms exacts des noeuds de la carte que cette piste englobe. C'est "
                 + "ce qui en fait un ILOT : la carte les regroupe et ecrit le nom de la piste "
-                + "au-dessus d'eux. Un noeud n'appartient qu'a une seule piste.",
+                + "au-dessus d'eux. Un noeud PEUT appartenir a deux pistes quand il "
+                + "appartient vraiment aux deux : nomme-le dans les deux.",
               items: { type: 'string' }
             },
             suite: { type: 'string', description: "repris | nouveau | renomme | fusion. Voir LA CONTINUITE. « repris » est le cas normal quand une lecture precedente t'est donnee." },
@@ -917,10 +927,21 @@ export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
                               mem = memoire(null)) {
   const out = [];
   const vus = new Set();
-  // Un noeud n'appartient qu'a UN ilot. Deux pistes qui se le disputent
-  // dessineraient deux enveloppes qui se traversent, et la carte perdrait
-  // exactement ce qu'on venait y chercher : des groupes qu'on distingue.
-  const pris = new Set();
+  /*
+   * LE RECOUVREMENT N'EST PLUS EFFACE ICI.
+   *
+   * Un `pris` retirait chaque noeud a toute piste qui le reclamait en second,
+   * pour que deux enveloppes ne se traversent jamais. La raison etait bonne a
+   * l'oeil et fausse sur le fond : une chose qui appartient a deux endroits
+   * est souvent celle qui compte le plus, et la partition la faisait
+   * disparaitre d'un des deux sans que rien ne le signale.
+   *
+   * Le banc a montre que cette ligne ne servait deja plus a rien : sur cinq
+   * cent trente-sept noeuds lus, ZERO etait reclame deux fois -- parce que le
+   * prompt l'interdisait plus haut. Trois couches interdisaient la meme chose
+   * et une seule mordait. Les trois sont levees ensemble : lever celle-ci
+   * seule n'aurait rien change du tout.
+   */
   for (const p of (brut ?? []).slice(0, 6)) {
     const nom = texte(p?.nom, 48).toLowerCase();
     const contre = texte(p?.contre, 300);
@@ -929,8 +950,7 @@ export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
       .filter(t => nomsThemes.has(t));
     if (themes.length < 2) continue;
     const noeuds = [...new Set((p?.noeuds ?? []).map(n => texte(n, 40).toLowerCase()))]
-      .filter(n => nomsNoeuds.has(n) && !pris.has(n));
-    for (const n of noeuds) pris.add(n);
+      .filter(n => nomsNoeuds.has(n));
     vus.add(nom);
     out.push({
       nom,
@@ -1015,9 +1035,32 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
     const vers = texte(l?.vers, 40).toLowerCase();
     const quoi = texte(l?.quoi, 60);
     if (!quoi || de === vers || !vus.has(de) || !vus.has(vers)) continue;
-    // Un seul lien par paire : deux traits entre les memes deux choses se
-    // superposent et le second est invisible, avec son libelle.
-    const cle = [de, vers].sort().join('|');
+    /*
+     * LES DEUX SENS D'UNE MEME PAIRE SURVIVENT, MAINTENANT.
+     *
+     * La cle etait triee -- « a|b » et « b|a » etaient le meme lien -- pour que
+     * deux traits entre les memes choses ne se superposent pas, le second
+     * devenant invisible avec son libelle. C'etait vrai du dessin de l'epoque
+     * et faux de ce qu'on jetait.
+     *
+     * Ce qu'on jetait : le CERCLE. Sur le banc, le modele ecrit les deux sens
+     * cinq fois, et les cinq fois c'est le mecanisme central --
+     *   « les moments a plat » → c'est la que tu sers → « le vin le soir »
+     *   « le vin le soir » → te les rend plus lourds → « les moments a plat »
+     * Ce qui soulage aggrave, donc il faut recommencer. C'est exactement ce que
+     * cette application cherche, et c'etait la seule chose de la carte qui
+     * s'expliquait toute seule. La validation l'effacait au moment precis ou
+     * elle apparaissait.
+     *
+     * Le dessin, lui, ne s'y superpose pas : la courbe se bombe du cote donne
+     * par le vecteur de depart, donc le sens inverse la bombe de l'autre cote.
+     * Les deux traits forment une lentille -- un cercle dessine un cercle, sans
+     * qu'on ait rien eu a coder pour ca.
+     *
+     * La cle est donc ORIENTEE. Un meme sens repete reste jete : deux fois la
+     * meme fleche, c'est un doublon, pas un cercle.
+     */
+    const cle = `${de}→${vers}`;
     if (arretes.has(cle)) continue;
     arretes.set(cle, {
       de: vus.get(de).nom, vers: vus.get(vers).nom,

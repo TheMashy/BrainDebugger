@@ -91,16 +91,40 @@ test('la carte n’est faite que de ce qui se relie vraiment', () => {
              { nom: 'flottant', genre: 'activite', poids: 1 },
              { nom: 'Léa', genre: 'personne', poids: 1 }],
     liens: [{ de: 'Léa', vers: 'les nuits courtes', quoi: 'précède', force: 2 },
-            { de: 'les nuits courtes', vers: 'Léa', quoi: 'doublon', force: 3 },
+            { de: 'Léa', vers: 'les nuits courtes', quoi: 'redit pareil', force: 3 },
             { de: 'Léa', vers: 'fantôme', quoi: 'x', force: 1 },
             { de: 'Léa', vers: 'les nuits courtes', quoi: '', force: 1 },
             { de: 'Léa', vers: 'Léa', quoi: 'boucle', force: 1 }]
   } }, DATES).carte;
   // un doublon de nom, un nœud sans lien, un lien vers un fantôme, un lien sans
-  // « comment », une boucle sur soi : rien de tout ça ne se dessine.
+  // « comment », le MÊME sens écrit deux fois, une boucle sur soi : rien de
+  // tout ça ne se dessine.
   assert.deepEqual(c.noeuds.map(n => n.nom), ['Léa', 'les nuits courtes']);
   assert.equal(c.liens.length, 1);
   assert.equal(c.liens[0].quoi, 'précède');
+});
+
+test('les DEUX SENS d’une même paire survivent : c’est le cercle', () => {
+  /*
+   * « les moments à plat » → c'est là que tu sers → « le vin le soir »
+   * « le vin le soir » → te les rend plus lourds → « les moments à plat »
+   *
+   * Ce qui soulage aggrave, donc il faut recommencer. C'est le mécanisme que
+   * cette application cherche, et la clé triée l'effaçait au moment précis où
+   * il apparaissait — le second sens était traité comme un doublon du premier.
+   * Sur le banc, le modèle l'écrit cinq fois, et les cinq fois c'est le
+   * mécanisme central de la lecture.
+   */
+  const c = valider({ synthese: '', themes: [], carte: {
+    noeuds: [{ nom: 'le vin le soir', genre: 'dependance', poids: 3 },
+             { nom: 'les moments à plat', genre: 'corps', poids: 2 }],
+    liens: [{ de: 'les moments à plat', vers: 'le vin le soir', quoi: 'c’est là que tu sers', force: 3 },
+            { de: 'le vin le soir', vers: 'les moments à plat', quoi: 'te les rend plus lourds', force: 2 }]
+  } }, DATES).carte;
+  assert.equal(c.liens.length, 2, 'le cercle a deux sens, et les deux comptent');
+  assert.deepEqual(c.liens.map(l => l.quoi),
+                   ['c’est là que tu sers', 'te les rend plus lourds']);
+  assert.deepEqual(c.liens.map(l => l.de), ['les moments à plat', 'le vin le soir']);
 });
 
 test('un genre inconnu retombe sur « activite » au lieu de casser le rendu', () => {
