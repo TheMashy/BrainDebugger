@@ -108,6 +108,12 @@ qu'une quatrième lecture si on en veut une.
 Ce n'est pas un test qu'on lance à chaque commit — c'est une mesure qu'on refait
 quand on touche au prompt, à la validation, ou à la carte.
 
+**Sans clé API**, `consigne-tissage.txt` porte la même consigne, à donner à
+autant de lecteurs indépendants qu'il y a de lectures à faire — un par
+`<ID>`/`<K>`. Chacun doit lire le corpus SANS voir les autres lectures : c'est
+cette indépendance qu'on mesure, et un lecteur qui enchaîne trois lectures du
+même journal se relit lui-même.
+
 ### Le prompt système est extrait, pas recopié
 
 `consigne.mjs` va chercher `SYSTEME` dans `server/lecture.js` à l'instant même.
@@ -130,7 +136,7 @@ mesures.
 | **ponts** | Les liens qui traversent deux îlots, et les nœuds qui les portent. Aujourd'hui ils se dessinent **avant** les halos, donc sous eux. |
 | **appui** | Par îlot : liens internes, liens sortants, densité. L'enveloppe se calcule sur les **positions**, jamais sur les liens — un groupe à densité nulle est dessiné aussi plein qu'un groupe saturé. |
 | **boucles** | Les paires où le modèle écrit les **deux sens** — « ça soulage » et « ça aggrave ». `validerCarte()` n'en garde qu'un : le mécanisme s'efface au moment précis où il s'expliquait. |
-| **témoins** | Combien de nœuds de genre `dependance`, et combien de pistes, sur une conversation sans enjeu. |
+| **témoins** | Les deux groupes côte à côte. La tentation serait de dresser une liste de mots lourds et de compter — mais ce serait *notre* liste, et elle déciderait du résultat avant la mesure. Si une conversation sur le football et un entretien sur l'héroïne produisent la même proportion de nœuds `dependance` et le même vocabulaire de pistes, ce vocabulaire vient du lecteur et pas du corpus. |
 
 `BANC_LECTURES=/un/autre/dossier npm run banc:carte` mesure un autre jeu de
 lectures — deux tissages du même corpus se comparent alors sans se marcher

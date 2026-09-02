@@ -101,26 +101,21 @@ export function boucles(brut) {
 
 /* --------------------------------- l'appui --------------------------------- */
 
-export function appuiDesIlots(G) {
-  const par = new Map();
-  G.noeuds.forEach((n, i) => {
-    for (const k of siensDe(n)) {
-      if (!par.has(k)) par.set(k, new Set());
-      par.get(k).add(i);
-    }
-  });
-  return [...par].map(([i, m]) => {
-    let dedans = 0, dehors = 0;
-    for (const l of G.liens) {
-      const a = m.has(l.s), b = m.has(l.t);
-      if (a && b) dedans++; else if (a || b) dehors++;
-    }
-    const paires = m.size * (m.size - 1) / 2;
-    return { i, nom: G.ilots.find(x => x.i === i)?.nom ?? null, n: m.size, dedans, dehors,
-             densite: paires ? dedans / paires : 0,
-             appui: dedans + dehors ? dedans / (dedans + dehors) : 0 };
-  }).sort((a, b) => a.i - b.i);
-}
+/*
+ * L'APPUI SE LIT SUR LE PRODUIT, IL NE SE RECALCULE PAS ICI.
+ *
+ * Cette fonction refaisait le comptage de son cote. Elle a survecu a
+ * `appuyer()` sans apprendre sa troisieme mesure -- `part`, qui dit si les
+ * membres d'un ilot tiennent en une seule piece -- et le rapport annoncait donc
+ * « 0 ilot sur 30 garde son enveloppe » alors que le produit en garde
+ * vingt-trois. Une mesure fausse ressemble exactement a une mesure juste ;
+ * celle-ci condamnait le rendu pour un defaut qui n'etait que dans le banc.
+ *
+ * `versGraphe` remplit deja `G.ilots` avec les trois nombres. Le banc les lit,
+ * il ne les refait pas : deux calculs pour une seule verite finissent toujours
+ * par diverger, et c'est le deuxieme fois que ca arrive ici.
+ */
+export const appuiDesIlots = G => (G.ilots ?? []).map(a => ({ ...a }));
 
 /* ------------------------------- la stabilite -------------------------------
  *
