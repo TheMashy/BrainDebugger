@@ -4,7 +4,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { toutMesurer } from './mesurer.mjs';
+import { toutMesurer, nu } from './mesurer.mjs';
 
 const ICI = path.dirname(new URL(import.meta.url).pathname);
 const p = (s, n) => String(s).padEnd(n);
@@ -88,11 +88,59 @@ for (const j of tout) {
 console.log(`\n→ ${faibles.length} îlots dessinés à pleine enveloppe avec une densité interne < 0,34.`);
 
 console.log('\n═══ TEMOINS — une conversation neutre fait-elle pousser une dependance ? ═══\n');
+/*
+ * ON COMPARE, ON NE JUGE PAS.
+ *
+ * La tentation serait de dresser une liste de mots lourds et de compter les
+ * pistes qui en portent un. Ce serait ma liste : elle deciderait du resultat
+ * avant la mesure, et personne ne pourrait la contester sans discuter mon
+ * vocabulaire plutot que les donnees.
+ *
+ * On met donc les deux groupes cote a cote. Les entretiens parlent de ce que
+ * quelqu'un n'arrive pas a arreter ; les temoins parlent de football et de
+ * cinema. Si les deux produisent la meme proportion de noeuds « dependance »
+ * et le meme vocabulaire de pistes, ce vocabulaire ne vient pas du corpus --
+ * il vient du lecteur. C'est verifiable, et ca ne demande aucune liste.
+ */
+const groupe = src => {
+  const js = tout.filter(x => x.source === src);
+  const vues = js.flatMap(j => j.vues.filter(v => v.G));
+  if (!vues.length) return null;
+  const noms = vues.flatMap(v => v.lu.pistes.map(x => nu(x.nom)));
+  return {
+    src, journaux: js.length, lectures: vues.length,
+    avecDep: vues.filter(v => v.dependances > 0).length,
+    depMoy: vues.reduce((a, v) => a + v.dependances, 0) / vues.length,
+    pistesMoy: vues.reduce((a, v) => a + v.lu.pistes.length, 0) / vues.length,
+    noms: new Set(noms), tousNoms: noms
+  };
+};
+const mi = groupe('AnnoMI'), te = groupe('Topical-Chat');
+
 for (const j of tout.filter(x => x.source === 'Topical-Chat')) {
   const v = j.vues.find(x => x.G);
-  if (!v) continue;
+  if (!v) { console.log(p(j.id, 17), '— aucune lecture'); continue; }
   console.log(p(j.id, 17), `${v.dependances} nœud(s) « dependance », ${v.lu.pistes.length} piste(s) :`,
               v.lu.pistes.map(x => x.nom).join(', ') || '(aucune)');
+}
+
+if (mi && te) {
+  const part = g => `${g.avecDep}/${g.lectures} (${Math.round(g.avecDep / g.lectures * 100)}%)`;
+  console.log('\n' + p('', 17), p('lectures', 10), p('avec ≥1 « dependance »', 24),
+              p('dépend./lecture', 16), 'pistes/lecture');
+  for (const g of [mi, te])
+    console.log(p(g.src, 17), p(g.lectures, 10), p(part(g), 24),
+                p(g.depMoy.toFixed(2), 16), g.pistesMoy.toFixed(2));
+
+  let communs = 0;
+  for (const n of te.noms) if (mi.noms.has(n)) communs++;
+  console.log(`\n→ vocabulaire de pistes : ${communs} nom(s) sur ${te.noms.size} distincts chez les témoins`
+    + ` se retrouvent aussi chez les entretiens.`);
+  if (communs) console.log('   ' + [...te.noms].filter(n => mi.noms.has(n)).join(' · '));
+  console.log('   Un vocabulaire partagé entre une conversation sur le football et un entretien');
+  console.log('   sur l’héroïne ne vient pas du corpus : il vient du lecteur.');
+} else {
+  console.log('\n→ comparaison impossible : il manque un des deux groupes.');
 }
 
 /* la planche */
