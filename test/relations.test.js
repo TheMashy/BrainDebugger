@@ -5,7 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
-         contour, poidsDuNoeud, ilotDesNoeuds, LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+         contour, poidsDuNoeud, ilotDesNoeuds, appuyer, tenueDe, SEUIL_APPUI, SEUIL_PART,
+         LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { disposer } from '../web/carte.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
@@ -635,4 +636,103 @@ test('après la simulation, un îlot est nettement plus serré que l’espace en
   const rapport = moy(dehors) / moy(dedans);
   assert.ok(rapport > 5,
     `les îlots ne se serrent pas : dedans ${moy(dedans).toFixed(0)} px, dehors ${moy(dehors).toFixed(0)} px (rapport ${rapport.toFixed(2)})`);
+});
+
+
+/* ===================== CE QUI APPUIE UN ILOT =====================
+ *
+ * Trois nombres decident si une enveloppe se dessine. Ils ont ete ecrits parce
+ * que le banc a montre qu'une poche est aussi pleine avec zero lien interne
+ * qu'avec quatre-vingts -- l'enveloppe se calculant sur les POSITIONS, qui ne
+ * savent rien des liens.
+ */
+
+/** Un graphe ou l'on choisit exactement qui est relie a qui. */
+function carteDe(membres, aretes, pistes) {
+  const noeuds = membres.map(nom => ({ nom, genre: 'activite', poids: 1, jours: [] }));
+  const liens = aretes.map(([de, vers]) => ({ de, vers, quoi: 'précède', force: 2 }));
+  return versGraphe({ noeuds, liens }, pistes);
+}
+
+test('l’appui compte ce qui reste dedans, la densite ce qui se touche', () => {
+  // a-b-c relies en chaine, plus un lien qui sort vers d.
+  const G = carteDe(['a', 'b', 'c', 'd'],
+                    [['a', 'b'], ['b', 'c'], ['c', 'd']],
+                    [{ nom: 'trois', teinte: 200, noeuds: ['a', 'b', 'c'] }]);
+  const a = G.ilots.find(x => x.nom === 'trois');
+  assert.equal(a.n, 3);
+  assert.equal(a.dedans, 2);
+  assert.equal(a.dehors, 1);
+  assert.equal(a.densite, 2 / 3);          // 2 liens sur 3 paires possibles
+  assert.equal(a.appui, 2 / 3);            // 2 dedans sur 3 liens touchant l'ilot
+  assert.equal(a.part, 1);                 // une seule piece
+});
+
+test('un ilot plus relie au dehors qu’a lui-meme perd son enveloppe', () => {
+  // « se faire petit », vu sur une vraie lecture : 1 lien dedans, 9 dehors.
+  const G = carteDe(['x', 'y', 'z', 'hors'],
+                    [['x', 'y'], ['x', 'hors'], ['y', 'hors'], ['z', 'hors']],
+                    [{ nom: 'creux', teinte: 200, noeuds: ['x', 'y', 'z'] }]);
+  const a = G.ilots.find(x => x.nom === 'creux');
+  assert.equal(a.dedans, 1);
+  assert.equal(a.dehors, 3);
+  assert.ok(a.appui < SEUIL_APPUI, `appui ${a.appui}`);
+  assert.equal(tenueDe(a), 0, 'pas d’enveloppe');
+});
+
+test('un ilot dont les membres ne se tiennent pas perd son enveloppe, meme avec un appui parfait', () => {
+  /*
+   * LE PIEGE QUE L'APPUI SEUL NE VOIT PAS. Six noeuds, UN lien interne, aucun
+   * lien sortant : tout ce qui le relie reste dedans, donc appui = 1,00 —
+   * pendant que cinq membres sur six ne touchent rien. C'est le cas « epars »
+   * du banc fabrique, et sans la troisieme mesure il serait dessine a pleine
+   * enveloppe.
+   */
+  const G = carteDe(['a', 'b', 'c', 'd', 'e', 'f'], [['a', 'b']],
+                    [{ nom: 'eparse', teinte: 200, noeuds: ['a', 'b', 'c', 'd', 'e', 'f'] }]);
+  const a = G.ilots.find(x => x.nom === 'eparse');
+  assert.equal(a.appui, 1, 'rien ne sort, donc tout reste dedans');
+  assert.equal(a.part, 2 / 6, 'et pourtant la plus grande piece n’en tient que deux');
+  assert.ok(a.part < SEUIL_PART);
+  assert.equal(tenueDe(a), 0);
+});
+
+test('un ilot dense et entier garde son enveloppe, a pleine force', () => {
+  const G = carteDe(['a', 'b', 'c'], [['a', 'b'], ['b', 'c'], ['a', 'c']],
+                    [{ nom: 'tenu', teinte: 200, noeuds: ['a', 'b', 'c'] }]);
+  const a = G.ilots.find(x => x.nom === 'tenu');
+  assert.equal(a.densite, 1);
+  assert.equal(a.appui, 1);
+  assert.equal(a.part, 1);
+  assert.equal(tenueDe(a), 1);
+});
+
+test('la tenue monte avec l’appui, entre le seuil et un', () => {
+  const faible = { appui: SEUIL_APPUI, part: 1 };
+  const moyen  = { appui: (SEUIL_APPUI + 1) / 2, part: 1 };
+  const plein  = { appui: 1, part: 1 };
+  assert.equal(tenueDe(faible), 0);
+  assert.ok(tenueDe(moyen) > 0.45 && tenueDe(moyen) < 0.55);
+  assert.equal(tenueDe(plein), 1);
+  assert.equal(tenueDe(undefined), 0, 'un ilot sans mesure ne se dessine pas');
+});
+
+test('appuyer ne compte que les liens de l’ilot vise', () => {
+  const noeuds = [{ nom: 'a', ilot: 0 }, { nom: 'b', ilot: 0 },
+                  { nom: 'c', ilot: 1 }, { nom: 'd', ilot: 1 }];
+  const liens = [{ s: 0, t: 1 }, { s: 2, t: 3 }, { s: 1, t: 2 }];
+  const [un, deux] = appuyer([{ i: 0 }, { i: 1 }], noeuds, liens);
+  for (const a of [un, deux]) {
+    assert.equal(a.dedans, 1);
+    assert.equal(a.dehors, 1, 'le lien qui traverse compte pour les deux, dehors');
+  }
+});
+
+test('un noeud hors de tout ilot ne compte dans aucun', () => {
+  const [a] = appuyer([{ i: 0 }],
+    [{ nom: 'a', ilot: 0 }, { nom: 'b', ilot: 0 }, { nom: 'seul', ilot: null }],
+    [{ s: 0, t: 1 }]);
+  assert.equal(a.n, 2);
+  assert.equal(a.dedans, 1);
+  assert.equal(a.dehors, 0);
 });
