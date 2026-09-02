@@ -124,6 +124,25 @@ const couleur = (g, l = 62, a = 1) => `hsl(${teinte(g)} 58% ${l}% / ${a})`;
  */
 export const LIBRE = 1000;
 
+/*
+ * UN NOEUD PEUT APPARTENIR A DEUX ILOTS, ET LA CARTE DOIT LE MONTRER.
+ *
+ * Le premier arrive gardait le noeud, pour que deux enveloppes ne se traversent
+ * jamais. C'etait vrai a l'oeil et faux sur le fond : le verre du soir tient a
+ * la fois de ce dont on a du mal a se passer et de la facon dont on rend ses
+ * soirees supportables, et le ranger d'un seul cote efface exactement ce qui le
+ * rend interessant. Deux enveloppes qui se recouvrent sont plus honnetes qu'une
+ * partition propre -- c'est la chose que le decoupage ne sait pas dire.
+ *
+ * Cette ligne n'etait d'ailleurs plus la vraie serrure : sur les vingt lectures
+ * du banc, ZERO noeud sur cinq cent trente-sept etait reclame deux fois, parce
+ * que le prompt l'interdisait plus haut et que `validerPistes` le refaisait au
+ * milieu. Trois couches pour la meme regle ; elles sont levees ensemble.
+ *
+ * @returns {Map<string, number[]>} nom en minuscules -> index de ses pistes,
+ *   dans l'ordre ou elles le reclament. Le premier reste le principal : c'est
+ *   lui qui decide ou le noeud se POSE, puisqu'un noeud n'a qu'une place.
+ */
 export function ilotDesNoeuds(carte, pistes = []) {
   const noeuds = carte?.noeuds ?? [];
   const surLaCarte = new Set(noeuds.map(n => String(n.nom).toLowerCase()));
@@ -134,19 +153,149 @@ export function ilotDesNoeuds(carte, pistes = []) {
       // Un nom qui n'est PAS sur la carte est ignore : une lecture enregistree
       // avant un changement de carte peut nommer un noeud disparu, et l'ilot
       // dessinerait alors une enveloppe autour de rien, avec un titre flottant
-      // au-dessus. Le premier arrive garde le noeud : deux enveloppes qui se
-      // traversent effacent ce qu'on venait chercher.
-      if (surLaCarte.has(k) && !ilotDe.has(k)) ilotDe.set(k, i);
+      // au-dessus.
+      if (!surLaCarte.has(k)) continue;
+      if (!ilotDe.has(k)) ilotDe.set(k, []);
+      if (!ilotDe.get(k).includes(i)) ilotDe.get(k).push(i);
     }
   });
   return ilotDe;
+}
+
+/* ===================== CE QUI APPUIE UN ILOT =====================
+ *
+ * LE PROBLEME, MESURE. L'enveloppe d'un ilot se calcule sur les POSITIONS de
+ * ses noeuds -- jamais sur les liens. Une poche est donc aussi ronde et aussi
+ * pleine avec zero lien interne qu'avec quatre-vingts. Le banc l'a montre sur
+ * des cartes fabriquees (un groupe a densite nulle dessine comme un groupe
+ * sature), puis sur vingt vraies lectures : quatorze ilots sur vingt-six ont
+ * plus de liens qui SORTENT que de liens qui restent dedans, et tous sont
+ * dessines a pleine encre, avec leur titre en capitales.
+ *
+ * Le pire cas vu : une conversation sur le diabete ou l'ilot « dependance »
+ * porte un lien interne et cinq sortants. Ce n'est pas un groupe -- c'est une
+ * tranche de la carte a qui on a donne un nom, et le nom le plus lourd du
+ * produit.
+ *
+ * CE QU'ON COMPTE. Deux nombres, tous les deux verifiables :
+ *
+ *   densite = liens internes / paires possibles
+ *             -- a quel point ses membres se tiennent entre eux.
+ *   appui   = liens internes / (internes + sortants)
+ *             -- la part de ce qui le relie qui reste DEDANS. En dessous de la
+ *             moitie, l'ilot appartient plus au reste de la carte qu'a
+ *             lui-meme.
+ *
+ * C'est `appui` qui commande le dessin, parce que c'est lui qui repond a la
+ * question posee : « est-ce un groupe, ou une decoupe ? ». `densite` reste
+ * calculee et rendue -- la liste sous la carte s'en sert.
+ *
+ * ET ON NE COMPOSE PAS LES DEUX en un score unique. Un chiffre invente a
+ * partir de deux chiffres vrais ne se verifie plus, et cette carte n'affiche
+ * que ce qui se verifie.
+ */
+
+/** En dessous, un ilot n'a plus d'enveloppe : il n'y a pas de groupe a montrer. */
+export const SEUIL_APPUI = 0.34;
+
+/*
+ * ET LES MEMBRES DOIVENT TENIR ENSEMBLE.
+ *
+ * Une enveloppe trace une frontiere et dit « ces choses-la vont ensemble ». Si
+ * plus d'un quart de ce qu'elle entoure ne peut pas rejoindre le reste sans
+ * sortir, la frontiere est fausse pour ce quart-la -- et une frontiere fausse
+ * pour un quart de son contenu est une frontiere fausse.
+ *
+ * Le seuil vient de cette phrase, pas des donnees : on ne choisit pas un chiffre
+ * qui epargne les ilots qu'on a sous les yeux. Sur les vingt-six ilots du banc,
+ * il en retire un que l'appui laissait passer -- « l'evitement » d'annomi-4,
+ * sept noeuds dont la plus grande piece n'en tient que quatre.
+ */
+export const SEUIL_PART = 0.75;
+
+/**
+ * De l'appui vers la force du trait : 0 au seuil, 1 quand tout reste dedans.
+ * Rend 0 -- donc pas d'enveloppe du tout -- si les membres ne se tiennent pas.
+ */
+export const tenueDe = a => (a?.part ?? 0) < SEUIL_PART ? 0
+  : Math.max(0, Math.min(1, ((a?.appui ?? 0) - SEUIL_APPUI) / (1 - SEUIL_APPUI)));
+
+/** Les ilots d'un noeud, en tolerant l'ancienne forme a un seul `ilot`. */
+export const siensDe = n => n?.ilots?.length ? n.ilots : (n?.ilot != null ? [n.ilot] : []);
+
+/** Ajoute a chaque ilot ce qui l'appuie. Rend le meme tableau, complete. */
+export function appuyer(ilots, noeuds, liens) {
+  const membres = new Map();
+  noeuds.forEach((n, i) => {
+    // Un noeud qui appartient a deux ilots compte dans les deux : chacun est
+    // mesure sur ce qu'il contient VRAIMENT, y compris ce qu'il partage.
+    for (const k of siensDe(n)) {
+      if (!membres.has(k)) membres.set(k, new Set());
+      membres.get(k).add(i);
+    }
+  });
+  for (const a of ilots) {
+    const m = membres.get(a.i) ?? new Set();
+    let dedans = 0, dehors = 0;
+    for (const l of liens) {
+      const x = m.has(l.s), y = m.has(l.t);
+      if (x && y) dedans++; else if (x || y) dehors++;
+    }
+    /*
+     * ET UNE TROISIEME CHOSE, PARCE QUE LES DEUX PREMIERES SE FONT AVOIR.
+     *
+     * Un ilot de six noeuds avec UN lien interne et aucun lien sortant obtient
+     * appui = 1,00 : tout ce qui le relie reste dedans, en effet -- il n'y a
+     * presque rien. Le banc l'a produit (le cas « epars », six noeuds, un
+     * lien) et la regle l'aurait dessine a pleine enveloppe, ce qui est
+     * exactement le defaut qu'on corrige.
+     *
+     * On regarde donc si les membres SE TIENNENT : en n'empruntant que les
+     * liens internes, forment-ils une seule piece ? `part` est la taille de la
+     * plus grande piece rapportee au groupe. A 1, on peut aller de n'importe
+     * quel membre a n'importe quel autre sans sortir. A 0,33, on a trois tas
+     * qu'une enveloppe ferait passer pour un.
+     *
+     * Trois nombres, chacun verifiable, aucun melange en un score.
+     */
+    const dansIlot = new Map();
+    for (const l of liens) if (m.has(l.s) && m.has(l.t)) {
+      if (!dansIlot.has(l.s)) dansIlot.set(l.s, []);
+      if (!dansIlot.has(l.t)) dansIlot.set(l.t, []);
+      dansIlot.get(l.s).push(l.t);
+      dansIlot.get(l.t).push(l.s);
+    }
+    const vus = new Set();
+    let plusGrande = 0;
+    for (const depart of m) {
+      if (vus.has(depart)) continue;
+      let taille = 0;
+      const pile = [depart];
+      while (pile.length) {
+        const x = pile.pop();
+        if (vus.has(x)) continue;
+        vus.add(x); taille++;
+        for (const y of dansIlot.get(x) ?? []) if (!vus.has(y)) pile.push(y);
+      }
+      plusGrande = Math.max(plusGrande, taille);
+    }
+
+    const paires = m.size * (m.size - 1) / 2;
+    a.n = m.size;
+    a.dedans = dedans;
+    a.dehors = dehors;
+    a.densite = paires ? dedans / paires : 0;
+    a.appui = dedans + dehors ? dedans / (dedans + dehors) : 0;
+    a.part = m.size ? plusGrande / m.size : 0;
+  }
+  return ilots;
 }
 
 export function versGraphe(carte, pistes = []) {
   const noeuds = carte?.noeuds ?? [];
   const index = new Map(noeuds.map((n, i) => [n.nom, i]));
   const ilotDe = ilotDesNoeuds(carte, pistes);
-  const utilises = new Set([...ilotDe.values()]);
+  const utilises = new Set([...ilotDe.values()].flat());
 
   /*
    * CE QUI N'A PAS ENCORE DE NOM SE GROUPE QUAND MEME.
@@ -199,6 +348,51 @@ export function versGraphe(carte, pistes = []) {
     if (membres.length < 2) for (const m of membres) grappeDe.delete(m);
     else grappes++;
   }
+  /*
+   * LES NOEUDS ET LES LIENS SE CONSTRUISENT AVANT LE RETOUR, parce qu'il faut
+   * les avoir tous pour mesurer ce qui APPUIE chaque ilot. La mesure est en
+   * dessous ; ici on prepare seulement de quoi la faire.
+   */
+  const lesNoeuds = noeuds.map(n => {
+    const siens = ilotDe.get(String(n.nom).toLowerCase()) ?? [];
+    /*
+     * `ilots` porte TOUS ceux auxquels il appartient ; `ilot` n'en garde qu'un.
+     *
+     * Les deux sont necessaires et ne disent pas la meme chose. `ilots` est
+     * l'appartenance -- c'est elle qui decide quelles enveloppes l'entourent, et
+     * c'est elle qui peut valoir pour deux. `ilot` est la PLACE : un noeud n'a
+     * qu'un point sur la toile, donc un seul amas d'origine, sinon la
+     * simulation le tirerait vers deux ancres a la fois et il finirait entre
+     * les deux, dans un endroit qui n'est ni l'un ni l'autre.
+     */
+    const pi = siens.length ? siens[0] : undefined;
+    const gr = grappeDe.get(n.nom);
+    return {
+      ...n,
+      occurrences: n.jours ?? [],
+      jours: n.jours?.length || n.poids,
+      ilots: siens.length ? siens : (gr != null ? [LIBRE + gr] : []),
+      ilot: pi ?? (gr != null ? LIBRE + gr : null),
+      /*
+       * L'AMAS EST NOMME, PAS NUMEROTE.
+       *
+       * C'etait `p${pi}` -- l'index de la piste. Or `disposer()` pose chaque
+       * amas a l'endroit que son nom lui donne : avec un numero, une piste
+       * qui passe de la deuxieme a la premiere place emmene tout son groupe
+       * a l'autre bout du cadre, sans qu'un seul noeud ait change. Le nom,
+       * lui, ne bouge pas tant que la piste s'appelle pareil.
+       */
+      amas: pi != null ? `piste:${pistes[pi]?.nom ?? pi}`
+          : gr != null ? `grappe:${[...grappeDe].filter(([, g]) => g === gr).map(([nm]) => nm).sort()[0]}`
+          : n.genre
+    };
+  });
+
+  const lesLiens = (carte?.liens ?? []).map(l => ({
+    s: index.get(l.de), t: index.get(l.vers),
+    quoi: l.quoi, force: l.force / 3
+  })).filter(l => l.s !== undefined && l.t !== undefined);
+
   return {
     /*
      * LA TEINTE VIENT DE LA PISTE, PLUS DE SON RANG.
@@ -213,7 +407,7 @@ export function versGraphe(carte, pistes = []) {
      * enregistrees avant ce changement : elles n'ont pas de teinte, et un ilot
      * sans couleur ne se dessine pas du tout.
      */
-    ilots: [
+    ilots: appuyer([
       ...pistes.map((p, i) => ({
         i, nom: p.nom,
         teinte: TEINTES_DECLAREES.includes(p.teinte)
@@ -226,44 +420,9 @@ export function versGraphe(carte, pistes = []) {
       ...Array.from({ length: grappes }, (_, k) => ({
         i: LIBRE + k, nom: null, teinte: TEINTE_GENRE.mecanisme
       }))
-    ],
-    /*
-     * `jours` est le nom que `disposer()` donne a la MASSE d'un noeud, et c'est
-     * aussi le nom que le serveur donne a la LISTE de ses journees. Les deux se
-     * sont rencontres ici, et la liste ecrasait silencieusement la masse.
-     *
-     * Les dates passent donc sous `occurrences`, et la masse devient leur
-     * nombre reel plutot que le poids declare : une chose vue quarante fois
-     * pousse plus fort ses voisines qu'une chose vue six fois, et c'est
-     * exactement ce qu'on veut voir dans la disposition. Sans dates, on retombe
-     * sur le poids.
-     */
-    noeuds: noeuds.map(n => {
-      const pi = ilotDe.get(String(n.nom).toLowerCase());
-      const gr = grappeDe.get(n.nom);
-      return {
-        ...n,
-        occurrences: n.jours ?? [],
-        jours: n.jours?.length || n.poids,
-        ilot: pi ?? (gr != null ? LIBRE + gr : null),
-        /*
-         * L'AMAS EST NOMME, PAS NUMEROTE.
-         *
-         * C'etait `p${pi}` -- l'index de la piste. Or `disposer()` pose chaque
-         * amas a l'endroit que son nom lui donne : avec un numero, une piste
-         * qui passe de la deuxieme a la premiere place emmene tout son groupe
-         * a l'autre bout du cadre, sans qu'un seul noeud ait change. Le nom,
-         * lui, ne bouge pas tant que la piste s'appelle pareil.
-         */
-        amas: pi != null ? `piste:${pistes[pi]?.nom ?? pi}`
-            : gr != null ? `grappe:${[...grappeDe].filter(([, g]) => g === gr).map(([nm]) => nm).sort()[0]}`
-            : n.genre
-      };
-    }),
-    liens: (carte?.liens ?? []).map(l => ({
-      s: index.get(l.de), t: index.get(l.vers),
-      quoi: l.quoi, force: l.force / 3
-    })).filter(l => l.s !== undefined && l.t !== undefined)
+    ], lesNoeuds, lesLiens),
+    noeuds: lesNoeuds,
+    liens: lesLiens
   };
 }
 
@@ -385,10 +544,18 @@ export function poidsDuNoeud(lecture, nom) {
     sortant: String(l.de).toLowerCase() === cle
   })).sort((a, b) => b.force - a.force);
 
-  // L'ilot auquel il APPARTIENT, s'il en a un. C'est le titre ecrit au-dessus
-  // de lui sur la carte, et ce n'est pas la meme chose que ce qu'il pese
-  // ailleurs : on peut appartenir a une piste et peser plus lourd dans une autre.
-  const ilot = pistes.find(p => (p.noeuds ?? []).some(x => String(x).toLowerCase() === cle)) ?? null;
+  /*
+   * LES ilots AUXQUELS IL APPARTIENT. Ce sont les titres ecrits au-dessus de
+   * lui sur la carte, et ce n'est pas la meme chose que ce qu'il pese ailleurs :
+   * on peut appartenir a une piste et peser plus lourd dans une autre.
+   *
+   * Ils sont au PLURIEL depuis que le recouvrement existe. Un noeud dans deux
+   * pistes est justement celui qu'on vient regarder de pres -- afficher un seul
+   * de ses deux titres serait cacher la seule chose que ce panneau a de plus
+   * que la carte.
+   */
+  const siens = pistes.filter(p => (p.noeuds ?? []).some(x => String(x).toLowerCase() === cle));
+  const ilot = siens[0] ?? null;
 
   return {
     nom: n.nom, genre: n.genre, jours: [...jours].sort(),
@@ -398,6 +565,7 @@ export function poidsDuNoeud(lecture, nom) {
     quoi: n.quoi ?? null,
     extraits: (n.extraits ?? []).filter(x => x?.date && x?.extrait),
     ilot: ilot ? { nom: ilot.nom, teinte: ilot.teinte ?? null } : null,
+    ilots: siens.map(p => ({ nom: p.nom, teinte: p.teinte ?? null })),
     liens, pesees
   };
 }
@@ -650,7 +818,7 @@ export function dessinerRelations(ctx, G, dispo,
   const ilots = [];
   for (const a of G.ilots ?? []) {
     const membres = [];
-    G.noeuds.forEach((n, i) => { if (n.ilot === a.i && pts[i]) membres.push(pts[i]); });
+    G.noeuds.forEach((n, i) => { if (siensDe(n).includes(a.i) && pts[i]) membres.push(pts[i]); });
     if (membres.length < 2) continue;   // un ilot d'un seul noeud est ce noeud
     /*
      * UNE GRAPPE SANS NOM PREND PLUS LARGE. Ses membres ne sont retenus par
@@ -682,7 +850,7 @@ export function dessinerRelations(ctx, G, dispo,
   // Un noeud EN DEHORS de l'ilot vise s'efface avec le reste : sans ca, la
   // moitie de la carte reste a pleine encre autour d'un groupe qu'on vient de
   // designer, et on ne voit pas ce qu'on a designe.
-  const dedans = i => !focalise || G.noeuds[i]?.ilot === ilotVise;
+  const dedans = i => !focalise || siensDe(G.noeuds[i]).includes(ilotVise);
 
   /* --- l'enveloppe des ilots, sous tout le reste --- */
   if (aIlot > 0.02 || focalise) {
@@ -698,7 +866,24 @@ export function dessinerRelations(ctx, G, dispo,
        * chose que ce produit ne fait pas.
        */
       const anonyme = a.nom == null;
-      const f = (eteint(a) ? aIlot * 0.25 : (a.i === ilotVise ? 1 : aIlot)) * (anonyme ? 0.75 : 1);
+      /*
+       * L'ENVELOPPE SUIT CE QUI L'APPUIE.
+       *
+       * Elle ne suivait que les positions, et les positions ne savent rien des
+       * liens : un groupe dont aucun membre n'en touche un autre etait dessine
+       * exactement comme un groupe ou tous se touchent. C'est la chose que ce
+       * dessin promettait sans pouvoir la tenir.
+       *
+       * `tenue` va de 0 au seuil a 1 quand tout reste dedans. En dessous du
+       * seuil il n'y a PAS d'enveloppe -- pas une plus pale : aucune. Une
+       * poche a peine visible dirait encore « ces choses vont ensemble », et
+       * la seule chose vraie a dire, la, est qu'on n'en sait rien. Les noeuds
+       * restent, leurs liens restent ; c'est la forme qui s'en va.
+       */
+      const t = tenueDe(a);
+      if (t <= 0) continue;
+      const f = (eteint(a) ? aIlot * 0.25 : (a.i === ilotVise ? 1 : aIlot))
+        * (anonyme ? 0.75 : 1) * (0.34 + 0.66 * t);
       if (f < 0.02) continue;
       tracer(ctx, a.bord);
       ctx.fillStyle = `hsl(${a.teinte} 60% 58% / ${
@@ -707,10 +892,17 @@ export function dessinerRelations(ctx, G, dispo,
       // CONTOUR POINTILLE, jamais plein : un ilot est DECLARE par le modele,
       // et la regle de couleur du produit tient jusqu'ici. Une grappe sans nom
       // l'est encore plus : pointille plus court, plus espace, plus pale.
+      //
+      // Et le POINTILLE S'AJOURE avec l'appui : plus l'ilot tient a lui-meme,
+      // plus le trait est continu. C'est la meme grammaire que le reste du
+      // produit -- ce qui est plein est mesure, ce qui est ajoure l'est moins
+      // -- appliquee cette fois a l'interieur d'une meme forme.
       ctx.globalAlpha = (anonyme ? 0.44 : 0.45) * f;
       ctx.strokeStyle = `hsl(${a.teinte} 60% 62%)`;
       ctx.lineWidth = (a.i === ilotVise ? 1.6 : 1) / v.k;
-      ctx.setLineDash(anonyme ? [2 / v.k, 6 / v.k] : [5 / v.k, 7 / v.k]);
+      const trait = anonyme ? 2 : 3 + 5 * t;
+      const vide = (anonyme ? 6 : 10 - 3 * t);
+      ctx.setLineDash([trait / v.k, vide / v.k]);
       tracer(ctx, a.bord);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -718,8 +910,39 @@ export function dessinerRelations(ctx, G, dispo,
     }
   }
 
+  /* ===================== LES PONTS PASSENT DEVANT =====================
+   *
+   * Un lien qui traverse deux ilots est le plus informatif de la carte : c'est
+   * lui qui dit par ou une chose en atteint une autre, et c'est la seule ligne
+   * qui explique pourquoi deux groupes ne sont pas deux vies separees.
+   *
+   * Il etait le moins visible. L'ordre de dessin allait enveloppes -> liens ->
+   * halos -> anneaux, et chaque halo couvre quatre fois et demie le rayon de
+   * son noeud : les traits passaient dessous, noyes. Sur les vingt lectures du
+   * banc, cent soixante-cinq liens-ponts, tous invisibles -- et leur verbe ne
+   * s'affichait qu'au survol, donc seulement si on savait deja ou pointer.
+   *
+   * Ils sortent donc de cette boucle et se dessinent APRES les noeuds, avec
+   * leur verbe ecrit sans qu'on ait rien a survoler.
+   */
+  /*
+   * UN PONT RELIE DEUX ILOTS QUI N'ONT RIEN EN COMMUN.
+   *
+   * Depuis que le recouvrement existe, deux noeuds peuvent partager un ilot
+   * tout en appartenant chacun a un autre. Le lien entre eux n'est alors pas
+   * une traversee -- il passe DEDANS, dans l'ilot qu'ils ont tous les deux --
+   * et le dessiner par-dessus les halos le ferait passer pour ce qu'il n'est
+   * pas. On ne compte donc comme pont que ce qui ne partage aucun ilot.
+   */
+  const estPont = l => {
+    const x = siensDe(G.noeuds[l.s]), y = siensDe(G.noeuds[l.t]);
+    return x.length && y.length && !x.some(k => y.includes(k));
+  };
+  const ponts = [];
+
   /* --- les liens --- */
   for (const l of G.liens) {
+    if (estPont(l)) { ponts.push(l); continue; }
     const a = pts[l.s], b = pts[l.t];
     const actif = (survol < 0 || l.s === survol || l.t === survol)
       && (dedans(l.s) || dedans(l.t));
@@ -772,6 +995,88 @@ export function dessinerRelations(ctx, G, dispo,
     }
   }
 
+  /* --- les halos, a part : c'est SOUS eux que les ponts se noyaient ---
+     Les halos couvrent quatre fois et demie le rayon de leur noeud. Peints dans
+     la meme passe que les anneaux, ils obligeaient a choisir entre « les ponts
+     sous les halos » (invisibles) et « les ponts sur les anneaux » (un trait
+     qui barre les cercles). Separes, les trois couches se rangent dans le seul
+     ordre qui marche : halos, ponts, anneaux. */
+  for (let i = 0; i < G.noeuds.length; i++) {
+    const n = G.noeuds[i], p = pts[i];
+    const actif = (survol < 0 || proches.has(i)) && dedans(i);
+    const r = RAYON(n);
+    const g = ctx.createRadialGradient(p.x, p.y, r * 0.6, p.x, p.y, r * 4.5);
+    g.addColorStop(0, couleur(n.genre, 60, 0.34));
+    g.addColorStop(1, couleur(n.genre, 60, 0));
+    ctx.globalAlpha = actif ? 1 : 0.22;
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r * 4.5, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  /* --- les ponts, par-dessus les halos --- */
+  const versPonts = [];
+  for (const l of ponts) {
+    const a = pts[l.s], b = pts[l.t];
+    const actif = (survol < 0 || l.s === survol || l.t === survol)
+      && (dedans(l.s) || dedans(l.t));
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const cx = mx - dy * 0.13, cy = my + dx * 0.13;
+
+    /*
+     * UN PONT N'A PAS DE GENRE. Les autres liens prennent la teinte de leur
+     * noeud de depart, parce qu'ils appartiennent a un genre ; celui-ci
+     * appartient a deux ilots et a aucun des deux. Un ton clair et neutre,
+     * donc -- c'est ce qui le detache des nappes colorees, et c'est aussi ce
+     * qui dit ce qu'il est.
+     */
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(cx, cy, b.x, b.y);
+    ctx.strokeStyle = '#dfe9e3';
+    ctx.globalAlpha = actif ? 0.26 + l.force * 0.26 : 0.05;
+    ctx.lineWidth = (0.7 + l.force * 1.3) / v.k * Math.max(0.9, ech);
+    ctx.stroke();
+
+    if (!actif) continue;
+    const t = 0.5, u = 1 - t;
+    versPonts.push({
+      lien: l,
+      paire: [siensDe(G.noeuds[l.s])[0], siensDe(G.noeuds[l.t])[0]].sort((x, y) => x - y).join('|'),
+      texte: mot(l.quoi),
+      x: u * u * a.x + 2 * t * u * cx + t * t * b.x,
+      y: u * u * a.y + 2 * t * u * cy + t * t * b.y
+    });
+  }
+
+  /*
+   * UN SEUL VERBE PAR PAIRE D'ILOTS, ET QUATRE AU PLUS.
+   *
+   * Tous ecrits, ils recouvraient la carte : sept pavés gris sur une lecture de
+   * quatorze noeuds, et les nappes colorees disparaissaient dessous. On avait
+   * remplace un defaut par son symetrique -- ce qui explique tout n'explique
+   * plus rien.
+   *
+   * Ce qu'un pont apprend n'est pas « il existe un lien de plus » : c'est PAR
+   * OU ce groupe atteint celui-la. Une paire d'ilots n'a donc besoin que d'un
+   * verbe, le plus fort ; les autres traversees restent tracees, sans texte. Le
+   * plafond a quatre suit la meme regle que les vingt pastilles du retissage :
+   * au-dela, ce n'est plus une carte qu'on lit, c'est une page.
+   *
+   * Les autres verbes ne sont pas perdus -- ils reviennent au survol du noeud,
+   * comme tous les liens.
+   */
+  const MAX_VERBES = 4;
+  const parPaire = new Map();
+  for (const pv of versPonts) {
+    const gagne = parPaire.get(pv.paire);
+    if (!gagne || pv.lien.force > gagne.lien.force) parPaire.set(pv.paire, pv);
+  }
+  const verbesPonts = [...parPaire.values()]
+    .sort((a, b) => b.lien.force - a.lien.force)
+    .slice(0, MAX_VERBES);
+
   /* --- les noeuds : des anneaux, parce que tout ceci est declare --- */
   const libelles = [];
   for (let i = 0; i < G.noeuds.length; i++) {
@@ -779,13 +1084,6 @@ export function dessinerRelations(ctx, G, dispo,
     const actif = (survol < 0 || proches.has(i)) && dedans(i);
     const r = RAYON(n);
     const c = couleur(n.genre, actif ? 66 : 52);
-
-    const g = ctx.createRadialGradient(p.x, p.y, r * 0.6, p.x, p.y, r * 4.5);
-    g.addColorStop(0, couleur(n.genre, 60, 0.34));
-    g.addColorStop(1, couleur(n.genre, 60, 0));
-    ctx.globalAlpha = actif ? 1 : 0.22;
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r * 4.5, 0, 7); ctx.fill();
 
     // Les journees, sous l'anneau : il doit rester net par-dessus, sinon on ne
     // distingue plus le contour du grain.
@@ -884,6 +1182,7 @@ export function dessinerRelations(ctx, G, dispo,
                     opa, actif, poids: n.jours ?? 0 });
   }
 
+
   /*
    * LES NOMS QUI SE CHEVAUCHENT NE S'AFFICHENT PAS TOUS.
    *
@@ -919,6 +1218,39 @@ export function dessinerRelations(ctx, G, dispo,
       const r = RAYON(nd), q = pts[k];
       return { x0: q.x - r, x1: q.x + r, y0: q.y - r, y1: q.y + r };
     });
+
+    /*
+     * LES VERBES DES PONTS SE POSENT AVANT LES NOMS DE NOEUDS.
+     *
+     * Meme raison que pour les titres d'ilots, qui reservaient deja leur place
+     * en premier : ce qui se lit en premier doit se poser en premier, sinon il
+     * perd la course contre trente libelles et disparait entierement. Et ici
+     * l'enjeu est plus net encore -- un nom de noeud manquant se retrouve au
+     * survol, alors qu'un pont sans son verbe est un trait qui ne dit rien.
+     *
+     * « fait retomber », « ne te laisse jamais plus de deux jours d'avance » :
+     * c'est le texte le plus dense de la carte, et il n'etait lisible qu'en
+     * sachant deja ou pointer.
+     */
+    for (const pv of verbesPonts) {
+      const w = ctx.measureText(pv.texte).width;
+      const r = { x0: pv.x - w / 2 - 5 / v.k, x1: pv.x + w / 2 + 5 / v.k,
+                  y0: pv.y - h * 0.62, y1: pv.y + h * 0.62 };
+      if (poses.some(q => r.x0 < q.x1 && r.x1 > q.x0 && r.y0 < q.y1 && r.y1 > q.y0)) continue;
+      poses.push(r);
+      // Un fond, parce que le verbe passe au-dessus des halos : sans lui, il se
+      // lirait sur une nappe coloree.
+      ctx.globalAlpha = 0.82;
+      ctx.fillStyle = 'rgba(10,12,11,.9)';
+      ctx.beginPath();
+      ctx.roundRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0, 4 / v.k);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#cfdcd4';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pv.texte, pv.x, pv.y);
+      ctx.textBaseline = 'bottom';
+    }
     /*
      * QUATRE PLACES, PAS UNE.
      *
@@ -1014,8 +1346,17 @@ export function dessinerRelations(ctx, G, dispo,
     const hautVu = -v.y / v.k;
     const dispo = Math.max(1, g1 - g0 - 2 * marge);
     const poses = [];
-    // Les grappes sans nom n'ont rien a ecrire : c'est tout leur propos.
-    for (const a of ilots.filter(x => x.nom != null).sort((p, q) => p.haut - q.haut)) {
+    /*
+     * Les grappes sans nom n'ont rien a ecrire : c'est tout leur propos.
+     *
+     * ET UN ILOT SANS ENVELOPPE N'A PAS DE TITRE NON PLUS. Un nom en capitales
+     * flottant au-dessus de noeuds qui ne se touchent pas est la forme la plus
+     * affirmative que puisse prendre cette carte, et c'est celle qui a le moins
+     * de quoi la soutenir. Le nom reste dans la liste sous la carte, ou il est
+     * lu comme une lecture ; sur la toile il serait lu comme un fait.
+     */
+    for (const a of ilots.filter(x => x.nom != null && tenueDe(x) > 0)
+                         .sort((p, q) => p.haut - q.haut)) {
       const t = mot(a.nom).toUpperCase();
       /*
        * Sur telephone, « instabilite emotionnelle et autodestruction » est plus

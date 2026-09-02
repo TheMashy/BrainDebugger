@@ -5,7 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
-         contour, poidsDuNoeud, ilotDesNoeuds, LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+         contour, poidsDuNoeud, ilotDesNoeuds, appuyer, siensDe, tenueDe, SEUIL_APPUI, SEUIL_PART,
+         LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
 import { disposer } from '../web/carte.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
@@ -302,15 +303,39 @@ test('sans pistes, on retombe sur le regroupement par genre', () => {
   assert.deepEqual(G.ilots, []);
 });
 
-test('un nœud ne tombe que dans un seul îlot', () => {
-  // Deux enveloppes qui se traversent effacent exactement ce qu'on venait
-  // chercher sur la carte : des groupes qu'on distingue.
+test('un nœud réclamé par deux pistes appartient aux deux, et se pose dans une', () => {
+  /*
+   * LE PREMIER ARRIVÉ NE GARDE PLUS LE NŒUD. Une chose qui appartient à deux
+   * endroits est souvent celle qui compte le plus, et la ranger d'un seul côté
+   * efface exactement ce qui la rend intéressante.
+   *
+   * `ilots` est l'APPARTENANCE et peut valoir pour deux ; `ilot` est la PLACE,
+   * et il n'y en a qu'une : un point sur la toile tiré vers deux ancres
+   * finirait entre les deux, dans un endroit qui n'est ni l'un ni l'autre.
+   */
   const G = versGraphe(CARTE, [
     { nom: 'a', noeuds: ['Léa'] },
     { nom: 'b', noeuds: ['Léa', 'le dimanche soir'] }
   ]);
-  assert.equal(G.noeuds[0].ilot, 0, 'le premier îlot garde le nœud');
-  assert.equal(G.noeuds[2].ilot, 1);
+  assert.deepEqual(G.noeuds[0].ilots, [0, 1], 'Léa est dans les deux');
+  assert.equal(G.noeuds[0].ilot, 0, 'et se pose dans la première');
+  assert.deepEqual(G.noeuds[2].ilots, [1]);
+  assert.equal(G.ilots.length, 2, 'les deux pistes deviennent des îlots');
+});
+
+test('les deux îlots d’un nœud partagé le comptent chacun', () => {
+  // Sinon l'un des deux serait mesuré sur un membre qu'il n'a pas, et son
+  // enveloppe dirait autre chose que ce qu'elle entoure.
+  const noeuds = ['a', 'b', 'c'].map(nom => ({ nom, genre: 'activite', poids: 1, jours: [] }));
+  const liens = [{ de: 'a', vers: 'b', quoi: 'précède', force: 2 },
+                 { de: 'b', vers: 'c', quoi: 'précède', force: 2 }];
+  const G = versGraphe({ noeuds, liens }, [
+    { nom: 'un', teinte: 200, noeuds: ['a', 'b'] },
+    { nom: 'deux', teinte: 300, noeuds: ['b', 'c'] }
+  ]);
+  for (const a of G.ilots) assert.equal(a.n, 2, `« ${a.nom} » compte ses deux membres`);
+  // Et « b » n'est plus un pont : il est DANS les deux, il ne les relie pas.
+  assert.deepEqual(G.noeuds[1].ilots, [0, 1]);
 });
 
 test('une piste qui ne place aucun nœud ne devient pas un îlot vide', () => {
@@ -530,24 +555,25 @@ test('la liste sous la carte et l’enveloppe sur la carte tiennent les mêmes n
    */
   const pistes = [
     { nom: 'dépendance', noeuds: ['Léa', 'les nuits courtes', 'un nœud disparu'] },
-    { nom: 'vide au travail', noeuds: ['le dimanche soir', 'Léa'] } // Léa est déjà prise
+    { nom: 'vide au travail', noeuds: ['le dimanche soir', 'Léa'] } // Léa est dans les deux
   ];
   const ilotDe = ilotDesNoeuds(CARTE, pistes);
   const G = versGraphe(CARTE, pistes);
 
   for (const a of G.ilots) {
-    const surLaCarte = G.noeuds.filter(n => n.ilot === a.i).map(n => n.nom).sort();
+    const surLaCarte = G.noeuds.filter(n => siensDe(n).includes(a.i)).map(n => n.nom).sort();
     // Ce que la liste écrit sous ce titre : le même filtre, depuis la carte brute.
     const enListe = CARTE.noeuds
-      .filter(n => ilotDe.get(String(n.nom).toLowerCase()) === a.i)
+      .filter(n => (ilotDe.get(String(n.nom).toLowerCase()) ?? []).includes(a.i))
       .map(n => n.nom).sort();
     assert.deepEqual(surLaCarte, enListe,
                      `« ${a.nom ?? 'sans nom'} » ne tient pas la même chose des deux côtés`);
   }
   // Et un nom que la carte ne porte pas ne compte nulle part.
   assert.equal(ilotDe.has('un nœud disparu'), false);
-  // Un nœud revendiqué deux fois reste au premier qui l'a nommé, des deux côtés.
-  assert.equal(ilotDe.get('léa'), 0);
+  // Un nœud revendiqué deux fois est dans les deux, des deux côtés — c'est
+  // exactement ce recouvrement que la partition effaçait sans le dire.
+  assert.deepEqual(ilotDe.get('léa'), [0, 1]);
 });
 
 test('ce qui n’est dans aucune piste est quand même sur la carte, sans titre', () => {
@@ -635,4 +661,103 @@ test('après la simulation, un îlot est nettement plus serré que l’espace en
   const rapport = moy(dehors) / moy(dedans);
   assert.ok(rapport > 5,
     `les îlots ne se serrent pas : dedans ${moy(dedans).toFixed(0)} px, dehors ${moy(dehors).toFixed(0)} px (rapport ${rapport.toFixed(2)})`);
+});
+
+
+/* ===================== CE QUI APPUIE UN ILOT =====================
+ *
+ * Trois nombres decident si une enveloppe se dessine. Ils ont ete ecrits parce
+ * que le banc a montre qu'une poche est aussi pleine avec zero lien interne
+ * qu'avec quatre-vingts -- l'enveloppe se calculant sur les POSITIONS, qui ne
+ * savent rien des liens.
+ */
+
+/** Un graphe ou l'on choisit exactement qui est relie a qui. */
+function carteDe(membres, aretes, pistes) {
+  const noeuds = membres.map(nom => ({ nom, genre: 'activite', poids: 1, jours: [] }));
+  const liens = aretes.map(([de, vers]) => ({ de, vers, quoi: 'précède', force: 2 }));
+  return versGraphe({ noeuds, liens }, pistes);
+}
+
+test('l’appui compte ce qui reste dedans, la densite ce qui se touche', () => {
+  // a-b-c relies en chaine, plus un lien qui sort vers d.
+  const G = carteDe(['a', 'b', 'c', 'd'],
+                    [['a', 'b'], ['b', 'c'], ['c', 'd']],
+                    [{ nom: 'trois', teinte: 200, noeuds: ['a', 'b', 'c'] }]);
+  const a = G.ilots.find(x => x.nom === 'trois');
+  assert.equal(a.n, 3);
+  assert.equal(a.dedans, 2);
+  assert.equal(a.dehors, 1);
+  assert.equal(a.densite, 2 / 3);          // 2 liens sur 3 paires possibles
+  assert.equal(a.appui, 2 / 3);            // 2 dedans sur 3 liens touchant l'ilot
+  assert.equal(a.part, 1);                 // une seule piece
+});
+
+test('un ilot plus relie au dehors qu’a lui-meme perd son enveloppe', () => {
+  // « se faire petit », vu sur une vraie lecture : 1 lien dedans, 9 dehors.
+  const G = carteDe(['x', 'y', 'z', 'hors'],
+                    [['x', 'y'], ['x', 'hors'], ['y', 'hors'], ['z', 'hors']],
+                    [{ nom: 'creux', teinte: 200, noeuds: ['x', 'y', 'z'] }]);
+  const a = G.ilots.find(x => x.nom === 'creux');
+  assert.equal(a.dedans, 1);
+  assert.equal(a.dehors, 3);
+  assert.ok(a.appui < SEUIL_APPUI, `appui ${a.appui}`);
+  assert.equal(tenueDe(a), 0, 'pas d’enveloppe');
+});
+
+test('un ilot dont les membres ne se tiennent pas perd son enveloppe, meme avec un appui parfait', () => {
+  /*
+   * LE PIEGE QUE L'APPUI SEUL NE VOIT PAS. Six noeuds, UN lien interne, aucun
+   * lien sortant : tout ce qui le relie reste dedans, donc appui = 1,00 —
+   * pendant que cinq membres sur six ne touchent rien. C'est le cas « epars »
+   * du banc fabrique, et sans la troisieme mesure il serait dessine a pleine
+   * enveloppe.
+   */
+  const G = carteDe(['a', 'b', 'c', 'd', 'e', 'f'], [['a', 'b']],
+                    [{ nom: 'eparse', teinte: 200, noeuds: ['a', 'b', 'c', 'd', 'e', 'f'] }]);
+  const a = G.ilots.find(x => x.nom === 'eparse');
+  assert.equal(a.appui, 1, 'rien ne sort, donc tout reste dedans');
+  assert.equal(a.part, 2 / 6, 'et pourtant la plus grande piece n’en tient que deux');
+  assert.ok(a.part < SEUIL_PART);
+  assert.equal(tenueDe(a), 0);
+});
+
+test('un ilot dense et entier garde son enveloppe, a pleine force', () => {
+  const G = carteDe(['a', 'b', 'c'], [['a', 'b'], ['b', 'c'], ['a', 'c']],
+                    [{ nom: 'tenu', teinte: 200, noeuds: ['a', 'b', 'c'] }]);
+  const a = G.ilots.find(x => x.nom === 'tenu');
+  assert.equal(a.densite, 1);
+  assert.equal(a.appui, 1);
+  assert.equal(a.part, 1);
+  assert.equal(tenueDe(a), 1);
+});
+
+test('la tenue monte avec l’appui, entre le seuil et un', () => {
+  const faible = { appui: SEUIL_APPUI, part: 1 };
+  const moyen  = { appui: (SEUIL_APPUI + 1) / 2, part: 1 };
+  const plein  = { appui: 1, part: 1 };
+  assert.equal(tenueDe(faible), 0);
+  assert.ok(tenueDe(moyen) > 0.45 && tenueDe(moyen) < 0.55);
+  assert.equal(tenueDe(plein), 1);
+  assert.equal(tenueDe(undefined), 0, 'un ilot sans mesure ne se dessine pas');
+});
+
+test('appuyer ne compte que les liens de l’ilot vise', () => {
+  const noeuds = [{ nom: 'a', ilot: 0 }, { nom: 'b', ilot: 0 },
+                  { nom: 'c', ilot: 1 }, { nom: 'd', ilot: 1 }];
+  const liens = [{ s: 0, t: 1 }, { s: 2, t: 3 }, { s: 1, t: 2 }];
+  const [un, deux] = appuyer([{ i: 0 }, { i: 1 }], noeuds, liens);
+  for (const a of [un, deux]) {
+    assert.equal(a.dedans, 1);
+    assert.equal(a.dehors, 1, 'le lien qui traverse compte pour les deux, dehors');
+  }
+});
+
+test('un noeud hors de tout ilot ne compte dans aucun', () => {
+  const [a] = appuyer([{ i: 0 }],
+    [{ nom: 'a', ilot: 0 }, { nom: 'b', ilot: 0 }, { nom: 'seul', ilot: null }],
+    [{ s: 0, t: 1 }]);
+  assert.equal(a.n, 2);
+  assert.equal(a.dedans, 1);
+  assert.equal(a.dehors, 0);
 });
