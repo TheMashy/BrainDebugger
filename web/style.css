@@ -2965,13 +2965,13 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
    couleur porte le niveau : ambre = évoqué, rouge = une blessure écrite. Il
    passe DEVANT la teinte de note : une crise ne doit pas disparaître sous le
    vert d'une bonne journée voisine. */
-.mjour.aveille { box-shadow: inset 0 3px 0 var(--vc, var(--warn)); }
+.mjour.aveille { box-shadow: inset 0 0 0 1.5px var(--vc, var(--warn)); }
 .mjour.aveille.jaune { --vc: var(--warn); }
 .mjour.aveille.rouge { --vc: var(--danger); }
-.mjour.aveille.ouvert { box-shadow: inset 0 3px 0 var(--vc), 0 0 0 1px var(--accent); }
+.mjour.aveille.ouvert { box-shadow: inset 0 0 0 1.5px var(--vc), 0 0 0 1px var(--accent); }
 .mjveille {
-  position: absolute; top: 2px; right: 2px; line-height: 0; color: var(--vc, var(--warn));
-  opacity: .95; pointer-events: none;
+  position: absolute; top: 1px; right: 1px; line-height: 0; color: var(--vc, var(--warn));
+  pointer-events: none; filter: drop-shadow(0 0 1.5px rgba(0,0,0,.45));
 }
 @media (max-width: 900px) {
   .moisruban { gap: 2px; }
@@ -2982,13 +2982,17 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
    remplit presque, et sa couleur suffit à repérer une période à surveiller en
    feuilletant. Il s'affiche même sans note — un jour de crise non chiffré ne
    doit pas être une case vide. */
-table.grid td.cell.aveille { outline: 1.5px solid var(--vc, var(--warn)); outline-offset: 0; z-index: 1; }
+table.grid td.cell.aveille { outline: 2px solid var(--vc, var(--warn)); outline-offset: -1px; z-index: 2; }
 table.grid td.cell.aveille.jaune { --vc: var(--warn); }
 table.grid td.cell.aveille.rouge { --vc: var(--danger); }
-table.grid td.cell.aveille:hover { outline-width: 2px; z-index: 3; }
+table.grid td.cell.aveille:hover { outline-width: 2.5px; z-index: 4; }
+/* Le triangle plein REMPLIT presque la case : sur une grille de 15 px, c'est
+   ce qui le rend repérable d'un coup d'œil en feuilletant l'année. Une ombre
+   portée le décolle du fond, quelle que soit la couleur de la case. */
 .cellveille {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--vc, var(--warn)); line-height: 0; pointer-events: none;
+  filter: drop-shadow(0 0 1.5px rgba(0,0,0,.5));
 }
 
 /* LA CARTE DE VEILLE SUR LA JOURNÉE OUVERTE : le signe AVEC sa preuve.

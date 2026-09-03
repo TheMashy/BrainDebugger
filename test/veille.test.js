@@ -72,6 +72,31 @@ test('la même phrase, dans une journée de crise, devient rouge', () => {
   assert.equal(r.extrait, 'je me suis coupé');
 });
 
+test('UN FAIT ANCIEN RACONTÉ n’est pas une blessure de ce jour-là', () => {
+  /*
+   * La personne revient sur ce qui lui est arrivé — « le lendemain de ma
+   * scarification en mai ». Ce n'est pas un geste du jour ; le compter rouge
+   * « une blessure est écrite ce jour-là » est le faux positif qui apprend à
+   * ignorer le signe. Il descend en jaune « évoqué », sans 3114.
+   */
+  const r = niveauDuTexte("Le lendemain de ma scarification en mai, je suis allé au travail direct");
+  assert.equal(r.niveau, 'jaune', 'un fait ancien raconté ne doit pas être rouge');
+  assert.equal(r.motifs[0].genre, 'evoque_passe');
+
+  for (const p of ['ma scarification de 2019', 'je me suis tailladé quand j’étais ado',
+                   'mon automutilation à l’époque']) {
+    assert.equal(niveauDuTexte(p).niveau, 'jaune', `« ${p} » devrait être un jaune évoqué`);
+  }
+});
+
+test('MAIS « hier » et « ce matin » restent un vrai rouge', () => {
+  // La frontière est le passé LOINTAIN. Une scarification d'hier, ou racontée
+  // avec un marqueur de maintenant, reste un rouge — mieux vaut un de trop.
+  assert.equal(niveauDuTexte('scarification hier soir').niveau, 'rouge');
+  assert.equal(niveauDuTexte('je me suis scarifiée ce matin').niveau, 'rouge');
+  assert.equal(niveauDuTexte('je viens de me scarifier').niveau, 'rouge');
+});
+
 /* ==================== un moyen à portée ==================== */
 
 test('UN MOYEN À PORTÉE, c’est un signe — même sans le mot suicide', () => {
@@ -202,7 +227,7 @@ test('les phrases sont des FAITS, jamais des consignes ni des verdicts', () => {
    * comment elle va, et un rappel formulé comme un reproche est un rappel
    * qu'on ferme. On dit ce qui est écrit, au passé, et c'est tout.
    */
-  assert.deepEqual(Object.keys(DIT).sort(), ['blessure', 'dereel', 'moyen', 'suicide']);
+  assert.deepEqual(Object.keys(DIT).sort(), ['blessure', 'dereel', 'evoque_passe', 'moyen', 'suicide']);
   for (const phrase of Object.values(DIT)) {
     for (const mot of ['tu devrais', 'attention', 'danger', 'grave', 'inquiét',
                        'il faut', 'arrête', 'tu vas mal']) {

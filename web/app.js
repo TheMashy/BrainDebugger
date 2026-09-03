@@ -2196,7 +2196,7 @@ function gridMarkup(grid) {
         return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}"
           ${(has || d.veille) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
           ${has ? `style="background:${deltaColor(d.delta)}"` : ''}>${
-          d.veille ? `<span class="cellveille">${ico('alerte', 9)}</span>` : ''}</td>`;
+          d.veille ? `<span class="cellveille">${alerteGlyph(13)}</span>` : ''}</td>`;
       }).join('')}
       <td class="avg">${mo.avg ?? ''}</td>
     </tr>`).join('')}
@@ -2357,6 +2357,21 @@ async function ouvrirJour(date) {
  * qu'une crise ne passe pas inaperçue en feuilletant : c'est le seul rôle d'un
  * signe sur un ruban de trente jours.
  */
+/*
+ * LE GLYPHE D'ALERTE, PLEIN — pour qu'il se voie d'un coup d'œil.
+ *
+ * Le triangle en simple trait se perdait dans une case de 15 px sur fond
+ * coloré. Ici il est REMPLI de la couleur du niveau, avec un point
+ * d'exclamation sombre au centre et un liseré sombre : il tranche sur une case
+ * verte comme sur une rouge. `currentColor` porte la couleur du niveau (--vc).
+ */
+const alerteGlyph = (t = 12) => `<svg viewBox="0 0 18 18" width="${t}" height="${t}"
+  class="ico ialerte" aria-hidden="true" focusable="false">
+  <path d="M9 2.1 16.75 15.6a1 1 0 0 1-.87 1.5H2.12a1 1 0 0 1-.87-1.5z"
+    fill="currentColor" stroke="#141109" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M9 6.7v3.5" stroke="#141109" stroke-width="1.7" stroke-linecap="round"/>
+  <circle cx="9" cy="13" r="1.05" fill="#141109"/></svg>`;
+
 const veilleTitre = n => n === 'rouge'
   ? ' · ⚠ à surveiller — une blessure est écrite ce jour-là'
   : n === 'jaune'
@@ -2370,7 +2385,8 @@ const VEILLE_DIT = {
   suicide:  'le suicide a été évoqué',
   moyen:    'quelque chose pour se faire mal était à portée',
   dereel:   'un moment où le réel s’est décollé',
-  blessure: 'une blessure est écrite ce jour-là'
+  blessure: 'une blessure est écrite ce jour-là',
+  evoque_passe: 'une blessure passée a été évoquée'
 };
 
 /**
@@ -2418,7 +2434,7 @@ function moisRuban(m, date) {
         title="${esc(fmtDay(c.date))}${note ? ` · ${c.note}/10` : ''}${c.texte ? ' · écrit' : ''}${veilleTitre(c.veille)}">
         <span class="mjn">${Number(c.date.slice(8))}</span>
         ${c.texte ? '<span class="mjpt"></span>' : ''}
-        ${c.veille ? `<span class="mjveille">${ico('alerte', 10)}</span>` : ''}
+        ${c.veille ? `<span class="mjveille">${alerteGlyph(15)}</span>` : ''}
       </button>`;
     }).join('')}
   </div>`;
