@@ -155,3 +155,32 @@ test('le recalage ne remonte JAMAIS plus d’un jour en arrière', async () => {
   const veille = messagesForDate('2026-06-30', UN) ?? [];
   assert.equal(veille.length, 0, 'rien ne doit atterrir deux jours en arrière');
 });
+
+test('un coucher DIT du matin ne s’affiche pas comme le coucher du jour même', () => {
+  // Le compagnon note « couché 09:45 » sur aujourd'hui (via noter_bornes, qui
+  // date sur today()), en même temps qu'un lever de 17:30 : on vient de se lever
+  // en fin d'après-midi. 09:45 est le matin — c'est la coupure qui OUVRE le jour,
+  // pas sa fin. Il ne doit pas s'afficher comme « couché » du jour où l'on ne
+  // s'est pas recouché.
+  const U = 'poste-matin';
+  poserMesure({ date: '2026-07-20', source: 'dit', cle: 'coucher_dit', texte: '09:45', userId: U });
+  poserMesure({ date: '2026-07-20', source: 'dit', cle: 'lever_dit',   texte: '17:30', userId: U });
+
+  const auj = api.posteDuJour('2026-07-20', U);
+  assert.equal(auj?.lever?.heure, '17:30', 'le lever reste celui du jour');
+  assert.equal(auj?.coucher?.heure ?? null, null,
+    'aucun coucher fantôme le jour où l’on ne s’est pas recouché');
+
+  // Et il se range sur la VEILLE, qu'il ferme réellement.
+  const veille = api.posteDuJour('2026-07-19', U);
+  assert.equal(veille?.coucher?.heure, '09:45', 'le coucher du matin ferme la veille');
+  assert.equal(veille?.coucher?.source, 'dit');
+});
+
+test('un coucher DIT du soir reste bien le coucher du jour même', () => {
+  const U = 'poste-soir';
+  poserMesure({ date: '2026-07-25', source: 'dit', cle: 'coucher_dit', texte: '23:30', userId: U });
+  const j = api.posteDuJour('2026-07-25', U);
+  assert.equal(j?.coucher?.heure, '23:30', 'un « je vais me coucher » du soir ferme ce jour-là');
+  assert.equal(j?.coucher?.source, 'dit');
+});

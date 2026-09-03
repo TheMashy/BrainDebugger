@@ -29,7 +29,7 @@ import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
          chiffresDuJour, contient, COUCHER, LEVER, DERNIERE, PREMIERE } from './allure.js';
 import { lireDigest } from './digest.js';
 import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, veilleDe,
-         SOURCE_DIT, CLE_LEVER, CLE_COUCHER } from './jour-vecu.js';
+         SOURCE_DIT, CLE_LEVER, CLE_COUCHER, MIDI } from './jour-vecu.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
@@ -555,24 +555,42 @@ export function mesuresSituees(date, userId = OWNER, { avecLiens = true } = {}) 
 export function posteDuJour(date, userId = OWNER) {
   const dig = activiteDuJour(date, userId)?.digest ?? null;
   const jourM = mesuresDuJour(date, userId);
-  const dit = g => {
-    const cle = g === 'lever' ? CLE_LEVER : CLE_COUCHER;
-    const m = jourM.find(x => x.source === SOURCE_DIT && x.cle === cle);
+  const jourMdemain = mesuresDuJour(addDays(date, 1), userId);
+  const ditLever = () => {
+    const m = jourM.find(x => x.source === SOURCE_DIT && x.cle === CLE_LEVER);
     return m ? (m.texte ?? null) : null;
+  };
+  /*
+   * LE COUCHER QUI FERME LE JOUR N'EST PAS CELUI DU MATIN MÊME.
+   *
+   * Un coucher DIT posé le jour D à une heure du MATIN (< MIDI) n'est pas la fin
+   * de D : c'est la coupure qui OUVRE D — on s'est endormi ce matin-là après une
+   * nuit blanche, et ce coucher ferme D-1. Le prendre pour le coucher de D
+   * affichait « couché 09:45 » un jour où on venait de se lever à 17:30, et où
+   * l'on ne s'était pas encore recouché. Le coucher qui ferme VRAIMENT D est :
+   *   - un coucher DIT du SOIR de D (>= MIDI : « je vais me coucher » ce soir), ou
+   *   - un coucher DIT du MATIN de D+1 (< MIDI : « je me couche » passé minuit).
+   */
+  const ditCoucherFermant = () => {
+    const soir = jourM.find(x => x.source === SOURCE_DIT && x.cle === CLE_COUCHER
+                              && (enMinutes(x.texte) ?? 0) >= MIDI);
+    if (soir) return soir.texte ?? null;
+    const apresMinuit = jourMdemain.find(x => x.source === SOURCE_DIT && x.cle === CLE_COUCHER
+                              && (enMinutes(x.texte) ?? 1440) < MIDI);
+    return apresMinuit ? (apresMinuit.texte ?? null) : null;
   };
   const poste = dig?.poste ?? {};
   const plage = dig?.plage ?? {};
-  // LE COUCHER QUI FERME LE JOUR EST DANS LE DIGEST DU LENDEMAIN.
+  // LE COUCHER MESURÉ QUI FERME LE JOUR EST DANS LE DIGEST DU LENDEMAIN.
   //
   // `poste.coucher` de D est la dernière extinction AVANT le réveil de D —
   // c'est-à-dire le coucher de la nuit qui a OUVERT D (soir de D-1), apparié à
   // `poste.reveil` pour donner `sommeil_h`. Le coucher qui FERME le jour vécu D
   // (soir de D) est la dernière extinction avant le réveil de D+1 : il vit donc
-  // dans le digest de D+1. Sans ça, « moi » montrait un coucher chronologiquement
-  // AVANT le lever, d'une nuit trop tôt. Le lever, lui, reste celui de D.
+  // dans le digest de D+1. Le lever, lui, reste celui de D.
   const posteFin = activiteDuJour(addDays(date, 1), userId)?.digest?.poste ?? {};
   const borne = g => {
-    const d = dit(g);
+    const d = g === 'lever' ? ditLever() : ditCoucherFermant();
     if (d) return { heure: d, source: 'dit' };
     const mes = g === 'lever' ? poste.reveil : posteFin.coucher;
     if (mes) return { heure: mes, source: 'mesure' };

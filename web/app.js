@@ -1728,7 +1728,10 @@ async function renderYear(year) {
     if (y) return renderYear(Number(y.dataset.year));
     const w = e.target.closest('[data-win]');
     if (w) { CUMWIN = w.dataset.win; return renderYear(year); }
-    const cell = e.target.closest('td.cell.has');
+    // Une case notée OU marquée d'un signe de veille s'ouvre : un jour de crise
+    // sans note chiffrée doit rester cliquable, sinon le signe montre un jour
+    // qu'on ne peut pas aller lire.
+    const cell = e.target.closest('td.cell.has, td.cell.aveille');
     if (cell) return ouvrirJour(cell.dataset.date);
     const cad = e.target.closest('[data-cadre]');
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
@@ -2185,9 +2188,15 @@ function gridMarkup(grid) {
       ${mo.days.map(d => {
         if (!d) return '<td></td>';
         const has = d.note !== null && d.note !== undefined;
-        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}"
-          ${has ? `style="background:${deltaColor(d.delta)}" data-date="${d.date}"
-          data-tip="${fmtDay(d.date)}\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}"` : ''}></td>`;
+        // Le signe de veille passe AVANT la note : une année se feuillette pour
+        // voir les périodes, et trois alertes en une semaine ne doivent pas se
+        // perdre parce que ces jours-là n'ont pas de note chiffrée.
+        const al = d.veille ? ` aveille ${d.veille}` : '';
+        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}`;
+        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}"
+          ${(has || d.veille) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
+          ${has ? `style="background:${deltaColor(d.delta)}"` : ''}>${
+          d.veille ? `<span class="cellveille">${ico('alerte', 9)}</span>` : ''}</td>`;
       }).join('')}
       <td class="avg">${mo.avg ?? ''}</td>
     </tr>`).join('')}
@@ -2340,6 +2349,51 @@ async function ouvrirJour(date) {
  * lundis », inutile ici : ce qu'on suit dans un journal, c'est une SUITE, et
  * une suite se lit sur une ligne.
  */
+/*
+ * CE QUE DIT LE SIGNE D'ALERTE SUR LE CALENDRIER.
+ *
+ * Il ne se substitue pas au détail — la phrase qui l'a déclenché s'ouvre en
+ * cliquant le jour. Sur la case, il dit juste QUOI surveiller, et assez pour
+ * qu'une crise ne passe pas inaperçue en feuilletant : c'est le seul rôle d'un
+ * signe sur un ruban de trente jours.
+ */
+const veilleTitre = n => n === 'rouge'
+  ? ' · ⚠ à surveiller — une blessure est écrite ce jour-là'
+  : n === 'jaune'
+  ? ' · ⚠ à surveiller — le suicide ou un moyen de se faire mal a été évoqué'
+  : '';
+
+/* Ce que dit chaque GENRE de signe — par genre, pas par couleur : « le suicide
+   a été évoqué » et « un objet dangereux était à portée » sont deux jaunes, et
+   ce ne sont pas la même journée. Reflète server/veille.js (DIT). */
+const VEILLE_DIT = {
+  suicide:  'le suicide a été évoqué',
+  moyen:    'quelque chose pour se faire mal était à portée',
+  dereel:   'un moment où le réel s’est décollé',
+  blessure: 'une blessure est écrite ce jour-là'
+};
+
+/**
+ * LE SIGNE DE VEILLE, SUR LA JOURNÉE OUVERTE, AVEC SA PREUVE.
+ *
+ * Le calendrier ne porte que le niveau ; ici on montre POURQUOI — la phrase que
+ * la personne a écrite, celle qui a déclenché le signe. Un signe sans sa preuve
+ * serait un verdict de machine ; avec elle, c'est un rappel de ce qu'on a
+ * écrit, et si le signe est faux ça se voit tout de suite. Le 3114 n'apparaît
+ * que sur un rouge — le serveur ne remplit `aide` que là.
+ */
+function veilleBanner(v) {
+  if (!v?.niveau) return '';
+  const phrases = [...new Set((v.motifs ?? []).map(mo => VEILLE_DIT[mo.genre]).filter(Boolean))];
+  const quoi = phrases.length ? phrases.join(' · ')
+             : v.niveau === 'rouge' ? VEILLE_DIT.blessure : VEILLE_DIT.suicide;
+  return `<div class="veillecard ${esc(v.niveau)}">
+    <div class="vtete">${ico('alerte', 15)}<b>À surveiller</b><span class="vquoi">${esc(quoi)}</span></div>
+    ${v.extrait ? `<blockquote class="vextrait">« ${esc(v.extrait)} »</blockquote>` : ''}
+    ${v.aide ? `<p class="vaide">${esc(v.aide)}</p>` : ''}
+  </div>`;
+}
+
 function moisRuban(m, date) {
   const cases = m.calendrier ?? [];
   if (!cases.length) return '';
@@ -2358,12 +2412,13 @@ function moisRuban(m, date) {
     ${cases.map(c => {
       const note = c.note !== null && c.note !== undefined;
       const futur = c.date > jourCivil();
-      return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}"
+      return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}${c.veille ? ` aveille ${c.veille}` : ''}"
         data-cal="jour" data-d="${c.date}" ${futur ? 'disabled' : ''}
         ${note ? `style="background:${deltaColor(c.delta ?? 0)}"` : ''}
-        title="${esc(fmtDay(c.date))}${note ? ` · ${c.note}/10` : ''}${c.texte ? ' · écrit' : ''}">
+        title="${esc(fmtDay(c.date))}${note ? ` · ${c.note}/10` : ''}${c.texte ? ' · écrit' : ''}${veilleTitre(c.veille)}">
         <span class="mjn">${Number(c.date.slice(8))}</span>
         ${c.texte ? '<span class="mjpt"></span>' : ''}
+        ${c.veille ? `<span class="mjveille">${ico('alerte', 10)}</span>` : ''}
       </button>`;
     }).join('')}
   </div>`;
@@ -3534,6 +3589,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
       ${/* L'API renvoyait déjà `reperes` dans cette branche, et le markup ne
             l'affichait jamais : le champ était reçu et jeté. Le plancher retire
             des chiffres, pas des faits qu'on a soi-même posés. */''}
+      ${veilleBanner(m.jour?.veille)}
       ${reperesMarkup(m.reperes, date)}
       ${/* MEME RAISON POUR LES MESURES, et le même piège : le serveur les envoie
             dans cette branche, et il suffirait de ne pas écrire cette ligne pour
@@ -3614,6 +3670,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
             veut voir où ce jour tombe dans sa semaine. */''}
       ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
+      ${veilleBanner(m.jour?.veille)}
       ${reperesMarkup(m.reperes, date)}
 
       <div class="card dayread">

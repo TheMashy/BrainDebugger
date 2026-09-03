@@ -51,6 +51,12 @@ export const TRAITS = {
   // Antenne : un point et deux ondes qui en partent. Ce qui ARRIVE d'ailleurs
   // -- une montre, une balance, un telephone qui pousse ce qu'il a mesure.
   antenne:  '<circle cx="5" cy="13" r="1.6" fill="currentColor" stroke="none"/><path d="M8.8 13a3.8 3.8 0 0 0-3.8-3.8"/><path d="M13.2 13A8.2 8.2 0 0 0 5 4.8"/>',
+  // Alerte : un triangle et un point d'exclamation. Le SEUL signe d'alarme du
+  // produit. Il ne s'allume que sur ce que la personne a ecrit elle-meme, et il
+  // montre toujours la phrase qui l'a declenche -- jamais un verdict de machine
+  // (voir veille.js). Une crise qui ne laisse pas de trace passe entre les
+  // mailles du filet, et c'est exactement ce qu'on refuse ici.
+  alerte:   '<path d="M9 3.1 15.7 15H2.3z"/><path d="M9 7.4v3.4"/><circle cx="9" cy="12.9" r=".6" fill="currentColor" stroke="none"/>',
 
   /* ---- la nuit ----
      Deux bornes, et rien entre les deux. Une lune pour le coucher, un soleil
