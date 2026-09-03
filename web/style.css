@@ -1098,6 +1098,22 @@ input[type=date] { color-scheme: dark; }
 
 .gaugepanel .nums { margin: 0 0 3px; font-size: 13.5px; color: var(--ink-dim); }
 .gaugepanel .nums b { color: var(--ink); font-family: var(--mono); font-size: 15px; }
+
+/* Courbe de consommation de jetons : des barres, par heure ou par jour. */
+.usagebloc { margin: 14px 0 4px; }
+.usagetete { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.usagetog { display: inline-flex; gap: 4px; }
+.usagesel {
+  font: 500 11px var(--sans); color: var(--ink-dim); background: transparent;
+  border: 1px solid var(--line-soft); border-radius: 6px; padding: 2px 8px; cursor: pointer;
+}
+.usagesel.on { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.usagegraph { min-height: 44px; }
+.ubars { display: flex; align-items: flex-end; gap: 1px; height: 52px; }
+.ubar { flex: 1 1 0; display: flex; align-items: flex-end; min-width: 0; cursor: help; }
+.ubar i { width: 100%; background: var(--accent); border-radius: 1px 1px 0 0; min-height: 1px; }
+.ubar.vide i { background: var(--line-soft); }
+.ubar:hover i { background: color-mix(in srgb, var(--accent) 70%, var(--ink)); }
 /* « sans enveloppe » n'est pas une alerte : c'est un état choisi. Il se signale
    sans crier, à la façon d'une étiquette d'outil de développeur. */
 .gaugepanel .sansenv {
@@ -3204,6 +3220,20 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 
 .jmesures { display: flex; flex-direction: column; gap: 8px; }
 .jmlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+/* Le poste, en léger : lever, coucher, sommeil, écran. Des puces en ligne, une
+   icône puis l'heure ; l'estimation grisée et préfixée « ≈ » se distingue de
+   l'œil d'une heure dite ou mesurée. Survol = source (title) ou top 3 (data-tip). */
+.jposte { display: flex; flex-direction: column; gap: 8px; }
+.jpostligne { display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; }
+.jpost { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+.jpost .ico { color: var(--ink-faint); flex: none; }
+.jpost .mono { font-variant-numeric: tabular-nums; }
+.jpost .faint { font-size: 12px; }
+.jpost[data-tip] { cursor: help; }
+.jpost.lu { color: var(--ink-dim); }
+.jpost.lu .mono { color: var(--ink-dim); }
+.jpost.inconnu { color: var(--ink-faint); }
 
 /* Une ligne par mesure : le nom, la valeur, le côté. La grille tient les trois
    en colonnes — en `flex`, les valeurs ne s'alignent pas d'une ligne à l'autre

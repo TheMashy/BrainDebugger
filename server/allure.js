@@ -567,5 +567,15 @@ export function estDetail(cle) {
   return contient(k, ['temps', 'contexte', 'duree_app'])
       || contient(k, ['bascule', 'switch'])
       || contient(k, ['pause', 'break'])
+      // Ce que « poste » résume déjà en tête de colonne : lever, coucher, plage
+      // active, minutes actives. On les replie pour que « ce qui a été mesuré »
+      // reste léger ; le chiffre brut reste accessible dessous. On ANCRE sur les
+      // clés composées réellement produites par le digest (poste_*, plage_*) et
+      // les bornes dites (coucher_dit/lever_dit) — pas sur les sous-chaînes
+      // « coucher »/« lever »/« reveil », qui replieraient à tort une vraie
+      // mesure de corps importée (sommeil_reveils, une colonne « coucher » de
+      // montre). Ce qui se mesure sur un corps reste ouvert (voir plus haut).
+      || k.startsWith('poste_') || k.startsWith('plage_')
+      || k === 'actif_minutes' || k === 'coucher_dit' || k === 'lever_dit'
       || contient(k, DERNIERE) || contient(k, PREMIERE);
 }

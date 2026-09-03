@@ -12,7 +12,7 @@ import {
   mesuresEntre, poserMesure,
   redaterMessages, rebuildEntryText
 } from './db.js';
-import { usageFor, record as recordUsage } from './usage.js';
+import { usageFor, record as recordUsage, serieUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
@@ -366,6 +366,13 @@ export function recalerLaNuit(date, userId = OWNER) {
   if (coupure == null) return 0;
 
   const avant = messagesForDate(date, userId).filter(m => {
+    // IDEMPOTENCE : ne toucher qu'aux messages RÉELLEMENT écrits le jour civil
+    // `date`. Un message déjà rangé sur `date` par un recalage précédent garde
+    // un ts du petit matin ; sans ce garde, on le comparerait encore à la
+    // coupure de `date` et on le renverrait un jour plus tôt à chaque passe —
+    // dérive sans fin, texte des journées corrompu. Le jour civil se lit sur le
+    // TS (jamais réécrit), comme le fait jourVecuDe.
+    if (jourLocal(m.ts) !== date) return false;
     const h = enMinutes(heureLocale(m.ts));
     return h != null && h < coupure;
   });
@@ -531,6 +538,64 @@ export function mesuresSituees(date, userId = OWNER, { avecLiens = true } = {}) 
       lien: pour[0] ?? null
     };
   });
+}
+
+/**
+ * LE POSTE DU JOUR, EN LEGER : lever, coucher, sommeil, temps d'ecran.
+ *
+ * De quoi tenir la colonne « ce qui a ete mesure » sans y deverser les quarante
+ * cles du digest. Chaque borne porte SA SOURCE, dans l'ordre du plus sur au
+ * moins sur -- ce que la personne a DIT, puis ce que la machine a MESURE, puis
+ * une ESTIMATION lue sur la plage d'activite, puis rien du tout (inconnu). On ne
+ * fait jamais passer une estimation pour une mesure.
+ *
+ * L'ecran est fendu en temps d'application et temps web, chacun avec ses trois
+ * premiers, pour le survol.
+ */
+export function posteDuJour(date, userId = OWNER) {
+  const dig = activiteDuJour(date, userId)?.digest ?? null;
+  const jourM = mesuresDuJour(date, userId);
+  const dit = g => {
+    const cle = g === 'lever' ? CLE_LEVER : CLE_COUCHER;
+    const m = jourM.find(x => x.source === SOURCE_DIT && x.cle === cle);
+    return m ? (m.texte ?? null) : null;
+  };
+  const poste = dig?.poste ?? {};
+  const plage = dig?.plage ?? {};
+  // LE COUCHER QUI FERME LE JOUR EST DANS LE DIGEST DU LENDEMAIN.
+  //
+  // `poste.coucher` de D est la dernière extinction AVANT le réveil de D —
+  // c'est-à-dire le coucher de la nuit qui a OUVERT D (soir de D-1), apparié à
+  // `poste.reveil` pour donner `sommeil_h`. Le coucher qui FERME le jour vécu D
+  // (soir de D) est la dernière extinction avant le réveil de D+1 : il vit donc
+  // dans le digest de D+1. Sans ça, « moi » montrait un coucher chronologiquement
+  // AVANT le lever, d'une nuit trop tôt. Le lever, lui, reste celui de D.
+  const posteFin = activiteDuJour(addDays(date, 1), userId)?.digest?.poste ?? {};
+  const borne = g => {
+    const d = dit(g);
+    if (d) return { heure: d, source: 'dit' };
+    const mes = g === 'lever' ? poste.reveil : posteFin.coucher;
+    if (mes) return { heure: mes, source: 'mesure' };
+    const est = g === 'lever' ? plage.de : plage.a;
+    if (est) return { heure: est, source: 'estime' };
+    return { heure: null, source: null };
+  };
+  const tp = dig?.temps_par_contexte_s ?? {};
+  let appS = 0, webS = 0; const apps = [], webs = [];
+  for (const [k, v] of Object.entries(tp)) {
+    if (typeof v !== 'number' || v <= 0) continue;
+    if (k.startsWith('web:')) { webS += v; webs.push([k.slice(4), v]); }
+    else { appS += v; apps.push([k, v]); }
+  }
+  const top = arr => arr.sort((a, b) => b[1] - a[1]).slice(0, 3)
+                        .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }));
+  const ecran = (appS || webS) ? {
+    app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
+    top_app: top(apps), top_web: top(webs)
+  } : null;
+  const lever = borne('lever'), coucher = borne('coucher');
+  if (!lever.heure && !coucher.heure && poste.sommeil_h == null && !ecran) return null;
+  return { lever, coucher, sommeil_h: poste.sommeil_h ?? null, ecran };
 }
 
 /**
@@ -925,8 +990,19 @@ export const routes = {
    */
   'GET /api/mirror': ({ query, userId }) => {
     const s = getSettings(userId);
-    const { series: ser, byDate, index, rows, textCount } = series(userId);
     const date = query.date ?? today();
+    /*
+     * LA NUIT DU JOUR REGARDÉ EST RANGÉE AVANT D'ÊTRE LUE.
+     *
+     * Une borne peut arriver bien après les messages qu'elle range (« couché
+     * 06:10 » posé à 6 h du matin, ou poussé par Machi Tool le lendemain), et
+     * `reprendreLesNuits` ne repasse qu'au démarrage. Sans ce filet, on ouvre la
+     * journée et on la voit encore mal rangée. `recalerLaNuit` est borné (jamais
+     * plus d'un jour en arrière, seulement les messages d'avant une coupure
+     * CONNUE) et idempotent : un jour déjà rangé n'y bouge rien.
+     */
+    recalerLaNuit(date, userId);
+    const { series: ser, byDate, index, rows, textCount } = series(userId);
     const cur = byDate.get(date) ?? null;
     const entry = getEntry(date, userId);
     const note = entry?.note ?? null;
@@ -1088,6 +1164,10 @@ export const routes = {
               * ce dont personne ne se souvient en relisant.
               */
              mesures: mesuresSituees(date, userId),
+             // Le poste en leger : lever, coucher, sommeil, temps d'ecran. Ce
+             // qui tient la colonne « ce qui a ete mesure » ; le detail se
+             // replie derriere.
+             poste: posteDuJour(date, userId),
              // Les notes apportees passent le plancher, pour la meme raison que
              // les reperes : ce sont des faits que la personne a poses
              // elle-meme, pas une statistique calculee sur elle.
@@ -1586,6 +1666,29 @@ export const routes = {
      session : elle est appelee par un programme, pas par un navigateur. */
   'POST /api/passerelle/cle': ({ userId }) => ({ cle: poserCle(userId) }),
   'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
+
+  /*
+   * DE QUOI ALLER CHERCHER LE DIGEST DIRECTEMENT SUR LA MACHINE.
+   *
+   * Le navigateur, qui tourne sur le meme poste que Machi Tool, peut tirer le
+   * digest du jour de 127.0.0.1 quand on ouvre une journee encore ouverte --
+   * sans attendre le prochain envoi automatique. Il lui faut pour cela la MEME
+   * cle que la passerelle (celle que Machi Tool presente deja), et l'adresse
+   * locale. Cette route est DERRIERE le verrou : seule la personne connectee, sur
+   * sa propre machine, recoit sa propre cle. Elle ne sort jamais autrement.
+   */
+  'GET /api/passerelle/local': ({ userId }) => ({
+    cle: getSettings(userId).passerelleCle || '',
+    url: 'http://127.0.0.1:7373'
+  }),
+
+  /*
+   * LA CONSOMMATION DE JETONS DANS LE TEMPS. Une courbe, par heure (48 dernières)
+   * ou par jour (30 derniers). De quoi voir d'un coup où ça a coûté, sans ouvrir
+   * une facture — l'enveloppe reste une jauge, pas un compte.
+   */
+  'GET /api/usage/serie': ({ query, userId }) =>
+    serieUsage(userId, query.grain === 'heure' ? 'heure' : 'jour'),
 
   /* ---------- quantified self : ce qui est arrive, et par quel tuyau ----------
    *
