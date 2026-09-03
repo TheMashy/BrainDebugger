@@ -167,11 +167,60 @@ function drawGaugePanel() {
       Enveloppe épuisée pour ce mois. Le compagnon continue de répondre, mais hors-ligne —
       il ne se souvient plus de la conversation.
       <br>Tu peux la retirer dans Réglages, section « Modèle ».</p>` : ''}
+    ${/* La consommation dans le temps : une courbe rapide, par heure ou par jour.
+          Pliée dans le panneau des jetons, là où on vient déjà voir l'enveloppe. */''}
+    <div class="usagebloc">
+      <div class="usagetete">
+        <span class="k faint">Consommation de jetons</span>
+        <span class="usagetog">
+          <button type="button" data-grain="heure" class="usagesel">48 h</button>
+          <button type="button" data-grain="jour" class="usagesel on">30 j</button>
+        </span>
+      </div>
+      <div id="usageGraph" class="usagegraph"><p class="sub" style="margin:0">…</p></div>
+    </div>
+
     ${/* Le mode pudique se declenche ici, et pas seulement dans Reglages : on
           l'allume dans la seconde qui precede un partage d'ecran, et traverser
           trois vues pour le trouver, c'est trois vues de journal a l'ecran. */''}
     ${pudMarkup()}`;
   el.querySelector('form')?.addEventListener('submit', () => { /* laisse le POST partir */ });
+  el.querySelectorAll('[data-grain]').forEach(b => b.onclick = () => {
+    el.querySelectorAll('[data-grain]').forEach(x => x.classList.toggle('on', x === b));
+    chargerGrapheUsage(b.dataset.grain);
+  });
+  chargerGrapheUsage('jour');
+}
+
+/**
+ * LA COURBE DE CONSOMMATION, chargée à la demande dans le panneau des jetons.
+ *
+ * Des barres, pas une facture : on voit d'un coup les pics et les creux. Une
+ * période vide se dit en toutes lettres — un graphe plat se lirait « rien
+ * mesuré », ce qui est faux quand rien n'a été consommé.
+ */
+async function chargerGrapheUsage(grain) {
+  const hote = $('#usageGraph');
+  if (!hote) return;
+  let d;
+  try { d = await api(`/api/usage/serie?grain=${grain}`); }
+  catch { hote.innerHTML = '<p class="sub" style="margin:0">Lecture impossible.</p>'; return; }
+  if (!d.total) {
+    hote.innerHTML = `<p class="sub" style="margin:0">Rien de consommé sur ${
+      grain === 'heure' ? 'les dernières 48 h' : 'les 30 derniers jours'}.</p>`;
+    return;
+  }
+  const barres = d.points.map(p => {
+    const h = Math.max(2, Math.round(100 * p.tokens / d.pic));
+    const quand = grain === 'heure' ? `${p.k.slice(11)} h` : fmtDay(p.k);
+    const tip = p.tokens
+      ? `${quand} : ${fmtTok(p.tokens)} jetons${p.appels ? ` · ${p.appels} échange${p.appels > 1 ? 's' : ''}` : ''}`
+      : `${quand} : rien`;
+    return `<span class="ubar${p.tokens ? '' : ' vide'}" data-tip="${esc(tip)}"><i style="height:${h}%"></i></span>`;
+  }).join('');
+  hote.innerHTML = `<div class="ubars">${barres}</div>
+    <p class="sub" style="margin:6px 0 0">${fmtTok(d.total)} jetons sur ${
+      grain === 'heure' ? '48 h' : '30 jours'} · tout en UTC</p>`;
 }
 
 function toggleGauge(force) {

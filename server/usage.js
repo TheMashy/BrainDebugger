@@ -116,3 +116,40 @@ function nextMonthStart() {
   const d = new Date();
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
 }
+
+/**
+ * LA CONSOMMATION DANS LE TEMPS, POUR UNE COURBE.
+ *
+ * Chaque appel au modele a un horodatage et ses jetons ; on les regroupe par
+ * HEURE (48 dernieres) ou par JOUR (30 derniers). On rend une serie CONTINUE,
+ * trous compris (une heure sans appel vaut zero) : c'est justement le creux qui
+ * dit « rien ne consommait la », et le masquer ferait croire a une activite
+ * ininterrompue. Tout est en UTC, comme le reste du comptage.
+ *
+ * L'enveloppe compte tous les jetons (cache compris) : la barre mesure ce qui a
+ * traverse le modele. `sortie` isole les jetons de sortie, les plus chers.
+ */
+export function serieUsage(userId, grain = 'jour') {
+  const heure = grain === 'heure';
+  const pas = heure ? 48 : 30;
+  const fmt = heure ? '%Y-%m-%dT%H' : '%Y-%m-%d';
+  const rows = db.prepare(
+    `SELECT strftime('${fmt}', ts) k,
+            SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) t,
+            SUM(output_tokens) o, COUNT(*) n
+     FROM usage WHERE user_id = ? GROUP BY k`
+  ).all(userId);
+  const par = new Map(rows.map(r => [r.k, r]));
+  const now = new Date();
+  const points = [];
+  for (let i = pas - 1; i >= 0; i--) {
+    const d = new Date(now);
+    if (heure) d.setUTCHours(d.getUTCHours() - i, 0, 0, 0);
+    else { d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - i); }
+    const k = heure ? d.toISOString().slice(0, 13) : d.toISOString().slice(0, 10);
+    const r = par.get(k);
+    points.push({ k, tokens: r?.t ?? 0, sortie: r?.o ?? 0, appels: r?.n ?? 0 });
+  }
+  const total = points.reduce((s, p) => s + p.tokens, 0);
+  return { grain, points, total, pic: Math.max(1, ...points.map(p => p.tokens)) };
+}

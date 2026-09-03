@@ -12,7 +12,7 @@ import {
   mesuresEntre, poserMesure,
   redaterMessages, rebuildEntryText
 } from './db.js';
-import { usageFor, record as recordUsage } from './usage.js';
+import { usageFor, record as recordUsage, serieUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
@@ -1681,6 +1681,14 @@ export const routes = {
     cle: getSettings(userId).passerelleCle || '',
     url: 'http://127.0.0.1:7373'
   }),
+
+  /*
+   * LA CONSOMMATION DE JETONS DANS LE TEMPS. Une courbe, par heure (48 dernières)
+   * ou par jour (30 derniers). De quoi voir d'un coup où ça a coûté, sans ouvrir
+   * une facture — l'enveloppe reste une jauge, pas un compte.
+   */
+  'GET /api/usage/serie': ({ query, userId }) =>
+    serieUsage(userId, query.grain === 'heure' ? 'heure' : 'jour'),
 
   /* ---------- quantified self : ce qui est arrive, et par quel tuyau ----------
    *
