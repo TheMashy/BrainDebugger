@@ -675,7 +675,11 @@ table.grid td.avg { padding-left: 9px; color: var(--ink-dim); font-size: 11px; t
 /* ---------- divers ---------- */
 
 .tip {
-  position: fixed; pointer-events: none; z-index: 60;
+  /* Au-dessus de TOUT — le panneau des jetons (z-index 70) porte des barres
+     avec une infobulle, et une infobulle sous ce qui la déclenche ne sert à
+     rien. L'infobulle ne capte pas la souris (pointer-events: none), donc la
+     mettre au sommet ne gêne aucun clic. */
+  position: fixed; pointer-events: none; z-index: 100;
   background: #050807; border: 1px solid var(--line); border-radius: 7px;
   padding: 7px 10px; font-size: 12px; font-family: var(--mono);
   box-shadow: 0 8px 24px rgba(0,0,0,.6); white-space: pre; opacity: 0;
@@ -3015,20 +3019,29 @@ table.grid td.cell.aveille:hover { outline-width: 2.5px; z-index: 4; }
 .vaide { margin: 9px 0 0; font-size: 12.5px; color: var(--ink-dim); }
 
 /* ==================================================================
-   CHERCHER — retrouver un mot partout où on l'a écrit.
+   CHERCHER — dans « Moi », en haut. Repliée jusqu'à ce qu'on tape.
    ================================================================== */
-.rechwrap { max-width: 760px; margin: 0 auto; }
-.rechbar {
-  display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 3;
-  padding: 10px 0 12px; background: var(--bg);
-}
-.rechbico { display: flex; color: var(--ink-faint); }
+.moirech { margin: 0 0 14px; }
+.rechbar { display: flex; align-items: center; gap: 8px; }
+.rechbico { display: flex; color: var(--ink-faint); flex: none; }
 #rechInput {
-  flex: 1 1 auto; min-width: 0; font-size: 15px; padding: 9px 12px;
+  flex: 1 1 auto; min-width: 0; font-size: 14px; padding: 8px 11px;
   border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); color: var(--ink);
 }
 #rechInput:focus { border-color: var(--accent-dk); }
-.rechvide { margin: 18px 2px; color: var(--ink-dim); }
+.rechclear {
+  flex: none; display: flex; align-items: center; justify-content: center; padding: 5px;
+  background: none; border: none; color: var(--ink-faint); cursor: pointer; border-radius: 6px;
+}
+.rechclear:hover { color: var(--ink); background: var(--panel-2); }
+/* Repliée, la barre seule ; dépliée, les résultats tombent dessous, bornés en
+   hauteur pour que la journée reste à portée d'un petit défilement. */
+.moirech:not(.actif) .moirechres { display: none; }
+.moirechres {
+  margin-top: 10px; max-height: 46vh; overflow-y: auto;
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 12px; background: var(--panel);
+}
+.rechvide { margin: 6px 2px; color: var(--ink-dim); }
 .rechcompte { margin: 4px 2px 14px; font-size: 13.5px; color: var(--ink-dim); }
 .rechcompte b { color: var(--ink); font-family: var(--mono); }
 .rechjour { margin: 0 0 16px; }

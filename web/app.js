@@ -3684,6 +3684,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
             droite. Ailleurs (une journée ouverte depuis « Ma carte ») c'est la
             grille de sept colonnes, parce qu'on y arrive d'une preuve et qu'on
             veut voir où ce jour tombe dans sa semaine. */''}
+      ${moi ? moiRechercheMarkup() : ''}
       ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
       ${veilleBanner(m.jour?.veille)}
@@ -4338,6 +4339,8 @@ function wireMirror() {
       return rejouer(MIRROR_DATE, { garderCal: true });
     }
     if (e.target.closest('[data-lecture]')) { MIRROR_DATE = null; return renderLecture(); }
+    // Effacer la recherche : on replie la barre et on revient à la journée.
+    if (e.target.closest('#rechClear')) { RECH = { q: '', data: null }; return rejouer(MIRROR_DATE, { garderCal: true }); }
     const g = e.target.closest('[data-goto]');
     if (g) return rejouer(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
@@ -4362,6 +4365,10 @@ function wireMirror() {
       } catch (err) { toast(err.message); }
     }
   };
+  // La barre de recherche de « Moi », si elle est là (elle ne l'est pas dans
+  // « Ma carte ») : frappe débattue, Entrée, effacer. Les clics sur un résultat
+  // portent [data-goto] et passent par le gestionnaire ci-dessus.
+  wireRechercheMoi();
 }
 
 /* ============================= vue : carte =============================
@@ -6179,36 +6186,51 @@ function rechResultatsMarkup(d) {
   return entete + jours;
 }
 
-async function renderRecherche() {
-  $('#view').innerHTML = `
-    <div class="rechwrap">
-      <form id="rechForm" class="rechbar" autocomplete="off" role="search">
-        <span class="rechbico">${ico('loupe', 16)}</span>
-        <input id="rechInput" type="search" name="q" value="${esc(RECH.q)}"
-               placeholder="Chercher un mot ou une phrase…"
-               aria-label="Chercher dans tout ce que tu as écrit">
-        <button class="btn" type="submit">Chercher</button>
-      </form>
-      <div id="rechRes">${rechResultatsMarkup(RECH.data)}</div>
-    </div>`;
-  const form = $('#rechForm'), input = $('#rechInput'), res = $('#rechRes');
-  // Le curseur en fin de la requête déjà tapée, pour enchaîner une correction.
-  if (input) { input.focus(); const v = input.value; input.value = ''; input.value = v; }
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
+/*
+ * LA RECHERCHE VIT DANS « MOI », en haut, repliée jusqu'à ce qu'on tape.
+ *
+ * Un onglet à part faisait un aller-retour pour une chose qu'on fait en
+ * regardant sa journée. Ici c'est une barre, sur place : on tape, les
+ * résultats tombent dessous, un clic ouvre le jour. Repliée, elle ne prend
+ * qu'une ligne — le tableau de bord reste ce qu'il était.
+ */
+function moiRechercheMarkup() {
+  const actif = !!(RECH.q && RECH.data);
+  return `<div class="moirech${actif ? ' actif' : ''}">
+    <form id="rechForm" class="rechbar" autocomplete="off" role="search">
+      <span class="rechbico">${ico('loupe', 15)}</span>
+      <input id="rechInput" type="search" name="q" value="${esc(RECH.q)}"
+             placeholder="Chercher un mot ou une phrase dans tout ce que tu as écrit…"
+             aria-label="Chercher dans tout ce que tu as écrit">
+      ${RECH.q ? `<button type="button" class="rechclear" id="rechClear" aria-label="Effacer la recherche">${ico('fermer', 14)}</button>` : ''}
+    </form>
+    <div id="moiRechRes" class="moirechres">${actif ? rechResultatsMarkup(RECH.data) : ''}</div>
+  </div>`;
+}
+
+/** Branche la barre de recherche de « Moi » : frappe (débattue), Entrée, effacer. */
+function wireRechercheMoi() {
+  const form = $('#rechForm'), input = $('#rechInput'), box = $('#moiRechRes');
+  if (!form || !input || !box) return;
+  const lancer = async () => {
     const q = input.value.trim();
     RECH.q = q;
-    if (q.length < 2) { RECH.data = { q, total: 0, jours: [], court: true }; res.innerHTML = rechResultatsMarkup(RECH.data); return; }
-    res.innerHTML = `<p class="sub rechvide">Recherche…</p>`;
+    if (q.length < 2) {
+      RECH.data = q ? { q, total: 0, jours: [], court: true } : null;
+      box.innerHTML = RECH.data ? rechResultatsMarkup(RECH.data) : '';
+      $('.moirech')?.classList.toggle('actif', !!RECH.data);
+      return;
+    }
+    box.innerHTML = `<p class="sub rechvide">Recherche…</p>`;
+    $('.moirech')?.classList.add('actif');
     try { RECH.data = await api(`/api/chercher?q=${encodeURIComponent(q)}`); }
-    catch (err) { res.innerHTML = `<p class="warn" style="margin:14px 2px">${esc(err.message)}</p>`; return; }
-    res.innerHTML = rechResultatsMarkup(RECH.data);
-  });
-  // Un résultat ouvre sa journée — c'est là qu'on va lire ce qu'il y a autour.
-  res.onclick = e => {
-    const g = e.target.closest('[data-goto]');
-    if (g) ouvrirJour(g.dataset.goto);
+    catch (err) { box.innerHTML = `<p class="warn" style="margin:10px 2px">${esc(err.message)}</p>`; return; }
+    box.innerHTML = rechResultatsMarkup(RECH.data);
   };
+  form.addEventListener('submit', e => { e.preventDefault(); lancer(); });
+  // Recherche à la frappe, mais espacée : on ne tire pas à chaque lettre.
+  let deb;
+  input.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(lancer, 250); });
 }
 
 const VIEWS = {
@@ -6216,12 +6238,11 @@ const VIEWS = {
   moi: () => renderMoi(),
   year: () => renderYear(),
   mirror: () => renderMirror(),
-  recherche: () => renderRecherche(),
   settings: renderSettings
 };
 
 const NOM_VUE = { tonight: 'Parler', moi: 'Moi', year: 'Année', mirror: 'Ma carte',
-                  recherche: 'Chercher', settings: 'Réglages' };
+                  settings: 'Réglages' };
 
 /**
  * LES ONGLETS PRENNENT LEUR ICÔNE, UNE FOIS.
