@@ -149,6 +149,13 @@ const AJOUTS = [
    */
   ['usage', 'cache_read_tokens',  'INTEGER'],
   ['usage', 'cache_write_tokens', 'INTEGER'],
+  /*
+   * D'OU VIENT LA DEPENSE : le chat (une conversation, au premier plan) ou la
+   * carte (relecture, retissage -- le travail de fond). Sans cette colonne, on
+   * voit COMBIEN part sans voir SI ca part en fond. NULL sur les lignes d'avant :
+   * on ne sait pas, et on ne le devinera pas.
+   */
+  ['usage', 'source', 'TEXT'],
   ['events', 'fin',    'TEXT'],     // NULL = un instant, sinon une periode
   ['events', 'ouvert', 'INTEGER'],  // 1 = periode en cours. INVARIANT : ouvert=1 => fin IS NULL
   ['events', 'theme',  'TEXT'],     // NULL = deduit du libelle

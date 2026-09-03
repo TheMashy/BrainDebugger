@@ -784,7 +784,7 @@ async function releverLecture(userId) {
     const r = await releverLot(lot.id, corpus, s);
     if (!r.pret) return null;
 
-    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'carte');
     const ecrites = rows.filter(x => x.text && x.text.trim());
     setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
@@ -915,7 +915,7 @@ export const routes = {
     const history = recentMessages(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
     const m = recentMemory(date, userId, text);
     const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos });
-    if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
+    if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'chat');
 
     addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
     return {
@@ -2129,7 +2129,7 @@ export const routes = {
     let r;
     try { r = await lire(corpus, s); }
     catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
-    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
+    recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'carte');
     const l = setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
@@ -2508,7 +2508,7 @@ export async function retisser(body, send, userId = OWNER) {
     return;
   }
 
-  recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
+  recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'carte');
   const l = setLecture({
     contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
     jours: corpus.jours, modele: r.modele, userId
@@ -2563,7 +2563,7 @@ export async function streamMessage(body, send, userId = OWNER) {
     exhausted: before.exhausted,
     outils: outilsPour(userId, messageId, send)
   });
-  if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit);
+  if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'chat');
 
   addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
                text: r.text, reflexion: r.pensee ?? null, userId });

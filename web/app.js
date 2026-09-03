@@ -210,17 +210,39 @@ async function chargerGrapheUsage(grain) {
       grain === 'heure' ? 'les dernières 48 h' : 'les 30 derniers jours'}.</p>`;
     return;
   }
+  // Échelle en RACINE : un seul appel énorme (souvent un retissage de « ma
+  // carte ») écrase sinon toutes les petites barres à 1 px. La racine garde les
+  // pics lisibles sans effacer le reste. Toute barre non nulle a un plancher
+  // visible.
+  const ech = t => t <= 0 ? 0 : Math.max(8, Math.round(100 * Math.sqrt(t) / Math.sqrt(d.pic)));
+  const seg = (v, cls) => v > 0 ? `<i class="${cls}" style="flex:${v}"></i>` : '';
   const barres = d.points.map(p => {
-    const h = Math.max(2, Math.round(100 * p.tokens / d.pic));
     const quand = grain === 'heure' ? `${p.k.slice(11)} h` : fmtDay(p.k);
+    const bouts = [];
+    if (p.chat)  bouts.push(`chat ${fmtTok(p.chat)}`);
+    if (p.carte) bouts.push(`ma carte ${fmtTok(p.carte)}`);
+    if (p.autre) bouts.push(`autre ${fmtTok(p.autre)}`);
     const tip = p.tokens
-      ? `${quand} : ${fmtTok(p.tokens)} jetons${p.appels ? ` · ${p.appels} échange${p.appels > 1 ? 's' : ''}` : ''}`
+      ? `${quand} — ${fmtTok(p.tokens)} jetons${bouts.length ? ` (${bouts.join(' · ')})` : ''}`
       : `${quand} : rien`;
-    return `<span class="ubar${p.tokens ? '' : ' vide'}" data-tip="${esc(tip)}"><i style="height:${h}%"></i></span>`;
+    const pile = p.tokens
+      ? `<span class="upile" style="height:${ech(p.tokens)}%">${
+          seg(p.chat, 'uchat')}${seg(p.carte, 'ucarte')}${seg(p.autre, 'uautre')}</span>`
+      : '';
+    return `<span class="ubar${p.tokens ? '' : ' vide'}" data-tip="${esc(tip)}">${pile}</span>`;
   }).join('');
+  const t = d.totaux || { chat: 0, carte: 0, autre: 0 };
+  const leg = [];
+  if (t.chat)  leg.push(`<span class="uleg"><i class="uchat"></i>chat ${fmtTok(t.chat)}</span>`);
+  if (t.carte) leg.push(`<span class="uleg"><i class="ucarte"></i>ma carte ${fmtTok(t.carte)}</span>`);
+  if (t.autre) leg.push(`<span class="uleg"><i class="uautre"></i>avant le suivi ${fmtTok(t.autre)}</span>`);
+  // Répond directement à « est-ce que ça consomme en fond ? » : « ma carte »
+  // (relecture, retissage) est le travail de fond, le chat est au premier plan.
+  const fond = t.carte ? `dont ${fmtTok(t.carte)} en fond (ma carte)` : 'rien en fond';
   hote.innerHTML = `<div class="ubars">${barres}</div>
-    <p class="sub" style="margin:6px 0 0">${fmtTok(d.total)} jetons sur ${
-      grain === 'heure' ? '48 h' : '30 jours'} · tout en UTC</p>`;
+    <div class="uleglist">${leg.join('')}</div>
+    <p class="sub" style="margin:4px 0 0">${fmtTok(d.total)} jetons sur ${
+      grain === 'heure' ? '48 h' : '30 jours'} · ${fond} · UTC</p>`;
 }
 
 function toggleGauge(force) {
@@ -5503,27 +5525,48 @@ let SYNC_DERNIERE = 0;                           // horodatage de la derniere te
 let SYNC_GEN = 0;                                // jeton de generation, contre les chevauchements
 
 function qsSynchroMarkup(sy) {
+  const surAujourdhui = QS_JOUR === S.today;
   // L'état live d'une tentative ne concerne QUE le jour courant : sur un jour
   // passé (qui ne se synchronise jamais), le badge doit refléter son propre `sy`,
   // pas un échec relatif à aujourd'hui resté affiché.
-  if (QS_JOUR === S.today) {
+  if (surAujourdhui) {
     if (SYNC_APP.etat === 'encours')
       return `<span class="qssync" title="Tentative de synchronisation avec Machi Tool">${
         ico('antenne', 11)}synchronisation…</span>`;
+    // Une tentative a eu lieu et a échoué : on affiche SA RAISON, jamais un
+    // simple « désynchronisé ». C'est tout l'objet du badge — dire pourquoi.
     if (SYNC_APP.etat === 'hors' || SYNC_APP.etat === 'echec')
       return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
         ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
   }
   if (!sy) return '';
   if (sy.depuis_min == null) {
-    return `<span class="qssync muet" title="Aucun envoi n’a jamais été reçu">${
-      ico('antenne', 11)}jamais reçu</span>`;
+    // Jamais rien reçu : la raison n'est pas « c'est vieux », c'est que rien
+    // n'est jamais arrivé. On le dit, et on dit quoi vérifier.
+    return `<span class="qssync muet" title="Aucun digest n’a jamais été reçu de Machi Tool. Vérifie que l’application tourne, que l’envoi au site est coché, et que la clé de la passerelle est la même des deux côtés.">${
+      ico('antenne', 11)}Machi Tool ne s’est jamais connecté</span>`;
   }
   const frais = sy.depuis_min < SYNCHRO_FRAICHE;
   const quand = depuisMot(sy.depuis_min);
-  return `<span class="qssync${frais ? '' : ' tard'}"
-    title="Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}">${
-    ico('antenne', 11)}${frais ? 'à jour' : `désynchronisé · dernière synchro ${esc(quand)}`}</span>`;
+  if (frais)
+    return `<span class="qssync"
+      title="Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}">${
+      ico('antenne', 11)}à jour</span>`;
+  /*
+   * PAS FRAIS : ON N'ÉCRIT JAMAIS « désynchronisé · il y a 14 h » TOUT SEUL.
+   *
+   * Ce message disait le symptôme sans la cause. Sur aujourd'hui, une
+   * vérification est lancée en parallèle (chargerQS) et sa raison — Machi Tool
+   * éteint, clé absente, site qui refuse — remplacera ceci dès qu'elle rentre.
+   * En attendant, on annonce la vérification plutôt qu'un reproche muet.
+   */
+  const detail = `Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}`;
+  if (surAujourdhui)
+    return `<span class="qssync tard" title="${detail} — on redemande à Machi Tool un état à jour.">${
+      ico('antenne', 11)}rien reçu depuis ${esc(quand)} — vérification…</span>`;
+  // Sur un jour passé, il ne se resynchronise plus : on dit l'état, sans alarme.
+  return `<span class="qssync tard" title="${detail}">${
+    ico('antenne', 11)}dernier envoi ${esc(quand)}</span>`;
 }
 
 /* ===================== CE QUI A ETE REGARDE, ET AVEC QUOI =====================
@@ -5940,15 +5983,19 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
     return rafraichirBadgeSync();
   }
 
-  let digest;
+  let charge;
   try {
-    const r = await tireAvecDelai(url + '/activite', { headers: { 'X-Machitool-Cle': cle } });
+    // `?tout=1` : on demande TOUT l'historique d'un coup — chaque jour avec son
+    // lever, son coucher, son temps d'écran — pour tout remettre à jour en un
+    // seul aller-retour. Une version d'application d'avant ignore le paramètre
+    // et rend le seul digest du jour ; on sait retomber dessus plus bas.
+    const r = await tireAvecDelai(url + '/activite?tout=1', { headers: { 'X-Machitool-Cle': cle } });
     if (!r.ok) {
       SYNC_APP = { etat: 'echec', message: r.status === 401
         ? 'Machi Tool refuse la clé' : `Machi Tool a répondu ${r.status}` };
       return rafraichirBadgeSync();
     }
-    digest = await r.json();
+    charge = await r.json();
   } catch {
     // Injoignable ou muet : sans doute éteint. On le relance, puis un unique
     // nouvel essai — mais seulement si aucune tentative plus récente n'a pris la
@@ -5968,11 +6015,14 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
   }
 
   try {
+    // Tout l'historique si l'application l'a rendu ({jours:[...]}), sinon le
+    // seul digest du jour (application d'avant). Le site accepte les deux.
+    const corps = Array.isArray(charge?.jours) ? { jours: charge.jours } : charge;
     const r = await tireAvecDelai('/api/machitool/activite', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Machitool-Cle': cle },
-      body: JSON.stringify(digest)
-    }, 8000);
+      body: JSON.stringify(corps)
+    }, 12000);
     if (!r.ok) { SYNC_APP = { etat: 'echec', message: 'le site a refusé le digest' }; return rafraichirBadgeSync(); }
   } catch {
     SYNC_APP = { etat: 'echec', message: 'envoi au site impossible' };
