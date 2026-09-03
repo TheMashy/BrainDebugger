@@ -119,7 +119,8 @@ export function ico(nom, t = 13) {
 
 /** L'icône de chaque onglet. Le nom de la vue est la clé employée partout ailleurs. */
 export const ICO_VUE = {
-  tonight: 'parler', moi: 'moi', mirror: 'carte', year: 'annee', settings: 'reglages'
+  tonight: 'parler', moi: 'moi', mirror: 'carte', year: 'annee',
+  recherche: 'loupe', settings: 'reglages'
 };
 
 /**

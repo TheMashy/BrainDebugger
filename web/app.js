@@ -6128,15 +6128,100 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
  */
 const jourCivil = () => S?.jourCivil ?? S?.today;
 
+/* ============================== vue : chercher ==============================
+ *
+ * RETROUVER UN MOT OU UNE PHRASE, PARTOUT OÙ ON L'A ÉCRIT.
+ *
+ * Pas « ma carte » (les proximités, ce qui se ressemble) : ici on cherche le
+ * texte EXACT, et on veut toutes ses instances — chaque jour, chaque fois, à
+ * quelle heure. « Combien de fois j'ai parlé de ça, et quand » se répond en le
+ * voyant, pas en s'en souvenant. Chaque résultat ouvre sa journée.
+ */
+let RECH = { q: '', data: null };
+
+/* Surligne le terme cherché dans un extrait. Comme `highlight`, on cherche sur
+   une copie aplatie de MÊME longueur (accents retirés), pour que les positions
+   restent valides sur le texte d'origine et que « fatigue » éclaire « fatigué ». */
+function surlignerTerme(texte, q) {
+  const motif = echapRe(aplat(String(q)));
+  if (!motif.trim()) return esc(texte);
+  const plat = aplat(texte);
+  const re = new RegExp(motif, 'gi');
+  const spans = [];
+  let m;
+  while ((m = re.exec(plat)) !== null) {
+    spans.push([m.index, m.index + m[0].length]);
+    if (m.index === re.lastIndex) re.lastIndex++;   // pas de boucle sur un vide
+  }
+  if (!spans.length) return esc(texte);
+  let out = '', cur = 0;
+  for (const [a, b] of spans) { out += esc(texte.slice(cur, a)) + `<mark>${esc(texte.slice(a, b))}</mark>`; cur = b; }
+  return out + esc(texte.slice(cur));
+}
+
+function rechResultatsMarkup(d) {
+  if (!d) return `<p class="sub rechvide">Tape un mot ou une phrase pour retrouver partout où tu l'as écrit — chaque jour, chaque fois, avec l'heure.</p>`;
+  if (d.court) return `<p class="sub rechvide">Au moins deux lettres.</p>`;
+  if (!d.total) return `<p class="sub rechvide">Rien trouvé pour « ${esc(d.q)} » dans ce que tu as écrit.</p>`;
+  const nJ = d.jours.length;
+  const entete = `<p class="rechcompte"><b>${d.total}</b> fois, sur <b>${nJ}</b> jour${nJ > 1 ? 's' : ''}${
+    d.tronque ? ' <span class="faint">· les 500 premières</span>' : ''}</p>`;
+  const jours = d.jours.map(j => `
+    <section class="rechjour">
+      <button class="rechdate" data-goto="${j.date}">${fmtDay(j.date)}<span class="faint mono"> · ${j.hits.length}</span></button>
+      <ul class="rechhits">
+        ${j.hits.map(h => `<li class="rechhit" data-goto="${j.date}" title="Ouvrir le ${fmtDay(j.date)}">
+          <span class="rechh mono">${fmtTime(h.ts)}</span>
+          <span class="rechtx">${surlignerTerme(h.extrait, d.q)}${h.rangee ? ' <span class="rechrangee">note</span>' : ''}</span>
+        </li>`).join('')}
+      </ul>
+    </section>`).join('');
+  return entete + jours;
+}
+
+async function renderRecherche() {
+  $('#view').innerHTML = `
+    <div class="rechwrap">
+      <form id="rechForm" class="rechbar" autocomplete="off" role="search">
+        <span class="rechbico">${ico('loupe', 16)}</span>
+        <input id="rechInput" type="search" name="q" value="${esc(RECH.q)}"
+               placeholder="Chercher un mot ou une phrase…"
+               aria-label="Chercher dans tout ce que tu as écrit">
+        <button class="btn" type="submit">Chercher</button>
+      </form>
+      <div id="rechRes">${rechResultatsMarkup(RECH.data)}</div>
+    </div>`;
+  const form = $('#rechForm'), input = $('#rechInput'), res = $('#rechRes');
+  // Le curseur en fin de la requête déjà tapée, pour enchaîner une correction.
+  if (input) { input.focus(); const v = input.value; input.value = ''; input.value = v; }
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const q = input.value.trim();
+    RECH.q = q;
+    if (q.length < 2) { RECH.data = { q, total: 0, jours: [], court: true }; res.innerHTML = rechResultatsMarkup(RECH.data); return; }
+    res.innerHTML = `<p class="sub rechvide">Recherche…</p>`;
+    try { RECH.data = await api(`/api/chercher?q=${encodeURIComponent(q)}`); }
+    catch (err) { res.innerHTML = `<p class="warn" style="margin:14px 2px">${esc(err.message)}</p>`; return; }
+    res.innerHTML = rechResultatsMarkup(RECH.data);
+  });
+  // Un résultat ouvre sa journée — c'est là qu'on va lire ce qu'il y a autour.
+  res.onclick = e => {
+    const g = e.target.closest('[data-goto]');
+    if (g) ouvrirJour(g.dataset.goto);
+  };
+}
+
 const VIEWS = {
   tonight: renderTonight,
   moi: () => renderMoi(),
   year: () => renderYear(),
   mirror: () => renderMirror(),
+  recherche: () => renderRecherche(),
   settings: renderSettings
 };
 
-const NOM_VUE = { tonight: 'Parler', moi: 'Moi', year: 'Année', mirror: 'Ma carte', settings: 'Réglages' };
+const NOM_VUE = { tonight: 'Parler', moi: 'Moi', year: 'Année', mirror: 'Ma carte',
+                  recherche: 'Chercher', settings: 'Réglages' };
 
 /**
  * LES ONGLETS PRENNENT LEUR ICÔNE, UNE FOIS.
