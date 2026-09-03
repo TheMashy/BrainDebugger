@@ -2451,18 +2451,18 @@ async function renderMoi(date, { garderCal = false, rafraichir = false } = {}) {
   }
   const vue = renderMirror(date ?? MIRROR_DATE ?? S.today, { garderCal });
   /*
-   * LE QUANTIFIED SELF SE CHARGE TOUT SEUL, ET APRÈS LA JOURNÉE.
+   * LA SYNCHRONISATION CONTINUE EN FOND, SANS PANNEAU.
    *
-   * Il vivait derrière un bouton, donc il ne partait que si on le demandait. Il
-   * est maintenant toujours à l'écran — et il se charge SANS attendre, pour que
-   * la journée s'affiche tout de suite : elle est en haut, on la lit d'abord,
-   * et le panneau se remplit dessous quand il arrive.
-   */
-  /*
-   * LE QS SUIT LE JOUR OUVERT. `renderMirror` pose `MIRROR_DATE` avant son
-   * premier `await`, mais s'appuyer là-dessus serait s'appuyer sur l'ordre des
-   * instructions d'une autre fonction : la date est donc calculée ici et passée
-   * en clair. Deux vues du même jour ne peuvent plus se désynchroniser.
+   * Le grand panneau Quantified Self a été retiré : il redisait en bas ce que
+   * « Ce qui a été mesuré » porte déjà en haut. Mais son travail utile reste —
+   * ouvrir aujourd'hui va chercher le digest à jour sur la machine, pour que
+   * lever, coucher, sommeil et écran soient frais. `chargerQS` ne peint donc
+   * plus rien (son hôte a disparu), il ne fait que le tirage ; la journée se
+   * repeint toute seule quand la synchro rentre.
+   *
+   * La date est calculée ici et passée en clair plutôt que lue depuis l'état
+   * qu'une autre fonction vient de poser : deux vues du même jour ne peuvent
+   * plus se désynchroniser.
    */
   chargerQS(date ?? MIRROR_DATE ?? S.today);
   return vue;
@@ -3741,22 +3741,14 @@ async function renderMirror(date, { garderCal = false } = {}) {
 
       ${notesDuJourMarkup(m.carnet)}
 
-      ${/* LE QUANTIFIED SELF EST EN DERNIER, ET C'EST L'ORDRE DE LA PAGE.
-            Il s'ouvrait entre le calendrier et la journée : on descendait vers
-            ce qu'on avait ressenti et écrit, et un mur de mesures s'intercalait
-            — trois chiffres de montre AVANT la première humeur du jour. Un
-            journal donne le dernier mot à la personne, pas à la machine : ce
-            qui a été vécu se lit d'abord, ce qu'un appareil en a compté se lit
-            après, quand on va vérifier.
-
-            Il est TOUJOURS LÀ, et plus derrière un bouton : ce qu'on mesure de
-            soi fait partie de la journée, il se lit avec elle. Être en bas
-            n'est pas être caché — c'est arriver après ce qu'on a vécu.
-
-            Il vit dans « Moi » parce que c'est la page de ce qu'on SAIT de soi.
-            Réglages garde le branchement et le journal des envois : deux
-            questions différentes, deux endroits. */''}
-      ${moi ? `<div id="qspanneau">${qsPanneauMarkup(QS_DATA)}</div>` : ''}
+      ${/* LE QUANTIFIED SELF NE REDÉROULE PLUS UN GRAND PANNEAU ICI.
+            Il redisait, en gros et en bas, ce que « Ce qui a été mesuré »
+            porte déjà en haut de la journée — lever, coucher, sommeil, temps
+            d'écran (les trois premières applications au survol). Deux fois la
+            même chose sur une page, c'est une de trop ; on garde celle qui est
+            à côté de ce qu'on a vécu. La synchronisation, elle, continue en
+            fond (voir renderMoi) pour que ces mesures restent fraîches, et le
+            branchement vit dans Réglages. */''}
     </div>`;
   const form = $('#cnForm'); if (form) form.dataset.jour = date;
   wireMirror();
