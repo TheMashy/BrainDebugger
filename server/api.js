@@ -366,6 +366,13 @@ export function recalerLaNuit(date, userId = OWNER) {
   if (coupure == null) return 0;
 
   const avant = messagesForDate(date, userId).filter(m => {
+    // IDEMPOTENCE : ne toucher qu'aux messages RÉELLEMENT écrits le jour civil
+    // `date`. Un message déjà rangé sur `date` par un recalage précédent garde
+    // un ts du petit matin ; sans ce garde, on le comparerait encore à la
+    // coupure de `date` et on le renverrait un jour plus tôt à chaque passe —
+    // dérive sans fin, texte des journées corrompu. Le jour civil se lit sur le
+    // TS (jamais réécrit), comme le fait jourVecuDe.
+    if (jourLocal(m.ts) !== date) return false;
     const h = enMinutes(heureLocale(m.ts));
     return h != null && h < coupure;
   });
@@ -555,10 +562,19 @@ export function posteDuJour(date, userId = OWNER) {
   };
   const poste = dig?.poste ?? {};
   const plage = dig?.plage ?? {};
+  // LE COUCHER QUI FERME LE JOUR EST DANS LE DIGEST DU LENDEMAIN.
+  //
+  // `poste.coucher` de D est la dernière extinction AVANT le réveil de D —
+  // c'est-à-dire le coucher de la nuit qui a OUVERT D (soir de D-1), apparié à
+  // `poste.reveil` pour donner `sommeil_h`. Le coucher qui FERME le jour vécu D
+  // (soir de D) est la dernière extinction avant le réveil de D+1 : il vit donc
+  // dans le digest de D+1. Sans ça, « moi » montrait un coucher chronologiquement
+  // AVANT le lever, d'une nuit trop tôt. Le lever, lui, reste celui de D.
+  const posteFin = activiteDuJour(addDays(date, 1), userId)?.digest?.poste ?? {};
   const borne = g => {
     const d = dit(g);
     if (d) return { heure: d, source: 'dit' };
-    const mes = g === 'lever' ? poste.reveil : poste.coucher;
+    const mes = g === 'lever' ? poste.reveil : posteFin.coucher;
     if (mes) return { heure: mes, source: 'mesure' };
     const est = g === 'lever' ? plage.de : plage.a;
     if (est) return { heure: est, source: 'estime' };

@@ -3922,7 +3922,7 @@ function posteMarkup(p) {
       <span class="faint">web</span></span>
   </div>` : '';
   const som = p.sommeil_h != null
-    ? `<span class="jpost" title="de sommeil"><span class="mono">${
+    ? `<span class="jpost lu" title="sommeil estimé — extinction → démarrage du poste"><span class="mono">≈${
         String(p.sommeil_h).replace('.', ',')} h</span><span class="faint">dormi</span></span>`
     : '';
   return `<div class="jposte">
@@ -5451,17 +5451,20 @@ function depuisMot(min) {
  */
 let SYNC_APP = { etat: 'idle', message: '' };   // idle | encours | hors | echec
 let SYNC_DERNIERE = 0;                           // horodatage de la derniere tentative
+let SYNC_GEN = 0;                                // jeton de generation, contre les chevauchements
 
 function qsSynchroMarkup(sy) {
-  if (SYNC_APP.etat === 'encours')
-    return `<span class="qssync" title="Tentative de synchronisation avec Machi Tool">${
-      ico('antenne', 11)}synchronisation…</span>`;
-  if (SYNC_APP.etat === 'hors')
-    return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
-      ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
-  if (SYNC_APP.etat === 'echec')
-    return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
-      ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
+  // L'état live d'une tentative ne concerne QUE le jour courant : sur un jour
+  // passé (qui ne se synchronise jamais), le badge doit refléter son propre `sy`,
+  // pas un échec relatif à aujourd'hui resté affiché.
+  if (QS_JOUR === S.today) {
+    if (SYNC_APP.etat === 'encours')
+      return `<span class="qssync" title="Tentative de synchronisation avec Machi Tool">${
+        ico('antenne', 11)}synchronisation…</span>`;
+    if (SYNC_APP.etat === 'hors' || SYNC_APP.etat === 'echec')
+      return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
+        ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
+  }
   if (!sy) return '';
   if (sy.depuis_min == null) {
     return `<span class="qssync muet" title="Aucun envoi n’a jamais été reçu">${
@@ -5822,7 +5825,10 @@ async function chargerQS(jour = null, { syncAuto = true } = {}) {
   const desync = QS_DATA?.synchro && QS_DATA.synchro.depuis_min != null
                  && QS_DATA.synchro.depuis_min >= SYNCHRO_FRAICHE;
   const aAttendu = Date.now() - SYNC_DERNIERE > 45000;
-  if (syncAuto && vise === S.today && (desync || aAttendu) && SYNC_APP.etat !== 'encours')
+  // Ni pendant une tentative ('encours'), ni pendant sa fenêtre de relance
+  // ('hors') : sinon deux tirages se chevauchent et le « un seul essai » saute.
+  const libre = SYNC_APP.etat !== 'encours' && SYNC_APP.etat !== 'hors';
+  if (syncAuto && vise === S.today && (desync || aAttendu) && libre)
     synchroniserDepuisApp(vise);
 }
 
@@ -5860,10 +5866,22 @@ function lancerApp() {
  * on tente de le relancer par le schema d'URL, puis un seul nouvel essai.
  */
 async function synchroniserDepuisApp(jour, { relance = true } = {}) {
-  if (SYNC_APP.etat === 'encours') return;
+  // Un seul vol à la fois : ni pendant la tentative ('encours'), ni pendant sa
+  // fenêtre de relance ('hors'). Sinon deux tirages se chevauchent.
+  if (SYNC_APP.etat === 'encours' || SYNC_APP.etat === 'hors') return;
   SYNC_DERNIERE = Date.now();
+  const gen = ++SYNC_GEN;                 // jeton : une tentative plus récente prime
   SYNC_APP = { etat: 'encours', message: '' };
   rafraichirBadgeSync();
+
+  // Un fetch vers 127.0.0.1 qui se connecte mais ne répond pas (app en cours de
+  // démarrage, handler bloqué) laisserait le badge coincé sur « synchronisation… »
+  // et bloquerait toute relance. Un délai court le bascule en échec/hors.
+  const tireAvecDelai = (u, opts = {}, ms = 4000) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    return fetch(u, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+  };
 
   let cle, url;
   try { ({ cle, url } = await api('/api/passerelle/local')); }
@@ -5875,7 +5893,7 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
 
   let digest;
   try {
-    const r = await fetch(url + '/activite', { headers: { 'X-Machitool-Cle': cle } });
+    const r = await tireAvecDelai(url + '/activite', { headers: { 'X-Machitool-Cle': cle } });
     if (!r.ok) {
       SYNC_APP = { etat: 'echec', message: r.status === 401
         ? 'Machi Tool refuse la clé' : `Machi Tool a répondu ${r.status}` };
@@ -5883,24 +5901,29 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
     }
     digest = await r.json();
   } catch {
-    // Injoignable : sans doute eteint. On le relance, puis un unique nouvel essai.
+    // Injoignable ou muet : sans doute éteint. On le relance, puis un unique
+    // nouvel essai — mais seulement si aucune tentative plus récente n'a pris la
+    // main entre-temps (jeton de génération).
     SYNC_APP = { etat: 'hors', message: relance
       ? 'Machi Tool ne répond pas — relance en cours' : 'Machi Tool ne répond pas' };
     rafraichirBadgeSync();
     if (relance) {
       lancerApp();
-      setTimeout(() => { SYNC_APP = { etat: 'idle', message: '' };
-                         synchroniserDepuisApp(jour, { relance: false }); }, 6000);
+      setTimeout(() => {
+        if (SYNC_GEN !== gen) return;    // une autre tentative est passée : on s'efface
+        SYNC_APP = { etat: 'idle', message: '' };
+        synchroniserDepuisApp(jour, { relance: false });
+      }, 6000);
     }
     return;
   }
 
   try {
-    const r = await fetch('/api/machitool/activite', {
+    const r = await tireAvecDelai('/api/machitool/activite', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Machitool-Cle': cle },
       body: JSON.stringify(digest)
-    });
+    }, 8000);
     if (!r.ok) { SYNC_APP = { etat: 'echec', message: 'le site a refusé le digest' }; return rafraichirBadgeSync(); }
   } catch {
     SYNC_APP = { etat: 'echec', message: 'envoi au site impossible' };
@@ -5908,10 +5931,12 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
   }
 
   SYNC_APP = { etat: 'idle', message: '' };
-  // Le digest est rangé et la nuit recalée côté serveur. On recharge le jour
-  // regardé pour que « moi » (messages recalés, poste à jour) et le panneau
-  // montrent le frais. renderMoi rappelle chargerQS, mais le garde-fou des 45 s
-  // empêche de re-tirer en boucle.
+  // RÉPONSE EN RETARD : si l'utilisateur a changé de jour pendant la synchro (1
+  // à quelques secondes), on ne le ramène pas de force sur le jour synchronisé.
+  // Le digest est déjà rangé côté serveur ; le jour regardé récupérera le frais
+  // à sa prochaine ouverture. On se contente de rafraîchir le badge.
+  const affiche = JOUR_DANS === 'moi' ? MIRROR_DATE : QS_JOUR;
+  if (jour !== affiche) return rafraichirBadgeSync();
   if (JOUR_DANS === 'moi') await renderMoi(jour, { garderCal: true });
   else await chargerQS(jour, { syncAuto: false });
 }
