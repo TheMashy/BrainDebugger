@@ -152,17 +152,26 @@ const CONTEXTE_CRISE = [
  * apprend à ignorer le signe — exactement ce que l'asymétrie interdit dans
  * l'autre sens.
  *
- * On ne demote QUE sur un marqueur de passé LOINTAIN — un mois nommé, une année,
- * « quand j'étais », « à l'époque », « le lendemain de ». Surtout PAS « hier » :
- * une scarification d'hier soir reste un rouge (c'est un test). Et un marqueur
- * de MAINTENANT (« ce matin », « je viens de ») annule le doute et garde le
- * rouge : mieux vaut un rouge de trop qu'un rouge manqué.
+ * On demote sur deux familles de signaux :
+ *   — un PASSÉ LOINTAIN daté : un mois nommé, une année, « quand j'étais »,
+ *     « à l'époque », « le lendemain de » ;
+ *   — un RÉCIT D'HISTOIRE : « à savoir que », « pour info », un fait REVENU
+ *     plusieurs fois (« à 3 occasions », « plusieurs fois »), « il m'est
+ *     arrivé ». Quelqu'un qui donne son parcours à un soignant — « je me suis
+ *     coupé à 3 occasions, dont une finale qui m'a valu l'hôpital » — raconte,
+ *     il ne se blesse pas maintenant.
+ *
+ * Surtout PAS « hier » : une scarification d'hier soir reste un rouge (c'est un
+ * test). Et un marqueur de MAINTENANT (« ce matin », « je viens de », « là »)
+ * annule le doute et garde le rouge : mieux vaut un rouge de trop qu'un manqué.
  */
 const RECIT_PASSE = /\b(?:en |au mois de )?(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\b|\b(?:19|20)\d{2}\b|\bil y a (?:longtemps|des annees|des mois|un an|une annee|\d+ ans?|\d+ mois|\d+ annees?)\b|\bl (?:an|annee) (?:derniere|dernier|passee|passe|d avant)\b|\bannees? (?:passees?|precedentes?|d avant)\b|\bquand j (?:etais|avais)\b|\ba l epoque\b|\bautrefois\b|\bplus jeune\b|\betant (?:petit|petite|jeune|ado|adolescent|adolescente|enfant)\b|\b(?:mon|ma) (?:adolescence|enfance)\b|\ble lendemain de\b|\bla veille de\b/;
-const MAINTENANT = /\b(?:aujourd hui|ce matin|ce soir|cette nuit|ce midi|la maintenant|maintenant|a l instant|tout de suite)\b|\bje viens de\b/;
+/* Le récit d'un parcours, ou un fait qui s'est répété dans le temps. */
+const RACONTE_HISTOIRE = /\ba savoir\b|\bpour (?:info|contexte|te situer|que tu saches)\b|\b(?:sache|il faut que tu saches) que\b|\bpar le passe\b|\bdans (?:le|mon) passe\b|\bmon (?:historique|parcours|vecu)\b|\bdans mon histoire\b|\bil m est arrive\b|\bca m est arrive\b|\bj ai (?:deja|longtemps)\b|\ba plusieurs reprises\b|\bplusieurs fois\b|\b(?:de nombreuses|maintes) fois\b|\b\d+ (?:fois|occasions?|reprises?)\b/;
+const MAINTENANT = /\b(?:aujourd hui|ce matin|ce soir|cette nuit|ce midi|la maintenant|maintenant|a l instant|tout de suite|la tout de suite)\b|\bje viens de\b|\bje me suis coupee? la\b|\bje me taille la\b/;
 const raconteLePasse = np => {
   const x = np.replace(/['’`]/g, ' ').replace(/\s+/g, ' ');
-  return RECIT_PASSE.test(x) && !MAINTENANT.test(x);
+  return (RECIT_PASSE.test(x) || RACONTE_HISTOIRE.test(x)) && !MAINTENANT.test(x);
 };
 
 const dedans = (t, mots) => mots.find(m => t.includes(m)) ?? null;
