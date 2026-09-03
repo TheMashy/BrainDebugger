@@ -89,6 +89,24 @@ test('UN FAIT ANCIEN RACONTÉ n’est pas une blessure de ce jour-là', () => {
   }
 });
 
+test('DONNER SON PARCOURS n’est pas se blesser aujourd’hui', () => {
+  /*
+   * Quelqu'un explique son histoire à un soignant, sans date explicite :
+   * « à savoir que je me suis coupé à 3 occasions, dont une finale qui m'a valu
+   * l'hôpital ». Le récit (« à savoir que ») et la répétition (« 3 occasions »)
+   * disent un parcours, pas un geste du jour.
+   */
+  const r = niveauDuTexte(
+    "a savoir que je me suis coupé à 3 occasion le bras (scarification) dont une finale qui m'a valu une visite à l'hopital");
+  assert.equal(r.niveau, 'jaune', 'un parcours raconté ne doit pas être rouge');
+  assert.equal(r.motifs[0].genre, 'evoque_passe');
+
+  for (const p of ['je me suis scarifiée plusieurs fois par le passé',
+                   'pour info je me suis tailladé à 2 reprises']) {
+    assert.equal(niveauDuTexte(p).niveau, 'jaune', `« ${p} » devrait être un jaune évoqué`);
+  }
+});
+
 test('MAIS « hier » et « ce matin » restent un vrai rouge', () => {
   // La frontière est le passé LOINTAIN. Une scarification d'hier, ou racontée
   // avec un marqueur de maintenant, reste un rouge — mieux vaut un de trop.
