@@ -143,6 +143,28 @@ const CONTEXTE_CRISE = [
  * fait basculer une blessure ambiguë au rouge, c'est un état — pas un ustensile.
  */
 
+/* ---------------------------------------------------------------------
+ * UN FAIT ANCIEN RACONTÉ N'EST PAS UNE BLESSURE DE CE JOUR-LÀ.
+ *
+ * « Le lendemain de ma scarification en mai, je suis allé au travail direct » :
+ * la personne RACONTE, elle ne se blesse pas aujourd'hui. Compter ça comme un
+ * rouge « une blessure est écrite ce jour-là », c'est le faux positif qui
+ * apprend à ignorer le signe — exactement ce que l'asymétrie interdit dans
+ * l'autre sens.
+ *
+ * On ne demote QUE sur un marqueur de passé LOINTAIN — un mois nommé, une année,
+ * « quand j'étais », « à l'époque », « le lendemain de ». Surtout PAS « hier » :
+ * une scarification d'hier soir reste un rouge (c'est un test). Et un marqueur
+ * de MAINTENANT (« ce matin », « je viens de ») annule le doute et garde le
+ * rouge : mieux vaut un rouge de trop qu'un rouge manqué.
+ */
+const RECIT_PASSE = /\b(?:en |au mois de )?(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\b|\b(?:19|20)\d{2}\b|\bil y a (?:longtemps|des annees|des mois|un an|une annee|\d+ ans?|\d+ mois|\d+ annees?)\b|\bl (?:an|annee) (?:derniere|dernier|passee|passe|d avant)\b|\bannees? (?:passees?|precedentes?|d avant)\b|\bquand j (?:etais|avais)\b|\ba l epoque\b|\bautrefois\b|\bplus jeune\b|\betant (?:petit|petite|jeune|ado|adolescent|adolescente|enfant)\b|\b(?:mon|ma) (?:adolescence|enfance)\b|\ble lendemain de\b|\bla veille de\b/;
+const MAINTENANT = /\b(?:aujourd hui|ce matin|ce soir|cette nuit|ce midi|la maintenant|maintenant|a l instant|tout de suite)\b|\bje viens de\b/;
+const raconteLePasse = np => {
+  const x = np.replace(/['’`]/g, ' ').replace(/\s+/g, ' ');
+  return RECIT_PASSE.test(x) && !MAINTENANT.test(x);
+};
+
 const dedans = (t, mots) => mots.find(m => t.includes(m)) ?? null;
 
 /**
@@ -168,12 +190,17 @@ export function niveauDuTexte(texte, { contexteDuJour = '' } = {}) {
 
   for (const p of phrases) {
     const np = norm(p);
+    // Un fait ancien RACONTÉ (« ma scarification en mai ») n'est pas une
+    // blessure de ce jour-là : il devient un jaune « évoqué », pas un rouge.
+    const passe = raconteLePasse(np);
 
     const certaine = dedans(np, BLESSURE_CERTAINE);
-    if (certaine) poser('blessure', 'rouge', certaine, p);
+    if (certaine) poser(...(passe ? ['evoque_passe', 'jaune'] : ['blessure', 'rouge']), certaine, p);
     else {
       const possible = dedans(np, BLESSURE_POSSIBLE);
-      if (possible && enCrise) poser('blessure', 'rouge', possible, p);
+      // Une blessure ambiguë ne compte qu'accompagnée d'un contexte de crise ;
+      // racontée au passé, elle reste un jaune « évoqué » plutôt qu'un rouge.
+      if (possible && enCrise) poser(...(passe ? ['evoque_passe', 'jaune'] : ['blessure', 'rouge']), possible, p);
     }
 
     const s = dedans(np, SUICIDE) ?? (SUICIDE_SIGLES.test(np) ? 'ts' : null);
@@ -259,7 +286,11 @@ export const DIT = {
   suicide:  'le suicide a été évoqué ce jour-là',
   moyen:    'quelque chose pour se faire mal était à portée',
   dereel:   'un moment où le réel s’est décollé',
-  blessure: 'une blessure est écrite ce jour-là'
+  blessure: 'une blessure est écrite ce jour-là',
+  // Une blessure ANCIENNE, racontée. Pas « ce jour-là » : c'est un souvenir qui
+  // remonte, pas un geste du jour. Le distinguer, c'est ne pas crier « blessure
+  // aujourd'hui » quand quelqu'un revient sur ce qui lui est arrivé.
+  evoque_passe: 'une blessure passée a été évoquée'
 };
 
 /*
