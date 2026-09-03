@@ -35,14 +35,15 @@ const ECRITURE_CACHE = 1.25;
 
 export const currentMonth = () => new Date().toISOString().slice(0, 7);
 
-export function record(userId, model, input = 0, output = 0, cacheLu = 0, cacheEcrit = 0) {
+export function record(userId, model, input = 0, output = 0, cacheLu = 0, cacheEcrit = 0,
+                       source = null) {
   if (!input && !output && !cacheLu && !cacheEcrit) return;
   db.prepare(`
     INSERT INTO usage(user_id, ts, month, model, input_tokens, output_tokens,
-                      cache_read_tokens, cache_write_tokens)
-    VALUES(?,?,?,?,?,?,?,?)
+                      cache_read_tokens, cache_write_tokens, source)
+    VALUES(?,?,?,?,?,?,?,?,?)
   `).run(userId, new Date().toISOString(), currentMonth(), model ?? null,
-         input | 0, output | 0, cacheLu | 0, cacheEcrit | 0);
+         input | 0, output | 0, cacheLu | 0, cacheEcrit | 0, source ?? null);
 }
 
 /**
@@ -133,13 +134,26 @@ export function serieUsage(userId, grain = 'jour') {
   const heure = grain === 'heure';
   const pas = heure ? 48 : 30;
   const fmt = heure ? '%Y-%m-%dT%H' : '%Y-%m-%d';
+  // Par bucket ET par source : le chat (au premier plan) et la carte (le fond)
+  // ne sont pas la meme depense. `chat` regroupe la conversation ; `carte` la
+  // relecture / le retissage ; `autre` les lignes d'avant le suivi par source.
   const rows = db.prepare(
     `SELECT strftime('${fmt}', ts) k,
-            SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) t,
-            SUM(output_tokens) o, COUNT(*) n
-     FROM usage WHERE user_id = ? GROUP BY k`
+            CASE WHEN source = 'carte' THEN 'carte'
+                 WHEN source = 'chat'  THEN 'chat'
+                 ELSE 'autre' END AS s,
+            SUM(input_tokens + output_tokens
+                + COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)) t,
+            COUNT(*) n
+     FROM usage WHERE user_id = ? GROUP BY k, s`
   ).all(userId);
-  const par = new Map(rows.map(r => [r.k, r]));
+  const par = new Map();               // bucket -> {chat, carte, autre, appels}
+  for (const r of rows) {
+    const e = par.get(r.k) ?? { chat: 0, carte: 0, autre: 0, appels: 0 };
+    e[r.s] = (e[r.s] ?? 0) + r.t;
+    e.appels += r.n;
+    par.set(r.k, e);
+  }
   const now = new Date();
   const points = [];
   for (let i = pas - 1; i >= 0; i--) {
@@ -147,9 +161,15 @@ export function serieUsage(userId, grain = 'jour') {
     if (heure) d.setUTCHours(d.getUTCHours() - i, 0, 0, 0);
     else { d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - i); }
     const k = heure ? d.toISOString().slice(0, 13) : d.toISOString().slice(0, 10);
-    const r = par.get(k);
-    points.push({ k, tokens: r?.t ?? 0, sortie: r?.o ?? 0, appels: r?.n ?? 0 });
+    const e = par.get(k) ?? { chat: 0, carte: 0, autre: 0, appels: 0 };
+    points.push({ k, chat: e.chat, carte: e.carte, autre: e.autre,
+                  tokens: e.chat + e.carte + e.autre, appels: e.appels });
   }
-  const total = points.reduce((s, p) => s + p.tokens, 0);
-  return { grain, points, total, pic: Math.max(1, ...points.map(p => p.tokens)) };
+  const somme = c => points.reduce((s, p) => s + p[c], 0);
+  return {
+    grain, points,
+    total: points.reduce((s, p) => s + p.tokens, 0),
+    pic: Math.max(1, ...points.map(p => p.tokens)),
+    totaux: { chat: somme('chat'), carte: somme('carte'), autre: somme('autre') }
+  };
 }

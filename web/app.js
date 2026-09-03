@@ -210,17 +210,39 @@ async function chargerGrapheUsage(grain) {
       grain === 'heure' ? 'les dernières 48 h' : 'les 30 derniers jours'}.</p>`;
     return;
   }
+  // Échelle en RACINE : un seul appel énorme (souvent un retissage de « ma
+  // carte ») écrase sinon toutes les petites barres à 1 px. La racine garde les
+  // pics lisibles sans effacer le reste. Toute barre non nulle a un plancher
+  // visible.
+  const ech = t => t <= 0 ? 0 : Math.max(8, Math.round(100 * Math.sqrt(t) / Math.sqrt(d.pic)));
+  const seg = (v, cls) => v > 0 ? `<i class="${cls}" style="flex:${v}"></i>` : '';
   const barres = d.points.map(p => {
-    const h = Math.max(2, Math.round(100 * p.tokens / d.pic));
     const quand = grain === 'heure' ? `${p.k.slice(11)} h` : fmtDay(p.k);
+    const bouts = [];
+    if (p.chat)  bouts.push(`chat ${fmtTok(p.chat)}`);
+    if (p.carte) bouts.push(`ma carte ${fmtTok(p.carte)}`);
+    if (p.autre) bouts.push(`autre ${fmtTok(p.autre)}`);
     const tip = p.tokens
-      ? `${quand} : ${fmtTok(p.tokens)} jetons${p.appels ? ` · ${p.appels} échange${p.appels > 1 ? 's' : ''}` : ''}`
+      ? `${quand} — ${fmtTok(p.tokens)} jetons${bouts.length ? ` (${bouts.join(' · ')})` : ''}`
       : `${quand} : rien`;
-    return `<span class="ubar${p.tokens ? '' : ' vide'}" data-tip="${esc(tip)}"><i style="height:${h}%"></i></span>`;
+    const pile = p.tokens
+      ? `<span class="upile" style="height:${ech(p.tokens)}%">${
+          seg(p.chat, 'uchat')}${seg(p.carte, 'ucarte')}${seg(p.autre, 'uautre')}</span>`
+      : '';
+    return `<span class="ubar${p.tokens ? '' : ' vide'}" data-tip="${esc(tip)}">${pile}</span>`;
   }).join('');
+  const t = d.totaux || { chat: 0, carte: 0, autre: 0 };
+  const leg = [];
+  if (t.chat)  leg.push(`<span class="uleg"><i class="uchat"></i>chat ${fmtTok(t.chat)}</span>`);
+  if (t.carte) leg.push(`<span class="uleg"><i class="ucarte"></i>ma carte ${fmtTok(t.carte)}</span>`);
+  if (t.autre) leg.push(`<span class="uleg"><i class="uautre"></i>avant le suivi ${fmtTok(t.autre)}</span>`);
+  // Répond directement à « est-ce que ça consomme en fond ? » : « ma carte »
+  // (relecture, retissage) est le travail de fond, le chat est au premier plan.
+  const fond = t.carte ? `dont ${fmtTok(t.carte)} en fond (ma carte)` : 'rien en fond';
   hote.innerHTML = `<div class="ubars">${barres}</div>
-    <p class="sub" style="margin:6px 0 0">${fmtTok(d.total)} jetons sur ${
-      grain === 'heure' ? '48 h' : '30 jours'} · tout en UTC</p>`;
+    <div class="uleglist">${leg.join('')}</div>
+    <p class="sub" style="margin:4px 0 0">${fmtTok(d.total)} jetons sur ${
+      grain === 'heure' ? '48 h' : '30 jours'} · ${fond} · UTC</p>`;
 }
 
 function toggleGauge(force) {
@@ -1706,7 +1728,10 @@ async function renderYear(year) {
     if (y) return renderYear(Number(y.dataset.year));
     const w = e.target.closest('[data-win]');
     if (w) { CUMWIN = w.dataset.win; return renderYear(year); }
-    const cell = e.target.closest('td.cell.has');
+    // Une case notée OU marquée d'un signe de veille s'ouvre : un jour de crise
+    // sans note chiffrée doit rester cliquable, sinon le signe montre un jour
+    // qu'on ne peut pas aller lire.
+    const cell = e.target.closest('td.cell.has, td.cell.aveille');
     if (cell) return ouvrirJour(cell.dataset.date);
     const cad = e.target.closest('[data-cadre]');
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
@@ -2163,9 +2188,15 @@ function gridMarkup(grid) {
       ${mo.days.map(d => {
         if (!d) return '<td></td>';
         const has = d.note !== null && d.note !== undefined;
-        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}"
-          ${has ? `style="background:${deltaColor(d.delta)}" data-date="${d.date}"
-          data-tip="${fmtDay(d.date)}\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}"` : ''}></td>`;
+        // Le signe de veille passe AVANT la note : une année se feuillette pour
+        // voir les périodes, et trois alertes en une semaine ne doivent pas se
+        // perdre parce que ces jours-là n'ont pas de note chiffrée.
+        const al = d.veille ? ` aveille ${d.veille}` : '';
+        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}`;
+        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}"
+          ${(has || d.veille) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
+          ${has ? `style="background:${deltaColor(d.delta)}"` : ''}>${
+          d.veille ? `<span class="cellveille">${ico('alerte', 9)}</span>` : ''}</td>`;
       }).join('')}
       <td class="avg">${mo.avg ?? ''}</td>
     </tr>`).join('')}
@@ -2318,6 +2349,51 @@ async function ouvrirJour(date) {
  * lundis », inutile ici : ce qu'on suit dans un journal, c'est une SUITE, et
  * une suite se lit sur une ligne.
  */
+/*
+ * CE QUE DIT LE SIGNE D'ALERTE SUR LE CALENDRIER.
+ *
+ * Il ne se substitue pas au détail — la phrase qui l'a déclenché s'ouvre en
+ * cliquant le jour. Sur la case, il dit juste QUOI surveiller, et assez pour
+ * qu'une crise ne passe pas inaperçue en feuilletant : c'est le seul rôle d'un
+ * signe sur un ruban de trente jours.
+ */
+const veilleTitre = n => n === 'rouge'
+  ? ' · ⚠ à surveiller — une blessure est écrite ce jour-là'
+  : n === 'jaune'
+  ? ' · ⚠ à surveiller — le suicide ou un moyen de se faire mal a été évoqué'
+  : '';
+
+/* Ce que dit chaque GENRE de signe — par genre, pas par couleur : « le suicide
+   a été évoqué » et « un objet dangereux était à portée » sont deux jaunes, et
+   ce ne sont pas la même journée. Reflète server/veille.js (DIT). */
+const VEILLE_DIT = {
+  suicide:  'le suicide a été évoqué',
+  moyen:    'quelque chose pour se faire mal était à portée',
+  dereel:   'un moment où le réel s’est décollé',
+  blessure: 'une blessure est écrite ce jour-là'
+};
+
+/**
+ * LE SIGNE DE VEILLE, SUR LA JOURNÉE OUVERTE, AVEC SA PREUVE.
+ *
+ * Le calendrier ne porte que le niveau ; ici on montre POURQUOI — la phrase que
+ * la personne a écrite, celle qui a déclenché le signe. Un signe sans sa preuve
+ * serait un verdict de machine ; avec elle, c'est un rappel de ce qu'on a
+ * écrit, et si le signe est faux ça se voit tout de suite. Le 3114 n'apparaît
+ * que sur un rouge — le serveur ne remplit `aide` que là.
+ */
+function veilleBanner(v) {
+  if (!v?.niveau) return '';
+  const phrases = [...new Set((v.motifs ?? []).map(mo => VEILLE_DIT[mo.genre]).filter(Boolean))];
+  const quoi = phrases.length ? phrases.join(' · ')
+             : v.niveau === 'rouge' ? VEILLE_DIT.blessure : VEILLE_DIT.suicide;
+  return `<div class="veillecard ${esc(v.niveau)}">
+    <div class="vtete">${ico('alerte', 15)}<b>À surveiller</b><span class="vquoi">${esc(quoi)}</span></div>
+    ${v.extrait ? `<blockquote class="vextrait">« ${esc(v.extrait)} »</blockquote>` : ''}
+    ${v.aide ? `<p class="vaide">${esc(v.aide)}</p>` : ''}
+  </div>`;
+}
+
 function moisRuban(m, date) {
   const cases = m.calendrier ?? [];
   if (!cases.length) return '';
@@ -2336,12 +2412,13 @@ function moisRuban(m, date) {
     ${cases.map(c => {
       const note = c.note !== null && c.note !== undefined;
       const futur = c.date > jourCivil();
-      return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}"
+      return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}${c.veille ? ` aveille ${c.veille}` : ''}"
         data-cal="jour" data-d="${c.date}" ${futur ? 'disabled' : ''}
         ${note ? `style="background:${deltaColor(c.delta ?? 0)}"` : ''}
-        title="${esc(fmtDay(c.date))}${note ? ` · ${c.note}/10` : ''}${c.texte ? ' · écrit' : ''}">
+        title="${esc(fmtDay(c.date))}${note ? ` · ${c.note}/10` : ''}${c.texte ? ' · écrit' : ''}${veilleTitre(c.veille)}">
         <span class="mjn">${Number(c.date.slice(8))}</span>
         ${c.texte ? '<span class="mjpt"></span>' : ''}
+        ${c.veille ? `<span class="mjveille">${ico('alerte', 10)}</span>` : ''}
       </button>`;
     }).join('')}
   </div>`;
@@ -3512,6 +3589,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
       ${/* L'API renvoyait déjà `reperes` dans cette branche, et le markup ne
             l'affichait jamais : le champ était reçu et jeté. Le plancher retire
             des chiffres, pas des faits qu'on a soi-même posés. */''}
+      ${veilleBanner(m.jour?.veille)}
       ${reperesMarkup(m.reperes, date)}
       ${/* MEME RAISON POUR LES MESURES, et le même piège : le serveur les envoie
             dans cette branche, et il suffirait de ne pas écrire cette ligne pour
@@ -3592,6 +3670,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
             veut voir où ce jour tombe dans sa semaine. */''}
       ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
+      ${veilleBanner(m.jour?.veille)}
       ${reperesMarkup(m.reperes, date)}
 
       <div class="card dayread">
@@ -5503,27 +5582,48 @@ let SYNC_DERNIERE = 0;                           // horodatage de la derniere te
 let SYNC_GEN = 0;                                // jeton de generation, contre les chevauchements
 
 function qsSynchroMarkup(sy) {
+  const surAujourdhui = QS_JOUR === S.today;
   // L'état live d'une tentative ne concerne QUE le jour courant : sur un jour
   // passé (qui ne se synchronise jamais), le badge doit refléter son propre `sy`,
   // pas un échec relatif à aujourd'hui resté affiché.
-  if (QS_JOUR === S.today) {
+  if (surAujourdhui) {
     if (SYNC_APP.etat === 'encours')
       return `<span class="qssync" title="Tentative de synchronisation avec Machi Tool">${
         ico('antenne', 11)}synchronisation…</span>`;
+    // Une tentative a eu lieu et a échoué : on affiche SA RAISON, jamais un
+    // simple « désynchronisé ». C'est tout l'objet du badge — dire pourquoi.
     if (SYNC_APP.etat === 'hors' || SYNC_APP.etat === 'echec')
       return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
         ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
   }
   if (!sy) return '';
   if (sy.depuis_min == null) {
-    return `<span class="qssync muet" title="Aucun envoi n’a jamais été reçu">${
-      ico('antenne', 11)}jamais reçu</span>`;
+    // Jamais rien reçu : la raison n'est pas « c'est vieux », c'est que rien
+    // n'est jamais arrivé. On le dit, et on dit quoi vérifier.
+    return `<span class="qssync muet" title="Aucun digest n’a jamais été reçu de Machi Tool. Vérifie que l’application tourne, que l’envoi au site est coché, et que la clé de la passerelle est la même des deux côtés.">${
+      ico('antenne', 11)}Machi Tool ne s’est jamais connecté</span>`;
   }
   const frais = sy.depuis_min < SYNCHRO_FRAICHE;
   const quand = depuisMot(sy.depuis_min);
-  return `<span class="qssync${frais ? '' : ' tard'}"
-    title="Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}">${
-    ico('antenne', 11)}${frais ? 'à jour' : `désynchronisé · dernière synchro ${esc(quand)}`}</span>`;
+  if (frais)
+    return `<span class="qssync"
+      title="Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}">${
+      ico('antenne', 11)}à jour</span>`;
+  /*
+   * PAS FRAIS : ON N'ÉCRIT JAMAIS « désynchronisé · il y a 14 h » TOUT SEUL.
+   *
+   * Ce message disait le symptôme sans la cause. Sur aujourd'hui, une
+   * vérification est lancée en parallèle (chargerQS) et sa raison — Machi Tool
+   * éteint, clé absente, site qui refuse — remplacera ceci dès qu'elle rentre.
+   * En attendant, on annonce la vérification plutôt qu'un reproche muet.
+   */
+  const detail = `Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}`;
+  if (surAujourdhui)
+    return `<span class="qssync tard" title="${detail} — on redemande à Machi Tool un état à jour.">${
+      ico('antenne', 11)}rien reçu depuis ${esc(quand)} — vérification…</span>`;
+  // Sur un jour passé, il ne se resynchronise plus : on dit l'état, sans alarme.
+  return `<span class="qssync tard" title="${detail}">${
+    ico('antenne', 11)}dernier envoi ${esc(quand)}</span>`;
 }
 
 /* ===================== CE QUI A ETE REGARDE, ET AVEC QUOI =====================
@@ -5940,15 +6040,19 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
     return rafraichirBadgeSync();
   }
 
-  let digest;
+  let charge;
   try {
-    const r = await tireAvecDelai(url + '/activite', { headers: { 'X-Machitool-Cle': cle } });
+    // `?tout=1` : on demande TOUT l'historique d'un coup — chaque jour avec son
+    // lever, son coucher, son temps d'écran — pour tout remettre à jour en un
+    // seul aller-retour. Une version d'application d'avant ignore le paramètre
+    // et rend le seul digest du jour ; on sait retomber dessus plus bas.
+    const r = await tireAvecDelai(url + '/activite?tout=1', { headers: { 'X-Machitool-Cle': cle } });
     if (!r.ok) {
       SYNC_APP = { etat: 'echec', message: r.status === 401
         ? 'Machi Tool refuse la clé' : `Machi Tool a répondu ${r.status}` };
       return rafraichirBadgeSync();
     }
-    digest = await r.json();
+    charge = await r.json();
   } catch {
     // Injoignable ou muet : sans doute éteint. On le relance, puis un unique
     // nouvel essai — mais seulement si aucune tentative plus récente n'a pris la
@@ -5968,11 +6072,14 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
   }
 
   try {
+    // Tout l'historique si l'application l'a rendu ({jours:[...]}), sinon le
+    // seul digest du jour (application d'avant). Le site accepte les deux.
+    const corps = Array.isArray(charge?.jours) ? { jours: charge.jours } : charge;
     const r = await tireAvecDelai('/api/machitool/activite', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Machitool-Cle': cle },
-      body: JSON.stringify(digest)
-    }, 8000);
+      body: JSON.stringify(corps)
+    }, 12000);
     if (!r.ok) { SYNC_APP = { etat: 'echec', message: 'le site a refusé le digest' }; return rafraichirBadgeSync(); }
   } catch {
     SYNC_APP = { etat: 'echec', message: 'envoi au site impossible' };

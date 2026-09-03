@@ -1108,12 +1108,27 @@ input[type=date] { color-scheme: dark; }
   border: 1px solid var(--line-soft); border-radius: 6px; padding: 2px 8px; cursor: pointer;
 }
 .usagesel.on { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.usagegraph { min-height: 44px; }
-.ubars { display: flex; align-items: flex-end; gap: 1px; height: 52px; }
+/* Le graphe prend sa propre place : sans hauteur explicite le bloc se
+   repliait sous le texte du total, qui passait alors PAR-DESSUS les barres. */
+.usagegraph { min-height: 70px; }
+.ubars { display: flex; align-items: stretch; gap: 1px; height: 56px; }
+/* stretch (pas flex-end) donne à chaque barre une HAUTEUR DÉFINIE de 56 px :
+   sans elle, le pourcentage de `.upile` s'appuie sur une hauteur « auto » et
+   s'effondre à 1 px. La pile, elle, reste alignée en bas par align-items. */
 .ubar { flex: 1 1 0; display: flex; align-items: flex-end; min-width: 0; cursor: help; }
-.ubar i { width: 100%; background: var(--accent); border-radius: 1px 1px 0 0; min-height: 1px; }
-.ubar.vide i { background: var(--line-soft); }
-.ubar:hover i { background: color-mix(in srgb, var(--accent) 70%, var(--ink)); }
+/* Une barre EMPILÉE : chat en bas, « ma carte » (le fond) au-dessus, l'ancien
+   au sommet. column-reverse met le premier segment (chat) en bas. */
+.upile { width: 100%; display: flex; flex-direction: column-reverse;
+         border-radius: 1px 1px 0 0; overflow: hidden; min-height: 1px; }
+.upile i { width: 100%; display: block; min-height: 1px; }
+.uchat  { background: var(--accent); }
+.ucarte { background: #5CE6A4; }              /* vif : le travail de fond, « ma carte » */
+.uautre { background: var(--line-soft); }     /* avant le suivi par source */
+.ubar:hover .upile { filter: brightness(1.18); }
+.uleglist { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 7px; }
+.uleg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-dim); }
+.uleg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.uleg .uchat, .uleg .ucarte, .uleg .uautre { flex: none; }
 /* « sans enveloppe » n'est pas une alerte : c'est un état choisi. Il se signale
    sans crier, à la façon d'une étiquette d'outil de développeur. */
 .gaugepanel .sansenv {
@@ -2945,10 +2960,55 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
   position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
   width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .55;
 }
+/* LE SIGNE DE VEILLE SUR LE RUBAN — une journée à surveiller.
+   Un liseré en haut (large, discret) + un petit triangle dans le coin. La
+   couleur porte le niveau : ambre = évoqué, rouge = une blessure écrite. Il
+   passe DEVANT la teinte de note : une crise ne doit pas disparaître sous le
+   vert d'une bonne journée voisine. */
+.mjour.aveille { box-shadow: inset 0 3px 0 var(--vc, var(--warn)); }
+.mjour.aveille.jaune { --vc: var(--warn); }
+.mjour.aveille.rouge { --vc: var(--danger); }
+.mjour.aveille.ouvert { box-shadow: inset 0 3px 0 var(--vc), 0 0 0 1px var(--accent); }
+.mjveille {
+  position: absolute; top: 2px; right: 2px; line-height: 0; color: var(--vc, var(--warn));
+  opacity: .95; pointer-events: none;
+}
 @media (max-width: 900px) {
   .moisruban { gap: 2px; }
   .mjour { height: 38px; font-size: 10.5px; }
 }
+
+/* LE MÊME SIGNE SUR LA GRILLE DE L'ANNÉE. Une case de 15 px : le triangle la
+   remplit presque, et sa couleur suffit à repérer une période à surveiller en
+   feuilletant. Il s'affiche même sans note — un jour de crise non chiffré ne
+   doit pas être une case vide. */
+table.grid td.cell.aveille { outline: 1.5px solid var(--vc, var(--warn)); outline-offset: 0; z-index: 1; }
+table.grid td.cell.aveille.jaune { --vc: var(--warn); }
+table.grid td.cell.aveille.rouge { --vc: var(--danger); }
+table.grid td.cell.aveille:hover { outline-width: 2px; z-index: 3; }
+.cellveille {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--vc, var(--warn)); line-height: 0; pointer-events: none;
+}
+
+/* LA CARTE DE VEILLE SUR LA JOURNÉE OUVERTE : le signe AVEC sa preuve.
+   Un bandeau sobre — pas une alarme rouge plein cadre, qui se lit comme un
+   reproche — avec la phrase que la personne a écrite, et le 3114 sur un rouge. */
+.veillecard {
+  margin: 0 0 14px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--vc) 45%, var(--line));
+  background: color-mix(in srgb, var(--vc) 10%, var(--panel));
+  --vc: var(--warn);
+}
+.veillecard.rouge { --vc: var(--danger); }
+.vtete { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--vc); }
+.vtete b { font-size: 13.5px; }
+.vtete .vquoi { color: var(--ink-dim); font-size: 12.5px; }
+.vextrait {
+  margin: 9px 0 0; padding: 0 0 0 11px; border-left: 2px solid color-mix(in srgb, var(--vc) 55%, transparent);
+  color: var(--ink); font-style: italic; font-size: 13.5px; line-height: 1.55;
+}
+.vaide { margin: 9px 0 0; font-size: 12.5px; color: var(--ink-dim); }
 
 /* ==================================================================
    QUANTIFIED SELF — l'inventaire de ce qu'une autre application envoie.

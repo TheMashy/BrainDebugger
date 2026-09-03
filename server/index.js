@@ -271,55 +271,82 @@ async function traiter(req, res) {
       indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
     });
     try {
-      const digest = await readBody(req);
-      // La date vient du digest ; à défaut, la journée de la personne, pas
-      // celle du serveur — un envoi passé minuit appartient à SON jour.
+      const corps = await readBody(req);
       const zone = zoneDeRequete(req);
       const dateDefaut = dansLaZone(zone, () => new Date().toISOString().slice(0, 10));
-      const date = String(digest?.date ?? dateDefaut).slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        noterEnvoi({ userId, source: 'machitool', statut: 400, refus: 'date du digest illisible' });
-        return json(res, 400, { error: 'date du digest illisible' });
+
+      /*
+       * UN JOUR OU TOUS. L'application peut pousser le digest du jour seul
+       * (l'ancien envoi), ou l'historique entier d'un coup sous `{jours:[...]}`.
+       * Le second remet a jour TOUT le quantified self en un appel : chaque
+       * journee retrouve son lever, son coucher, son temps d'ecran, sans qu'il
+       * faille ouvrir chaque jour un par un. Un seul chemin de traitement pour
+       * les deux — ce qui vaut pour un digest vaut pour chacun de la liste.
+       */
+      const enVrac = Array.isArray(corps?.jours);
+      const digests = enVrac ? corps.jours : [corps];
+
+      // La date vient du digest ; à défaut, la journée de la personne, pas
+      // celle du serveur — un envoi passé minuit appartient à SON jour.
+      const rangerUnJour = (digest) => {
+        const date = String(digest?.date ?? dateDefaut).slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+        poserActiviteJour(userId, date, digest);
+
+        /*
+         * ET SES NOMBRES DEVIENNENT DES MESURES.
+         *
+         * Le digest etait range tel quel, et rien d'autre. Or il est plein de
+         * chiffres QUOTIDIENS -- bascules, temps par contexte, nombre de pauses,
+         * la plus longue -- qui ont exactement la forme d'une mesure : un nombre,
+         * une cle, un jour. Les laisser dans une colonne de JSON, c'est les
+         * rendre invisibles a tout le reste : pas de courbe, pas de mediane, pas
+         * de lien avec la note du soir, rien dans le compte rendu.
+         *
+         * Ils passent donc par le MEME tuyau que la montre et la balance. Ce
+         * n'est pas une exception pour Machi Tool : c'est le tuyau qui accepte
+         * enfin ce qu'il savait deja lire.
+         *
+         * Le digest brut reste range a cote, entier : c'est lui que la console
+         * relit, et c'est lui qu'on affiche quand on veut voir ce qui est
+         * VRAIMENT arrive plutot que ce qu'on en a compris.
+         */
+        const { gardees: chiffres } = dansLaZone(zone,
+          () => analyser({ ...digest, date }, { source: 'machitool', zone }));
+        for (const m of chiffres) poserMesure({ ...m, userId });
+
+        /*
+         * ET LE COUCHER QU'IL PORTE RANGE LA NUIT.
+         *
+         * Le digest porte l'heure de coucher mesurée (poste). Comme n'importe
+         * quelle borne, elle doit faire rejoindre à la soirée la journée qu'elle
+         * terminait — sinon « couché 06:10 » s'affiche et les messages de 01:56
+         * restent sur le lendemain. Le chemin des mesures (montre) recalait déjà ;
+         * celui-ci l'oubliait. `recalerSurBornes` ne bouge que ce qui est borné.
+         */
+        recalerSurBornes(chiffres, userId);
+        return { date, mesures: chiffres.length };
+      };
+
+      const rangés = [];
+      for (const d of digests) {
+        const r = rangerUnJour(d);
+        if (r) rangés.push(r);
       }
-      poserActiviteJour(userId, date, digest);
+      if (!rangés.length) {
+        noterEnvoi({ userId, source: 'machitool', statut: 400, refus: 'aucune date de digest lisible' });
+        return json(res, 400, { error: 'aucune date de digest lisible' });
+      }
 
-      /*
-       * ET SES NOMBRES DEVIENNENT DES MESURES.
-       *
-       * Le digest etait range tel quel, et rien d'autre. Or il est plein de
-       * chiffres QUOTIDIENS -- bascules, temps par contexte, nombre de pauses,
-       * la plus longue -- qui ont exactement la forme d'une mesure : un nombre,
-       * une cle, un jour. Les laisser dans une colonne de JSON, c'est les
-       * rendre invisibles a tout le reste : pas de courbe, pas de mediane, pas
-       * de lien avec la note du soir, rien dans le compte rendu.
-       *
-       * Ils passent donc par le MEME tuyau que la montre et la balance. Ce
-       * n'est pas une exception pour Machi Tool : c'est le tuyau qui accepte
-       * enfin ce qu'il savait deja lire.
-       *
-       * Le digest brut reste range a cote, entier : c'est lui que la console
-       * relit, et c'est lui qu'on affiche quand on veut voir ce qui est
-       * VRAIMENT arrive plutot que ce qu'on en a compris.
-       */
-      const { gardees: chiffres } = dansLaZone(zone,
-        () => analyser({ ...digest, date }, { source: 'machitool', zone }));
-      for (const m of chiffres) poserMesure({ ...m, userId });
-
-      /*
-       * ET LE COUCHER QU'IL PORTE RANGE LA NUIT.
-       *
-       * Le digest porte l'heure de coucher mesurée (poste). Comme n'importe
-       * quelle borne, elle doit faire rejoindre à la soirée la journée qu'elle
-       * terminait — sinon « couché 06:10 » s'affiche et les messages de 01:56
-       * restent sur le lendemain. Le chemin des mesures (montre) recalait déjà ;
-       * celui-ci l'oubliait. `recalerSurBornes` ne bouge que ce qui est borné.
-       */
-      recalerSurBornes(chiffres, userId);
-
-      noterEnvoi({ userId, source: 'machitool:activite', statut: 200, recues: 1, gardees: 1,
-                   apercu: Object.keys(digest ?? {}).slice(0, 8).join(', ') });
-      return json(res, 200, { ok: true, date, mesures: chiffres.length,
-                              jours: activiteJours(userId).length });
+      const mesures = rangés.reduce((s, r) => s + r.mesures, 0);
+      noterEnvoi({ userId, source: 'machitool:activite', statut: 200,
+                   recues: rangés.length, gardees: rangés.length,
+                   apercu: rangés.map(r => r.date).slice(0, 8).join(', ') });
+      return json(res, 200, { ok: true,
+        // Rétro-compatible : le champ `date` reste celui du dernier jour rangé.
+        date: rangés[rangés.length - 1].date,
+        jours_recus: rangés.length, mesures,
+        jours: activiteJours(userId).length });
     } catch (err) {
       const pourquoi = String(err.message ?? err).slice(0, 200);
       noterEnvoi({ userId, source: 'machitool:activite', statut: 400, refus: pourquoi });
