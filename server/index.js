@@ -305,6 +305,17 @@ async function traiter(req, res) {
         () => analyser({ ...digest, date }, { source: 'machitool', zone }));
       for (const m of chiffres) poserMesure({ ...m, userId });
 
+      /*
+       * ET LE COUCHER QU'IL PORTE RANGE LA NUIT.
+       *
+       * Le digest porte l'heure de coucher mesurée (poste). Comme n'importe
+       * quelle borne, elle doit faire rejoindre à la soirée la journée qu'elle
+       * terminait — sinon « couché 06:10 » s'affiche et les messages de 01:56
+       * restent sur le lendemain. Le chemin des mesures (montre) recalait déjà ;
+       * celui-ci l'oubliait. `recalerSurBornes` ne bouge que ce qui est borné.
+       */
+      recalerSurBornes(chiffres, userId);
+
       noterEnvoi({ userId, source: 'machitool:activite', statut: 200, recues: 1, gardees: 1,
                    apercu: Object.keys(digest ?? {}).slice(0, 8).join(', ') });
       return json(res, 200, { ok: true, date, mesures: chiffres.length,

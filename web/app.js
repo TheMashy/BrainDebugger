@@ -3892,7 +3892,51 @@ function phraseLien(l) {
  * sommeil, poids, pas, cœur — et tout ce qui va avec les journées notées : un
  * rouage qui bouge avec la personne n'est plus un rouage, c'est une trouvaille.
  */
-function mesuresMarkup(mesures) {
+/**
+ * LE POSTE, EN LÉGER : d'abord le lever, puis le coucher, le sommeil, l'écran.
+ *
+ * L'heure porte une ICÔNE, pas le mot « dit » : soleil au lever, lune au coucher.
+ * Sa source se lit au survol, et une ESTIMATION se distingue à l'œil — préfixée
+ * d'un « ≈ » et grisée — d'une heure dite ou mesurée : on ne fait jamais passer
+ * une déduction pour une mesure. Le temps d'écran est fendu application / web ;
+ * survoler l'un montre ses trois premiers.
+ */
+function posteMarkup(p) {
+  if (!p) return '';
+  const SRC = { dit: 'tu l’as dit', mesure: 'mesuré par la machine',
+                estime: 'estimé d’après ta plage d’activité' };
+  const borne = (b, dessin, mot) => {
+    if (!b || !b.heure) return `<span class="jpost inconnu" title="${mot} — inconnu">${
+      ico(dessin, 13)}<span class="faint">—</span></span>`;
+    const est = b.source === 'estime';
+    return `<span class="jpost${est ? ' lu' : ''}" title="${mot} — ${SRC[b.source] ?? ''}">${
+      ico(dessin, 13)}<span class="mono">${est ? '≈' : ''}${esc(b.heure)}</span></span>`;
+  };
+  const listeTop = t => (t?.length ? t.map(x => `${x.nom} ${x.min} min`).join(' · ') : 'rien');
+  const ecranBloc = p.ecran ? `<div class="jpostligne">
+    <span class="jpost" data-tip="Applications : ${esc(listeTop(p.ecran.top_app))}">${
+      ico('oeil', 13)}<span class="mono">${p.ecran.app_min} min</span>
+      <span class="faint">appli</span></span>
+    <span class="jpost" data-tip="Onglets : ${esc(listeTop(p.ecran.top_web))}">${
+      ico('globe', 13)}<span class="mono">${p.ecran.web_min} min</span>
+      <span class="faint">web</span></span>
+  </div>` : '';
+  const som = p.sommeil_h != null
+    ? `<span class="jpost" title="de sommeil"><span class="mono">${
+        String(p.sommeil_h).replace('.', ',')} h</span><span class="faint">dormi</span></span>`
+    : '';
+  return `<div class="jposte">
+    <div class="k faint">Ce qui a été mesuré</div>
+    <div class="jpostligne">
+      ${borne(p.lever, 'soleil', 'levé')}
+      ${borne(p.coucher, 'lune', 'couché')}
+      ${som}
+    </div>
+    ${ecranBloc}
+  </div>`;
+}
+
+function mesuresMarkup(mesures, { titre = true } = {}) {
   if (!mesures?.length) return '';
   const ligne = m => {
         const phrase = phraseLien(m.lien);
@@ -3917,9 +3961,11 @@ function mesuresMarkup(mesures) {
 
   const ouvertes = mesures.filter(m => !m.detail || m.lien);
   const rouages = mesures.filter(m => m.detail && !m.lien);
+  // Rien d'ouvert et rien qui se replie : tout est déjà résumé par « poste ».
+  if (!ouvertes.length && !rouages.length) return '';
 
   return `<div class="jmesures">
-    <div class="k faint">Ce qui a été mesuré</div>
+    ${titre ? '<div class="k faint">Ce qui a été mesuré</div>' : ''}
     ${ouvertes.length ? `<ul class="jmlist">${ouvertes.map(ligne).join('')}</ul>` : ''}
     ${rouages.length ? `<details class="jmrouages">
       <summary>${rouages.length} mesure${rouages.length > 1 ? 's' : ''} derrière ces chiffres</summary>
@@ -4005,7 +4051,8 @@ function journeeMarkup(m) {
   const texte = decoupe || (m.jour?.text
     ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
     : `<p class="jvide">${m.note !== null ? 'Notée, sans texte.' : 'Rien d’écrit ce jour-là.'}</p>`);
-  const cote = `${volatiliteMarkup(j.volatilite)}${mesuresMarkup(m.mesures)}${thematiquesMarkup(j.thematiques)}`;
+  const cote = `${volatiliteMarkup(j.volatilite)}${posteMarkup(m.poste)}`
+             + `${mesuresMarkup(m.mesures, { titre: !m.poste })}${thematiquesMarkup(j.thematiques)}`;
 
   return `<div class="jgrille">
     <div class="jcol jfil">
@@ -5395,7 +5442,26 @@ function depuisMot(min) {
  * discrète. Elle passe en orange quand ça ne vient plus — c'est le seul moment
  * où elle a quelque chose à dire.
  */
+/*
+ * L'ETAT LIVE D'UNE TENTATIVE DE SYNCHRO DEPUIS L'APPLICATION LOCALE.
+ *
+ * Il prime sur l'etat serveur dans le badge : « synchronisation… » puis, selon
+ * l'issue, le silence (le badge redevient « à jour » apres rechargement) ou une
+ * raison. Une seule tentative en vol a la fois.
+ */
+let SYNC_APP = { etat: 'idle', message: '' };   // idle | encours | hors | echec
+let SYNC_DERNIERE = 0;                           // horodatage de la derniere tentative
+
 function qsSynchroMarkup(sy) {
+  if (SYNC_APP.etat === 'encours')
+    return `<span class="qssync" title="Tentative de synchronisation avec Machi Tool">${
+      ico('antenne', 11)}synchronisation…</span>`;
+  if (SYNC_APP.etat === 'hors')
+    return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
+      ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
+  if (SYNC_APP.etat === 'echec')
+    return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
+      ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
   if (!sy) return '';
   if (sy.depuis_min == null) {
     return `<span class="qssync muet" title="Aucun envoi n’a jamais été reçu">${
@@ -5630,7 +5696,7 @@ function qsPanneauMarkup(d) {
     <div class="card qspan">
       <div class="qstete">
         <h2>${ico('antenne', 15)}Quantified self</h2>
-        ${qsSynchroMarkup(d.synchro)}
+        <span id="qssyncbadge">${qsSynchroMarkup(d.synchro)}</span>
       </div>
       ${d.jourLu ? `<div class="qsjour k faint">${fmtDay(d.jourLu)}</div>` : ''}
 
@@ -5718,7 +5784,7 @@ function qsPucesMarkup(d) {
  */
 const QS_FENETRE = 90;
 
-async function chargerQS(jour = null) {
+async function chargerQS(jour = null, { syncAuto = true } = {}) {
   const vise = jour ?? QS_JOUR ?? S.today;
   /*
    * ON REDEMANDE QUAND LE JOUR CHANGE. Le panneau était chargé une fois et
@@ -5744,6 +5810,110 @@ async function chargerQS(jour = null) {
   if (QS_JOUR !== vise) return;
   const h = $('#qspanneau');
   if (h) h.innerHTML = qsPanneauMarkup(QS_DATA);
+
+  /*
+   * ON OUVRE UNE JOURNEE ENCORE OUVERTE : ON VA CHERCHER LE FRAIS.
+   *
+   * Regarder aujourd'hui declenche un tirage du digest a jour sur la machine,
+   * sans attendre le prochain envoi automatique de Machi Tool. On ne le fait que
+   * pour la journee vecue courante (les jours passes ne bougent plus), et on
+   * s'espace : inutile de tirer a chaque aller-retour de calendrier.
+   */
+  const desync = QS_DATA?.synchro && QS_DATA.synchro.depuis_min != null
+                 && QS_DATA.synchro.depuis_min >= SYNCHRO_FRAICHE;
+  const aAttendu = Date.now() - SYNC_DERNIERE > 45000;
+  if (syncAuto && vise === S.today && (desync || aAttendu) && SYNC_APP.etat !== 'encours')
+    synchroniserDepuisApp(vise);
+}
+
+/** Le badge de synchro, remis a jour seul pendant une tentative. */
+function rafraichirBadgeSync() {
+  const el = $('#qssyncbadge');
+  if (el) el.innerHTML = qsSynchroMarkup(QS_DATA?.synchro ?? null);
+}
+
+/**
+ * RELANCER MACHI TOOL QUAND IL NE REPOND PAS.
+ *
+ * Un navigateur ne demarre aucun programme local ; le seul geste permis est
+ * d'ouvrir une URL de schema, que Windows associe a l'application. On passe par
+ * un lien invisible plutot que par `location`, pour ne pas quitter la page.
+ */
+function lancerApp() {
+  try {
+    const a = document.createElement('a');
+    a.href = 'machitool://sync';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch { /* schema non enregistre : rien a faire de plus */ }
+}
+
+/**
+ * TIRER LE DIGEST DU JOUR DEPUIS L'APPLICATION LOCALE, ET LE RANGER.
+ *
+ * Le navigateur, sur le meme poste que Machi Tool, appelle 127.0.0.1 avec la
+ * cle de la passerelle (celle qu'il tient deja), puis relaie le digest au site
+ * par la meme route que l'application. Succes : le panneau se recharge et se met
+ * a jour tout seul. Echec : on dit pourquoi. Injoignable : sans doute eteint,
+ * on tente de le relancer par le schema d'URL, puis un seul nouvel essai.
+ */
+async function synchroniserDepuisApp(jour, { relance = true } = {}) {
+  if (SYNC_APP.etat === 'encours') return;
+  SYNC_DERNIERE = Date.now();
+  SYNC_APP = { etat: 'encours', message: '' };
+  rafraichirBadgeSync();
+
+  let cle, url;
+  try { ({ cle, url } = await api('/api/passerelle/local')); }
+  catch { SYNC_APP = { etat: 'echec', message: 'clé de passerelle introuvable' }; return rafraichirBadgeSync(); }
+  if (!cle) {
+    SYNC_APP = { etat: 'echec', message: 'aucune clé — crée-la dans Réglages › La passerelle' };
+    return rafraichirBadgeSync();
+  }
+
+  let digest;
+  try {
+    const r = await fetch(url + '/activite', { headers: { 'X-Machitool-Cle': cle } });
+    if (!r.ok) {
+      SYNC_APP = { etat: 'echec', message: r.status === 401
+        ? 'Machi Tool refuse la clé' : `Machi Tool a répondu ${r.status}` };
+      return rafraichirBadgeSync();
+    }
+    digest = await r.json();
+  } catch {
+    // Injoignable : sans doute eteint. On le relance, puis un unique nouvel essai.
+    SYNC_APP = { etat: 'hors', message: relance
+      ? 'Machi Tool ne répond pas — relance en cours' : 'Machi Tool ne répond pas' };
+    rafraichirBadgeSync();
+    if (relance) {
+      lancerApp();
+      setTimeout(() => { SYNC_APP = { etat: 'idle', message: '' };
+                         synchroniserDepuisApp(jour, { relance: false }); }, 6000);
+    }
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/machitool/activite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Machitool-Cle': cle },
+      body: JSON.stringify(digest)
+    });
+    if (!r.ok) { SYNC_APP = { etat: 'echec', message: 'le site a refusé le digest' }; return rafraichirBadgeSync(); }
+  } catch {
+    SYNC_APP = { etat: 'echec', message: 'envoi au site impossible' };
+    return rafraichirBadgeSync();
+  }
+
+  SYNC_APP = { etat: 'idle', message: '' };
+  // Le digest est rangé et la nuit recalée côté serveur. On recharge le jour
+  // regardé pour que « moi » (messages recalés, poste à jour) et le panneau
+  // montrent le frais. renderMoi rappelle chargerQS, mais le garde-fou des 45 s
+  // empêche de re-tirer en boucle.
+  if (JOUR_DANS === 'moi') await renderMoi(jour, { garderCal: true });
+  else await chargerQS(jour, { syncAuto: false });
 }
 
 /* ============================= routage ============================= */

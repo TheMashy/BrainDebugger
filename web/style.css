@@ -3205,6 +3205,20 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .jmesures { display: flex; flex-direction: column; gap: 8px; }
 .jmlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 
+/* Le poste, en léger : lever, coucher, sommeil, écran. Des puces en ligne, une
+   icône puis l'heure ; l'estimation grisée et préfixée « ≈ » se distingue de
+   l'œil d'une heure dite ou mesurée. Survol = source (title) ou top 3 (data-tip). */
+.jposte { display: flex; flex-direction: column; gap: 8px; }
+.jpostligne { display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; }
+.jpost { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+.jpost .ico { color: var(--ink-faint); flex: none; }
+.jpost .mono { font-variant-numeric: tabular-nums; }
+.jpost .faint { font-size: 12px; }
+.jpost[data-tip] { cursor: help; }
+.jpost.lu { color: var(--ink-dim); }
+.jpost.lu .mono { color: var(--ink-dim); }
+.jpost.inconnu { color: var(--ink-faint); }
+
 /* Une ligne par mesure : le nom, la valeur, le côté. La grille tient les trois
    en colonnes — en `flex`, les valeurs ne s'alignent pas d'une ligne à l'autre
    et la liste se lit comme du texte au lieu d'un relevé. */

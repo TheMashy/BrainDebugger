@@ -534,6 +534,55 @@ export function mesuresSituees(date, userId = OWNER, { avecLiens = true } = {}) 
 }
 
 /**
+ * LE POSTE DU JOUR, EN LEGER : lever, coucher, sommeil, temps d'ecran.
+ *
+ * De quoi tenir la colonne « ce qui a ete mesure » sans y deverser les quarante
+ * cles du digest. Chaque borne porte SA SOURCE, dans l'ordre du plus sur au
+ * moins sur -- ce que la personne a DIT, puis ce que la machine a MESURE, puis
+ * une ESTIMATION lue sur la plage d'activite, puis rien du tout (inconnu). On ne
+ * fait jamais passer une estimation pour une mesure.
+ *
+ * L'ecran est fendu en temps d'application et temps web, chacun avec ses trois
+ * premiers, pour le survol.
+ */
+export function posteDuJour(date, userId = OWNER) {
+  const dig = activiteDuJour(date, userId)?.digest ?? null;
+  const jourM = mesuresDuJour(date, userId);
+  const dit = g => {
+    const cle = g === 'lever' ? CLE_LEVER : CLE_COUCHER;
+    const m = jourM.find(x => x.source === SOURCE_DIT && x.cle === cle);
+    return m ? (m.texte ?? null) : null;
+  };
+  const poste = dig?.poste ?? {};
+  const plage = dig?.plage ?? {};
+  const borne = g => {
+    const d = dit(g);
+    if (d) return { heure: d, source: 'dit' };
+    const mes = g === 'lever' ? poste.reveil : poste.coucher;
+    if (mes) return { heure: mes, source: 'mesure' };
+    const est = g === 'lever' ? plage.de : plage.a;
+    if (est) return { heure: est, source: 'estime' };
+    return { heure: null, source: null };
+  };
+  const tp = dig?.temps_par_contexte_s ?? {};
+  let appS = 0, webS = 0; const apps = [], webs = [];
+  for (const [k, v] of Object.entries(tp)) {
+    if (typeof v !== 'number' || v <= 0) continue;
+    if (k.startsWith('web:')) { webS += v; webs.push([k.slice(4), v]); }
+    else { appS += v; apps.push([k, v]); }
+  }
+  const top = arr => arr.sort((a, b) => b[1] - a[1]).slice(0, 3)
+                        .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }));
+  const ecran = (appS || webS) ? {
+    app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
+    top_app: top(apps), top_web: top(webs)
+  } : null;
+  const lever = borne('lever'), coucher = borne('coucher');
+  if (!lever.heure && !coucher.heure && poste.sommeil_h == null && !ecran) return null;
+  return { lever, coucher, sommeil_h: poste.sommeil_h ?? null, ecran };
+}
+
+/**
  * SPEC 4.1 - Le plancher.
  * Sous le seuil, AUCUNE statistique n'est calculee ni renvoyee. Uniquement les
  * entrees passees, brutes. La regle est appliquee ici, pas dans l'interface :
@@ -925,8 +974,19 @@ export const routes = {
    */
   'GET /api/mirror': ({ query, userId }) => {
     const s = getSettings(userId);
-    const { series: ser, byDate, index, rows, textCount } = series(userId);
     const date = query.date ?? today();
+    /*
+     * LA NUIT DU JOUR REGARDÉ EST RANGÉE AVANT D'ÊTRE LUE.
+     *
+     * Une borne peut arriver bien après les messages qu'elle range (« couché
+     * 06:10 » posé à 6 h du matin, ou poussé par Machi Tool le lendemain), et
+     * `reprendreLesNuits` ne repasse qu'au démarrage. Sans ce filet, on ouvre la
+     * journée et on la voit encore mal rangée. `recalerLaNuit` est borné (jamais
+     * plus d'un jour en arrière, seulement les messages d'avant une coupure
+     * CONNUE) et idempotent : un jour déjà rangé n'y bouge rien.
+     */
+    recalerLaNuit(date, userId);
+    const { series: ser, byDate, index, rows, textCount } = series(userId);
     const cur = byDate.get(date) ?? null;
     const entry = getEntry(date, userId);
     const note = entry?.note ?? null;
@@ -1088,6 +1148,10 @@ export const routes = {
               * ce dont personne ne se souvient en relisant.
               */
              mesures: mesuresSituees(date, userId),
+             // Le poste en leger : lever, coucher, sommeil, temps d'ecran. Ce
+             // qui tient la colonne « ce qui a ete mesure » ; le detail se
+             // replie derriere.
+             poste: posteDuJour(date, userId),
              // Les notes apportees passent le plancher, pour la meme raison que
              // les reperes : ce sont des faits que la personne a poses
              // elle-meme, pas une statistique calculee sur elle.
@@ -1586,6 +1650,21 @@ export const routes = {
      session : elle est appelee par un programme, pas par un navigateur. */
   'POST /api/passerelle/cle': ({ userId }) => ({ cle: poserCle(userId) }),
   'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
+
+  /*
+   * DE QUOI ALLER CHERCHER LE DIGEST DIRECTEMENT SUR LA MACHINE.
+   *
+   * Le navigateur, qui tourne sur le meme poste que Machi Tool, peut tirer le
+   * digest du jour de 127.0.0.1 quand on ouvre une journee encore ouverte --
+   * sans attendre le prochain envoi automatique. Il lui faut pour cela la MEME
+   * cle que la passerelle (celle que Machi Tool presente deja), et l'adresse
+   * locale. Cette route est DERRIERE le verrou : seule la personne connectee, sur
+   * sa propre machine, recoit sa propre cle. Elle ne sort jamais autrement.
+   */
+  'GET /api/passerelle/local': ({ userId }) => ({
+    cle: getSettings(userId).passerelleCle || '',
+    url: 'http://127.0.0.1:7373'
+  }),
 
   /* ---------- quantified self : ce qui est arrive, et par quel tuyau ----------
    *
