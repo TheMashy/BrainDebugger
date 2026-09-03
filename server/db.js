@@ -732,6 +732,22 @@ export function recentUserMessages(limit = 40, userId = OWNER) {
 }
 
 /**
+ * TOUT CE QUE LA PERSONNE A ÉCRIT, pour une recherche plein texte.
+ *
+ * Ce qu'ELLE a écrit, jamais les réponses du compagnon : chercher « suicide »
+ * ne doit pas ressortir les fois où la machine a prononcé le mot. Les notes
+ * rangées d'ailleurs (`rangee = 1`) comptent — elle les a écrites aussi. Du
+ * plus récent au plus ancien, comme on relit.
+ */
+export function tousMessagesUtilisateur(userId = OWNER) {
+  return db.prepare(
+    "SELECT ts, date, text, COALESCE(rangee, 0) rangee FROM messages " +
+    "WHERE user_id = ? AND role = 'user' AND text IS NOT NULL AND TRIM(text) <> '' " +
+    "ORDER BY ts DESC"
+  ).all(userId);
+}
+
+/**
  * Suppression d'une journee : la note, le texte, et les messages qui l'ont
  * produit. Les trois ensemble, sinon rebuildEntryText la ferait renaitre au
  * prochain message.

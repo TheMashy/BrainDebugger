@@ -10,7 +10,7 @@ import {
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
   toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro,
   mesuresEntre, poserMesure,
-  redaterMessages, rebuildEntryText
+  redaterMessages, rebuildEntryText, tousMessagesUtilisateur
 } from './db.js';
 import { usageFor, record as recordUsage, serieUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -616,6 +616,47 @@ export function posteDuJour(date, userId = OWNER) {
   return { lever, coucher, sommeil_h: poste.sommeil_h ?? null, ecran };
 }
 
+/* Découpe un texte en phrases, pour situer une occurrence à l'endroit précis
+   où elle a été écrite plutôt que dans six cents mots. */
+const enPhrases = t => String(t).split(/(?<=[.!?…])\s+|\n+/).map(p => p.trim()).filter(Boolean);
+/* Sans accent ni casse : « fatigue » trouve « fatigué ». Même aplatissement des
+   deux côtés, pour ne jamais rater un mot à cause d'un accent. */
+const normCherche = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const MAX_RESULTATS = 500;
+
+/**
+ * TOUTES LES INSTANCES D'UN MOT OU D'UNE PHRASE, PAR JOUR ET PAR HEURE.
+ *
+ * On rend la phrase qui porte le terme (pas le message entier), avec le jour et
+ * l'horodatage — de quoi répondre à « quand ai-je parlé de ça, et combien de
+ * fois ». Groupé par journée, la plus récente d'abord ; dans chaque journée,
+ * dans l'ordre où c'est arrivé. Plafonné, parce qu'un terme courant sortirait
+ * la moitié du journal et la recherche n'est plus une recherche.
+ */
+export function chercher(terme, userId = OWNER) {
+  const brut = String(terme ?? '').trim();
+  const q = normCherche(brut).replace(/\s+/g, ' ').trim();
+  if (q.length < 2) return { q: brut, total: 0, jours: [], court: true };
+
+  const parJour = new Map();
+  let total = 0, tronque = false;
+  for (const r of tousMessagesUtilisateur(userId)) {
+    for (const p of enPhrases(r.text)) {
+      if (!normCherche(p).includes(q)) continue;
+      if (total >= MAX_RESULTATS) { tronque = true; break; }
+      const e = parJour.get(r.date) ?? [];
+      e.push({ ts: r.ts, extrait: p.slice(0, 400), rangee: !!r.rangee });
+      parJour.set(r.date, e);
+      total++;
+    }
+    if (tronque) break;
+  }
+  const jours = [...parJour.entries()]
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([date, hits]) => ({ date, hits: hits.sort((x, y) => (x.ts < y.ts ? -1 : 1)) }));
+  return { q: brut, total, jours, tronque };
+}
+
 /**
  * SPEC 4.1 - Le plancher.
  * Sous le seuil, AUCUNE statistique n'est calculee ni renvoyee. Uniquement les
@@ -975,6 +1016,20 @@ export const routes = {
     }
     return grille;
   },
+
+  /**
+   * CHERCHER UN MOT OU UNE PHRASE DANS TOUT CE QU'ON A ÉCRIT.
+   *
+   * Pas une carte de proximité (ça, c'est « ma carte »), pas un résumé : le
+   * texte EXACT, partout où on l'a tapé. Chaque instance porte SON jour et SON
+   * heure — « quand ai-je parlé de ça, et combien de fois ». On rend la phrase
+   * qui contient le terme, pas le message entier : c'est l'endroit précis qu'on
+   * cherche, pas six cents mots autour.
+   *
+   * Insensible aux accents et à la casse (« fatigue » trouve « fatigué »). On
+   * cherche ce que la PERSONNE a écrit, jamais les réponses du compagnon.
+   */
+  'GET /api/chercher': ({ query, userId }) => chercher(query.q ?? '', userId),
 
   /** Serie compacte pour les courbes : tableaux paralleles, ~5x plus leger que des objets. */
   'GET /api/series': ({ userId }) => {
