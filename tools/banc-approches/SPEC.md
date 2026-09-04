@@ -111,3 +111,28 @@ Seuils : fixés **une fois** sur un jeu de calibration (profil témoin + un prof
 - `resultats.json` : par méthode × profil × manquants × T : rappel/précision/F1 global et par type, fausses découvertes sur le témoin, et l'écart-type entre patients.
 - `exemples.json` : pour chaque profil, UN patient (T=180, 15 % manquants) avec sa série complète et les trouvailles de chaque méthode — pour dessiner ce que chaque carte rend.
 - Le rapport console : un tableau méthodes × profils (F1), puis le classement.
+
+---
+
+# Journal des versions — v1 (ce que les critiques ont changé)
+
+Trois lecteurs indépendants (fidélité clinique, identifiabilité/équité, réalisme des données) ont critiqué la v0. Ce qui a été retenu, et où ça vit :
+
+**Données (§1)**
+- Convention écrite une fois : `variable(t)` = journée civile t, `sommeil_h(t)` = nuit t−1→t, `coucher(t)` = le soir de t. Les lags plantés en découlent (`generateur.mjs`).
+- Une 13ᵉ variable `surcharge` (surcharge sensorielle), présente chez tous, plus fréquente en profil autistique et TDAH.
+- Manquants **non aléatoires** : logistique sur l'humeur latente, épisodes, veille de week-end, décrochage d'adhésion, persistance (rafales, plus longues en TDAH), taux ×0,5 en profil autistique ; un trou long (vacances) ; et un niveau de contrôle 35 % **MCAR** pour chiffrer ce que coûte le mécanisme.
+- Le coucher exposé aux méthodes est celui du **poste** : coucher latent − latence d'endormissement (lognormale, +30 min les soirs d'anxio, ×0,5 en manie), null quand pas d'activité le soir (plus souvent les soirs sociaux). Capteurs troués : nuits manquantes en rafales, digest absent 5 % des jours (×2 le week-end) → `ecran_min` et `coucher` null ce jour-là.
+- Observation des déclaratives : style de réponse k ∈ [0,7 ; 1,2], dérive ±1 point sur 180 j et marche ±1 (p 0,3), `substance` sous-déclarée (sensibilité 0,7), `absolus` binomial sur un nombre de mots lognormal (court en dépression, long les jours d'anxio), 5 % de blocs datés au lendemain, 2,5 % de cases humeur↔énergie échangées. La vérité est définie sur le **latent**.
+
+**Profils (§2)** — lignes de base pour les 13 variables dans `profils.mjs` ; rythme hebdomadaire chez tous sauf le profil autistique (amplitude ×0,3 en épisode) ; dépression : sous-type sommeil par patient (réveil précoce / hypersomnie), φ 0,65, paliers −1,5 ; bipolarité : rampe de sommeil 4 nuits avant la manie, coucher +2,5 h et labilité en manie, dépression enchaînée dans 40 % des cas, `ews` porté aussi par le sommeil ; TDAH : chaîne hyperfocus (écran ≥ 700 → coucher tard → nuit courte → énergie basse), rattrapage du week-end, réactivité immédiate au déclencheur ; profil autistique : surcharge → énergie ↓ et anxio, retrait social 2 jours, coût social lissé sur J+1/J+2, pas de bonus week-end ; déréalisation : p conditionnelle chiffrée, cannabis de la veille, persistance, `dereel → anxio`, humeur 4 ± 0,3 les jours dereel ; anxiété : anxio spontanée, anticipation (nuit courte avant l'événement), `absolus` à r ≈ −0,25 pour tester la spécificité. Épisodes garantis à T = 60 (un début dans [25, 40]).
+
+**Notation (§3)**
+- Vérité **émise par le générateur, par patient** : dates réelles, occurrences réelles des chaînes après masquage. Un **oracle** (`oracle.mjs`) qui connaît la forme de chaque item l'applique à l'observé ; l'item non retrouvé est **neutre** (ni récompensé ni puni, hors dénominateur).
+- Discrétisation partagée (`etats.mjs`) : états d'humeur/énergie **relatifs** au patient, part bornée à 25 % (égalités des entiers), capteurs absolus ; fenêtre de chaîne = 2 jours ; une chaîne plantée n'est identifiable que si réalisée ≥ 3 fois **et** distinguable (lift ≥ 1,5 à chaque maillon).
+- Appariement **un-à-un** par type (glouton par crédit) ; abstention sur une dimension = 0,5 ; assertion fausse = 0 + faux positif ; arête : lag planté ±1 ; épisode : ±5 j, la fin (rémission) est neutre ; alertes **causales**, dans [t0−14, t0−1], celles pendant l'épisode neutres, les autres payées ; `coupling_sign` : signe par régime (recouvrement ≥ 50 %) ou arête globale négative créditée 0,5 ; `language` : Spearman avec l'humeur, ou avec les jours dereel.
+- 0/0 = non défini, exclu ; F1 **micro** par cellule ; IC 95 % par bootstrap sur les patients ; différences appariées composite − contrôle.
+
+**Méthodes (§4)** — chaque module exporte `TYPES` (ce qu'il rend) ; la comparaison principale est **par type**. Contrôles : `union_toutes`, `var_pheno_langage`, `frise_chaine`, `frise_ews`, `chaine_ews`, et `meilleure_par_type` (sélection oracle). Seuils fixés une fois (`calibrer.mjs`) sur le témoin **et** un profil de calibration distinct `calib_mixte` (riche en événements, jamais testé), à la cible d'un faux item / 100 jours par type (0,5 pour chaînes et épisodes) ; classes par quantiles q05/q95 du témoin ; `calibration.json` porte l'empreinte du générateur et le banc refuse de tourner si elle a changé. Familles de graines : `calib` ≠ `test-1..3`.
+
+**Sorties (§5)** — `resultats.json` (cellules × méthodes, par type, IC, propre/observé, fausses découvertes sur le témoin), `exemples.json` (un patient par profil avec les trouvailles de chaque méthode), `scores_patients.json`. Le rapport console imprime les tableaux, le classement, le par-type, et la composite contre ses contrôles.
