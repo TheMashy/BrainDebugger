@@ -413,8 +413,15 @@ function decouperEnBlocs(lues) {
 /**
  * DES BLOCS AUX SUJETS. `zone` présente => on attache une heure discrète, prise
  * sur le premier message du bloc, comme le fait le fil des moments à gauche.
+ *
+ * `min` est le nombre de blocs en dessous duquel on ne rend rien. Il vaut 2 pour
+ * un texte collé d'un seul tenant (une icône seule sur tout un pavé serait une
+ * étiquette) ; il vaut 1 quand on découpe des MESSAGES horodatés : là chaque
+ * bloc porte l'heure de son premier message, exactement comme un moment à
+ * gauche, et un unique bloc n'est plus une étiquette mais le repère de la
+ * journée d'aujourd'hui — celui qui manquait au jour en cours.
  */
-function blocsEnSujets(fondus, ref, zone = null) {
+function blocsEnSujets(fondus, ref, zone = null, min = 2) {
   const sujets = fondus.map(b => {
     const t = b.phrases.map(x => x.texte).join(' ');
     const penche = pencheDe(t);
@@ -448,15 +455,33 @@ function blocsEnSujets(fondus, ref, zone = null) {
      */
     const ids = [...new Set(b.phrases.map(x => x.id).filter(x => x != null))];
     if (ids.length) s.ids = ids;
+    /*
+     * LES MORCEAUX DU BLOC, MESSAGE PAR MESSAGE.
+     *
+     * Un bloc peut recoller plusieurs messages sur le même sujet. Cliquer un
+     * moment à gauche désigne des messages PRÉCIS : pour n'allumer que la phrase
+     * qui les porte, et non tout le pavé, la colonne de droite a besoin de savoir
+     * quel bout de texte vient de quel message. On regroupe donc les phrases
+     * consécutives par identifiant, sans jamais toucher au texte ni à son ordre.
+     */
+    const morceaux = [];
+    for (const ph of b.phrases) {
+      const id = ph.id ?? null;
+      const dernier = morceaux[morceaux.length - 1];
+      if (dernier && dernier.id === id) dernier.texte += ' ' + ph.texte;
+      else morceaux.push({ id, texte: ph.texte });
+    }
+    if (morceaux.some(m => m.id != null)) s.morceaux = morceaux;
     return s;
   });
 
   /*
-   * UN SEUL SUJET N'EST PAS UN DECOUPAGE : c'est le texte avec une icône
-   * au-dessus, et l'icône serait alors une étiquette posée sur toute une
-   * journée. On rend une liste vide, et la page affiche le texte tel quel.
+   * EN DESSOUS DE `min`, ON NE REND RIEN. Pour un texte collé (min = 2), un seul
+   * bloc serait une icône posée sur toute une journée — une étiquette. Pour des
+   * messages horodatés (min = 1), un seul bloc porte son heure et son icône comme
+   * un moment : c'est le repère du jour, pas une étiquette.
    */
-  if (sujets.length < 2) return [];
+  if (sujets.length < min) return [];
   return sujets.slice(0, MAX_SUJETS);
 }
 
@@ -487,7 +512,9 @@ export function sujetsDuJour(date, userId = OWNER, { reference = null, zone = zo
   for (const m of msgs)
     for (const p of phrasesDe(m.text))
       lues.push({ texte: p, theme: themeOuNull(p), penche: pencheDe(p), ts: m.ts, id: m.id });
-  return blocsEnSujets(decouperEnBlocs(lues), ref, zone);
+  // min = 1 : à partir de messages horodatés, même un seul bloc mérite son heure
+  // et son icône — c'est ce qui rend le jour en cours marqué comme les autres.
+  return blocsEnSujets(decouperEnBlocs(lues), ref, zone, 1);
 }
 
 /**

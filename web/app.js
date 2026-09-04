@@ -3873,7 +3873,7 @@ function estimeMarkup(e) {
  */
 function montrerLePassage(moment) {
   const dejaLa = moment?.classList.contains('vise');
-  for (const el of document.querySelectorAll('.jmoment.vise, .jsujet.vise, .dayText.vise'))
+  for (const el of document.querySelectorAll('.jmoment.vise, .jsujet.vise, .jsphr.vise, .dayText.vise'))
     el.classList.remove('vise');
   if (!moment || dejaLa) return;
 
@@ -3881,9 +3881,20 @@ function montrerLePassage(moment) {
   if (!ids.size) return;
   moment.classList.add('vise');
 
+  /*
+   * LA PHRASE, PAS LE PAVÉ. Un moment désigne des messages précis ; on allume le
+   * MORCEAU de texte qui vient de ces messages (`.jsphr[data-id]`), pas tout le
+   * bloc. Sans morceaux (texte importé d'un seul tenant), on retombe sur le bloc
+   * entier — mieux vaut le pavé que rien.
+   */
   const vus = [];
-  for (const s of document.querySelectorAll('.jsujet[data-ids]')) {
-    if ((s.dataset.ids ?? '').split(',').some(x => ids.has(x))) { s.classList.add('vise'); vus.push(s); }
+  for (const el of document.querySelectorAll('.jsphr[data-id]')) {
+    if (ids.has(el.dataset.id)) { el.classList.add('vise'); vus.push(el); }
+  }
+  if (!vus.length) {
+    for (const s of document.querySelectorAll('.jsujet[data-ids]')) {
+      if ((s.dataset.ids ?? '').split(',').some(x => ids.has(x))) { s.classList.add('vise'); vus.push(s); }
+    }
   }
   /*
    * Une journée d'un seul tenant n'a pas de passages découpés : il n'y a qu'un
@@ -4046,6 +4057,34 @@ function phraseLien(l) {
  * les cinq plus regardés de chaque. Pas de « source », pas de repli de mesures,
  * pas d'inconnu affiché en « — » : ce qu'on n'a pas, on ne le dit pas.
  */
+/*
+ * À QUELLE FAMILLE APPARTIENT UNE APPLICATION.
+ *
+ * Un petit signe devant chaque nom : est-ce qu'on était avec des gens (social),
+ * en train de jouer (jeu), en train de faire (outil) — ou est-ce qu'on ne sait
+ * pas (inconnu). On ne devine que ce qu'on reconnaît ; le reste reste « inconnu »
+ * plutôt que de se faire passer pour rangé. Les jeux Steam qu'on ne connaît pas
+ * par leur nom tombent dans « inconnu » : c'est honnête, et l'application locale
+ * saura les nommer mieux avec le temps.
+ */
+const ICO_CAT = { social: 'gens', jeu: 'jeu', outil: 'code', inconnu: 'point' };
+const NOM_CAT = { social: 'social', jeu: 'jeu', outil: 'outil', inconnu: 'inconnu' };
+const CAT_APPS = {
+  social: ['discord', 'slack', 'messenger', 'whatsapp', 'telegram', 'teams', 'signal',
+           'instagram', 'twitter', 'facebook', 'snapchat', 'reddit', 'tiktok', 'skype', 'zoom'],
+  jeu:    ['steam', 'bodycam', 'epicgames', 'riotclient', 'league', 'valorant', 'minecraft',
+           'csgo', 'cs2', 'dota', 'osu', 'battle.net', 'origin', 'gog', 'game'],
+  outil:  ['code', 'devenv', 'pycharm', 'sublime', 'terminal', 'powershell', 'cmd', 'wt',
+           'explorer', 'obs', 'photoshop', 'premiere', 'blender', 'machitool', 'claude',
+           'notion', 'excel', 'word', 'figma', 'vlc', 'mpc', 'lightshot']
+};
+function categorieApp(nom) {
+  const n = String(nom || '').toLowerCase();
+  for (const [cat, liste] of Object.entries(CAT_APPS))
+    if (liste.some(x => n.includes(x))) return cat;
+  return 'inconnu';
+}
+
 function posteMarkup(p, synchro) {
   p = p || {};
   const heure = h => `<span class="mono">${esc(h)}</span>`;
@@ -4056,19 +4095,33 @@ function posteMarkup(p, synchro) {
     : '';
 
   // Le sommeil, en un épisode — SEULEMENT si on a dormi (durée connue) :
-  // couché HH:MM, puis la durée. Sinon on n'en parle pas.
+  // couché HH:MM, puis la durée. Sinon, si on connaît quand même une heure de
+  // COUCHER (dite, ou l'extinction du poste), on la montre seule : « je n'ai
+  // aucun temps de coucher » ne doit pas rester vrai dès qu'on sait l'heure.
   const aDormi = p.sommeil_h != null;
   const sommeil = aDormi
     ? `<span class="jpost lu" title="sommeil (extinction → réveil du poste)">${ico('lune', 13)}${
         p.dormi_de ? heure(p.dormi_de) + ' · ' : ''}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span>`
-    : '';
+    : (p.coucher?.heure || p.dormi_de)
+      ? `<span class="jpost" title="couché">${ico('lune', 13)}${heure(p.coucher?.heure || p.dormi_de)}</span>`
+      : '';
 
-  // Le temps d'écran : appli / web, avec les 5 plus regardés de chaque.
-  const colonne = (dessin, mot, min, top) => `<div class="jpecol">
-    <div class="jpetete">${ico(dessin, 12)}${heure(min + ' min')} <span class="faint">${mot}</span></div>
-    ${top?.length ? `<ol class="jpetop">${top.map(x =>
-      `<li><span class="jpenom">${esc(x.nom)}</span><span class="mono faint">${x.min} min</span></li>`).join('')}</ol>` : ''}
-  </div>`;
+  // Le temps d'écran : appli / web. La colonne se REPLIE — on ne voit que le
+  // total (le gras) ; cliquer « appli » ou « web » déplie les cinq plus regardés,
+  // chacun précédé du signe de sa famille (social, jeu, outil, inconnu).
+  const colonne = (dessin, mot, min, top) => {
+    const tete = `<span class="jpetete">${ico(dessin, 12)}${heure(min + ' min')} <span class="faint">${mot}</span></span>`;
+    if (!top?.length) return `<div class="jpecol jpevide">${tete}</div>`;
+    const item = x => {
+      const c = categorieApp(x.nom);
+      return `<li><span class="jpecat" data-tip="${esc(NOM_CAT[c])}">${ico(ICO_CAT[c], 12)}</span>`
+           + `<span class="jpenom">${esc(x.nom)}</span><span class="mono faint">${x.min} min</span></li>`;
+    };
+    return `<details class="jpecol">
+      <summary>${tete}</summary>
+      <ol class="jpetop">${top.map(item).join('')}</ol>
+    </details>`;
+  };
   const ecran = p.ecran ? `<div class="jpecran">
     ${colonne('oeil', 'appli', p.ecran.app_min, p.ecran.top_app)}
     ${colonne('globe', 'web', p.ecran.web_min, p.ecran.top_web)}
@@ -4172,13 +4225,20 @@ function sujetsMarkup(sujets) {
      note : le chiffre du passage se lit déjà dans les moments à gauche et dans
      la note de la journée. L'icône, plus grande, porte le sujet ; la survoler en
      donne le nom — c'est tout ce qu'on vient chercher ici. */
+  // Le texte du bloc, découpé par MESSAGE quand on le sait : chaque morceau porte
+  // son identifiant, pour que cliquer un moment à gauche n'allume que la phrase
+  // qui le porte et non tout le pavé. Sans morceaux (texte importé d'un bloc), on
+  // retombe sur le texte tel quel.
+  const corps = s => s.morceaux?.length
+    ? s.morceaux.map(m => `<span class="jsphr"${m.id != null ? ` data-id="${esc(m.id)}"` : ''}>${esc(m.texte)}</span>`).join(' ')
+    : esc(s.texte);
   return `<div class="jsujets">${sujets.map(s => `
     <div class="jsujet"${s.ids?.length ? ` data-ids="${esc(s.ids.join(','))}"` : ''}>
       <span class="jsmarque">
         <span class="jsico" data-tip="${esc(NOMS[s.theme] ?? s.theme)}">${icone(s.theme, 20)}</span>
         ${s.heure ? `<span class="jsheure mono">${esc(s.heure)}</span>` : ''}
       </span>
-      <p class="serif jstexte">${esc(s.texte)}</p>
+      <p class="serif jstexte">${corps(s)}</p>
     </div>`).join('')}</div>`;
 }
 
