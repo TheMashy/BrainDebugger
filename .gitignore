@@ -20,3 +20,5 @@ tools/banc-carte/planches/
 tools/banc-carte/synth/
 tools/banc-carte/systeme.txt
 tools/banc-carte/lectures.json
+tools/banc-approches/scores_patients.json
+tools/banc-approches/banc-rapide.log

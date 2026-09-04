@@ -1,0 +1,163 @@
+# Le banc des six cartes — rapport
+
+Question : parmi six façons de cartographier un état mental, laquelle retrouve le plus de fonctionnements plantés dans des données synthétiques réalistes ?
+Réponse courte : **pas celle que l'auteur proposait.**
+
+- 7 profils (témoin, dépression, anxiété, bipolarité, TDAH, profil autistique, déréalisation), 90 patients par cellule (30 × 3 graines), 56 cellules (4 niveaux de manquants × 2 longueurs), 13 méthodes et unions, 9 types de fonctionnement.
+- Chaque méthode est aveugle au profil et à la vérité ; un oracle marque neutre ce qui n'était pas retrouvable ; le score paie l'invention (appariement un-à-un, abstention 0,5, erreur 0 + faux positif) ; seuils calibrés une fois, hors test, à un faux item pour 100 jours par type.
+- Reproduire : `node calibrer.mjs` puis `node banc.mjs` (le banc refuse de tourner si le générateur a changé depuis la calibration). Page de synthèse : artefact « Le banc des six cartes ».
+
+## Résultats (extraits du journal `banc-complet.log`)
+
+    ═══ F1 (×100) — T=180, 15 % manquants (MNAR) ═══
+    méthode              depressio   anxiete bipolarit      tdah   autisme derealisa   moyenne
+    var_pheno_langage           52        40        43        57        35        37        44
+    meilleure_par_type          47        31        32        44        30        29        36
+    pheno                       20        26        51        50        33        20        34
+    union_toutes                42        30        31        40        26        30        33
+    frise                       37        20        42        42        28        17        31
+    frise_chaine                36        21        31        38        29        14        28
+    frise_ews                   34        16        40        35        21        14        27
+    composite                   33        17        31        32        23        12        25
+    var                         29        35         1        28        25        16        22
+    langage                     23         0         5         0         0        21         8
+    chaine_ews                  22         6         7         4        10         0         8
+    cooccurrence                 1        14         0         2         7        19         7
+    ews                         22         0        10         5         0         0         6
+    chaine                       0         8         0         0        14         0         4
+    
+    ═══ F1 — T=60, 15 % manquants ═══
+    méthode              depressio   anxiete bipolarit      tdah   autisme derealisa   moyenne
+    var_pheno_langage           48        31        25        52        32        32        37
+    meilleure_par_type          48        28        22        46        31        28        34
+    frise                       41        17        37        49        41        12        33
+    pheno                       12        23        47        51        46        15        32
+    frise_ews                   42        16        37        47        38        11        32
+    union_toutes                44        27        20        43        25        27        31
+    frise_chaine                41        20        28        46        39        11        31
+    composite                   42        18        29        43        36        10        30
+    var                         29        25         3        28        16        17        20
+    langage                     33         0         3         0         0        29        11
+    chaine_ews                  34         6         4        11         7         0        10
+    ews                         34         0         5        12         0         0         9
+    cooccurrence                 4        14         3         8         3        16         8
+    chaine                       0         7         0         0         9         0         3
+    
+    ═══ F1 — T=180, 35 % manquants MNAR ═══
+    méthode              depressio   anxiete bipolarit      tdah   autisme derealisa   moyenne
+    var_pheno_langage           58        39        39        58        33        39        44
+    pheno                       25        28        48        51        35        23        35
+    meilleure_par_type          50        29        26        44        29        28        34
+    union_toutes                45        29        25        41        25        29        32
+    frise                       39        22        38        41        29        19        31
+    frise_chaine                38        20        26        37        30        15        28
+    frise_ews                   35        17        35        33        22        15        26
+    composite                   34        16        26        31        25        12        24
+    var                         32        32         0        28        18        16        21
+    langage                     27         0         4         0         0        22         9
+    chaine_ews                  23         4         5         4        11         0         8
+    cooccurrence                 2        15         0         5         6        16         7
+    ews                         24         0         8         5         0         0         6
+    chaine                       0         6         0         0        15         0         3
+    
+    ═══ F1 — T=180, 35 % manquants MCAR (contrôle du mécanisme) ═══
+    méthode              depressio   anxiete bipolarit      tdah   autisme derealisa   moyenne
+    var_pheno_langage           55        40        46        60        34        41        46
+    pheno                       24        27        57        50        35        24        36
+    meilleure_par_type          48        31        32        45        28        30        36
+    union_toutes                44        30        28        42        24        30        33
+    frise                       40        20        44        41        29        16        32
+    frise_chaine                39        22        32        38        28        13        29
+    frise_ews                   37        15        39        33        22        13        27
+    composite                   35        18        30        31        23        11        25
+    var                         29        33         0        30        20        16        22
+    langage                     25         0         4         0         0        25         9
+    chaine_ews                  22         7         3         6         9         0         8
+    cooccurrence                 1        13         0         3         5        19         7
+    ews                         23         0         5         7         0         0         6
+    chaine                       0        10         0         0        12         0         4
+    
+    ═══ PLAFOND : F1 sur la série propre — T=180 ═══
+    méthode              depressio   anxiete bipolarit      tdah   autisme derealisa   moyenne
+    pheno                       22        26        60        50        29        24        35
+    var_pheno_langage           42        29        39        42        24        33        35
+    meilleure_par_type          39        31        31        38        27        34        33
+    frise                       38        20        47        46        25        20        33
+    frise_chaine                36        24        36        43        30        20        31
+    union_toutes                37        28        30        35        23        31        31
+    frise_ews                   35        16        46        38        20        17        29
+    composite                   34        20        36        36        25        16        28
+    var                         27        29         2        24        20        20        20
+    chaine_ews                  21         8         8         3        12         0         8
+    langage                     22         0         7         0         0        17         8
+    cooccurrence                 1        15         0         2         6        16         7
+    ews                         22         0        11         3         0         0         6
+    chaine                       0        11         0         0        16         0         4
+    
+    ═══ Classement global (moyenne des F1 sur toutes les cellules, hors témoin) ± écart-type entre graines ═══
+      var_pheno_langage      40  ±    2
+      meilleure_par_type     35  ±    —
+      pheno                  33  ±    2
+      frise                  32  ±    2
+      union_toutes           32  ±    2
+      frise_chaine           30  ±    2
+      frise_ews              29  ±    2
+      composite              27  ±    2
+      var                    21  ±    2
+      langage                10  ±    1
+      chaine_ews              9  ±    1
+      cooccurrence            8  ±    1
+      ews                     7  ±    1
+      chaine                  3  ±    1
+    
+    ═══ Par TYPE de fonctionnement — T=180, 15 % : la meilleure méthode simple, son rappel, et combien d’items l’oracle jugeait identifiables ═══
+      edge           plantés 1890  identifiables 1507 (80 %)   meilleure : var           rappel   24  précision   47  F1   32
+      chain          plantés  450  identifiables  132 (29 %)   meilleure : chaine        rappel   59  précision    7  F1   12
+      episode        plantés  310  identifiables  239 (77 %)   meilleure : pheno         rappel   57  précision   67  F1   62
+      ews            plantés  400  identifiables  171 (43 %)   meilleure : ews           rappel   26  précision    4  F1    7
+      rhythm         plantés  450  identifiables  379 (84 %)   meilleure : frise         rappel   92  précision   96  F1   94
+      regularity     plantés  180  identifiables  179 (99 %)   meilleure : frise         rappel  100  précision   47  F1   64
+      autocorr       plantés  180  identifiables  105 (58 %)   meilleure : var           rappel  100  précision   40  F1   58
+      coupling_sign  plantés   90  identifiables   10 (11 %)   meilleure : frise         rappel  100  précision    1  F1    3
+      language       plantés  180  identifiables  179 (99 %)   meilleure : langage       rappel   93  précision   75  F1   83
+    
+    ═══ Fausses découvertes sur le TÉMOIN — items faux pour 100 jours (T=180, 15 %) ═══
+    méthode                  edge    chain  episode      ews   rhythm regulari autocorr coupling language   fausses alertes /100 j hors épisode
+    cooccurrence             0.17     0.00     0.00     0.00     0.00     0.00     0.00     0.00     0.00   0.00
+    var                      0.12     0.00     0.00     0.00     0.00     0.00     0.02     0.00     0.00   0.00
+    ews                      0.00     0.00     0.00     1.09     0.00     0.00     0.02     0.00     0.00   1.09
+    chaine                   0.00     0.04     0.00     0.00     0.00     0.00     0.00     0.00     0.00   0.00
+    frise                    0.00     0.00     0.25     0.00     0.00     0.01     0.02     0.41     0.00   0.00
+    pheno                    0.00     0.00     0.02     0.00     0.00     0.01     0.00     0.00     0.00   0.00
+    langage                  0.00     0.00     0.00     0.86     0.00     0.00     0.00     0.00     0.00   0.86
+    composite                0.00     0.04     0.25     1.06     0.00     0.01     0.02     0.41     0.00   1.06
+    union_toutes             0.22     0.04     0.28     1.88     0.00     0.01     0.02     0.41     0.00   1.88
+    var_pheno_langage        0.12     0.00     0.02     0.86     0.00     0.01     0.02     0.00     0.00   0.86
+    frise_chaine             0.00     0.04     0.25     0.00     0.00     0.01     0.02     0.41     0.00   0.00
+    frise_ews                0.00     0.00     0.25     1.06     0.00     0.01     0.02     0.41     0.00   1.06
+    chaine_ews               0.00     0.04     0.00     1.06     0.00     0.00     0.02     0.00     0.00   1.06
+    
+    ═══ La composite contre ses contrôles — T=180, 15 %, différence de F1 (IC 95 % bootstrap apparié sur les patients) ═══
+      composite − frise : depres -4 [-5,-3] · anxiet -3 [-4,-1] · bipola -10 [-12,-9] · tdah -10 [-11,-9] · autism -4 [-6,-3] · dereal -5 [-6,-5]
+      composite − meilleure_par_type : depres -13 · anxiet -14 · bipola -1 · tdah -12 · autism -7 · dereal -17
+      composite − union_toutes : depres -9 [-10,-7] · anxiet -13 [-14,-12] · bipola +1 [-0,1] · tdah -8 [-10,-6] · autism -3 [-4,-2] · dereal -18 [-20,-17]
+      composite − var_pheno_langage : depres -18 [-21,-16] · anxiet -23 [-25,-21] · bipola -12 [-15,-9] · tdah -25 [-28,-22] · autism -12 [-15,-9] · dereal -25 [-27,-23]
+    
+    écrit : resultats.json, exemples.json, scores_patients.json
+
+## Ce que ça dit
+
+1. **La carte simple la plus efficace est le phénotypage digital** (F1 34 en moyenne à 180 j / 15 % manquants ; 33 sur toutes les cellules), suivie de près par la frise (31 / 32). Les deux vivent des mêmes signaux : les épisodes que le **sommeil** révèle (bipolarité : rappel 57 %, précision 67 % pour le sommeil seul), la régularité du coucher, le rythme de la semaine. Le phénotypage ne lit pas l'humeur : il ne voit donc jamais un palier dépressif sans signature de sommeil (F1 20 sur la dépression contre 37 pour la frise), mais les manquants non aléatoires ne lui coûtent rien.
+2. **La meilleure combinaison est réseau temporel + phénotypage + langage** (F1 44, ± 2 entre graines), et elle bat la sélection oracle « meilleure simple par type » (36) : c'est de la complémentarité réelle — le VAR apporte des arêtes justes (précision 47 %), le phénotypage les épisodes et la régularité, le langage la sévérité (F1 83) — pas du volume, puisque l'« union de tout » (33) fait moins bien.
+3. **La composite proposée (frise + chaîne + signaux précoces) fait moins bien que la frise seule** sur les six profils (−3 à −10 points, IC 95 % excluant 0 partout). Les chaînes automatisées (précision 7 %) et les signaux précoces (précision 4 %) ajoutent surtout des fausses découvertes.
+4. **Ce que personne ne retrouve** : le signe sommeil↔humeur pendant la manie (11 % identifiable — un régime de 10–20 jours de valeurs entières plafonnées n'a pas de corrélation lisible) ; les chaînes (29 % identifiables : un enchaînement d'états fréquents n'est pas *surprenant* en nombre, même réel) ; les signaux précoces avec une précision utile (43 % identifiables, précision 4 %).
+5. **La densité compte moins que prévu** : à 60 jours, frise et phénotypage tiennent (33 / 32), le réseau temporel recule (20). Les manquants non aléatoires coûtent 1 à 3 points aux cartes qui lisent l'humeur ; le plafond « propre » n'est que quelques points plus haut — ce qui manque n'est pas le bruit, c'est l'identifiabilité de certains fonctionnements.
+6. **La co-occurrence (le graphe actuel réduit à sa structure) retrouve presque rien** (F1 7) : sans direction ni temps, elle ne peut créditer que 0,5 par arête, et son seuil calibré ne laisse passer que les couples les plus forts.
+
+## Ce que le banc ne dit pas
+
+Il juge des implémentations automatiques : l'analyse en chaîne d'un clinicien sur un épisode raconté n'est pas une fouille de séquences ; un réseau estimé à la main fait mieux qu'un ridge de routine. Il juge des profils simulés d'après la littérature, pas un journal réel. Le graphe actuel y est réduit à sa structure ; sa lecture du texte par modèle n'est pas simulée.
+
+## Ce que les critiques ont changé (v0 → v1)
+
+Voir le journal des versions à la fin de `SPEC.md`. En bref : vérité émise par le générateur et vérifiée par un oracle, appariement un-à-un avec « abstention 0,5 / erreur 0 + FP », alertes causales payées en précision, comparaison par type avec unions de contrôle et sélection oracle, calibration sur le témoin et un profil distinct, manquants non aléatoires, coucher du poste avec latence, rythme hebdomadaire partout, dérive d'échelle, rampe de sommeil avant la manie, surcharge sensorielle, cannabis et persistance en déréalisation. Les quatre sceptiques prévus n'ont pas pu tourner (limite de session) ; leurs lentilles — fuite, équité envers la composite, robustesse aux graines, correction du scorer — sont couvertes par le protocole (empreinte du générateur, unions de contrôle, trois graines avec écart-type, IC appariés), mais **pas** par une relecture indépendante du code : c'est la limite à garder en tête.
