@@ -605,7 +605,7 @@ export function posteDuJour(date, userId = OWNER) {
     if (k.startsWith('web:')) { webS += v; webs.push([k.slice(4), v]); }
     else { appS += v; apps.push([k, v]); }
   }
-  const top = arr => arr.sort((a, b) => b[1] - a[1]).slice(0, 3)
+  const top = arr => arr.sort((a, b) => b[1] - a[1]).slice(0, 5)
                         .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }));
   const ecran = (appS || webS) ? {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
@@ -613,7 +613,12 @@ export function posteDuJour(date, userId = OWNER) {
   } : null;
   const lever = borne('lever'), coucher = borne('coucher');
   if (!lever.heure && !coucher.heure && poste.sommeil_h == null && !ecran) return null;
-  return { lever, coucher, sommeil_h: poste.sommeil_h ?? null, ecran };
+  // `dormi_de` : l'heure de coucher de la nuit QU'ON A DORMIE (celle qui va avec
+  // `sommeil_h` et le réveil), lue telle quelle dans le digest. C'est ce qu'on
+  // montre en « couché » sur la vue minimaliste — le sommeil comme un épisode
+  // (couché -> levé -> durée), pas le coucher qui fermera CE soir.
+  return { lever, coucher, sommeil_h: poste.sommeil_h ?? null,
+           dormi_de: poste.coucher ?? null, ecran };
 }
 
 /* Découpe un texte en phrases, pour situer une occurrence à l'endroit précis
@@ -1241,6 +1246,13 @@ export const routes = {
              // qui tient la colonne « ce qui a ete mesure » ; le detail se
              // replie derriere.
              poste: posteDuJour(date, userId),
+             // L'etat de la synchro, en leger : depuis combien de temps le
+             // dernier envoi de Machi Tool a ete recu. La vue minimaliste le
+             // montre a cote du poste ; l'ecran choisit les mots.
+             synchro: (() => {
+               const ts = derniereSynchro(userId);
+               return { depuis_min: ts ? Math.max(0, Math.round((Date.now() - Date.parse(ts)) / 60000)) : null };
+             })(),
              // Les notes apportees passent le plancher, pour la meme raison que
              // les reperes : ce sont des faits que la personne a poses
              // elle-meme, pas une statistique calculee sur elle.

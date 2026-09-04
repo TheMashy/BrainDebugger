@@ -4038,38 +4038,55 @@ function phraseLien(l) {
  * une déduction pour une mesure. Le temps d'écran est fendu application / web ;
  * survoler l'un montre ses trois premiers.
  */
-function posteMarkup(p) {
-  if (!p) return '';
-  const SRC = { dit: 'tu l’as dit', mesure: 'mesuré par la machine',
-                estime: 'estimé d’après ta plage d’activité' };
-  const borne = (b, dessin, mot) => {
-    if (!b || !b.heure) return `<span class="jpost inconnu" title="${mot} — inconnu">${
-      ico(dessin, 13)}<span class="faint">—</span></span>`;
-    const est = b.source === 'estime';
-    return `<span class="jpost${est ? ' lu' : ''}" title="${mot} — ${SRC[b.source] ?? ''}">${
-      ico(dessin, 13)}<span class="mono">${est ? '≈' : ''}${esc(b.heure)}</span></span>`;
-  };
-  const listeTop = t => (t?.length ? t.map(x => `${x.nom} ${x.min} min`).join(' · ') : 'rien');
-  const ecranBloc = p.ecran ? `<div class="jpostligne">
-    <span class="jpost" data-tip="Applications : ${esc(listeTop(p.ecran.top_app))}">${
-      ico('oeil', 13)}<span class="mono">${p.ecran.app_min} min</span>
-      <span class="faint">appli</span></span>
-    <span class="jpost" data-tip="Onglets : ${esc(listeTop(p.ecran.top_web))}">${
-      ico('globe', 13)}<span class="mono">${p.ecran.web_min} min</span>
-      <span class="faint">web</span></span>
-  </div>` : '';
-  const som = p.sommeil_h != null
-    ? `<span class="jpost lu" title="sommeil estimé — extinction → démarrage du poste"><span class="mono">≈${
-        String(p.sommeil_h).replace('.', ',')} h</span><span class="faint">dormi</span></span>`
+/**
+ * CE QUI A ÉTÉ MESURÉ — VERSION MINIMALISTE.
+ *
+ * Rien de plus que : le lever ; le sommeil (couché → levé → durée) UNIQUEMENT
+ * s'il a eu lieu ; l'état de la synchro ; le temps d'écran, appli et web, avec
+ * les cinq plus regardés de chaque. Pas de « source », pas de repli de mesures,
+ * pas d'inconnu affiché en « — » : ce qu'on n'a pas, on ne le dit pas.
+ */
+function posteMarkup(p, synchro) {
+  p = p || {};
+  const heure = h => `<span class="mono">${esc(h)}</span>`;
+
+  // Le lever, si on le connaît.
+  const lever = p.lever?.heure
+    ? `<span class="jpost" title="levé">${ico('soleil', 13)}${heure(p.lever.heure)}</span>`
     : '';
+
+  // Le sommeil, en un épisode — SEULEMENT si on a dormi (durée connue) :
+  // couché HH:MM, puis la durée. Sinon on n'en parle pas.
+  const aDormi = p.sommeil_h != null;
+  const sommeil = aDormi
+    ? `<span class="jpost lu" title="sommeil (extinction → réveil du poste)">${ico('lune', 13)}${
+        p.dormi_de ? heure(p.dormi_de) + ' · ' : ''}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span>`
+    : '';
+
+  // Le temps d'écran : appli / web, avec les 5 plus regardés de chaque.
+  const colonne = (dessin, mot, min, top) => `<div class="jpecol">
+    <div class="jpetete">${ico(dessin, 12)}${heure(min + ' min')} <span class="faint">${mot}</span></div>
+    ${top?.length ? `<ol class="jpetop">${top.map(x =>
+      `<li><span class="jpenom">${esc(x.nom)}</span><span class="mono faint">${x.min} min</span></li>`).join('')}</ol>` : ''}
+  </div>`;
+  const ecran = p.ecran ? `<div class="jpecran">
+    ${colonne('oeil', 'appli', p.ecran.app_min, p.ecran.top_app)}
+    ${colonne('globe', 'web', p.ecran.web_min, p.ecran.top_web)}
+  </div>` : '';
+
+  // L'état de la synchro : réutilise le badge (à jour / rien reçu depuis… /
+  // Machi Tool ne répond pas), tenu à jour en direct via #qssyncbadge.
+  const sync = `<div class="jpsync"><span id="qssyncbadge">${qsSynchroMarkup(synchro ?? QS_DATA?.synchro ?? null)}</span></div>`;
+
+  if (!lever && !sommeil && !ecran) {
+    // Rien mesuré : on montre quand même la synchro (elle dit pourquoi).
+    return `<div class="jposte"><div class="k faint">Ce qui a été mesuré</div>${sync}</div>`;
+  }
   return `<div class="jposte">
     <div class="k faint">Ce qui a été mesuré</div>
-    <div class="jpostligne">
-      ${borne(p.lever, 'soleil', 'levé')}
-      ${borne(p.coucher, 'lune', 'couché')}
-      ${som}
-    </div>
-    ${ecranBloc}
+    <div class="jpostligne">${lever}${sommeil}</div>
+    ${ecran}
+    ${sync}
   </div>`;
 }
 
@@ -4188,8 +4205,10 @@ function journeeMarkup(m) {
   const texte = decoupe || (m.jour?.text
     ? `<p class="serif dayText">${esc(m.jour.text)}</p>`
     : `<p class="jvide">${m.note !== null ? 'Notée, sans texte.' : 'Rien d’écrit ce jour-là.'}</p>`);
-  const cote = `${volatiliteMarkup(j.volatilite)}${posteMarkup(m.poste)}`
-             + `${mesuresMarkup(m.mesures, { titre: !m.poste })}${thematiquesMarkup(j.thematiques)}`;
+  // Minimaliste : le poste (lever, sommeil, synchro, écran) et de quoi on a
+  // parlé. Le détail chiffré des mesures ne s'entasse plus ici.
+  const cote = `${volatiliteMarkup(j.volatilite)}${posteMarkup(m.poste, m.synchro)}`
+             + `${thematiquesMarkup(j.thematiques)}`;
 
   return `<div class="jgrille">
     <div class="jcol jfil">
