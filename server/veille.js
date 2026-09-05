@@ -8,8 +8,9 @@
  * poids visuel pour cinq passages sur une crise et trois sur un projet.
  *
  * Deux niveaux, pas plus :
- *   JAUNE  le suicide a été évoqué
- *   ROUGE  il y a eu une blessure
+ *   JAUNE  le suicide a été évoqué, un moyen était à portée, le réel s'est
+ *          décollé, un excès (alcool, drogue, médicament hors dose) est écrit
+ *   ROUGE  il y a eu une blessure, ou une surdose
  *
  * ---------------------------------------------------------------------
  * CE QUE CE FICHIER NE FAIT PAS.
@@ -102,6 +103,58 @@ const DEREALISATION = [
   'plus dans mon corps', 'plus dans mon propre corps', 'decale de la realite',
   'dans du coton', 'brouillard', 'plus rien n est reel', 'je sais plus ce qui est reel'
 ];
+
+/* ---------------------------------------------------------------------
+ * LES SUBSTANCES : un excès (jaune), une surdose (rouge).
+ *
+ * « J'ai trop bu hier », « j'ai pris de la coke à la soirée », « j'ai avalé
+ * toute la plaquette » : trois phrases que la première version de ce fichier
+ * laissait passer sans un mot, alors qu'elles disent exactement ce que la
+ * veille doit voir — un danger pris avec le corps.
+ *
+ * Deux niveaux, comme pour le reste :
+ *   JAUNE  un EXCÈS est écrit : trop bu, ivre, défoncé, une drogue prise,
+ *          un médicament pris hors de sa dose ou sans ordonnance ;
+ *   ROUGE  une SURDOSE est écrite : overdose, trop de cachets, la boîte
+ *          entière, la dose doublée, alcool et cachets mélangés.
+ *
+ * Et ce qui ne compte PAS : « un verre de vin au dîner », « j'ai pris mon
+ * traitement », « une bière avec Léa ». Un usage n'est pas un excès ; ce
+ * fichier ne juge pas ce que les gens boivent, il compte ce qu'ils disent
+ * avoir dépassé. Les mêmes règles de temps que pour les blessures : un récit
+ * ancien ne marque pas le jour, un tiers (« mon frère était bourré ») non
+ * plus, une négation (« je n'ai pas bu ce soir ») non plus.
+ * ------------------------------------------------------------------ */
+/* À partir de cinq : « j'ai pris deux cachets » n'est pas une surdose. */
+const NB_CACHETS = '(?:[5-9]|[1-9]\\d+|cinq|six|sept|huit|neuf|dix|douze|quinze|vingt|trente|quarante|cinquante)';
+const UNITE_MEDOC = '(?:cachets|comprimes|medicaments|medocs|gelules|pilules|doliprane|dafalgan|efferalgan|paracetamol|ibuprofene|aspirine|xanax|lexomil|valium|temesta|seresta|imovane|stilnox|zolpidem|tramadol|codeine|benzos?)';
+const SURDOSE = new RegExp([
+  '\\boverdose\\b', '\\bsurdose\\b', '\\bsurdosage\\b', '\\bod\\b', '\\bintoxication (?:medicamenteuse|volontaire)\\b',
+  '\\btrop de (?:cachets|comprimes|medicaments|medocs|gelules|pilules|xanax|lexomil|valium|doliprane|paracetamol|dafalgan|codeine|tramadol)\\b',
+  '\\b(?:toute|tout) (?:la|ma|une|le|mon) (?:boite|plaquette|tube|flacon|stock|reserve)\\b', '\\b(?:la|ma) (?:boite|plaquette) (?:entiere|complete)\\b',
+  '\\btous mes (?:cachets|comprimes|medicaments|medocs)\\b', '\\btout mon (?:xanax|lexomil|valium|traitement|stock)\\b',
+  `\\b(?:avale|pris|gobe|ingere) ${NB_CACHETS} ${UNITE_MEDOC}\\b`,
+  '\\b(?:double|triple|quadruple) (?:ma|la) dose\\b', `\\b${NB_CACHETS} fois (?:ma|la) dose\\b`, '\\bdose (?:doublee|triplee)\\b',
+  '\\blavage d estomac\\b', '\\bcoma ethylique\\b', '\\bcoma\\b.{0,30}\\b(?:alcool|cachets|medicaments)\\b',
+  '\\bmelang\\w* .{0,25}\\b(?:alcool|vodka|whisky|rhum|gin|biere|vin)\\b.{0,25}\\b(?:cachets|comprimes|medicaments|medocs|xanax|lexomil|valium|codeine|tramadol|benzo)\\b',
+  '\\bmelang\\w* .{0,25}\\b(?:cachets|comprimes|medicaments|medocs|xanax|lexomil|valium|codeine|tramadol|benzo)\\b.{0,25}\\b(?:alcool|vodka|whisky|rhum|gin|biere|vin)\\b',
+].join('|'));
+/* L'alcool en excès : ce n'est pas « bu », c'est « trop bu ». */
+const ALCOOL_EXCES = /\b(?:trop|beaucoup trop|bien trop|enormement) bu\b|\bbu (?:trop|toute la (?:soiree|nuit|journee|bouteille)|jusqu a (?:vomir|tomber|plus savoir|l oubli|pas savoir))\b|\bbourre(?:e|es)?\b|\bivre(?: morte?)?\b|\b(?:une |grosse |la )?cuite\b|\bblack ?out\b|\btrou noir\b|\bgueule de bois\b|\b(?:fini|vide|descendu|siffle) (?:la|une|toute la) bouteille\b|\bune bouteille (?:entiere|de (?:vodka|whisky|rhum|gin|vin))\b|\bbinge\b|\bdefonce(?:e|es)?\b|\btorche(?:e|es)?\b|\bcomplet(?:ement)? raide\b|\bvomi .{0,20}\balcool\b|\b(?:six|sept|huit|dix|\d+) (?:verres|bieres|shots|pintes)\b/;
+/* Les drogues : un mot ne suffit pas, il faut la prise (« j'ai pris », « sniffé », « sous »). */
+const DROGUE = /\b(?:coke|cocaine|cc|md|mdma|ecsta|ecstasy|taz|ket|ketamine|lsd|acide|buvard|champi|champis|champignons|speed|amphet|amphetamines|meth|crack|heroine|hero|opium|opiaces|poppers|protoxyde|proto|ballons|gaz hilarant|gbl|ghb|3 ?mmc|4 ?mmc|cathinones|chems|drogue|drogues|dope)\b/;
+const PRISE = /\b(?:j ai|je me suis|on a|je) (?:pris|repris|sniffe|snife|gobe|tape|fume|consomme|avale|shoote|injecte|fait)\b|\bune trace\b|\bun rail\b|\bdes traces\b|\bdes rails\b|\bun ballon\b|\bdes ballons\b|\bje (?:prends|sniffe|gobe|tape|consomme)\b|\bsous (?:coke|cocaine|md|mdma|ecsta|ket|ketamine|lsd|acide|speed|meth|crack|hero|heroine|ghb|drogue)\b|\bme (?:suis )?drogu\w*\b|\bje me drogue\b|\bj ai (?:re)?plonge\b/;
+/* La prise qui se suffit : « tapé des traces », « deux rails », « sniffé » — la substance n'est pas nommée, la prise l'est. */
+const PRISE_SEULE = /\b(?:tape|sniffe|pris|fait|enchaine) (?:une|des|deux|trois|quatre|quelques|plusieurs) (?:traces?|rails?)\b|\b(?:un|deux|trois|quatre|cinq|des|quelques|plusieurs) rails?\b(?! (?:de|du) (?:train|tram|metro|securite))|\bsniffe\b|\bje me suis (?:shoote|shootee|injecte|injectee|pique|piquee)\b/;
+/* Le cannabis et les médicaments : seulement en excès ou hors ordonnance. */
+const CANNABIS = /\b(?:joint|joints|beuh|weed|shit|bedo|bedos|pet|pets|cannabis|spliff|spliffs|bang|bangs|bhang)\b/;
+const MEDOC = /\b(?:xanax|lexomil|valium|temesta|seresta|benzo|benzos|zolpidem|stilnox|imovane|codeine|tramadol|oxy|oxycodone|morphine|ritaline|methylphenidate|somnifere|somniferes|anxiolytique|anxiolytiques|cachets|comprimes|medocs|medicaments)\b/;
+const EXCES = /\btrop\b|\btoute la (?:journee|nuit|soiree)\b|\benchaine\b|\bnon stop\b|\bsans arret\b|\b(?:trois|quatre|cinq|six|sept|huit|dix|\d+) (?:joints|bedos|pets|cachets|comprimes|xanax|lexomil)\b|\bplus que (?:prevu|d habitude|la dose|prescrit)\b|\bsans ordonnance\b|\bpas prescrit\b|\bpas a moi\b|\bde ma mere\b|\bde mon pere\b|\bpour (?:dormir|planer|oublier|me calmer|tenir|m assommer|ne plus rien sentir)\b|\bavec de l alcool\b|\bavec l alcool\b/;
+/* Ce qui ressemble à un excès et n'en est pas. */
+const SUBSTANCE_HYPERBOLE = /\bivre de (?:joie|bonheur|rage|colere|fatigue)\b|\bbourre(?:e|es)? (?:de|d) (?!(?:vodka|whisky|rhum|gin|biere|bieres|vin|alcool|champagne|pastis|shots)\b)\w+|\bdefonce(?:e)? (?:de fatigue|par le sport|apres le sport|par la salle|par la seance)\b|\bcuite au four\b|\bcuite a la vapeur\b|\bune drogue douce\b|\bc est ma drogue\b|\bcomme une drogue\b|\bdrogue (?:du|de la|au) (?:travail|boulot|sport|sucre|serie|jeu)\b|\bcoke (?:zero|light|cola)\b|\bcoca\b|\bshit(?:ty)?\b(?= (?:day|show|storm))|\btaz(?:manie)?\b/g;
+const SUBSTANCE_TIERS = /\b(?:il|elle|ils|elles|on|mon frere|ma soeur|mon pere|ma mere|mon pote|ma pote|mon ami|mon amie|ma copine|mon copain|mon mec|ma meuf|mon ex|mon coloc|ma coloc|les gens|tout le monde|quelqu un|un mec|une fille|mon oncle|ma tante|mon cousin|ma cousine|les autres|mes potes|mes amis|le voisin|la voisine)\b[^,;.]{0,30}\b(?:etait|etaient|est|sont|a |ont |s est|se sont|avait|avaient|buvait|buvaient|prenait|prenaient|prend|boit)\b/;
+const SUBSTANCE_NEGATION = /\b(?:ne|n) (?:me suis )?(?:ai|suis|avais|etais|bois|prends|touche|fume) (?:pas|plus|jamais|rien)\b|\bpas (?:bu|pris|touche|fume|sniffe)\b|\bjamais (?:bu|pris|touche|fume|sniffe)\b|\bplus (?:bu|pris|touche|fume) depuis\b|\bsans (?:boire|alcool|rien prendre|toucher)\b|\bsobre\b|\barrete de (?:boire|fumer|prendre)\b|\bj ai arrete\b|\bzero alcool\b|\bpas une goutte\b|\bpas un verre\b/;
+const SUBSTANCE_INTENTION = /\benvie de (?:boire|me bourrer|me defoncer|prendre|reprendre|replonger|me mettre une cuite|sniffer)\b|\bj aimerais (?:boire|prendre|reprendre|me defoncer)\b|\bje vais (?:boire|me bourrer|me defoncer|prendre|reprendre|replonger)\b|\bsi je (?:bois|prends|reprends)\b|\bpour (?:ne pas|pas) (?:boire|reprendre|replonger|craquer)\b/;
 
 /* ---------------------------------------------------------------------
  * NIVEAU ROUGE : une blessure a eu lieu.
@@ -291,6 +344,31 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
       if (recent && /\b(?:je viens de|j ai fini par|j ai encore|je me suis) (?:me )?(?:faire du mal|faire mal|fait du mal|fait mal)\b/.test(prop) && !NEGATION.test(prop)) poser('blessure', 'rouge', 'me faire du mal', p);
     }
 
+    /* LES SUBSTANCES, PROPOSITION PAR PROPOSITION, AVEC LE TEMPS DU RESTE. */
+    for (const prop of propositions(np)) {
+      const q = prop.replace(SUBSTANCE_HYPERBOLE, ' ');
+      const recent = estRecent(q, aujourdhui), passe = estPasse(q, aujourdhui) || suivanteAuPasse(i);
+      if (SUBSTANCE_TIERS.test(q) && !/\b(?:je|j ai|moi|on a)\b/.test(q)) continue;
+      if (SUBSTANCE_NEGATION.test(q)) continue;
+      if (SURDOSE.test(q)) {
+        const mot = SURDOSE.exec(q)[0];
+        if (INFINITIF_QUESTION.test(p.trim()) && !recent && !/\bj ai\b|\bje me suis\b/.test(q)) { poser('evoque_passe', 'jaune', mot, p); continue; }
+        if (SUBSTANCE_INTENTION.test(q) && !recent) { poser('evoque_passe', 'jaune', mot, p); continue; }
+        if (passe && !recent) poser('evoque_passe', 'jaune', mot, p);
+        else poser('surdose', 'rouge', mot, p);
+        continue;
+      }
+      let exces = null;
+      if (ALCOOL_EXCES.test(q)) exces = ALCOOL_EXCES.exec(q)[0];
+      else if (DROGUE.test(q) && PRISE.test(q)) exces = DROGUE.exec(q)[0];
+      else if (PRISE_SEULE.test(q)) exces = PRISE_SEULE.exec(q)[0];
+      else if ((CANNABIS.test(q) || MEDOC.test(q)) && EXCES.test(q)) exces = (CANNABIS.exec(q) ?? MEDOC.exec(q))[0];
+      if (!exces) continue;
+      if (SUBSTANCE_INTENTION.test(q) && !/\b(?:j ai|je me suis|je suis)\b/.test(q)) continue;   // l'envie n'est pas la prise
+      if (passe && !recent) continue;                                                            // un récit ancien ne marque pas le jour
+      poser('substance', 'jaune', exces, p);
+    }
+
     const npSansHyperbole = np.replace(HYPERBOLE, ' ');
     const s = dedans(npSansHyperbole, SUICIDE) ?? (SUICIDE_SIGLES.test(np) ? 'ts' : null);
     if (s) poser('suicide', 'jaune', s, p);
@@ -379,7 +457,9 @@ export const DIT = {
   // Une blessure ANCIENNE, racontée. Pas « ce jour-là » : c'est un souvenir qui
   // remonte, pas un geste du jour. Le distinguer, c'est ne pas crier « blessure
   // aujourd'hui » quand quelqu'un revient sur ce qui lui est arrivé.
-  evoque_passe: 'une blessure passée a été évoquée'
+  evoque_passe: 'une blessure ou une surdose passée a été évoquée',
+  substance: 'un excès d’alcool ou une prise de substance est écrite ce jour-là',
+  surdose:  'une surdose est écrite ce jour-là'
 };
 
 /*
