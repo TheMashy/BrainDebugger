@@ -3362,12 +3362,28 @@ table.grid td.cell.abascule { cursor: pointer; }
    plus regardés. Sobre — une liste courte, pas un tableau. */
 .jpecran { display: flex; flex-wrap: wrap; gap: 18px 26px; }
 .jpecol { min-width: 130px; }
-.jpetete { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); margin-bottom: 5px; }
+/* La colonne se replie : le total (la tête) reste, le détail se déplie au clic.
+   `summary` est un bouton — on lui retire le marqueur natif et on lui pose le
+   nôtre, discret, pour que « appli » et « web » se lisent comme des onglets. */
+details.jpecol > summary { list-style: none; cursor: pointer; }
+details.jpecol > summary::-webkit-details-marker { display: none; }
+details.jpecol > summary::after {
+  content: '▸'; margin-left: 6px; color: var(--ink-faint); font-size: 10px;
+  transition: transform .15s ease; display: inline-block;
+}
+details.jpecol[open] > summary::after { transform: rotate(90deg); }
+details.jpecol > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.jpetete { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+details.jpecol .jpetop { margin-top: 5px; }
+.jpevide .jpetete { margin-bottom: 0; }
 .jpetete .ico { color: var(--ink-faint); flex: none; }
 .jpetete .faint { font-size: 12px; }
 .jpetop { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.jpetop li { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--ink-dim); }
-.jpenom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jpetop li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-dim); }
+/* Le petit signe de famille devant chaque application (social, jeu, outil…). */
+.jpecat { flex: none; display: inline-flex; color: var(--ink-faint); }
+.jpenom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.jpetop li .mono { flex: none; }
 /* L'état de la synchro, discret, sous le poste. */
 .jpsync { margin-top: 2px; }
 
@@ -3506,6 +3522,17 @@ table.grid td.cell.abascule { cursor: pointer; }
 }
 .jsujet { transition: background .18s ease, box-shadow .18s ease; padding-right: 4px; }
 @media (prefers-reduced-motion: reduce) { .jsujet { transition: none } }
+
+/* LA PHRASE DÉSIGNÉE, ET ELLE SEULE. Quand on connaît le message d'où vient
+   chaque morceau, cliquer un moment n'allume plus tout le bloc mais le seul
+   passage écrit à ce moment-là : un fond léger posé sur les mots, rien de
+   criard. Les morceaux voisins non désignés restent au repos. */
+.jsphr { border-radius: 4px; transition: background .18s ease, box-shadow .18s ease; }
+@media (prefers-reduced-motion: reduce) { .jsphr { transition: none } }
+.jsphr.vise {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 
 /* LES PUCES : une valeur, ce qu'elle est, son écart à la normale.
    Pas de courbe, pas de bornes — ce sont d'autres questions, et elles sont

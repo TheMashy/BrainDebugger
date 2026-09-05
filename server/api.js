@@ -590,13 +590,51 @@ export function posteDuJour(date, userId = OWNER) {
   // (soir de D) est la dernière extinction avant le réveil de D+1 : il vit donc
   // dans le digest de D+1. Le lever, lui, reste celui de D.
   const posteFin = activiteDuJour(addDays(date, 1), userId)?.digest?.poste ?? {};
+  /*
+   * LE COUCHER PAR LE SILENCE, EN DERNIER RECOURS.
+   *
+   * Ni l'ordi éteint (le JSON), ni une phrase (« je vais me coucher ») : reste ce
+   * que la nuit laisse toujours — l'arrêt d'écrire. On cherche, dans la fenêtre
+   * soir de D → matin de D+1, le dernier message d'une salve suivi d'un silence
+   * d'au moins ~6-7 h (le message suivant vient bien plus tard). Ce message-là
+   * marque l'endormissement. Un jour encore en cours n'a pas ce silence : rien
+   * n'est estimé tant qu'on n'a pas recommencé à écrire le lendemain.
+   */
+  const estimeCoucherParSilence = () => {
+    const SEUIL = 6.5 * 3600 * 1000;
+    const users = [...messagesForDate(date, userId), ...messagesForDate(addDays(date, 1), userId)]
+      .filter(m => m.role === 'user' && m.text?.trim() && m.ts)
+      .sort((a, b) => a.ts - b.ts);
+    for (let i = 0; i < users.length - 1; i++) {
+      if (users[i + 1].ts - users[i].ts < SEUIL) continue;
+      const jourMsg = jourLocal(users[i].ts);
+      const min = enMinutes(heureLocale(users[i].ts)) ?? 0;
+      const soirD = jourMsg === date && min >= MIDI;
+      const matinDemain = jourMsg === addDays(date, 1) && min < MIDI;
+      if (soirD || matinDemain) return heureLocale(users[i].ts);
+    }
+    return null;
+  };
   const borne = g => {
-    const d = g === 'lever' ? ditLever() : ditCoucherFermant();
-    if (d) return { heure: d, source: 'dit' };
-    const mes = g === 'lever' ? poste.reveil : posteFin.coucher;
-    if (mes) return { heure: mes, source: 'mesure' };
-    const est = g === 'lever' ? plage.de : plage.a;
+    if (g === 'lever') {
+      const d = ditLever();
+      if (d) return { heure: d, source: 'dit' };
+      if (poste.reveil) return { heure: poste.reveil, source: 'mesure' };
+      if (plage.de) return { heure: plage.de, source: 'estime' };
+      return { heure: null, source: null };
+    }
+    /*
+     * LE COUCHER, DANS L'ORDRE DEMANDÉ : d'abord le JSON (l'ordinateur éteint —
+     * l'extinction mesurée), sinon ce qui est dit dans la conversation (« je vais
+     * me coucher »), sinon l'estimation par le silence. `plage.a` (la dernière
+     * activité relevée) reste le tout dernier filet.
+     */
+    if (posteFin.coucher) return { heure: posteFin.coucher, source: 'mesure' };
+    const dit = ditCoucherFermant();
+    if (dit) return { heure: dit, source: 'dit' };
+    const est = estimeCoucherParSilence();
     if (est) return { heure: est, source: 'estime' };
+    if (plage.a) return { heure: plage.a, source: 'estime' };
     return { heure: null, source: null };
   };
   const tp = dig?.temps_par_contexte_s ?? {};
