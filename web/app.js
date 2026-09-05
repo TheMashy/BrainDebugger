@@ -50,7 +50,7 @@ const enTetes = (json = false) => ({
 });
 
 async function api(path, body) {
-  if (body !== undefined) FONCT = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
+  if (body !== undefined) FONCT = FONCT_AN = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
   const res = await fetch(path, body
     ? { method: 'POST', headers: enTetes(true), body: JSON.stringify(body) }
     : { headers: enTetes() });
@@ -1558,6 +1558,12 @@ async function renderYear(year) {
   CARNET = await api('/api/carnet');
   FRISE = await api('/api/frise');
   const grid = await api(`/api/year?year=${year}`);
+  FONCT_AN ??= await api('/api/fonctionnements?jours=400').catch(() => null);
+  /* Les bascules de « comment ça marche chez toi », posées sur leurs jours : une
+     date où le sommeil ou la note a changé de niveau se voit sur la grille. Pas
+     les autres fonctionnements — un rythme ou un lien n'ont pas de jour. */
+  const bascules = new Map();
+  for (const it of FONCT_AN?.items ?? []) if (it.type === 'bascule') bascules.set(it.date, [...(bascules.get(it.date) ?? []), it]);
 
   const FEN = fenetreCumul();
   const CUM0 = FEN.i0;
@@ -1613,12 +1619,13 @@ async function renderYear(year) {
             ${anneesFenetre.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
           </div>` : ''}
         </div>
-        <div class="gridwrap">${gridMarkup(grid)}</div>
+        <div class="gridwrap">${gridMarkup(grid, bascules)}</div>
         <div class="legend">
           <span>pire</span>
           ${Array.from({ length: 17 }, (_, i) => `<i style="background:${deltaColor(-SATURATION + (i / 16) * 2 * SATURATION)}"></i>`).join('')}
           <span>meilleur</span>
           <span style="margin-left:12px">écart à la référence, ±${SATURATION}</span>
+          ${bascules.size ? `<span style="margin-left:12px" class="legbascule"><i class="cellbascule"></i> changement de niveau (${bascules.size})</span>` : ''}
           <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
         </div>
       </div>
@@ -2180,7 +2187,7 @@ function wireFrise() {
   });
 }
 
-function gridMarkup(grid) {
+function gridMarkup(grid, bascules = new Map()) {
   const today = S.today;
   return `<table class="grid">
     <tr><th></th>${Array.from({ length: 31 }, (_, i) => `<th>${i + 1}</th>`).join('')}<th></th></tr>
@@ -2193,11 +2200,13 @@ function gridMarkup(grid) {
         // voir les périodes, et trois alertes en une semaine ne doivent pas se
         // perdre parce que ces jours-là n'ont pas de note chiffrée.
         const al = d.veille ? ` aveille ${d.veille}` : '';
-        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}`;
-        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}"
-          ${(has || d.veille) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
+        const bs = bascules.get(d.date) ?? [];
+        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}${bs.map(b => `\n↕ ${b.phrase}`).join('')}`;
+        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}${bs.length ? ' abascule' : ''}"
+          ${(has || d.veille || bs.length) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
           ${has ? `style="background:${deltaColor(d.delta)}"` : ''}>${
-          d.veille ? `<span class="cellveille">${alerteGlyph(13)}</span>` : ''}</td>`;
+          d.veille ? `<span class="cellveille">${alerteGlyph(13)}</span>` : ''}${
+          bs.length ? '<i class="cellbascule"></i>' : ''}</td>`;
       }).join('')}
       <td class="avg">${mo.avg ?? ''}</td>
     </tr>`).join('')}
@@ -2581,6 +2590,9 @@ let MIR_THEME = null;          // le theme deplie
 let LECTURE = null;
 /* Les fonctionnements : calculés sans modèle, invalidés dès qu'on écrit ou qu'une mesure arrive. */
 let FONCT = null;
+/* La même carte, sur un peu plus d'un an, pour la grille de l'Année : les bascules
+   n'ont de sens que posées sur les jours qu'elles datent. */
+let FONCT_AN = null;
 let LECTURE_EN_COURS = false;
 /*
  * LA DERNIERE ERREUR DE LECTURE, GARDEE A L'ECRAN.

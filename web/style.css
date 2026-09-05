@@ -2990,6 +2990,14 @@ table.grid td.cell.aveille { outline: 2px solid var(--vc, var(--warn)); outline-
 table.grid td.cell.aveille.jaune { --vc: var(--warn); }
 table.grid td.cell.aveille.rouge { --vc: var(--danger); }
 table.grid td.cell.aveille:hover { outline-width: 2.5px; z-index: 4; }
+/* UNE BASCULE SUR LA GRILLE. Un trait vertical dans l'angle : « ici, ça a changé
+   de niveau ». Pas une couleur de plus — la case garde sa note ; le trait dit
+   seulement qu'à cette date, le sommeil ou la note est passé d'un palier à un
+   autre (la phrase entière est dans l'infobulle). */
+.cellbascule { position: absolute; left: 1px; top: 1px; bottom: 1px; width: 3px; border-radius: 2px; background: var(--ink); opacity: .85; pointer-events: none; }
+table.grid td.cell.abascule { cursor: pointer; }
+.legbascule { display: inline-flex; align-items: center; gap: 6px; }
+.legbascule .cellbascule { position: static; display: inline-block; height: 12px; }
 /* Le triangle plein REMPLIT presque la case : sur une grille de 15 px, c'est
    ce qui le rend repérable d'un coup d'œil en feuilletant l'année. Une ombre
    portée le décolle du fond, quelle que soit la couleur de la case. */
