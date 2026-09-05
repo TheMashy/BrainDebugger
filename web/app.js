@@ -50,6 +50,7 @@ const enTetes = (json = false) => ({
 });
 
 async function api(path, body) {
+  if (body !== undefined) FONCT = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
   const res = await fetch(path, body
     ? { method: 'POST', headers: enTetes(true), body: JSON.stringify(body) }
     : { headers: enTetes() });
@@ -2578,6 +2579,8 @@ function termesMarkup(it) {
 
 let MIR_THEME = null;          // le theme deplie
 let LECTURE = null;
+/* Les fonctionnements : calculés sans modèle, invalidés dès qu'on écrit ou qu'une mesure arrive. */
+let FONCT = null;
 let LECTURE_EN_COURS = false;
 /*
  * LA DERNIERE ERREUR DE LECTURE, GARDEE A L'ECRAN.
@@ -3299,11 +3302,89 @@ function monterCarte(carte, pistes = []) {
   poser();
 }
 
+/* ==================================================================
+   COMMENT ÇA MARCHE CHEZ TOI.
+
+   La carte de co-occurrence reliait des mots qui tombaient dans les mêmes
+   journées. Un banc d'essai (tools/banc-approches) l'a notée 7 sur 100 : sans
+   direction ni temps, elle ne retrouve presque rien de ce qu'on plante. Ce bloc
+   montre ce que le banc a jugé retrouvable, et rien d'autre : des bascules
+   datées, des liens d'un jour sur le lendemain dits par un comptage, la forme
+   de la semaine, la régularité du coucher, l'inertie de la note, les mots
+   absolus. Chaque phrase se vérifie ; aucune ne nomme un trouble. Et ce qu'on
+   refuse de montrer se lit aussi, avec sa raison.
+   ================================================================== */
+const FONCT_ICO = { bascule: 'lune', lien: 'fleche', rythme: 'annee', regularite: 'epingle', inertie: 'refaire', mots: 'crayon' };
+const FONCT_TITRE = { bascule: 'Ce qui a changé de niveau', lien: 'D’un jour sur le lendemain', rythme: 'La forme de la semaine', regularite: 'La régularité du coucher', inertie: 'L’inertie de la note', mots: 'Les mots absolus' };
+const FONCT_ORDRE = ['bascule', 'lien', 'rythme', 'regularite', 'inertie', 'mots'];
+
+/** Deux barres qui se comparent : « 14 sur 18 » contre « 9 sur 30 ». */
+function fonctBarres(a, b) {
+  const W = 220, h = 9, pa = a.d ? a.n / a.d : a.v, pb = b.d ? b.n / b.d : b.v;
+  const max = Math.max(pa, pb, 1e-9);
+  const lig = (y, p, lab, txt) => `<text x="0" y="${y + 8}" font-size="10" class="fmut">${esc(lab)}</text>
+    <rect x="86" y="${y}" width="${W - 86 - 44}" height="${h}" rx="2" class="frail"/>
+    <rect x="86" y="${y}" width="${Math.max(2, (W - 86 - 44) * p / max)}" height="${h}" rx="2" class="fplein"/>
+    <text x="${W}" y="${y + 8}" font-size="10" text-anchor="end" class="fmono">${esc(txt)}</text>`;
+  return `<svg viewBox="0 0 ${W} 34" class="fsvg" aria-hidden="true">${lig(2, pa, a.lab, a.txt)}${lig(20, pb, b.lab, b.txt)}</svg>`;
+}
+/** Une bascule : la série autour de la date, et les deux niveaux. */
+function fonctBascule(it, series) {
+  const i = series.dates.indexOf(it.date); if (i < 0) return '';
+  const v = series[it.variable] ?? [], a = Math.max(0, i - 14), b = Math.min(v.length, i + 14);
+  const pts = []; for (let t = a; t < b; t++) if (v[t] != null) pts.push([t, v[t]]);
+  if (pts.length < 6) return '';
+  const W = 220, H = 40, ys = pts.map(p => p[1]), lo = Math.min(...ys, it.appui.avant, it.appui.apres), hi = Math.max(...ys, it.appui.avant, it.appui.apres);
+  const X = t => 4 + (t - a) / Math.max(1, b - 1 - a) * (W - 8), Y = y => 4 + (1 - (y - lo) / Math.max(1e-9, hi - lo)) * (H - 8);
+  const d = pts.map((p, k) => (k ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="fsvg" aria-hidden="true">
+    <line x1="${X(a)}" y1="${Y(it.appui.avant)}" x2="${X(i)}" y2="${Y(it.appui.avant)}" class="fniveau"/>
+    <line x1="${X(i)}" y1="${Y(it.appui.apres)}" x2="${X(b - 1)}" y2="${Y(it.appui.apres)}" class="fniveau"/>
+    <line x1="${X(i)}" y1="2" x2="${X(i)}" y2="${H - 2}" class="fdate"/>
+    <path d="${d}" class="fligne"/></svg>`;
+}
+function fonctFigure(it, series) {
+  if (it.type === 'bascule') return fonctBascule(it, series);
+  if (it.type === 'lien') return fonctBarres({ n: it.appui.bas.n, d: it.appui.bas.sur, lab: 'après un jour bas', txt: `${it.appui.bas.n} / ${it.appui.bas.sur}` }, { n: it.appui.haut.n, d: it.appui.haut.sur, lab: 'après un jour haut', txt: `${it.appui.haut.n} / ${it.appui.haut.sur}` });
+  if (it.type === 'rythme') { const f = v => String(Math.round(v * 10) / 10).replace('.', ','); return fonctBarres({ v: Math.abs(it.appui.dedans), lab: it.appui.quand, txt: f(it.appui.dedans) }, { v: Math.abs(it.appui.dehors), lab: 'le reste', txt: f(it.appui.dehors) }); }
+  if (it.type === 'mots') return fonctBarres({ v: it.appui.bas, lab: 'jours les plus bas', txt: String(it.appui.bas.toFixed(1)).replace('.', ',') }, { v: it.appui.haut, lab: 'jours les plus hauts', txt: String(it.appui.haut.toFixed(1)).replace('.', ',') });
+  return '';
+}
+function fonctionnementsMarkup(F) {
+  if (!F) return '';
+  const p = F.periode;
+  const tete = `<div class="fonctete">
+    <div class="k faint">Comment ça marche chez toi</div>
+    <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} journées notées · ${p.nuits} nuits · ${p.textes} journées écrites</span>
+  </div>`;
+  if (!F.assez) return `<section class="fonct"><div class="lechead">${tete}</div>
+    <p class="sub" style="max-width:62ch">Pas encore de quoi compter. ${F.manques.map(esc).join(' ')}</p></section>`;
+  const parType = new Map();
+  for (const it of F.items) { if (!parType.has(it.type)) parType.set(it.type, []); parType.get(it.type).push(it); }
+  const groupes = FONCT_ORDRE.filter(t => parType.has(t)).map(t => `
+    <div class="fonctgroupe">
+      <div class="foncttitre">${ico(FONCT_ICO[t], 14)}<span>${esc(FONCT_TITRE[t])}</span></div>
+      ${parType.get(t).map(it => `<article class="fonctcarte">
+        <p class="fonctphr">${esc(it.phrase)}</p>
+        ${fonctFigure(it, F.series)}
+        ${it.jours?.length ? `<details class="fonctjours"><summary>${it.jours.length === 1 ? 'cette journée' : `ces ${it.jours.length} journées`}</summary>
+          <div class="fonctliste">${it.jours.slice(0, 40).map(d => `<button class="fjour" data-fonct-jour="${esc(d)}">${esc(fmtDay(d))}</button>`).join('')}${it.jours.length > 40 ? `<span class="faint">… et ${it.jours.length - 40} autres</span>` : ''}</div></details>` : ''}
+      </article>`).join('')}
+    </div>`).join('');
+  const rien = F.items.length ? '' : `<p class="sub" style="max-width:62ch">Rien qui tienne, pour l'instant : sur cette période, ni bascule nette, ni lien qui se confirme au comptage, ni forme de semaine. Ce n'est pas un vide — c'est ce qu'on peut dire honnêtement.</p>`;
+  const manques = F.manques.length ? `<p class="sub fonctmanque">${F.manques.map(esc).join(' ')}</p>` : '';
+  const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
+  return `<section class="fonct"><div class="lechead">${tete}</div>${rien}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
+}
+
 async function renderLecture() {
   // La vue d'ensemble de « Ma carte » : ce qui s'ouvrira ensuite s'y encadre.
   JOUR_DANS = 'mirror';
   MIRROR_DATE = null;
-  if (!LECTURE) LECTURE = await api('/api/lecture');
+  // La lecture (par modèle) et les fonctionnements (comptés ici) partent ensemble :
+  // le second n'a pas à attendre le premier, il n'en dépend pas.
+  const [l, f] = await Promise.all([LECTURE ?? api('/api/lecture'), FONCT ?? api('/api/fonctionnements').catch(() => null)]);
+  LECTURE = l; FONCT = f;
   const L = LECTURE;
 
   /*
@@ -3404,6 +3485,8 @@ async function renderLecture() {
     ${/* Un lot qui a échoué doit le dire, sinon la seule façon de s'en
           apercevoir est de remarquer que la date ne bouge plus. */''}
     ${!LECTURE_ERR && L.lotErreur ? `<p class="sub lecterr lecterrhaut">La lecture de fond n'a pas abouti — ${esc(L.lotErreur)} Tu peux relancer avec « relire ».</p>` : ''}
+    ${fonctionnementsMarkup(FONCT)}
+    ${L.lecture ? '<div class="k faint dequoi">De quoi tu parles</div>' : ''}
     ${corps}
   </div>${tissageMarkup()}`;
 
@@ -3485,6 +3568,9 @@ function wireIlots() {
 
 function wireLecture() {
   $('#view').onclick = async e => {
+    // Une journée citée par un fonctionnement s'ouvre : la preuve est à un clic.
+    const fj = e.target.closest('[data-fonct-jour]');
+    if (fj) return renderMirror(fj.dataset.fonctJour);
     // Le panneau d'un nœud : le refermer, aller à un nœud voisin, ou descendre
     // sur la piste dont il vient de dire le poids.
     if (e.target.closest('[data-noeud-fermer]')) { NOEUD_OUVERT = null; return renderLecture(); }
