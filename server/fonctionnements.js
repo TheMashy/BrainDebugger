@@ -38,6 +38,7 @@
  *    recalibrer dans tools/banc-approches/calibrer.mjs — pas ici.
  */
 import { allEntries, activiteEntre, mesuresEntre, OWNER } from './db.js';
+import { nuitDuJour } from './nuits.js';
 import { jourLocal } from './temps.js';
 import { addDays } from './stats.js';
 import { normaliserCle } from './mesures.js';
@@ -192,18 +193,26 @@ export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = 
     const a = absolusDe(e.text); if (a) { l.absolus = a.taux; l.absolus_mots = a.vus; }
   }
   // Le digest de Machi Tool, par DATES : la nuit qui ouvre D (sommeil_h, lever) ; le coucher du SOIR de D est dans le digest de D+1.
-  for (const j of activiteEntre(debut, addDays(fin, 1), userId)) {
-    const dig = j.digest; if (!dig) continue;
-    if (j.date <= fin) {
+  const digests = activiteEntre(addDays(debut, -1), addDays(fin, 1), userId).filter(j => j.digest);
+  const digParDate = new Map(digests.map(j => [j.date, j.digest]));
+  for (const j of digests) {
+    const dig = j.digest;
+    if (j.date <= fin && j.date >= debut) {
       const l = ligne(j.date);
-      if (fini(dig.poste?.sommeil_h)) l.sommeil_h = dig.poste.sommeil_h;
-      if (dig.poste?.reveil) l.lever = enHeures(dig.poste.reveil);
+      // La nuit lue dans le clavier (nuits.js) passe devant le poste apparié : un
+      // ordinateur laissé allumé n'a ni extinction ni démarrage, et on y dort quand même.
+      const nuit = nuitDuJour(dig, digParDate.get(addDays(j.date, -1)) ?? null);
+      if (fini(nuit?.sommeil_h)) l.sommeil_h = nuit.sommeil_h;
+      else if (fini(dig.poste?.sommeil_h)) l.sommeil_h = dig.poste.sommeil_h;
+      if (nuit?.lever) l.lever = enHeures(nuit.lever);
+      else if (dig.poste?.reveil) l.lever = enHeures(dig.poste.reveil);
+      if (nuit?.coucher) { const h = coucherContinu(nuit.coucher); const v = addDays(j.date, -1); if (h != null && v >= debut && v <= fin) ligne(v).coucher = h; }
       const tp = dig.temps_par_contexte_s ?? {};
       let s = 0, vu = false; for (const v of Object.values(tp)) if (fini(v)) { s += v; vu = true; }
       if (vu) l.ecran_min = Math.round(s / 60);
     }
     const veille = addDays(j.date, -1);
-    if (veille >= debut && veille <= fin && dig.poste?.coucher) ligne(veille).coucher = coucherContinu(dig.poste.coucher);
+    if (veille >= debut && veille <= fin && dig.poste?.coucher && ligne(veille).coucher == null) ligne(veille).coucher = coucherContinu(dig.poste.coucher);
   }
   // Les mesures apportées (montre, balance, ou dites). Ce qui est DIT passe devant ce qui est mesuré,
   // comme dans posteDuJour : « je me couche » est une phrase de la personne, l'extinction du poste une déduction.

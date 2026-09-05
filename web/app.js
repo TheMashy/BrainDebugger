@@ -50,7 +50,7 @@ const enTetes = (json = false) => ({
 });
 
 async function api(path, body) {
-  if (body !== undefined) FONCT = FONCT_AN = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
+  if (body !== undefined) FONCT = FONCT_AN = NUITS = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
   const res = await fetch(path, body
     ? { method: 'POST', headers: enTetes(true), body: JSON.stringify(body) }
     : { headers: enTetes() });
@@ -1559,6 +1559,7 @@ async function renderYear(year) {
   FRISE = await api('/api/frise');
   const grid = await api(`/api/year?year=${year}`);
   FONCT_AN ??= await api('/api/fonctionnements?jours=400').catch(() => null);
+  NUITS ??= await api('/api/nuits?jours=730').catch(() => null);
   /* Les bascules de « comment ça marche chez toi », posées sur leurs jours : une
      date où le sommeil ou la note a changé de niveau se voit sur la grille. Pas
      les autres fonctionnements — un rythme ou un lien n'ont pas de jour. */
@@ -1629,6 +1630,8 @@ async function renderYear(year) {
           <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
         </div>
       </div>
+
+      ${nuitsCarte(NUITS?.nuits ?? [], DOM)}
 
       <div class="card">
         <div class="cardhead" style="margin-bottom:4px">
@@ -2187,6 +2190,67 @@ function wireFrise() {
   });
 }
 
+/* ====================================================================
+ * LES NUITS, DESSINÉES.
+ *
+ * Une barre par nuit, du coucher au lever, sur un axe qui va de 20 h à 14 h :
+ * on lit d'un coup d'œil si les couchers glissent, si les nuits raccourcissent,
+ * et où ça manque. La couleur dit la durée. Une nuit qui ne colle pas — le
+ * poste et le clavier en désaccord, un lever à 3 h — porte un point, et sa
+ * phrase en infobulle : les nuits se regardent pour savoir si elles sont
+ * justes, alors on montre ce qui ne l'est peut-être pas.
+ * ================================================================== */
+const heureNuit = hhmm => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm ?? '')); if (!m) return null; let h = +m[1] + +m[2] / 60; return h < 14 ? h + 24 : h; };   // 20 h → 38 h (14 h le lendemain)
+const fmtH = h => { const H = Math.floor(h) % 24, M = Math.round((h - Math.floor(h)) * 60); return `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}`; };
+const dureeTxt = h => h == null ? '—' : `${Math.floor(h)} h ${String(Math.round((h - Math.floor(h)) * 60)).padStart(2, '0')}`;
+function nuitsCarte(nuits, dom) {
+  const dans = nuits.filter(n => n.date >= dom.debut && n.date <= dom.fin);
+  if (!dans.length) return `<div class="card"><div class="cardhead" style="margin-bottom:6px"><h2>Nuits</h2></div>
+    <p class="faint" style="margin:0;max-width:62ch">Aucune nuit connue sur cette fenêtre : elles viennent de Machi Tool (la dernière touche du soir, la première du matin) ou de ce que tu dis au compagnon (« je me couche », « je me lève »).</p></div>`;
+  const W = 980, H = 240, L = 44, T = 14, B = 26, R = 12, y0 = 20, y1 = 38;
+  const debut = Date.parse(dom.debut + 'T00:00:00Z'), fin = Date.parse(dom.fin + 'T00:00:00Z'), nj = Math.max(1, Math.round((fin - debut) / 864e5) + 1);
+  const X = d => L + ((Date.parse(d + 'T00:00:00Z') - debut) / 864e5 + 0.5) / nj * (W - L - R);
+  const Y = h => T + (Math.min(y1, Math.max(y0, h)) - y0) / (y1 - y0) * (H - T - B);
+  const bw = Math.max(1.5, Math.min(10, (W - L - R) / nj * 0.7));
+  const teinte = h => h == null ? 'var(--ink-faint)' : h < 5 ? 'var(--danger)' : h < 6.5 ? 'var(--warn)' : h <= 9.5 ? 'var(--accent)' : 'var(--warn)';
+  const barres = dans.map(n => {
+    const c = heureNuit(n.coucher), l = heureNuit(n.lever);
+    const tip = `${fmtDay(n.date)} · couché ${n.coucher ?? '—'} · levé ${n.lever ?? '—'} · ${dureeTxt(n.sommeil_h)}${n.source === 'dit' ? ' · dit' : n.source === 'poste' ? ' · poste' : ''}${n.souci ? `\n⚠ ${n.souci}` : ''}`;
+    if (c == null || l == null) {
+      const y = c != null ? Y(c) : l != null ? Y(l) : null;
+      return y == null ? '' : `<circle cx="${X(n.date).toFixed(1)}" cy="${y.toFixed(1)}" r="${(bw / 2).toFixed(1)}" fill="${teinte(null)}" data-date="${n.date}" data-tip="${esc(tip)}"/>`;
+    }
+    const yc = Y(c), yl = Y(Math.max(l, c + 0.15));
+    return `<rect x="${(X(n.date) - bw / 2).toFixed(1)}" y="${yc.toFixed(1)}" width="${bw.toFixed(1)}" height="${(yl - yc).toFixed(1)}" rx="${Math.min(3, bw / 2).toFixed(1)}" fill="${teinte(n.sommeil_h)}" opacity="${n.source === 'dit' ? '.55' : '.9'}" data-date="${n.date}" data-tip="${esc(tip)}"/>${
+      n.souci ? `<circle cx="${X(n.date).toFixed(1)}" cy="${(yl + 6).toFixed(1)}" r="2.6" class="nsouci"><title>${esc(n.souci)}</title></circle>` : ''}`;
+  }).join('');
+  const heures = [20, 22, 24, 26, 28, 30, 32, 34, 36, 38];
+  const axe = heures.map(h => `<line x1="${L}" x2="${W - R}" y1="${Y(h).toFixed(1)}" y2="${Y(h).toFixed(1)}" class="ngrid"/><text x="${L - 6}" y="${(Y(h) + 3.5).toFixed(1)}" text-anchor="end" class="naxe">${fmtH(h)}</text>`).join('');
+  // Les mois, en bas.
+  const mois = []; for (let t = debut; t <= fin; t += 864e5) { const d = new Date(t); if (d.getUTCDate() === 1 || t === debut) mois.push(d.toISOString().slice(0, 10)); }
+  const axeX = mois.filter((d, i, a) => nj <= 60 || i % Math.ceil(a.length / 12) === 0).map(d => `<text x="${X(d).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="naxe">${['jan', 'fév', 'mar', 'avr', 'mai', 'juin', 'juil', 'aoû', 'sep', 'oct', 'nov', 'déc'][new Date(d + 'T00:00:00Z').getUTCMonth()]}${nj > 400 ? ' ' + d.slice(2, 4) : ''}</text>`).join('');
+  const med = arr => { const v = arr.filter(x => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
+  const mC = med(dans.map(n => heureNuit(n.coucher))), mL = med(dans.map(n => heureNuit(n.lever))), mS = med(dans.map(n => n.sommeil_h));
+  const soucis = dans.filter(n => n.souci);
+  const resume = `<span class="mono">${dans.length} nuit${dans.length > 1 ? 's' : ''}</span>${mC != null ? ` · couché vers <span class="mono">${fmtH(mC)}</span>` : ''}${mL != null ? ` · levé vers <span class="mono">${fmtH(mL)}</span>` : ''}${mS != null ? ` · <span class="mono">${dureeTxt(mS)}</span> de sommeil (médianes)` : ''}`;
+  return `<div class="card nuitscard">
+    <div class="cardhead" style="margin-bottom:4px">
+      <h2>Nuits</h2>
+      <span class="faint" style="font-size:11.5px">${resume}</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" class="nuitsvg" role="img" aria-label="Les nuits : du coucher au lever, une barre par nuit">
+      ${axe}${barres}${axeX}
+    </svg>
+    <div class="legend">
+      <i style="background:var(--danger)"></i><span>moins de 5 h</span>
+      <i style="background:var(--warn);margin-left:8px"></i><span>5 à 6 h 30, ou plus de 9 h 30</span>
+      <i style="background:var(--accent);margin-left:8px"></i><span>6 h 30 à 9 h 30</span>
+      <span style="margin-left:12px">une barre pâle = dit au compagnon · un point = à vérifier</span>
+    </div>
+    ${soucis.length ? `<details class="nuitsoucis"><summary>${soucis.length} nuit${soucis.length > 1 ? 's' : ''} à vérifier</summary><ul>${soucis.slice(-12).reverse().map(n => `<li><button class="fjour" data-date="${n.date}">${esc(fmtDay(n.date))}</button> ${esc(n.souci)}</li>`).join('')}</ul></details>` : ''}
+  </div>`;
+}
+
 function gridMarkup(grid, bascules = new Map()) {
   const today = S.today;
   return `<table class="grid">
@@ -2595,6 +2659,8 @@ let FONCT = null;
 /* La même carte, sur un peu plus d'un an, pour la grille de l'Année : les bascules
    n'ont de sens que posées sur les jours qu'elles datent. */
 let FONCT_AN = null;
+/* Les nuits (coucher, lever, durée), sur deux ans : la vue Année les dessine dans sa fenêtre. */
+let NUITS = null;
 let LECTURE_EN_COURS = false;
 /*
  * LA DERNIERE ERREUR DE LECTURE, GARDEE A L'ECRAN.
