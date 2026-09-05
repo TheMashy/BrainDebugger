@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { valider, corpusPour, choisirJours, grainPour, GENRES } from '../server/lecture.js';
+import { valider, corpusPour, choisirJours, grainPour, GENRES, VERSION_LECTURE } from '../server/lecture.js';
 
 const DATES = new Set(['2024-03-12', '2024-04-02', '2024-05-20']);
 
@@ -77,7 +77,7 @@ test('rien d’exploitable rend une lecture vide, pas une exception', () => {
   assert.deepEqual(valider(null, DATES),
     // `horizons: null` et pas absent : sans lignes de journal, le serveur ne
     // peut pas savoir si une fenêtre a de quoi parler, donc aucune ne parle.
-    { synthese: '', horizons: null, themes: [], pistes: [], carte: { noeuds: [], liens: [] } });
+    { synthese: '', horizons: null, themes: [], pistes: [], carte: { noeuds: [], liens: [] }, schemas: [], version: VERSION_LECTURE });
   assert.deepEqual(valider({ themes: 'pas un tableau' }, DATES).themes, []);
   assert.deepEqual(valider({ themes: [{}] }, DATES).themes, []);
 });
@@ -234,10 +234,10 @@ test('sans lecture, il faut la lancer ; avec, le retard décide', async () => {
   assert.equal((await etat()).possible, true);
   assert.equal((await etat()).arelire, true, 'aucune lecture : il faut la faire');
 
-  setLecture({ contenu: { synthese: 'x', themes: [] },
+  setLecture({ contenu: { synthese: 'x', themes: [], version: VERSION_LECTURE },
                jusqu_au: '2026-01-25', jours: 25, modele: 'm', userId: OWNER });
   const a = await etat();
-  assert.deepEqual([a.retard, a.perime, a.arelire], [0, false, false]);
+  assert.deepEqual([a.retard, a.perime, a.arelire, a.refonte], [0, false, false, false]);
 
   // Écrire tous les soirs ne doit PAS relancer une relecture complète du corpus
   // tous les soirs, pour un thème qui n'aura pas bougé d'un cheveu.
@@ -249,6 +249,21 @@ test('sans lecture, il faut la lancer ; avec, le retard décide', async () => {
   // Passé le seuil, elle se relance seule.
   for (let i = 1; i <= 14; i++) ecrire(`2026-02-${String(i).padStart(2, '0')}`, 'une journée');
   assert.equal((await etat()).arelire, true);
+});
+
+test('une lecture faite par une version antérieure est à refondre : elle se relance seule, en entier', async () => {
+  // Sans numéro de version : c'est une lecture d'avant les schémas.
+  setLecture({ contenu: { synthese: 'x', themes: [] },
+               jusqu_au: '2026-02-14', jours: 40, modele: 'm', userId: OWNER });
+  const a = await etat();
+  assert.equal(a.refonte, true);
+  assert.equal(a.arelire, true, 'à jour sur le retard, mais périmée par la version');
+  assert.equal(a.version, null);
+  // La même lecture à la version courante ne se relance pas.
+  setLecture({ contenu: { synthese: 'x', themes: [], version: VERSION_LECTURE },
+               jusqu_au: '2026-02-14', jours: 40, modele: 'm', userId: OWNER });
+  const b = await etat();
+  assert.deepEqual([b.refonte, b.arelire], [false, false]);
 });
 
 test('les notes apportées font vieillir la carte, pas seulement les journées', async () => {
