@@ -2383,9 +2383,9 @@ const alerteGlyph = (t = 12) => `<svg viewBox="0 0 18 18" width="${t}" height="$
   <circle cx="9" cy="13" r="1.05" fill="#141109"/></svg>`;
 
 const veilleTitre = n => n === 'rouge'
-  ? ' · ⚠ à surveiller — une blessure est écrite ce jour-là'
+  ? ' · ⚠ à surveiller — une blessure ou une surdose est écrite ce jour-là'
   : n === 'jaune'
-  ? ' · ⚠ à surveiller — le suicide ou un moyen de se faire mal a été évoqué'
+  ? ' · ⚠ à surveiller — le suicide, un moyen de se faire mal ou un excès a été évoqué'
   : '';
 
 /* Ce que dit chaque GENRE de signe — par genre, pas par couleur : « le suicide
@@ -2396,7 +2396,9 @@ const VEILLE_DIT = {
   moyen:    'quelque chose pour se faire mal était à portée',
   dereel:   'un moment où le réel s’est décollé',
   blessure: 'une blessure est écrite ce jour-là',
-  evoque_passe: 'une blessure passée a été évoquée'
+  evoque_passe: 'une blessure ou une surdose passée a été évoquée',
+  substance: 'un excès d’alcool ou une prise de substance est écrite ce jour-là',
+  surdose:  'une surdose est écrite ce jour-là'
 };
 
 /**
