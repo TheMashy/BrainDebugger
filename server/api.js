@@ -23,6 +23,7 @@ import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
+import { nuits, nuitDuJour } from './nuits.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
@@ -582,6 +583,9 @@ export function posteDuJour(date, userId = OWNER) {
   };
   const poste = dig?.poste ?? {};
   const plage = dig?.plage ?? {};
+  // LA NUIT LUE DANS LE CLAVIER (server/nuits.js) : plus juste que le poste
+  // quand l'ordinateur reste allumé, et elle dit ce qui ne colle pas.
+  const nuit = nuitDuJour(dig, activiteDuJour(addDays(date, -1), userId)?.digest ?? null);
   // LE COUCHER MESURÉ QUI FERME LE JOUR EST DANS LE DIGEST DU LENDEMAIN.
   //
   // `poste.coucher` de D est la dernière extinction AVANT le réveil de D —
@@ -619,6 +623,7 @@ export function posteDuJour(date, userId = OWNER) {
     if (g === 'lever') {
       const d = ditLever();
       if (d) return { heure: d, source: 'dit' };
+      if (nuit?.lever) return { heure: nuit.lever, source: 'mesure' };
       if (poste.reveil) return { heure: poste.reveil, source: 'mesure' };
       if (plage.de) return { heure: plage.de, source: 'estime' };
       return { heure: null, source: null };
@@ -651,13 +656,14 @@ export function posteDuJour(date, userId = OWNER) {
     top_app: top(apps), top_web: top(webs)
   } : null;
   const lever = borne('lever'), coucher = borne('coucher');
-  if (!lever.heure && !coucher.heure && poste.sommeil_h == null && !ecran) return null;
+  const sommeil_h = nuit?.sommeil_h ?? poste.sommeil_h ?? null;
+  if (!lever.heure && !coucher.heure && sommeil_h == null && !ecran) return null;
   // `dormi_de` : l'heure de coucher de la nuit QU'ON A DORMIE (celle qui va avec
   // `sommeil_h` et le réveil), lue telle quelle dans le digest. C'est ce qu'on
   // montre en « couché » sur la vue minimaliste — le sommeil comme un épisode
   // (couché -> levé -> durée), pas le coucher qui fermera CE soir.
-  return { lever, coucher, sommeil_h: poste.sommeil_h ?? null,
-           dormi_de: poste.coucher ?? null, ecran };
+  return { lever, coucher, sommeil_h,
+           dormi_de: nuit?.coucher ?? poste.coucher ?? null, nuit_souci: nuit?.souci ?? null, ecran };
 }
 
 /* Découpe un texte en phrases, pour situer une occurrence à l'endroit précis
@@ -2150,6 +2156,15 @@ export const routes = {
    * (notes, nuits, coucher, écran, mots absolus, mesures). C'est la carte
    * qu'un banc d'essai a jugée la plus juste ; voir server/fonctionnements.js.
    */
+  /**
+   * LES NUITS D'UNE PÉRIODE : coucher, lever, durée, et ce qui ne colle pas.
+   * Lues dans l'activité du poste (server/nuits.js), le dit passant devant.
+   */
+  'GET /api/nuits': ({ query, userId }) => {
+    const jours = Math.max(7, Math.min(730, parseInt(query.jours ?? '90', 10) || 90));
+    return { jours, nuits: nuits(userId, { jours }) };
+  },
+
   'GET /api/fonctionnements': ({ query, userId }) => {
     const jours = Math.max(60, Math.min(730, parseInt(query.jours ?? '180', 10) || 180));
     return fonctionnements(userId, { jours });

@@ -625,6 +625,17 @@ table.grid td.cell.has:hover { outline: 1.5px solid var(--ink); outline-offset: 
 table.grid td.cell.today { outline: 1.5px solid var(--accent); outline-offset: 1px; }
 table.grid td.avg { padding-left: 9px; color: var(--ink-dim); font-size: 11px; text-align: right; }
 
+/* LES NUITS : une barre par nuit, du coucher au lever. */
+.nuitsvg { width: 100%; height: auto; display: block; margin-top: 6px; }
+.nuitsvg .ngrid { stroke: var(--line-soft); stroke-width: 1; }
+.nuitsvg .naxe { fill: var(--ink-faint); font-size: 10.5px; font-family: var(--mono); }
+.nuitsvg rect[data-tip], .nuitsvg circle[data-tip] { cursor: pointer; }
+.nuitsvg rect[data-tip]:hover { opacity: 1; filter: brightness(1.25); }
+.nuitsvg .nsouci { fill: var(--panel); stroke: var(--warn); stroke-width: 1.5; }
+.nuitsoucis { margin-top: 10px; }
+.nuitsoucis summary { cursor: pointer; font-size: 12.5px; color: var(--ink-faint); }
+.nuitsoucis ul { margin: 8px 0 0; padding-left: 0; list-style: none; display: grid; gap: 4px; font-size: 12.5px; color: var(--ink-dim); }
+.nuitsoucis li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .legend { display: flex; align-items: center; gap: 3px; margin-top: 14px; font-size: 11px; color: var(--ink-faint); }
 .legend i { width: 17px; height: 11px; border-radius: 2px; display: block; }
 
