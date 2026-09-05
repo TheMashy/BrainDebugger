@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generer } from '../tools/banc-approches/generateur.mjs';
-import { analyserTable, absolusDe, MOTS_INTERDITS, SEUILS } from '../server/fonctionnements.js';
+import { analyserTable, absolusDe, MOTS_INTERDITS, SEUILS, laMachineDit } from '../server/fonctionnements.js';
 
 const dateDe = t => { const d = new Date(Date.UTC(2026, 0, 5 + t)); return d.toISOString().slice(0, 10); };   // 2026-01-05 est un lundi
 const enTable = s => ({
@@ -24,8 +24,9 @@ const PROFILS = ['temoin', 'depression', 'anxiete', 'bipolarite', 'tdah', 'autis
 test('aucune phrase ne nomme un trouble, sur aucun profil, sur trois patients chacun', () => {
   for (const p of PROFILS) for (let i = 0; i < 3; i++) {
     const r = patient(p, i);
-    for (const it of r.items) assert.ok(!MOTS_INTERDITS.test(it.phrase), `${p}#${i} : « ${it.phrase} »`);
-    for (const e of r.exclus) assert.ok(!MOTS_INTERDITS.test(e.raison.replace(/phase haute/, '')), e.raison);
+    for (const it of r.items) assert.ok(!MOTS_INTERDITS.test(laMachineDit(it.phrase)), `${p}#${i} : ${it.phrase}`);
+    for (const e of r.exclus) assert.ok(!MOTS_INTERDITS.test(laMachineDit(e.raison)), e.raison);
+    for (const m of r.manques) assert.ok(!MOTS_INTERDITS.test(laMachineDit(m)), m);
   }
 });
 

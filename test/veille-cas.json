@@ -1,0 +1,438 @@
+[
+{
+"phrase": "avant-hier je me suis tailladé la cuisse",
+"attendu": "rouge",
+"pourquoi": "Passé composé récent : « avant-hier » est du même épisode que « hier », pas un souvenir. Doit rester rouge même si on élargit RECIT_PASSE. (Aujourd'hui : rouge, OK.)"
+},
+{
+"phrase": "cette nuit j’ai craqué et je me suis coupé",
+"attendu": "rouge",
+"pourquoi": "Blessure possible + contexte de crise (« craqué ») + marqueur de maintenant (« cette nuit ») dans la même phrase. (Aujourd'hui : rouge, OK.)"
+},
+{
+"phrase": "là je viens de me faire du mal, j’en peux plus",
+"attendu": "rouge",
+"pourquoi": "« je viens de » = maintenant, « j'en peux plus » = crise. « me faire du mal » à l'infinitif après « viens de » n'est pas dans BLESSURE_POSSIBLE (seul « me suis fait du mal » y est) : la phrase passe inaperçue. (Aujourd'hui : rien — RATÉ, c'est le sens interdit de l'asymétrie.)"
+},
+{
+"phrase": "ce week-end je me suis scarifiée 2 fois",
+"attendu": "rouge",
+"pourquoi": "Piège de la répétition : « 2 fois » matche RACONTE_HISTOIRE (\\d+ fois) mais « ce week-end » est récent. Se répéter dans une fenêtre récente n'est pas raconter un parcours. (Aujourd'hui : jaune — faux négatif.)"
+},
+{
+"phrase": "depuis lundi je me scarifie tous les soirs",
+"attendu": "rouge",
+"pourquoi": "« depuis » + présent = action qui continue jusqu'à maintenant, à l'inverse de « il y a ». Régression à garder si on ajoute des jours de la semaine aux marqueurs de passé. (Aujourd'hui : rouge, OK.)"
+},
+{
+"phrase": "depuis hier je me suis coupé 3 fois",
+"attendu": "rouge",
+"pourquoi": "Avec contexte de crise du jour. « 3 fois » déclenche RACONTE_HISTOIRE, mais « depuis hier » ancre au présent ; « hier » n'est pas dans MAINTENANT donc rien ne rattrape. (Aujourd'hui : jaune — faux négatif.)"
+},
+{
+"phrase": "je me suis scarifié pendant des années",
+"attendu": "jaune",
+"pourquoi": "Durée révolue (« pendant des années ») = récit d'une période passée, pas un geste du jour. « pendant des années/mois » manque à RECIT_PASSE. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "il y a trois ans je me suis tailladé le bras",
+"attendu": "jaune",
+"pourquoi": "Même chose que « il y a 3 ans » mais le nombre est en lettres : RECIT_PASSE ne prend que \\d+. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "il y a 15 jours je me suis scarifié",
+"attendu": "jaune",
+"pourquoi": "« il y a » + durée = point daté dans le passé, contrairement à « depuis ». RECIT_PASSE ne connaît que ans/mois/années, pas les jours/semaines. Frontière produit : au-delà d'« hier/avant-hier », un « il y a N jours » explicite est un souvenir. (Aujourd'hui : rouge.)"
+},
+{
+"phrase": "depuis 15 jours je me scarifie",
+"attendu": "rouge",
+"pourquoi": "Le pendant exact de la phrase précédente : « depuis » + présent = ça continue. Un motif « 15 jours » ajouté trop largement casserait ce cas. (Aujourd'hui : rouge, OK.)"
+},
+{
+"phrase": "l’été dernier je me suis automutilé",
+"attendu": "jaune",
+"pourquoi": "Saison + « dernier » = passé daté, comme « l'an dernier ». RECIT_PASSE ne couvre que an/année. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "la fois où je me suis scarifié, j’ai fini aux urgences",
+"attendu": "jaune",
+"pourquoi": "« la fois où » introduit un récit (avec sa conséquence, l'hôpital) ; c'est exactement le cas rapporté par l'utilisateur. Aucun marqueur temporel connu. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "ça fait 3 ans que je ne me suis pas scarifié",
+"attendu": "jaune",
+"pourquoi": "Négation + durée : la blessure est évoquée, elle date. « ça fait N ans que » est le jumeau de « il y a N ans » et n'est pas reconnu. Jaune plutôt que rien : l'évocation mérite une trace. (Aujourd'hui : rouge — faux positif, le pire cas visible.)"
+},
+{
+"phrase": "depuis ma scarification, je n’ose plus mettre de t-shirt",
+"attendu": "jaune",
+"pourquoi": "« depuis » + nom (pas + présent) désigne un événement révolu dont on vit les suites ; on parle de cicatrices, pas d'un geste du jour. Contre-exemple au réflexe « depuis = présent ». (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "depuis que je me suis scarifié en juin, ma mère fouille ma chambre",
+"attendu": "jaune",
+"pourquoi": "« depuis que » + fait daté par un mois : le mois gouverne. Régression pour vérifier qu'une règle « depuis » ne remonte pas ce cas en rouge. (Aujourd'hui : jaune, OK.)"
+},
+{
+"phrase": "scarifications : mars 2019, juillet 2020, janvier 2022",
+"attendu": "jaune",
+"pourquoi": "Liste de dates = chronologie donnée au compagnon, pas un geste. Régression. (Aujourd'hui : jaune, OK.)"
+},
+{
+"phrase": "le 3 septembre je me suis tailladé",
+"aujourdhui": "2026-09-05",
+"attendu": "rouge",
+"pourquoi": "Un mois nommé n'est pas forcément lointain : écrit le 5 septembre, c'est avant-hier. veilleDuJour connaît la date du jour et pourrait comparer ; sans ça, un mois = le mois courant ou le précédent doit rester rouge (on ne rate pas). (Aujourd'hui : jaune — faux négatif.)"
+},
+{
+"phrase": "le 12 mars je me suis coupé, le 20 mars aussi, et là ça recommence",
+"attendu": "rouge",
+"pourquoi": "Avec contexte de crise du jour. Liste de dates qui se termine au présent (« là ça recommence ») : la dernière proposition l'emporte. « là » seul n'est pas dans MAINTENANT. (Aujourd'hui : jaune — faux négatif.)"
+},
+{
+"phrase": "en mai je me suis scarifié ; hier j’ai recommencé",
+"attendu": "rouge",
+"pourquoi": "« hier » doit battre « en mai » dans la même phrase (le point-virgule ne découpe pas). Aujourd'hui MAINTENANT ne contient pas « hier », donc le mois gagne. (Aujourd'hui : jaune — faux négatif.)"
+},
+{
+"phrase": "j’ai 30 ans et je me scarifie encore",
+"attendu": "rouge",
+"pourquoi": "Présent + « encore ». Piège pour toute heuristique « N ans » : ici c'est un âge, pas une distance. (Aujourd'hui : rouge, OK.)"
+},
+{
+"phrase": "à l’époque du lycée je me scarifiais tous les soirs",
+"attendu": "jaune",
+"pourquoi": "Imparfait d'habitude, passé nommé (« à l'époque »). Mais « scarifiais » ne contient aucune forme de BLESSURE_CERTAINE (scarifie/scarifier) : la phrase est invisible. Attendu jaune evoque_passe. (Aujourd'hui : rien.)"
+},
+{
+"phrase": "avant je me tailladais quand ça allait pas",
+"attendu": "jaune",
+"pourquoi": "Imparfait d'habitude (« avant… -ais »). « me tailladais » ne matche pas « me taillade ». Jaune : une blessure passée est évoquée. (Aujourd'hui : rien.)"
+},
+{
+"phrase": "quand j’étais en internat, je me faisais du mal presque chaque semaine",
+"attendu": "jaune",
+"pourquoi": "Imparfait + « quand j'étais » : récit d'une habitude ancienne, sans besoin de contexte de crise puisque c'est du passé. « me faisais du mal » n'est dans aucune liste. (Aujourd'hui : rien.)"
+},
+{
+"phrase": "quand j’étais ado je me scarifiais, et là ce soir j’ai recommencé",
+"attendu": "rouge",
+"pourquoi": "Le plus dangereux du lot : passé (« quand j'étais ado ») puis présent (« ce soir j'ai recommencé »). Aucune forme reconnue (« scarifiais », « recommencé ») donc rien du tout — alors que « ce soir » aurait dû annuler le doute. (Aujourd'hui : rien — RATÉ.)"
+},
+{
+"phrase": "j’avais arrêté de me scarifier depuis deux ans",
+"attendu": "jaune",
+"pourquoi": "Plus-que-parfait = état antérieur ; « depuis deux ans » porte sur l'arrêt, pas sur un geste. Souvent suivi d'une rechute, mais cette phrase seule ne l'écrit pas. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "j’avais recommencé à me mutiler juste avant l’hospitalisation",
+"attendu": "jaune",
+"pourquoi": "Plus-que-parfait + événement-repère passé (« avant l'hospitalisation ») : un chapitre du parcours. « j'avais + participe » est un marqueur de passé fiable à ajouter. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "je m’étais scarifié la veille de mon bac",
+"attendu": "jaune",
+"pourquoi": "Plus-que-parfait + « la veille de » déjà reconnu. Régression. (Aujourd'hui : jaune, OK.)"
+},
+{
+"phrase": "la psy m’a demandé si je m’étais déjà scarifié",
+"attendu": "jaune",
+"pourquoi": "Discours rapporté d'une question sur le passé (« si je m'étais déjà »). RACONTE_HISTOIRE ne connaît que « j'ai déjà », pas « m'étais déjà » / « j'avais déjà ». (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "elle m’a demandé si j’avais déjà pensé à me tuer",
+"attendu": "jaune",
+"pourquoi": "Le suicide est jaune quoi qu'il arrive, rapporté ou non — un passé ne doit jamais faire descendre un jaune suicide à rien. (Aujourd'hui : jaune, OK.)"
+},
+{
+"phrase": "mon frère m’a dit qu’il s’était scarifié quand il était ado",
+"attendu": "jaune",
+"pourquoi": "Troisième personne + « quand il était » : ce n'est ni un geste de la personne ni d'aujourd'hui. RECIT_PASSE ne connaît que « quand j'étais/avais ». Jaune évoqué au plus ; rouge serait un signe visiblement faux. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "ma mère m’a dit que je m’étais scarifié quand j’avais 14 ans",
+"attendu": "jaune",
+"pourquoi": "Souvenir rapporté par un tiers et daté par l'âge. Régression (« quand j'avais » est déjà couvert). (Aujourd'hui : jaune, OK.)"
+},
+{
+"phrase": "ma mère a vu mes bras ce matin, elle m’a dit d’arrêter de me scarifier",
+"attendu": "rouge",
+"pourquoi": "Discours rapporté MAIS des plaies vues « ce matin » : le marqueur de maintenant doit garder le rouge même dans une phrase « m'a dit que ». Garde-fou contre une règle « discours rapporté = jaune » trop large. (Aujourd'hui : rouge, OK.)"
+},
+{
+"phrase": "tu te souviens, je t’avais raconté la fois où je me suis coupé ?",
+"attendu": "jaune",
+"pourquoi": "Avec contexte de crise du jour. « je t'avais raconté » + « la fois où » = renvoi explicite à un récit déjà fait. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "je n’ai plus envie de mourir, ça va mieux",
+"attendu": "jaune",
+"pourquoi": "Négation d'une idée suicidaire : le jaune est large, et une négation écrite reste une évocation (souvent fragile). On n'essaie pas de parser la négation ; piège miroir de « plus envie de vivre ». (Aujourd'hui : jaune, OK.)"
+},
+{
+"phrase": "je ne me suis pas scarifié aujourd’hui, première fois depuis longtemps",
+"attendu": "jaune",
+"pourquoi": "Négation + « aujourd'hui » : MAINTENANT verrouille le rouge alors que la phrase dit qu'il n'y a PAS eu de geste. Un rouge affichant cette phrase se contredit lui-même. Jaune car l'habitude récente est évoquée. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "je me serais bien tailladé hier soir mais j’ai tenu",
+"attendu": "jaune",
+"pourquoi": "Conditionnel passé = ça n'a pas eu lieu. « me serais bien tailladé » n'est reconnu par aucune liste ; l'envie mérite un jaune, pas un rouge ni un silence. (Aujourd'hui : rien.)"
+},
+{
+"phrase": "si j’avais une lame sous la main je me scarifierais",
+"attendu": "jaune",
+"pourquoi": "Conditionnel = hypothèse, pas d'acte ; mais l'intention et l'objet méritent une trace. « scarifierais » contient « scarifie » et déclenche un rouge. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "pourquoi j’ai envie de mourir ?",
+"attendu": "jaune",
+"pourquoi": "Question au compagnon, au présent malgré « j'ai » (auxiliaire du présent, pas passé composé) : aucune heuristique de passé ne doit la démoter. Dans la taxonomie du fichier (rouge = blessure, jaune = suicide évoqué), c'est un jaune suicide — voir notes sur l'écart avec le « rouge » attendu par la consigne. (Aujourd'hui : jaune.)"
+},
+{
+"phrase": "est-ce que c’est normal d’avoir envie de se scarifier ?",
+"attendu": "jaune",
+"pourquoi": "Question générale, envie et non geste. « scarifier » déclenche BLESSURE_CERTAINE alors qu'aucune blessure n'est écrite. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "tu crois que je vais recommencer à me scarifier ?",
+"attendu": "jaune",
+"pourquoi": "Futur interrogatif : crainte de rechute, pas de geste. Même piège du substring « scarifie ». (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "pourquoi je me suis scarifié ce matin alors que ça allait ?",
+"attendu": "rouge",
+"pourquoi": "Question au compagnon, mais le geste est écrit et daté de « ce matin » : une règle « question = jaune » ne doit pas exister. (Aujourd'hui : rouge, OK.)"
+},
+{
+"phrase": "j’ai envie de me scarifier là maintenant",
+"attendu": "rouge",
+"pourquoi": "Une ENVIE, pas encore une blessure — mais « là maintenant » en fait le moment où le signe sert. Choix assumé : mieux vaut un rouge de trop sur une envie datée de l'instant qu'un jaune que personne ne lit ce soir-là."
+},
+{
+"phrase": "ce matin en me réveillant j’ai repensé à ma scarification de l’an dernier",
+"attendu": "jaune",
+"pourquoi": "Le « ce matin » porte sur « repensé », la blessure est « de l'an dernier ». MAINTENANT annule le passé à l'échelle de la phrase entière, à tort. Cas dur pour un regex : le marqueur le plus proche du mot de blessure devrait gouverner. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "il m’est arrivé de me scarifier, mais là ce soir je vais pas bien du tout",
+"attendu": "jaune",
+"pourquoi": "Symétrique du précédent : blessure au passé (« il m'est arrivé »), détresse ce soir mais aucun geste écrit ce soir. Jaune evoque_passe + crise ; le 3114 n'a pas sa place sur cette phrase. (Aujourd'hui : rouge.)"
+},
+{
+"phrase": "je me suis scarifié. C’était il y a longtemps.",
+"attendu": "jaune",
+"pourquoi": "Le marqueur de passé est dans la phrase SUIVANTE : le découpage par phrase le perd. raconteLePasse devrait voir un voisinage (phrase précédente/suivante) ou le message entier. (Aujourd'hui : rouge — faux positif.)"
+},
+{
+"phrase": "je me suis tailladé la semaine dernière",
+"attendu": "jaune",
+"pourquoi": "Cas de FRONTIÈRE, à trancher : « la semaine dernière » est daté et révolu (2 à 7 jours), pas « hier ». Règle d'or → jaune ; si le produit veut rouge jusqu'à une semaine, inverser ce seul cas. (Aujourd'hui : rouge.)"
+},
+{
+"phrase": "En mai je me suis scarifié, c'est la dernière fois que ça m'est arrivé.",
+"attendu": "jaune",
+"pourquoi": "Mois nommé au passé + « la dernière fois » : blessure passée évoquée, pas un geste du jour (passe déjà)."
+},
+{
+"phrase": "Quand j'avais 15 ans je me suis tailladé les bras pendant presque un an.",
+"attendu": "jaune",
+"pourquoi": "« Quand j'avais N ans » date l'époque ; récit d'un âge, pas d'aujourd'hui (passe déjà)."
+},
+{
+"phrase": "La fois où je me suis scarifié jusqu'à l'hôpital, c'était après la rupture avec Léa.",
+"attendu": "jaune",
+"pourquoi": "« La fois où » + « c'était » = souvenir daté par un événement ; actuellement ROUGE (faux positif, « la fois où » n'est pas reconnu)."
+},
+{
+"phrase": "À l'époque je me faisais du mal presque tous les soirs, personne ne le savait.",
+"attendu": "jaune",
+"pourquoi": "« À l'époque » + imparfait d'habitude ; actuellement RIEN car « me faisais du mal » (imparfait) n'est dans aucune liste — un jaune manqué, pas un rouge faux."
+},
+{
+"phrase": "Ma mère m'a dit que quand j'étais ado, elle avait vu mes scarifications et n'avait rien osé dire.",
+"attendu": "jaune",
+"pourquoi": "Citation d'un tiers sur l'adolescence ; « quand j'étais » demote (passe déjà)."
+},
+{
+"phrase": "Avec ma psy on est revenus sur ma TS de 2019, c'était dur mais utile.",
+"attendu": "jaune",
+"pourquoi": "Thérapie qui revient sur une TS datée : le suicide est évoqué (jaune large), aucune blessure du jour (passe déjà)."
+},
+{
+"phrase": "Pour que tu comprennes d'où je viens : à 17 ans j'ai fait une tentative de suicide, et j'ai été hospitalisé trois semaines.",
+"attendu": "jaune",
+"pourquoi": "Contexte donné au compagnon, âge en marqueur ; « tentative de suicide » = jaune évoqué (passe déjà)."
+},
+{
+"phrase": "À 3 occasions dans ma vie je me suis mutilé, la dernière remonte à deux ans.",
+"attendu": "jaune",
+"pourquoi": "Répétition (« 3 occasions ») + « remonte à deux ans » : parcours raconté (passe déjà via RACONTE_HISTOIRE)."
+},
+{
+"phrase": "Ado, je me scarifiais les cuisses pour que ça ne se voie pas.",
+"attendu": "jaune",
+"pourquoi": "Imparfait « scarifiais » + « ado » en tête ; actuellement RIEN (ni « scarifiais » ni « ado, » seul ne sont reconnus) — jaune manqué."
+},
+{
+"phrase": "Il y a trois ans, la nuit où je me suis tailladé, c'est mon frère qui m'a trouvé.",
+"attendu": "jaune",
+"pourquoi": "« Il y a trois ans » en lettres + « la nuit où » ; actuellement ROUGE (faux positif : RECIT_PASSE n'accepte que « il y a \\d+ ans » en chiffres)."
+},
+{
+"phrase": "Je t'explique le contexte : l'an dernier je me suis tailladé après chaque dispute avec lui.",
+"attendu": "jaune",
+"pourquoi": "Contexte annoncé + « l'an dernier » + habitude (« après chaque ») : récit d'une période (passe déjà)."
+},
+{
+"phrase": "Mon ancien psychiatre disait que mes scarifications d'adolescence étaient une façon de me sentir vivant.",
+"attendu": "jaune",
+"pourquoi": "Citation d'un soignant, « d'adolescence », imparfait ; actuellement ROUGE (faux positif : seul « mon/ma adolescence » est reconnu, pas « d'adolescence »)."
+},
+{
+"phrase": "Quand j'avais 14 ans, j'ai avalé une boîte de cachets, ma mère m'a emmenée aux urgences.",
+"attendu": "jaune",
+"pourquoi": "TS passée racontée sans le mot suicide ; actuellement RIEN (« boîte de cachets » n'est que MOYEN, sans proximité) — jaune manqué, jamais rouge."
+},
+{
+"phrase": "En thérapie aujourd'hui on a parlé de la période où je me faisais des entailles, ça remonte au lycée.",
+"attendu": "jaune",
+"pourquoi": "« Aujourd'hui » porte sur la séance, pas sur le geste (« la période où », « remonte au lycée ») ; piège : MAINTENANT annulerait le passé et ferait un rouge si la journée est en crise ailleurs."
+},
+{
+"phrase": "La dernière fois que je me suis fait du mal c'était à Noël, depuis je tiens.",
+"attendu": "jaune",
+"pourquoi": "« La dernière fois que … c'était à » + « depuis je tiens » = clôture au passé ; actuellement RIEN (pas de contexte de crise) — acceptable, mais un jaune évoqué serait plus juste."
+},
+{
+"phrase": "Hier soir je me suis scarifiée, je ne sais pas quoi te dire d'autre.",
+"attendu": "rouge",
+"pourquoi": "« Hier soir » est un passé immédiat, pas un souvenir : blessure de la veille, rouge (passe déjà)."
+},
+{
+"phrase": "Ce matin je me suis tailladé le bras avant d'aller bosser.",
+"attendu": "rouge",
+"pourquoi": "« Ce matin » = maintenant ; passage à l'acte du jour (passe déjà)."
+},
+{
+"phrase": "Je viens de me couper, ça saigne encore, j'en peux plus.",
+"attendu": "rouge",
+"pourquoi": "« Je viens de » + blessure + crise ; actuellement RIEN : « me couper » (infinitif) et « ça saigne » (présent) manquent, et l'apostrophe de « j'en peux plus » casse le contexte de crise — vrai rouge manqué."
+},
+{
+"phrase": "J'en peux plus. Je me suis coupé.",
+"attendu": "rouge",
+"pourquoi": "Coupure + crise dans le même texte, aucun marqueur de passé ; actuellement RIEN parce que norm() garde l'apostrophe et « j en peux plus » ne matche pas « j'en peux plus » — bug sous-jacent grave."
+},
+{
+"phrase": "Ce soir je vais me scarifier, c'est décidé.",
+"attendu": "rouge",
+"pourquoi": "Intention immédiate (« ce soir », « c'est décidé ») avec un mot certain : on garde le rouge, un de trop vaut mieux qu'un manqué (passe déjà)."
+},
+{
+"phrase": "Je me suis scarifié.",
+"attendu": "rouge",
+"pourquoi": "Passé composé sans aucun marqueur temporel : c'est un geste du jour par défaut, jamais demoté (passe déjà)."
+},
+{
+"phrase": "Automutilation encore, je me déteste.",
+"attendu": "rouge",
+"pourquoi": "Mot certain, « encore » dit une répétition en cours, pas un parcours (passe déjà)."
+},
+{
+"phrase": "Cette nuit j'ai craqué et je me suis brûlée avec la cigarette.",
+"attendu": "rouge",
+"pourquoi": "« Cette nuit » + « craqué » (crise) + brûlure : blessure possible confirmée par le contexte (passe déjà)."
+},
+{
+"phrase": "Je me suis fait du mal tout à l'heure, je voulais me punir.",
+"attendu": "rouge",
+"pourquoi": "« Tout à l'heure » = même journée, « me punir » = intention auto-agressive (passe déjà ; « tout à l'heure » mériterait d'entrer dans MAINTENANT)."
+},
+{
+"phrase": "En mai dernier j'allais mieux, mais là ce soir je me suis coupée à nouveau, j'en peux plus.",
+"attendu": "rouge",
+"pourquoi": "Le marqueur passé (« en mai ») cohabite avec « ce soir » : MAINTENANT doit gagner ; actuellement RIEN à cause de l'apostrophe de « j'en peux plus » (contexte de crise non vu)."
+},
+{
+"phrase": "Je me suis tailladé à 3 reprises rien que ce soir.",
+"attendu": "rouge",
+"pourquoi": "« 3 reprises » ressemble à un parcours mais « ce soir » le rattache à maintenant : MAINTENANT l'emporte sur RACONTE_HISTOIRE (passe déjà)."
+},
+{
+"phrase": "Quand j'étais ado je me scarifiais, et là je viens de recommencer.",
+"attendu": "rouge",
+"pourquoi": "Souvenir suivi d'un « je viens de recommencer » : le geste est d'aujourd'hui ; actuellement RIEN (« scarifiais » non reconnu, « recommencer » ne porte pas la blessure) — vrai rouge manqué."
+},
+{
+"phrase": "Depuis ce matin je pense au suicide et je me suis cognée la tête contre le mur jusqu'à saigner.",
+"attendu": "rouge",
+"pourquoi": "Suicide + blessure possible + « depuis ce matin » dans la même phrase (passe déjà)."
+},
+{
+"phrase": "Pour info je me suis scarifié hier, je te le dis parce que tu me l'as demandé.",
+"attendu": "rouge",
+"pourquoi": "« Hier » doit rester rouge même précédé de « pour info » ; actuellement JAUNE : RACONTE_HISTOIRE demote et « hier » n'est pas dans MAINTENANT — contredit le commentaire « surtout PAS hier »."
+},
+{
+"phrase": "Je me suis coupé, c'est la troisième fois cette semaine, je tiens plus.",
+"attendu": "rouge",
+"pourquoi": "« La troisième fois » est une répétition mais « cette semaine » la rend immédiate : ne pas laisser un futur marqueur de répétition en lettres demoter (passe déjà, faute de chiffres)."
+},
+{
+"phrase": "Je meurs de faim, j'ai rien mangé depuis ce matin.",
+"attendu": "rien",
+"pourquoi": "Expression figée, aucun mot du lexique (passe déjà)."
+},
+{
+"phrase": "Ce dossier me tue, encore trois jours dessus.",
+"attendu": "rien",
+"pourquoi": "« Me tue » (présent, sujet = le dossier) n'est pas « me tuer » ; métaphore (passe déjà)."
+},
+{
+"phrase": "Mon chef va me tuer si je rends ça en retard.",
+"attendu": "rien",
+"pourquoi": "Hyperbole où le sujet est un tiers (« va me tuer ») ; actuellement JAUNE (« me tuer ») — faux positif bénin, exclusion peu coûteuse de « va/vont me tuer »."
+},
+{
+"phrase": "J'ai envie de mourir de honte, j'ai appelé la prof « maman » devant toute la classe.",
+"attendu": "rien",
+"pourquoi": "« Mourir de honte/de rire » est un idiome ; actuellement JAUNE (« envie de mourir ») — exclusion facile du complément « de honte »."
+},
+{
+"phrase": "On a regardé un film sur le suicide d'un lycéen, ça m'a retourné.",
+"attendu": "jaune",
+"pourquoi": "Le suicide est évoqué même via un film et « ça m'a retourné » : le jaune large est voulu par la doctrine du fichier (passe déjà)."
+},
+{
+"phrase": "Dans le bouquin, l'héroïne se scarifie, j'ai trouvé ça très juste.",
+"attendu": "jaune",
+"pourquoi": "Blessure d'un personnage à la 3e personne (« se scarifie ») : pas un geste de la personne, jamais rouge ; actuellement ROUGE car « scarifie » matche sans sujet — rien serait aussi défendable."
+},
+{
+"phrase": "Ma sœur m'a raconté que sa collègue s'est scarifiée pendant des années.",
+"attendu": "jaune",
+"pourquoi": "Récit rapporté sur quelqu'un d'autre (« sa collègue s'est ») ; actuellement ROUGE — faux positif net, « s'est scarifiée » n'est pas « me suis scarifiée »."
+},
+{
+"phrase": "Mdr je vais me pendre si le train est encore en retard demain.",
+"attendu": "jaune",
+"pourquoi": "Humour sur un train : indétectable à coût raisonnable, et un jaune qui montre la phrase se conteste d'un coup d'œil (passe déjà, par doctrine)."
+},
+{
+"phrase": "Je me suis coupé en épluchant les carottes, un pansement et c'est réglé.",
+"attendu": "rien",
+"pourquoi": "Coupure de cuisine sans contexte de crise (passe déjà) ; devient rouge si la journée parle de suicide ailleurs, ce qui est le compromis assumé."
+},
+{
+"phrase": "Réunion mortelle, j'ai cru que j'allais crever d'ennui.",
+"attendu": "rien",
+"pourquoi": "« Crever d'ennui » n'est pas « envie de crever » ; métaphore (passe déjà)."
+},
+{
+"phrase": "J'ai lu un article sur les scarifications chez les ados, ça m'a fait penser à moi à 15 ans.",
+"attendu": "jaune",
+"pourquoi": "Lecture + souvenir daté par un âge (« moi à 15 ans ») ; actuellement ROUGE car « à N ans » sans « quand j'avais » n'est pas un marqueur de passé."
+}
+]

@@ -3315,16 +3315,16 @@ function monterCarte(carte, pistes = []) {
    refuse de montrer se lit aussi, avec sa raison.
    ================================================================== */
 const FONCT_ICO = { bascule: 'lune', lien: 'fleche', rythme: 'annee', regularite: 'epingle', inertie: 'refaire', mots: 'crayon' };
-const FONCT_TITRE = { bascule: 'Ce qui a changé de niveau', lien: 'D’un jour sur le lendemain', rythme: 'La forme de la semaine', regularite: 'La régularité du coucher', inertie: 'L’inertie de la note', mots: 'Les mots absolus' };
+const FONCT_TITRE = { bascule: 'Ce qui a changé de niveau', lien: 'D’un jour sur le lendemain', rythme: 'La forme de la semaine', regularite: 'La régularité du coucher', inertie: 'La note, d’un jour à l’autre', mots: 'Les mots absolus' };
 const FONCT_ORDRE = ['bascule', 'lien', 'rythme', 'regularite', 'inertie', 'mots'];
 
 /** Deux barres qui se comparent : « 14 sur 18 » contre « 9 sur 30 ». */
 function fonctBarres(a, b) {
-  const W = 220, h = 9, pa = a.d ? a.n / a.d : a.v, pb = b.d ? b.n / b.d : b.v;
+  const W = 260, h = 9, L = 128, pa = a.d ? a.n / a.d : a.v, pb = b.d ? b.n / b.d : b.v;
   const max = Math.max(pa, pb, 1e-9);
   const lig = (y, p, lab, txt) => `<text x="0" y="${y + 8}" font-size="10" class="fmut">${esc(lab)}</text>
-    <rect x="86" y="${y}" width="${W - 86 - 44}" height="${h}" rx="2" class="frail"/>
-    <rect x="86" y="${y}" width="${Math.max(2, (W - 86 - 44) * p / max)}" height="${h}" rx="2" class="fplein"/>
+    <rect x="${L}" y="${y}" width="${W - L - 52}" height="${h}" rx="2" class="frail"/>
+    <rect x="${L}" y="${y}" width="${Math.max(2, (W - L - 52) * p / max)}" height="${h}" rx="2" class="fplein"/>
     <text x="${W}" y="${y + 8}" font-size="10" text-anchor="end" class="fmono">${esc(txt)}</text>`;
   return `<svg viewBox="0 0 ${W} 34" class="fsvg" aria-hidden="true">${lig(2, pa, a.lab, a.txt)}${lig(20, pb, b.lab, b.txt)}</svg>`;
 }
@@ -3345,9 +3345,9 @@ function fonctBascule(it, series) {
 }
 function fonctFigure(it, series) {
   if (it.type === 'bascule') return fonctBascule(it, series);
-  if (it.type === 'lien') return fonctBarres({ n: it.appui.bas.n, d: it.appui.bas.sur, lab: 'après un jour bas', txt: `${it.appui.bas.n} / ${it.appui.bas.sur}` }, { n: it.appui.haut.n, d: it.appui.haut.sur, lab: 'après un jour haut', txt: `${it.appui.haut.n} / ${it.appui.haut.sur}` });
-  if (it.type === 'rythme') { const f = v => String(Math.round(v * 10) / 10).replace('.', ','); return fonctBarres({ v: Math.abs(it.appui.dedans), lab: it.appui.quand, txt: f(it.appui.dedans) }, { v: Math.abs(it.appui.dehors), lab: 'le reste', txt: f(it.appui.dehors) }); }
-  if (it.type === 'mots') return fonctBarres({ v: it.appui.bas, lab: 'jours les plus bas', txt: String(it.appui.bas.toFixed(1)).replace('.', ',') }, { v: it.appui.haut, lab: 'jours les plus hauts', txt: String(it.appui.haut.toFixed(1)).replace('.', ',') });
+  if (it.type === 'lien') return fonctBarres({ n: it.appui.bas.n, d: it.appui.bas.sur, lab: 'après ' + (it.appui.bas.cond ?? 'un jour bas'), txt: `${it.appui.bas.n} / ${it.appui.bas.sur}` }, { n: it.appui.haut.n, d: it.appui.haut.sur, lab: 'après ' + (it.appui.haut.cond ?? 'un jour haut'), txt: `${it.appui.haut.n} / ${it.appui.haut.sur}` });
+  if (it.type === 'rythme') { if (it.variable === 'coucher') return ''; return fonctBarres({ v: Math.abs(it.appui.dedans), lab: it.appui.quand, txt: it.appui.dedans_txt ?? '' }, { v: Math.abs(it.appui.dehors), lab: 'le reste', txt: it.appui.dehors_txt ?? '' }); }
+  if (it.type === 'mots') return fonctBarres({ v: it.appui.bas, lab: 'note la plus basse', txt: String(it.appui.bas.toFixed(1)).replace('.', ',') }, { v: it.appui.haut, lab: 'note la plus haute', txt: String(it.appui.haut.toFixed(1)).replace('.', ',') });
   return '';
 }
 function fonctionnementsMarkup(F) {
@@ -3355,7 +3355,7 @@ function fonctionnementsMarkup(F) {
   const p = F.periode;
   const tete = `<div class="fonctete">
     <div class="k faint">Comment ça marche chez toi</div>
-    <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} journées notées · ${p.nuits} nuits · ${p.textes} journées écrites</span>
+    <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} ${p.notes > 1 ? 'journées notées' : 'journée notée'} · ${p.nuits} ${p.nuits > 1 ? 'nuits' : 'nuit'} · ${p.textes} ${p.textes > 1 ? 'journées écrites' : 'journée écrite'}</span>
   </div>`;
   if (!F.assez) return `<section class="fonct"><div class="lechead">${tete}</div>
     <p class="sub" style="max-width:62ch">Pas encore de quoi compter. ${F.manques.map(esc).join(' ')}</p></section>`;
@@ -3371,7 +3371,7 @@ function fonctionnementsMarkup(F) {
           <div class="fonctliste">${it.jours.slice(0, 40).map(d => `<button class="fjour" data-fonct-jour="${esc(d)}">${esc(fmtDay(d))}</button>`).join('')}${it.jours.length > 40 ? `<span class="faint">… et ${it.jours.length - 40} autres</span>` : ''}</div></details>` : ''}
       </article>`).join('')}
     </div>`).join('');
-  const rien = F.items.length ? '' : `<p class="sub" style="max-width:62ch">Rien qui tienne, pour l'instant : sur cette période, ni bascule nette, ni lien qui se confirme au comptage, ni forme de semaine. Ce n'est pas un vide — c'est ce qu'on peut dire honnêtement.</p>`;
+  const rien = F.items.length ? '' : `<p class="sub" style="max-width:62ch">Sur cette période, rien ne se détache assez pour être compté, pour l’instant : pas de bascule nette, pas de lien confirmé au comptage, pas de forme de semaine, un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la veille sans non plus en repartir, des mots absolus qui ne suivent pas la note. C’est une réponse aussi : ce qui n’est pas là ne s’invente pas.</p>`;
   const manques = F.manques.length ? `<p class="sub fonctmanque">${F.manques.map(esc).join(' ')}</p>` : '';
   const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
   return `<section class="fonct"><div class="lechead">${tete}</div>${rien}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
