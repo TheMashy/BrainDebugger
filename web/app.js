@@ -50,6 +50,7 @@ const enTetes = (json = false) => ({
 });
 
 async function api(path, body) {
+  if (body !== undefined) FONCT = FONCT_AN = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
   const res = await fetch(path, body
     ? { method: 'POST', headers: enTetes(true), body: JSON.stringify(body) }
     : { headers: enTetes() });
@@ -1557,6 +1558,12 @@ async function renderYear(year) {
   CARNET = await api('/api/carnet');
   FRISE = await api('/api/frise');
   const grid = await api(`/api/year?year=${year}`);
+  FONCT_AN ??= await api('/api/fonctionnements?jours=400').catch(() => null);
+  /* Les bascules de « comment ça marche chez toi », posées sur leurs jours : une
+     date où le sommeil ou la note a changé de niveau se voit sur la grille. Pas
+     les autres fonctionnements — un rythme ou un lien n'ont pas de jour. */
+  const bascules = new Map();
+  for (const it of FONCT_AN?.items ?? []) if (it.type === 'bascule') bascules.set(it.date, [...(bascules.get(it.date) ?? []), it]);
 
   const FEN = fenetreCumul();
   const CUM0 = FEN.i0;
@@ -1612,12 +1619,13 @@ async function renderYear(year) {
             ${anneesFenetre.map(y => `<button data-year="${y}" aria-pressed="${Number(y) === year}">${y}</button>`).join('')}
           </div>` : ''}
         </div>
-        <div class="gridwrap">${gridMarkup(grid)}</div>
+        <div class="gridwrap">${gridMarkup(grid, bascules)}</div>
         <div class="legend">
           <span>pire</span>
           ${Array.from({ length: 17 }, (_, i) => `<i style="background:${deltaColor(-SATURATION + (i / 16) * 2 * SATURATION)}"></i>`).join('')}
           <span>meilleur</span>
           <span style="margin-left:12px">écart à la référence, ±${SATURATION}</span>
+          ${bascules.size ? `<span style="margin-left:12px" class="legbascule"><i class="cellbascule"></i> changement de niveau (${bascules.size})</span>` : ''}
           <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
         </div>
       </div>
@@ -2179,7 +2187,7 @@ function wireFrise() {
   });
 }
 
-function gridMarkup(grid) {
+function gridMarkup(grid, bascules = new Map()) {
   const today = S.today;
   return `<table class="grid">
     <tr><th></th>${Array.from({ length: 31 }, (_, i) => `<th>${i + 1}</th>`).join('')}<th></th></tr>
@@ -2192,11 +2200,13 @@ function gridMarkup(grid) {
         // voir les périodes, et trois alertes en une semaine ne doivent pas se
         // perdre parce que ces jours-là n'ont pas de note chiffrée.
         const al = d.veille ? ` aveille ${d.veille}` : '';
-        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}`;
-        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}"
-          ${(has || d.veille) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
+        const bs = bascules.get(d.date) ?? [];
+        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}${bs.map(b => `\n↕ ${b.phrase}`).join('')}`;
+        return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}${bs.length ? ' abascule' : ''}"
+          ${(has || d.veille || bs.length) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
           ${has ? `style="background:${deltaColor(d.delta)}"` : ''}>${
-          d.veille ? `<span class="cellveille">${alerteGlyph(13)}</span>` : ''}</td>`;
+          d.veille ? `<span class="cellveille">${alerteGlyph(13)}</span>` : ''}${
+          bs.length ? '<i class="cellbascule"></i>' : ''}</td>`;
       }).join('')}
       <td class="avg">${mo.avg ?? ''}</td>
     </tr>`).join('')}
@@ -2578,6 +2588,11 @@ function termesMarkup(it) {
 
 let MIR_THEME = null;          // le theme deplie
 let LECTURE = null;
+/* Les fonctionnements : calculés sans modèle, invalidés dès qu'on écrit ou qu'une mesure arrive. */
+let FONCT = null;
+/* La même carte, sur un peu plus d'un an, pour la grille de l'Année : les bascules
+   n'ont de sens que posées sur les jours qu'elles datent. */
+let FONCT_AN = null;
 let LECTURE_EN_COURS = false;
 /*
  * LA DERNIERE ERREUR DE LECTURE, GARDEE A L'ECRAN.
@@ -3299,11 +3314,89 @@ function monterCarte(carte, pistes = []) {
   poser();
 }
 
+/* ==================================================================
+   COMMENT ÇA MARCHE CHEZ TOI.
+
+   La carte de co-occurrence reliait des mots qui tombaient dans les mêmes
+   journées. Un banc d'essai (tools/banc-approches) l'a notée 7 sur 100 : sans
+   direction ni temps, elle ne retrouve presque rien de ce qu'on plante. Ce bloc
+   montre ce que le banc a jugé retrouvable, et rien d'autre : des bascules
+   datées, des liens d'un jour sur le lendemain dits par un comptage, la forme
+   de la semaine, la régularité du coucher, l'inertie de la note, les mots
+   absolus. Chaque phrase se vérifie ; aucune ne nomme un trouble. Et ce qu'on
+   refuse de montrer se lit aussi, avec sa raison.
+   ================================================================== */
+const FONCT_ICO = { bascule: 'lune', lien: 'fleche', rythme: 'annee', regularite: 'epingle', inertie: 'refaire', mots: 'crayon' };
+const FONCT_TITRE = { bascule: 'Ce qui a changé de niveau', lien: 'D’un jour sur le lendemain', rythme: 'La forme de la semaine', regularite: 'La régularité du coucher', inertie: 'La note, d’un jour à l’autre', mots: 'Les mots absolus' };
+const FONCT_ORDRE = ['bascule', 'lien', 'rythme', 'regularite', 'inertie', 'mots'];
+
+/** Deux barres qui se comparent : « 14 sur 18 » contre « 9 sur 30 ». */
+function fonctBarres(a, b) {
+  const W = 260, h = 9, L = 128, pa = a.d ? a.n / a.d : a.v, pb = b.d ? b.n / b.d : b.v;
+  const max = Math.max(pa, pb, 1e-9);
+  const lig = (y, p, lab, txt) => `<text x="0" y="${y + 8}" font-size="10" class="fmut">${esc(lab)}</text>
+    <rect x="${L}" y="${y}" width="${W - L - 52}" height="${h}" rx="2" class="frail"/>
+    <rect x="${L}" y="${y}" width="${Math.max(2, (W - L - 52) * p / max)}" height="${h}" rx="2" class="fplein"/>
+    <text x="${W}" y="${y + 8}" font-size="10" text-anchor="end" class="fmono">${esc(txt)}</text>`;
+  return `<svg viewBox="0 0 ${W} 34" class="fsvg" aria-hidden="true">${lig(2, pa, a.lab, a.txt)}${lig(20, pb, b.lab, b.txt)}</svg>`;
+}
+/** Une bascule : la série autour de la date, et les deux niveaux. */
+function fonctBascule(it, series) {
+  const i = series.dates.indexOf(it.date); if (i < 0) return '';
+  const v = series[it.variable] ?? [], a = Math.max(0, i - 14), b = Math.min(v.length, i + 14);
+  const pts = []; for (let t = a; t < b; t++) if (v[t] != null) pts.push([t, v[t]]);
+  if (pts.length < 6) return '';
+  const W = 220, H = 40, ys = pts.map(p => p[1]), lo = Math.min(...ys, it.appui.avant, it.appui.apres), hi = Math.max(...ys, it.appui.avant, it.appui.apres);
+  const X = t => 4 + (t - a) / Math.max(1, b - 1 - a) * (W - 8), Y = y => 4 + (1 - (y - lo) / Math.max(1e-9, hi - lo)) * (H - 8);
+  const d = pts.map((p, k) => (k ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="fsvg" aria-hidden="true">
+    <line x1="${X(a)}" y1="${Y(it.appui.avant)}" x2="${X(i)}" y2="${Y(it.appui.avant)}" class="fniveau"/>
+    <line x1="${X(i)}" y1="${Y(it.appui.apres)}" x2="${X(b - 1)}" y2="${Y(it.appui.apres)}" class="fniveau"/>
+    <line x1="${X(i)}" y1="2" x2="${X(i)}" y2="${H - 2}" class="fdate"/>
+    <path d="${d}" class="fligne"/></svg>`;
+}
+function fonctFigure(it, series) {
+  if (it.type === 'bascule') return fonctBascule(it, series);
+  if (it.type === 'lien') return fonctBarres({ n: it.appui.bas.n, d: it.appui.bas.sur, lab: 'après ' + (it.appui.bas.cond ?? 'un jour bas'), txt: `${it.appui.bas.n} / ${it.appui.bas.sur}` }, { n: it.appui.haut.n, d: it.appui.haut.sur, lab: 'après ' + (it.appui.haut.cond ?? 'un jour haut'), txt: `${it.appui.haut.n} / ${it.appui.haut.sur}` });
+  if (it.type === 'rythme') { if (it.variable === 'coucher') return ''; return fonctBarres({ v: Math.abs(it.appui.dedans), lab: it.appui.quand, txt: it.appui.dedans_txt ?? '' }, { v: Math.abs(it.appui.dehors), lab: 'le reste', txt: it.appui.dehors_txt ?? '' }); }
+  if (it.type === 'mots') return fonctBarres({ v: it.appui.bas, lab: 'note la plus basse', txt: String(it.appui.bas.toFixed(1)).replace('.', ',') }, { v: it.appui.haut, lab: 'note la plus haute', txt: String(it.appui.haut.toFixed(1)).replace('.', ',') });
+  return '';
+}
+function fonctionnementsMarkup(F) {
+  if (!F) return '';
+  const p = F.periode;
+  const tete = `<div class="fonctete">
+    <div class="k faint">Comment ça marche chez toi</div>
+    <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} ${p.notes > 1 ? 'journées notées' : 'journée notée'} · ${p.nuits} ${p.nuits > 1 ? 'nuits' : 'nuit'} · ${p.textes} ${p.textes > 1 ? 'journées écrites' : 'journée écrite'}</span>
+  </div>`;
+  if (!F.assez) return `<section class="fonct"><div class="lechead">${tete}</div>
+    <p class="sub" style="max-width:62ch">Pas encore de quoi compter. ${F.manques.map(esc).join(' ')}</p></section>`;
+  const parType = new Map();
+  for (const it of F.items) { if (!parType.has(it.type)) parType.set(it.type, []); parType.get(it.type).push(it); }
+  const groupes = FONCT_ORDRE.filter(t => parType.has(t)).map(t => `
+    <div class="fonctgroupe">
+      <div class="foncttitre">${ico(FONCT_ICO[t], 14)}<span>${esc(FONCT_TITRE[t])}</span></div>
+      ${parType.get(t).map(it => `<article class="fonctcarte">
+        <p class="fonctphr">${esc(it.phrase)}</p>
+        ${fonctFigure(it, F.series)}
+        ${it.jours?.length ? `<details class="fonctjours"><summary>${it.jours.length === 1 ? 'cette journée' : `ces ${it.jours.length} journées`}</summary>
+          <div class="fonctliste">${it.jours.slice(0, 40).map(d => `<button class="fjour" data-fonct-jour="${esc(d)}">${esc(fmtDay(d))}</button>`).join('')}${it.jours.length > 40 ? `<span class="faint">… et ${it.jours.length - 40} autres</span>` : ''}</div></details>` : ''}
+      </article>`).join('')}
+    </div>`).join('');
+  const rien = F.items.length ? '' : `<p class="sub" style="max-width:62ch">Sur cette période, rien ne se détache assez pour être compté, pour l’instant : pas de bascule nette, pas de lien confirmé au comptage, pas de forme de semaine, un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la veille sans non plus en repartir, des mots absolus qui ne suivent pas la note. C’est une réponse aussi : ce qui n’est pas là ne s’invente pas.</p>`;
+  const manques = F.manques.length ? `<p class="sub fonctmanque">${F.manques.map(esc).join(' ')}</p>` : '';
+  const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
+  return `<section class="fonct"><div class="lechead">${tete}</div>${rien}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
+}
+
 async function renderLecture() {
   // La vue d'ensemble de « Ma carte » : ce qui s'ouvrira ensuite s'y encadre.
   JOUR_DANS = 'mirror';
   MIRROR_DATE = null;
-  if (!LECTURE) LECTURE = await api('/api/lecture');
+  // La lecture (par modèle) et les fonctionnements (comptés ici) partent ensemble :
+  // le second n'a pas à attendre le premier, il n'en dépend pas.
+  const [l, f] = await Promise.all([LECTURE ?? api('/api/lecture'), FONCT ?? api('/api/fonctionnements').catch(() => null)]);
+  LECTURE = l; FONCT = f;
   const L = LECTURE;
 
   /*
@@ -3404,6 +3497,8 @@ async function renderLecture() {
     ${/* Un lot qui a échoué doit le dire, sinon la seule façon de s'en
           apercevoir est de remarquer que la date ne bouge plus. */''}
     ${!LECTURE_ERR && L.lotErreur ? `<p class="sub lecterr lecterrhaut">La lecture de fond n'a pas abouti — ${esc(L.lotErreur)} Tu peux relancer avec « relire ».</p>` : ''}
+    ${fonctionnementsMarkup(FONCT)}
+    ${L.lecture ? '<div class="k faint dequoi">De quoi tu parles</div>' : ''}
     ${corps}
   </div>${tissageMarkup()}`;
 
@@ -3485,6 +3580,9 @@ function wireIlots() {
 
 function wireLecture() {
   $('#view').onclick = async e => {
+    // Une journée citée par un fonctionnement s'ouvre : la preuve est à un clic.
+    const fj = e.target.closest('[data-fonct-jour]');
+    if (fj) return renderMirror(fj.dataset.fonctJour);
     // Le panneau d'un nœud : le refermer, aller à un nœud voisin, ou descendre
     // sur la piste dont il vient de dire le poids.
     if (e.target.closest('[data-noeud-fermer]')) { NOEUD_OUVERT = null; return renderLecture(); }

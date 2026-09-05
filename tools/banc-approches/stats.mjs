@@ -1,0 +1,22 @@
+/* Outils statistiques partagés : petits, sans dépendance, tolérants aux null. */
+export const rangs = v => { const idx = v.map((x, i) => [x, i]).sort((a, b) => a[0] - b[0]); const r = new Array(v.length); let i = 0; while (i < idx.length) { let j = i; while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++; const m = (i + j) / 2 + 1; for (let k = i; k <= j; k++) r[idx[k][1]] = m; i = j + 1; } return r; };
+export function pearson(x, y) { const n = x.length; if (n < 3) return null; let mx = 0, my = 0; for (let i = 0; i < n; i++) { mx += x[i]; my += y[i]; } mx /= n; my /= n; let sxy = 0, sxx = 0, syy = 0; for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; syy += (y[i] - my) ** 2; } if (sxx === 0 || syy === 0) return null; return sxy / Math.sqrt(sxx * syy); }
+/** Spearman sur les paires complètes ; rend { r, n } ou { r: null, n }. */
+export function spearman(a, b, lag = 0) { const x = [], y = []; for (let t = lag; t < b.length; t++) { const u = a[t - lag], v = b[t]; if (u == null || v == null || !Number.isFinite(u) || !Number.isFinite(v)) continue; x.push(u); y.push(v); } if (x.length < 8) return { r: null, n: x.length }; return { r: pearson(rangs(x), rangs(y)), n: x.length }; }
+export const seuilR = (n, z = 1.96) => (n > 3 ? z / Math.sqrt(n - 2) : Infinity);   // |r| au-delà = significatif
+export function moyenne(v) { const x = v.filter(u => u != null && Number.isFinite(u)); return x.length ? x.reduce((a, b) => a + b, 0) / x.length : null; }
+export function ecartType(v) { const x = v.filter(u => u != null && Number.isFinite(u)); if (x.length < 2) return null; const m = moyenne(x); return Math.sqrt(x.reduce((a, b) => a + (b - m) ** 2, 0) / (x.length - 1)); }
+export function quantile(v, q) { const x = v.filter(u => u != null && Number.isFinite(u)).sort((a, b) => a - b); if (!x.length) return null; return x[Math.min(x.length - 1, Math.floor(q * x.length))]; }
+/** AR(1) sur paires (t−1, t) complètes. */
+export function ar1(v) { const x = [], y = []; for (let t = 1; t < v.length; t++) if (v[t - 1] != null && v[t] != null) { x.push(v[t - 1]); y.push(v[t]); } if (x.length < 8) return null; return pearson(x, y); }
+/** t de Welch entre deux groupes. */
+export function welch(a, b) { const x = a.filter(u => u != null), y = b.filter(u => u != null); if (x.length < 4 || y.length < 4) return null; const ma = moyenne(x), mb = moyenne(y), va = ecartType(x) ** 2, vb = ecartType(y) ** 2; const se = Math.sqrt(va / x.length + vb / y.length); return se > 0 ? (ma - mb) / se : null; }
+/** τ de Kendall d'une série contre le temps (tendance). */
+export function kendallTemps(v) { const x = v.filter(u => u != null); const n = x.length; if (n < 5) return null; let s = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) s += Math.sign(x[j] - x[i]); return s / (n * (n - 1) / 2); }
+/** Interpolation linéaire des trous courts (≤ max jours) ; les longs restent null. */
+export function interpoler(v, max = 2) { const out = v.slice(); let t = 0; while (t < out.length) { if (out[t] != null) { t++; continue; } let e = t; while (e < out.length && out[e] == null) e++; const a = t - 1, b = e; if (a >= 0 && b < out.length && e - t <= max) for (let k = t; k < e; k++) out[k] = out[a] + (out[b] - out[a]) * (k - a) / (b - a); t = e; } return out; }
+/** Résolution d'un système linéaire (Gauss avec pivot). */
+export function resoudre(A, b) { const n = b.length; const M = A.map((row, i) => [...row, b[i]]); for (let c = 0; c < n; c++) { let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r; [M[c], M[p]] = [M[p], M[c]]; if (Math.abs(M[c][c]) < 1e-12) return null; for (let r = 0; r < n; r++) { if (r === c) continue; const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; } } return M.map((row, i) => row[n] / row[i]); }
+/** Ridge : X (n×p) centré-réduit, y centré ; rend les coefficients. */
+export function ridge(X, y, lambda = 1) { const n = X.length, p = X[0].length; const A = Array.from({ length: p }, () => new Array(p).fill(0)); const b = new Array(p).fill(0); for (let i = 0; i < n; i++) { for (let j = 0; j < p; j++) { b[j] += X[i][j] * y[i]; for (let k = 0; k < p; k++) A[j][k] += X[i][j] * X[i][k]; } } for (let j = 0; j < p; j++) A[j][j] += lambda; return resoudre(A, b); }
+export const colonne = (jours, k) => jours.map(j => (j[k] == null ? null : j[k]));

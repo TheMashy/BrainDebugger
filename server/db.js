@@ -1407,6 +1407,18 @@ export const activiteJours = (userId = OWNER, limite = 120) =>
     return { date: r.date, recu_le: r.recu_le, digest: d };
   });
 
+/** Les journées d'activité d'une fenêtre de dates, digest déjà relu, du plus ancien au plus récent.
+    Par DATES, pas par nombre : les N digests les plus récents ne sont pas ceux de la fenêtre
+    qu'on regarde dès que la personne cesse d'écrire alors que Machi Tool continue d'envoyer. */
+export const activiteEntre = (debut, fin, userId = OWNER) =>
+  db.prepare(
+    'SELECT date, recu_le, digest FROM activite_jours WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC'
+  ).all(userId, debut, fin).map(r => {
+    let d = null;
+    try { d = JSON.parse(r.digest); } catch { d = null; }
+    return { date: r.date, recu_le: r.recu_le, digest: d };
+  });
+
 /** Une journée d'activité précise, digest déjà relu. `null` si rien n'est arrivé ce jour-là. */
 export function activiteDuJour(date, userId = OWNER) {
   const r = db.prepare(

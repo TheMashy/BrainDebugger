@@ -22,6 +22,7 @@ import * as sessions from './sessions.js';
 import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
+import { fonctionnements } from './fonctionnements.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
@@ -2128,6 +2129,17 @@ export const routes = {
         amplitudes: amplitudes(userId)
       }, date)
     };
+  },
+
+  /*
+   * LES FONCTIONNEMENTS : comment ça marche chez cette personne, en comptant.
+   * Aucun modèle, aucune clé : tout se calcule ici, sur ce que la base tient
+   * (notes, nuits, coucher, écran, mots absolus, mesures). C'est la carte
+   * qu'un banc d'essai a jugée la plus juste ; voir server/fonctionnements.js.
+   */
+  'GET /api/fonctionnements': ({ query, userId }) => {
+    const jours = Math.max(60, Math.min(730, parseInt(query.jours ?? '180', 10) || 180));
+    return fonctionnements(userId, { jours });
   },
 
   'GET /api/lecture': async ({ userId }) => {
