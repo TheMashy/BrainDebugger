@@ -245,7 +245,7 @@ test('les phrases sont des FAITS, jamais des consignes ni des verdicts', () => {
    * comment elle va, et un rappel formulé comme un reproche est un rappel
    * qu'on ferme. On dit ce qui est écrit, au passé, et c'est tout.
    */
-  assert.deepEqual(Object.keys(DIT).sort(), ['blessure', 'dereel', 'evoque_passe', 'moyen', 'suicide']);
+  assert.deepEqual(Object.keys(DIT).sort(), ['blessure', 'dereel', 'evoque_passe', 'moyen', 'substance', 'suicide', 'surdose']);
   for (const phrase of Object.values(DIT)) {
     for (const mot of ['tu devrais', 'attention', 'danger', 'grave', 'inquiét',
                        'il faut', 'arrête', 'tu vas mal']) {
