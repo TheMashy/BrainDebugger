@@ -3424,6 +3424,45 @@ function schemasMarkup(schemas) {
   </section>`;
 }
 
+
+/* ====================================================================
+ * LES JOURS À SURVEILLER, ET CE QUI REVIENT AUTOUR.
+ *
+ * La veille marque des jours. Ici on les regarde ensemble : à quel rythme ils
+ * reviennent, à quelle heure ça s'écrit, et ce qui va avec — la nuit d'avant,
+ * le coucher de la veille, la note de la veille, le week-end, les mots
+ * absolus — compté contre les autres jours de la même période, et dit net
+ * seulement quand le hasard ne l'explique pas. Puis les boucles (les schémas)
+ * dans lesquelles ces jours tombent : « la porte » a 4 de ses 6 journées
+ * parmi eux. Des comptes, jamais des causes.
+ * ================================================================== */
+const SURV_GENRE = { blessure: 'une blessure écrite', surdose: 'une surdose écrite', suicide: 'le suicide évoqué', moyen: 'un moyen à portée', substance: 'un excès', dereel: 'le réel qui se décolle' };
+function surveillesMarkup(C, schemas) {
+  if (!C) return '';
+  if (!C.n) return '';
+  const tete = `<div class="lechead"><div class="fonctete"><div class="k faint">Les jours à surveiller, ce qui revient autour</div>
+    <span class="lecmeta faint">${C.rythme ? esc(C.rythme) : `${C.n} ${C.n > 1 ? 'jours' : 'jour'} sur la période`}</span></div></div>`;
+  if (C.manque) return `<section class="surv">${tete}<p class="sub" style="max-width:62ch">${esc(C.manque)}</p></section>`;
+  const genres = Object.entries(C.genres ?? {}).sort((a, b) => b[1] - a[1]).map(([g, n]) => `<span class="survgenre">${esc(SURV_GENRE[g] ?? g)} <b class="mono">${n}</b></span>`).join('');
+  const jours = C.jours.slice(-40).map(j => `<button class="fjour ${j.niveau}" data-fonct-jour="${esc(j.date)}" title="${esc(j.genres.map(g => SURV_GENRE[g] ?? g).join(' · '))}">${esc(fmtDay(j.date).replace(/ \d{4}$/, ''))}</button>`).join('');
+  const phrases = C.phrases.map(p => `<article class="fonctcarte survcarte${p.appui?.net ? ' net' : ''}">
+      <div class="survquoi">${esc(p.quoi)}${p.appui?.net ? '<span class="survnet">net</span>' : ''}</div>
+      <p class="fonctphr">${esc(p.phrase)}</p>
+      ${p.appui?.sur && p.appui?.hors_sur ? fonctBarres({ n: p.appui.n, d: p.appui.sur, lab: 'jours à surveiller', txt: `${p.appui.n} / ${p.appui.sur}` }, { n: p.appui.hors_n, d: p.appui.hors_sur, lab: 'les autres', txt: `${p.appui.hors_n} / ${p.appui.hors_sur}` }) : ''}
+    </article>`).join('');
+  // Les boucles où ces jours tombent.
+  const set = new Set(C.jours.map(j => j.date));
+  const boucles = (schemas ?? []).map(sc => { const dedans = (sc.jours ?? []).filter(d => set.has(d)); return dedans.length ? { sc, dedans } : null; }).filter(Boolean).sort((a, b) => b.dedans.length - a.dedans.length);
+  const boucleHtml = boucles.length ? `<div class="survboucles"><div class="foncttitre">${ico('refaire', 14)}<span>Les boucles où ces jours tombent</span></div>
+    ${boucles.map(({ sc, dedans }) => `<p class="survboucle">« <b>${esc(sc.nom)}</b> » : ${dedans.length} de ses ${sc.jours.length} ${sc.jours.length > 1 ? 'journées' : 'journée'} ${dedans.length > 1 ? 'sont des jours' : 'est un jour'} à surveiller — ${esc(sc.comportement)}</p>`).join('')}</div>` : '';
+  return `<section class="surv">${tete}
+    <div class="survgenres">${genres}</div>
+    <div class="fonctliste survjours">${jours}${C.jours.length > 40 ? `<span class="faint">… et ${C.jours.length - 40} autres</span>` : ''}</div>
+    ${phrases ? `<div class="fonctgrille">${phrases}</div>` : ''}
+    ${boucleHtml}
+    <p class="sub survnote">Des comptes contre les autres jours de la même période, jamais des causes. « net » veut dire que le hasard n’explique pas l’écart (test exact de Fisher à 5 %) ; sans « net », c’est un compte à regarder, pas une conclusion.</p>
+  </section>`;
+}
 /* ==================================================================
    COMMENT ÇA MARCHE CHEZ TOI.
 
@@ -3709,10 +3748,11 @@ async function renderLecture() {
     ${L.refonte ? `<p class="sub lecrefonte">${(LECTURE_EN_COURS || L.enLot)
         ? `L’application a changé de façon de lire : il relit <b>tout</b> ton journal (${L.ecrites} journées écrites), en fond. Les schémas se régénèrent, ça peut prendre jusqu’à une heure. En attendant, ceci est la lecture d’avant.`
         : `L’application a changé de façon de lire : cette lecture est celle d’avant, sans schémas. La relecture complète part toute seule à l’ouverture ; sinon, « relire tout ».`}</p>` : ''}
-    ${schemasMarkup(L.lecture?.schemas)}
-    ${fonctionnementsMarkup(FONCT)}
     ${L.lecture ? '<div class="k faint dequoi">De quoi tu parles</div>' : ''}
     ${corps}
+    ${schemasMarkup(L.lecture?.schemas)}
+    ${fonctionnementsMarkup(FONCT)}
+    ${surveillesMarkup(FONCT?.surveilles, L.lecture?.schemas)}
   </div>${tissageMarkup()}`;
 
   wireLecture();

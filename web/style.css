@@ -4054,3 +4054,17 @@ details.jpecol .jpetop { margin-top: 5px; }
 .fonctexclus ul { margin: 8px 0 0; padding-left: 18px; max-width: 70ch; font-size: 13px; color: var(--ink-dim); }
 .fonctexclus li { margin: 4px 0; }
 .dequoi { margin: 8px 0 -6px; }
+/* LES JOURS À SURVEILLER, CE QUI REVIENT AUTOUR. */
+.surv { display: grid; gap: 12px; margin: 6px 0 34px; }
+.surv .lechead { margin: 0; }
+.survgenres { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--ink-dim); }
+.survgenre b { color: var(--ink); font-weight: 500; margin-left: 2px; }
+.survjours .fjour.rouge { border-color: var(--danger); color: var(--danger); }
+.survjours .fjour.jaune { border-color: var(--warn); color: var(--warn); }
+.survquoi { display: flex; align-items: center; gap: 8px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
+.survnet { font-size: 10.5px; letter-spacing: .08em; color: var(--accent); border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent); border-radius: 999px; padding: 0 7px; text-transform: uppercase; }
+.survcarte.net { border-color: color-mix(in oklab, var(--accent) 35%, var(--line-soft)); }
+.survboucles { display: grid; gap: 8px; }
+.survboucle { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); max-width: 80ch; }
+.survnote { max-width: 76ch; margin: 0; font-size: 12.5px; }
+
