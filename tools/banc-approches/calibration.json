@@ -1,0 +1,66 @@
+{
+ "famille": "calib",
+ "N": 24,
+ "cible": {
+  "edge": 1,
+  "chain": 0.5,
+  "episode": 0.5,
+  "ews": 1
+ },
+ "classes": {
+  "autocorr": {
+   "high": 0.4391242893613094,
+   "low": -0.018477376753478728
+  },
+  "regularity": {
+   "haute": 1.2963950956025867,
+   "basse": 0.9451024242623124
+  }
+ },
+ "seuils": {
+  "cooccurrence": {
+   "seuil_phi": 0.35
+  },
+  "var": {
+   "seuil_var": 0.35,
+   "seuil_cont": 0.45,
+   "autocorr": {
+    "high": 0.4391242893613094,
+    "low": -0.018477376753478728
+   }
+  },
+  "ews": {
+   "seuil_tau": 0.7,
+   "autocorr": {
+    "high": 0.4391242893613094,
+    "low": -0.018477376753478728
+   }
+  },
+  "chaine": {
+   "seuil_lift": 1.8
+  },
+  "frise": {
+   "penalite": 3.5,
+   "regularity": {
+    "haute": 1.2963950956025867,
+    "basse": 0.9451024242623124
+   },
+   "autocorr": {
+    "high": 0.4391242893613094,
+    "low": -0.018477376753478728
+   }
+  },
+  "pheno": {
+   "penalite": 3,
+   "seuil_r": 0.15,
+   "regularity": {
+    "haute": 1.2963950956025867,
+    "basse": 0.9451024242623124
+   }
+  },
+  "langage": {
+   "seuil_tau": 0.4
+  }
+ },
+ "empreinte": 1526764587
+}
