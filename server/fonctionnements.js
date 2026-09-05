@@ -56,7 +56,7 @@ export const SEUILS = {
   rupture: { note: 4.5, sommeil: 3.0, min_seg: 14, ecart_min: { note: 1.0, sommeil_h: 1.0 }, z_saut: 3.5, fenetre_pente: 90 },   // sommeil = banc (pheno.penalite) ; note = local, DURCI après le banc (frise calibrée à 3,5) parce qu'une fausse bascule de note coûte cher ; ecart_min = local
   lien: { seuil: 0.35, stabilite: 0.6, boots: 40, lambda: 2, min_lignes: 40,   // banc : var.seuil_var, stabilité et bootstrap de la méthode var
           min_groupe: 10, effet_min: 0.15, fisher_p: 0.05 },                     // local : le comptage montré n'existe pas au banc — à y ajouter
-  mots: { r: 0.3, min_jours: 25, min_mots: 30 },   // local : r = CALIBRAGE par défaut de la méthode langage
+  mots: { r: 0.3, min_jours: 15, min_mots: 20 },   // local : r = CALIBRAGE par défaut de la méthode langage ; min_jours/min_mots ABAISSÉS (25/30 → 15/20) : un journal écrit en messages courts ne franchissait jamais la barre
 };
 
 /* Les mots absolus, adaptés d'Al-Mosaiwi & Johnstone (2018) : all/whole/full/

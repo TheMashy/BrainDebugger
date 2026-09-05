@@ -25,7 +25,7 @@ import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle } from './passerelle.js';
-import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN } from './lecture.js';
+import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
 import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
          chiffresDuJour, contient, COUCHER, LEVER, DERNIERE, PREMIERE } from './allure.js';
 import { lireDigest } from './digest.js';
@@ -850,11 +850,24 @@ function aNoter(rows, aujourdhui) {
  * appelant CETTE fonction, un test lit le corpus lui-meme et voit si la lecture
  * d'avant y est.
  */
+/**
+ * UNE LECTURE À REFAIRE EN ENTIER.
+ *
+ * Elle existe (sinon c'est une première lecture, pas une refonte) et elle a été
+ * faite par une version antérieure de la façon de lire. Ce n'est pas « en
+ * retard » : ce qu'elle rend n'a plus la forme qu'on attend, et la relecture
+ * qui la remplace se fait sur TOUT le journal, pas sur l'échantillon.
+ */
+export function lectureARefondre(userId) {
+  const l = getLecture(userId);
+  return !!l?.contenu && (Number(l.contenu.version) || 1) < VERSION_LECTURE;
+}
+
 export function corpusDuJournal(userId, rows = series(userId).rows,
-                                carnet = series(userId).carnet) {
+                                carnet = series(userId).carnet, { complet = false } = {}) {
   const avant = getLecture(userId);
   return corpusPour({
-    rows, events: allEvents(userId), carnet,
+    rows, events: allEvents(userId), carnet, complet,
     motifs: allMotifs(userId), objectifs: allObjectifs(userId),
     amplitudes: amplitudes(userId),
     // La consigne lui demande d'en reprendre les noms ; la validation, elle, ne
@@ -883,7 +896,7 @@ async function releverLecture(userId) {
   if (!lot?.id) return null;
   try {
     const { rows, carnet } = series(userId);
-    const corpus = corpusDuJournal(userId, rows, carnet);
+    const corpus = corpusDuJournal(userId, rows, carnet, { complet: !!lot.complet });
     const r = await releverLot(lot.id, corpus, s);
     if (!r.pret) return null;
 
@@ -2184,7 +2197,11 @@ export const routes = {
       ? ecrites.filter(r => r.date > l.jusqu_au).length
       : ecrites.length) + notes;
     const SEUIL = 7;
+    const refonte = lectureARefondre(userId);
     return {
+      // La façon de lire a changé depuis cette lecture : elle est à refaire, en entier.
+      refonte,
+      version: l?.contenu?.version ?? null,
       // Une lecture faite avant la bascule vers « tout le journal » : elle
       // s'affiche, mais elle est perimee par construction.
       ancienne: !!l?.ancienne,
@@ -2206,7 +2223,7 @@ export const routes = {
        * quoi qu'il arrive, donc celui ou la relance automatique repartirait a
        * chaque ouverture de la page sur un lot deja parti.
        */
-      arelire: (!l || retard >= SEUIL) && !getSettings(userId).lectureLot,
+      arelire: (!l || retard >= SEUIL || refonte) && !getSettings(userId).lectureLot,
       /*
        * UN LOT EN COURS SE DIT. Sans ca, l'ecran affiche « relire » pendant
        * qu'une lecture est deja partie, et cliquer en lancerait une deuxieme
@@ -2233,7 +2250,14 @@ export const routes = {
     if (ecrites.length < LECTURE_MIN) {
       return { error: `Il faut au moins ${LECTURE_MIN} journées écrites pour que ça veuille dire quelque chose.` };
     }
-    const corpus = corpusDuJournal(userId, rows, carnet);
+    /*
+     * EN ENTIER quand on le demande (« relire tout »), ou quand la façon de lire
+     * a changé depuis la dernière lecture : c'est la relecture qui refait les
+     * schémas sur tout le journal, pas sur les cinquante journées les plus
+     * denses. Le reste du temps, l'échantillon suffit et coûte dix fois moins.
+     */
+    const complet = !!body?.complet || lectureARefondre(userId);
+    const corpus = corpusDuJournal(userId, rows, carnet, { complet });
     if (!corpus.dates.size) {
       return { error: "Rien d'écrit dans ton journal — il n'y a rien à lire." };
     }
@@ -2253,7 +2277,7 @@ export const routes = {
       if (s.lectureLot?.id) return { error: 'Une lecture est déjà partie.' };
       try {
         const lot = await lancerLot(corpus, s);
-        setSettings({ lectureLot: { id: lot.id, depuis: new Date().toISOString() },
+        setSettings({ lectureLot: { id: lot.id, depuis: new Date().toISOString(), complet },
                       lectureLotErreur: null }, userId);
       } catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
       // Pas de lecture a rendre : celle d'avant reste a l'ecran, et `enLot` dit
@@ -2587,7 +2611,7 @@ export async function retisser(body, send, userId = OWNER) {
     return;
   }
 
-  const corpus = corpusDuJournal(userId, rows, carnet);
+  const corpus = corpusDuJournal(userId, rows, carnet, { complet: !!body?.complet || lectureARefondre(userId) });
   if (!corpus.dates.size) {
     send('erreur', { error: "Rien d'écrit dans ton journal — il n'y a rien à lire." });
     return;

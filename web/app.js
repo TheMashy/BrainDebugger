@@ -3316,6 +3316,48 @@ function monterCarte(carte, pistes = []) {
   poser();
 }
 
+/* ====================================================================
+ * TES SCHÉMAS : LES BOUCLES DE COMPORTEMENT, EN CINQ MAILLONS.
+ *
+ * C'est la lecture du modèle, dans la forme de l'analyse fonctionnelle : ce
+ * qui ouvre la boucle, ce qui monte, ce qu'on fait, ce que ça fait sur le
+ * moment, ce que ça coûte ensuite — et la flèche qui ramène au début, parce que
+ * c'est elle qui fait la boucle. Chaque schéma porte ses journées et ses
+ * extraits : on peut aller vérifier. Les mécanismes reconnus au fil des
+ * conversations (« peur avant de sortir ») viennent se ranger sous la boucle
+ * qui les contient, au lieu de rester en liste à plat.
+ * ================================================================== */
+const SCH_FONCTION = { eviter: 'pour éviter', soulager: 'pour soulager', controler: 'pour garder la main', tenir: 'pour tenir', se_punir: 'pour se punir', fuir: 'pour fuir', se_rapprocher: 'pour se rapprocher' };
+const SCH_MAILLONS = [['declencheur', 'ce qui ouvre'], ['reaction', 'ce qui monte'], ['comportement', 'ce que tu fais'], ['effet', 'sur le moment'], ['cout', 'ensuite']];
+const SCH_FORCE = { 1: 'se rejoue parfois', 2: 'se rejoue souvent', 3: 'se rejoue très souvent' };
+function schemasMarkup(schemas) {
+  if (!schemas?.length) return '';
+  const motifsConnus = new Map((S.motifs?.liste ?? []).map(m => [String(m.nom).toLowerCase(), m]));
+  const cartes = schemas.map((sc, i) => {
+    const maillons = SCH_MAILLONS.filter(([k]) => sc[k]).map(([k, lab]) => `<li class="schm ${k}"><span class="schk">${lab}</span><p>${esc(sc[k])}</p></li>`).join('<li class="schfl" aria-hidden="true"></li>');
+    const motifs = (sc.motifs ?? []).map(n => { const m = motifsConnus.get(n); return `<span class="schmotif" title="${esc(m?.mecanisme ?? '')}">${esc(m?.nom ?? n)}${m?.vues ? `<b class="mono">${m.vues}×</b>` : ''}</span>`; }).join('');
+    const preuves = (sc.preuves ?? []).map(p => `<li><button class="fjour" data-fonct-jour="${esc(p.date)}">${esc(fmtDay(p.date))}</button><q>${esc(p.extrait)}</q></li>`).join('');
+    const n = sc.jours?.length ?? 0;
+    return `<article class="schema" data-schema="${i}">
+      <header class="schtete">
+        <h3 class="schnom">${esc(sc.nom)}</h3>
+        <span class="schfonc">${esc(SCH_FONCTION[sc.fonction] ?? '')}</span>
+        <span class="schn faint">${n ? `${n} journée${n > 1 ? 's' : ''} · ` : ''}${SCH_FORCE[sc.force] ?? ''}${sc.suite === 'nouveau' ? ' · nouveau' : ''}</span>
+      </header>
+      <ol class="schchaine">${maillons}</ol>
+      <div class="schboucle"><span>et ça ramène au début</span></div>
+      ${motifs ? `<div class="schmotifs"><span class="faint">reconnu au fil des conversations :</span>${motifs}</div>` : ''}
+      ${sc.casse ? `<p class="schcasse"><b>Ce qui l’a déjà cassée :</b> ${esc(sc.casse)}</p>` : ''}
+      ${preuves ? `<details class="schpreuves"><summary>${(sc.preuves.length === 1) ? 'la journée qui le montre' : `${sc.preuves.length} journées qui le montrent`}</summary><ul>${preuves}</ul></details>` : ''}
+    </article>`;
+  }).join('');
+  return `<section class="schemas">
+    <div class="lechead"><div class="fonctete"><div class="k faint">Tes schémas</div>
+      <span class="lecmeta faint">des boucles qui se rejouent, lues dans ce que tu as écrit · chaque maillon vient de tes mots, et se vérifie sur ses journées</span></div></div>
+    <div class="schgrille">${cartes}</div>
+  </section>`;
+}
+
 /* ==================================================================
    COMMENT ÇA MARCHE CHEZ TOI.
 
@@ -3577,7 +3619,8 @@ async function renderLecture() {
         ? `<span class="lecmeta faint" title="${L.enLot
              ? 'Partie en tâche de fond, à moitié prix. Elle arrive dans l’heure.' : ''}">
              <span class="spin petit"></span> il relit${L.enLot ? ' — en fond' : ''}</span>`
-        : `<button class="btn ghost" data-lire title="Refait la lecture sur tout le corpus, tout de suite.">${ico('refaire')}relire</button>`) : ''}
+        : `<button class="btn ghost" data-lire title="Refait la lecture sur les journées les plus denses, tout de suite.">${ico('refaire')}relire</button>
+           <button class="btn ghost" data-lire-tout title="Relit TOUT le journal, chaque journée écrite, en fond : c’est long et c’est une vraie lecture.">${ico('oeil', 13)}relire tout</button>`) : ''}
       ${/* RETISSER : la même lecture, mais REGARDÉE. Deux fois par jour, parce
              que rien ne change en une heure, et qu'une toile qu'on rejoue
              jusqu'à ce qu'elle plaise n'est plus une lecture. */''}
@@ -3593,6 +3636,14 @@ async function renderLecture() {
     ${/* Un lot qui a échoué doit le dire, sinon la seule façon de s'en
           apercevoir est de remarquer que la date ne bouge plus. */''}
     ${!LECTURE_ERR && L.lotErreur ? `<p class="sub lecterr lecterrhaut">La lecture de fond n'a pas abouti — ${esc(L.lotErreur)} Tu peux relancer avec « relire ».</p>` : ''}
+    ${/* LA REFONTE SE DIT. Quand la façon de lire a changé, la lecture affichée
+          est celle d'avant, et la relecture qui la remplace se fait sur TOUT le
+          journal, en fond. Sans cette ligne on regarderait une carte sans
+          schémas sans savoir qu'ils arrivent. */''}
+    ${L.refonte ? `<p class="sub lecrefonte">${(LECTURE_EN_COURS || L.enLot)
+        ? `L’application a changé de façon de lire : il relit <b>tout</b> ton journal (${L.ecrites} journées écrites), en fond. Les schémas se régénèrent, ça peut prendre jusqu’à une heure. En attendant, ceci est la lecture d’avant.`
+        : `L’application a changé de façon de lire : cette lecture est celle d’avant, sans schémas. La relecture complète part toute seule à l’ouverture ; sinon, « relire tout ».`}</p>` : ''}
+    ${schemasMarkup(L.lecture?.schemas)}
     ${fonctionnementsMarkup(FONCT)}
     ${L.lecture ? '<div class="k faint dequoi">De quoi tu parles</div>' : ''}
     ${corps}
@@ -3626,14 +3677,14 @@ async function renderLecture() {
  *   l'écran garde la lecture précédente, et une heure d'attente ne coûte rien à
  *   qui n'attend pas. Un clic sur « relire », lui, veut une réponse.
  */
-async function lancerLecture({ fond = false } = {}) {
+async function lancerLecture({ fond = false, complet = false } = {}) {
   if (LECTURE_EN_COURS) return;
   LECTURE_EN_COURS = true;
   LECTURE_ERR = null;
   const avait = !!LECTURE?.lecture;
   if (!avait) await renderLecture();       // l'attente ne s'affiche que s'il n'y a rien à montrer
   try {
-    const r = await api('/api/lecture', { fond });
+    const r = await api('/api/lecture', { fond, complet });
     LECTURE = r;
     // Les pistes viennent de CETTE lecture : celles gardees pour « Moi »
     // parlent d'une fenetre qui vient d'etre relue, et il faut les redemander.
@@ -3746,6 +3797,7 @@ function wireLecture() {
       } catch (err) { return toast(err.message); }
     }
 
+    if (e.target.closest('[data-lire-tout]')) return lancerLecture({ fond: true, complet: true });
     if (e.target.closest('[data-lire]')) return lancerLecture();
     if (e.target.closest('#retisser')) return retisser();
     if (e.target.closest('#tsfin')) return fermerTissage();

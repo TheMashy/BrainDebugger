@@ -70,12 +70,32 @@ export function grainPour(jours) {
 export const MIN_JOURS = 12;
 
 /*
+ * LA VERSION DE LA LECTURE.
+ *
+ * Quand la façon de lire change assez pour que ce qui est affiché change de
+ * nature — les schémas, par exemple — une lecture faite avant n'est plus la
+ * même chose que celle qu'on attend. Le numéro voyage avec le contenu rangé ;
+ * une lecture d'une version antérieure est à REFAIRE, et à refaire sur TOUT le
+ * journal, pas sur l'échantillon : c'est le moment où l'on relit vraiment.
+ */
+export const VERSION_LECTURE = 2;
+
+/*
  * Le budget du corpus, en caracteres. ~45 000 fait a peu pres 12 000 jetons :
  * assez pour que le modele voie vraiment le fond, assez peu pour qu'une lecture
  * ne coute pas une conversation entiere a quelqu'un qui a une enveloppe.
  */
 const BUDGET = 45000;
 const CAR_PAR_JOUR = 900;
+/*
+ * LE BUDGET COMPLET sert à la refonte et au bouton « relire tout » : il tient
+ * dans la fenêtre d'un million de jetons des modèles actuels et ne coupe
+ * presque aucune journée. Ce qui dépasse encore est trié par densité, comme
+ * avant. Il coûte une vraie lecture ; il ne part donc que quand la façon de
+ * lire a changé, ou quand on le demande.
+ */
+export const BUDGET_COMPLET = 1_800_000;
+const CAR_PAR_JOUR_COMPLET = 4000;
 
 const jourDe = d => Date.parse(d + 'T00:00:00Z');
 const decaler = (d, n) => new Date(jourDe(d) + n * 86400000).toISOString().slice(0, 10);
@@ -89,13 +109,13 @@ const decaler = (d, n) => new Date(jourDe(d) + n * 86400000).toISOString().slice
  * passe quelque chose. On prend donc les plus ecrites, PUIS on reordonne par
  * date : le modele doit lire une chronologie, pas un palmares.
  */
-export function choisirJours(rows, budget = BUDGET) {
+export function choisirJours(rows, budget = BUDGET, carParJour = CAR_PAR_JOUR) {
   const ecrites = rows.filter(r => r.text && r.text.trim());
   const par = [...ecrites].sort((a, b) => b.text.length - a.text.length);
   const gardees = [];
   let total = 0;
   for (const r of par) {
-    const taille = Math.min(r.text.length, CAR_PAR_JOUR) + 24;
+    const taille = Math.min(r.text.length, carParJour) + 24;
     if (total + taille > budget) continue;      // continue, pas break : une
     total += taille;                            // journee courte peut encore tenir
     gardees.push(r);
@@ -145,6 +165,10 @@ function blocPrecedente(p, quand = null) {
   if (!p) return null;
   const parties = [];
 
+  if (p.schemas?.length) {
+    parties.push(`SES SCHÉMAS (les boucles, par leur nom)\n${p.schemas.map(x =>
+      `« ${x.nom} » — ${x.declencheur} → ${x.comportement}`).join('\n')}`);
+  }
   if (p.pistes?.length) {
     parties.push(`SES PISTES\n${p.pistes.map(x =>
       `« ${x.nom} » — regroupe : ${(x.themes ?? []).join(', ') || '—'}` +
@@ -187,7 +211,9 @@ ${parties.join('\n\n')}`;
  * @returns {{texte: string, dates: Set<string>, jours: number, depuis: string|null}}
  */
 export function corpusPour({ rows, events = [], carnet = [], motifs = [], objectifs = [],
-                             amplitudes = [], precedente = null }) {
+                             amplitudes = [], precedente = null, complet = false }) {
+  const budget = complet ? BUDGET_COMPLET : BUDGET;
+  const carParJour = complet ? CAR_PAR_JOUR_COMPLET : CAR_PAR_JOUR;
   // Tout, sans borne. Le budget de caracteres fait deja le tri -- et il le fait
   // sur la DENSITE des journees, ce qui est un bien meilleur critere qu'une
   // date de coupure : ce qui revient depuis quatre ans compte autant que ce qui
@@ -195,7 +221,7 @@ export function corpusPour({ rows, events = [], carnet = [], motifs = [], object
   const dans = () => true;
 
   const fenetre = rows.slice();
-  const gardees = choisirJours(fenetre);
+  const gardees = choisirJours(fenetre, budget, carParJour);
   const dates = new Set(gardees.map(r => r.date));
 
   const blocs = [];
@@ -214,7 +240,7 @@ ${mois.map(m => `${m.mois} | ${m.n} | ${m.med} | ${m.moy} | ${m.ecart} | ${m.bas
     blocs.push(`SES JOURNÉES ÉCRITES. ${gardees.length} journées sur les ${fenetre.filter(r => r.text?.trim()).length} qui portent du texte sur cette période — les plus fournies, remises dans l'ordre.
 
 ${gardees.map(r => `[${r.date}${r.note !== null && r.note !== undefined ? ` · ${r.note}/10` : ''}] ${
-  r.text.length > CAR_PAR_JOUR ? r.text.slice(0, CAR_PAR_JOUR) + '…' : r.text}`).join('\n\n')}`);
+  r.text.length > carParJour ? r.text.slice(0, carParJour) + '…' : r.text}`).join('\n\n')}`);
   }
 
   const ev = events.filter(e => dans(e.fin ?? e.date));
@@ -305,6 +331,8 @@ ${amp.map(a => `${a.date} | ${a.n} | ${a.bas} → ${a.haut} | ${a.ecart}`).join(
     // Elle voyage avec le corpus : `lire()` la repasse a `valider()`, qui en a
     // besoin pour reconnaitre les noms repris et garder les couleurs.
     precedente,
+    complet,
+    motifsConnus: new Set(motifs.map(m => String(m.nom).toLowerCase())),
     jours: fenetre.filter(r => r.text?.trim()).length,
     // L'etendue reelle, en jours : c'est elle qui decide du grain de la serie.
     etendue: fenetre.length
@@ -416,6 +444,54 @@ choses. Ce qu'on cherche est spécifique et récurrent à la fois : le nœud qu'
 reconnaîtrait immédiatement comme étant le sien.
 
 Huit à seize nœuds. En dessous ce n'est pas une carte ; au-dessus on n'y lit plus rien.
+
+LES SCHÉMAS
+C'est la partie qui lui sert le plus, et celle qui demande le plus de rigueur. Un SCHÉMA est
+une boucle de comportement, décrite comme le fait l'analyse fonctionnelle en psychologie du
+comportement : pas un trait, pas un état — une SÉQUENCE qui se rejoue.
+
+Cinq maillons, toujours les mêmes, toujours dans cet ordre :
+
+  1. LE DÉCLENCHEUR : la situation, le moment, ce qui se passe juste avant. « sortir de chez
+     toi », « un message qui reste sans réponse », « le dimanche soir », « quelqu'un qui te
+     félicite ».
+  2. LA RÉACTION : ce qui monte en lui à ce moment-là — dans le corps, en pensée, en émotion.
+     « la peur monte avant de franchir la porte », « tu te dis que tu vas décevoir ».
+  3. CE QU'IL FAIT : le comportement, concret. « un anxiolytique », « la weed », « annuler »,
+     « écrire jusqu'à 5 h », « retirer ce que tu as fait de ton propre compte ».
+  4. CE QUE ÇA FAIT SUR LE MOMENT : l'effet immédiat, ce qui rend le geste efficace à court
+     terme. « la porte se franchit », « le temps de penser disparaît », « tu n'as plus à
+     attendre la réponse ».
+  5. CE QUE ÇA COÛTE, ET CE QUI RAMÈNE AU DÉBUT : le prix, plus tard, et la raison pour
+     laquelle le déclencheur revient plus fort la fois d'après. « la peur n'a jamais
+     l'occasion de redescendre seule », « tu ne sais plus si c'était toi ou le cachet ».
+
+Tu nommes aussi la FONCTION du geste, en un mot parmi : eviter, soulager, controler, tenir,
+se_punir, fuir, se_rapprocher. C'est ce à quoi le comportement SERT chez lui — et c'est ce
+qui fait qu'il tient, malgré son coût.
+
+CE QUI FAIT UN SCHÉMA. Il se rejoue : trois journées au moins, avec un vocabulaire qui peut
+être différent à chaque fois. Un soir n'est pas un schéma. Et il se VÉRIFIE : chaque maillon
+vient de ce qu'il a écrit, pas de ce que tu sais des gens en général. Si tu ne peux pas
+remplir le maillon 4 ou 5 avec ses mots, laisse-le court, mais ne l'invente pas — un « ce
+que ça coûte » sorti d'un manuel se reconnaît tout de suite, et il n'y croira plus.
+
+CE QU'IL NE PORTE JAMAIS : un nom de maladie, un jugement, une consigne. « Tu devrais »
+n'existe pas ici. Tu décris la boucle ; c'est lui qui décidera quoi en faire.
+
+LES MÉCANISMES DU FIL. Si le corpus contient DES MÉCANISMES QUE TU SUIVAIS DÉJÀ (« peur
+avant de sortir », « urgence à éteindre »…), ce sont des choses reconnues en conversation,
+souvent un seul maillon d'un schéma. Quand un schéma les contient, cite leurs noms EXACTS
+dans « motifs » : c'est ce qui permet de les ranger sous la boucle qui les explique, au lieu
+de les laisser en liste à plat.
+
+CE QUI L'A DÉJÀ CASSÉE. Si une journée montre la boucle interrompue — la porte franchie sans
+rien prendre, la réponse attendue sans écrire jusqu'à l'aube — dis-le dans « casse », avec
+la date. C'est la seule chose de tout ce que tu rends qui lui dise par où ça peut passer, et
+elle ne vaut que si elle vient de lui.
+
+Deux à six schémas. Chacun avec ses journées (toutes celles que tu as vues) et deux à cinq
+preuves recopiées. Un schéma sans preuve datée n'est pas rendu.
 
 LES PISTES
 Au-dessus des thèmes, tu rends des PISTES : les deux ou trois grandes directions que
@@ -697,9 +773,37 @@ const OUTIL = {
        * ecrire a part, sur le meme corpus, aurait coute un deuxieme passage
        * complet pour la meme lecture.
        */
+      schemas: {
+        type: 'array',
+        description: "Les boucles de comportement qui se rejouent chez lui, décrites en cinq maillons (voir LES SCHÉMAS). Deux à six.",
+        items: {
+          type: 'object',
+          properties: {
+            nom: { type: 'string', description: "Un à quatre mots, minuscules, qui nomment la boucle : « la porte », « l'aube qui écrit », « le message sans réponse »." },
+            declencheur: { type: 'string', description: 'Une phrase : la situation ou le moment qui ouvre la boucle, chez lui.' },
+            reaction: { type: 'string', description: 'Une phrase : ce qui monte à ce moment-là — corps, pensée, émotion — avec ses mots.' },
+            comportement: { type: 'string', description: 'Une phrase : ce qu’il fait, concrètement.' },
+            effet: { type: 'string', description: 'Une phrase : ce que ça fait sur le moment, ce qui rend le geste efficace à court terme.' },
+            cout: { type: 'string', description: 'Une phrase : ce que ça coûte ensuite, et ce qui ramène au déclencheur.' },
+            fonction: { type: 'string', description: 'Un mot : eviter | soulager | controler | tenir | se_punir | fuir | se_rapprocher.' },
+            force: { type: 'integer', description: '1 se rejoue parfois, 2 souvent, 3 presque à chaque fois.' },
+            preuves: {
+              type: 'array',
+              description: 'Deux à cinq journées du corpus qui montrent la boucle, avec un extrait recopié tel quel.',
+              items: { type: 'object', properties: { date: { type: 'string' }, extrait: { type: 'string' } }, required: ['date', 'extrait'] }
+            },
+            jours: { type: 'array', description: 'Toutes les dates du corpus où la boucle se rejoue.', items: { type: 'string' } },
+            motifs: { type: 'array', description: 'Les noms EXACTS des mécanismes du fil que cette boucle contient.', items: { type: 'string' } },
+            casse: { type: 'string', description: 'Facultatif : une journée où la boucle s’est interrompue, et comment, avec sa date. Vide sinon.' },
+            suite: { type: 'string', description: 'repris | nouveau | renomme | fusion. Voir LA CONTINUITE.' },
+            avant: { type: 'array', description: 'Pour « renomme » et « fusion » : les noms exacts d’avant.', items: { type: 'string' } }
+          },
+          required: ['nom', 'declencheur', 'reaction', 'comportement', 'effet', 'cout', 'fonction', 'force', 'preuves', 'jours']
+        }
+      },
       horizons: SCHEMA_HORIZONS
     },
-    required: ['synthese', 'themes', 'pistes', 'carte']
+    required: ['synthese', 'themes', 'pistes', 'carte', 'schemas']
   }
 };
 
@@ -745,6 +849,7 @@ function memoire(precedente) {
   const bas = x => texte(x, 60).toLowerCase();
   const pistes = precedente?.pistes ?? [];
   return {
+    schemas: new Set((precedente?.schemas ?? []).map(t => bas(t.nom)).filter(Boolean)),
     themes: new Set((precedente?.themes ?? []).map(t => bas(t.nom)).filter(Boolean)),
     pistes: new Set(pistes.map(p => bas(p.nom)).filter(Boolean)),
     noeuds: new Set((precedente?.carte?.noeuds ?? []).map(n => bas(n.nom)).filter(Boolean)),
@@ -817,7 +922,7 @@ function teinterPistes(pistes, mem) {
  * disparait : la consigne dit qu'il ne tient pas sans ancrage, et une consigne
  * qui n'est pas appliquee n'est pas une regle.
  */
-export function valider(brut, dates, comps = [], precedente = null, rows = null) {
+export function valider(brut, dates, comps = [], precedente = null, rows = null, motifsConnus = new Set()) {
   /*
    * Le chiffre ne traverse jamais le modele. Il rend « c3 » ; la phrase de c3
    * est cherchee ici, dans la liste que le serveur a calculee. Un identifiant
@@ -898,7 +1003,9 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null)
     themes,
     pistes: validerPistes(brut?.pistes, noms,
       new Set(carte.noeuds.map(n => n.nom.toLowerCase())), mem),
-    carte
+    carte,
+    schemas: validerSchemas(brut?.schemas, dates, motifsConnus, mem),
+    version: VERSION_LECTURE
   };
 }
 
@@ -923,6 +1030,59 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null)
  * un theme cite ici mais jete plus haut ferait pointer la piste vers un
  * fonctionnement que la personne ne verra nulle part.
  */
+/** Les fonctions qu'un geste peut servir. Un mot inconnu retombe sur « soulager ». */
+export const FONCTIONS = ['eviter', 'soulager', 'controler', 'tenir', 'se_punir', 'fuir', 'se_rapprocher'];
+
+/**
+ * LES SCHÉMAS, VÉRIFIÉS COMME LE RESTE.
+ *
+ * Trois maillons non vides au moins (déclencheur, réaction, geste), une
+ * fonction connue, des preuves datées dans le corpus — sans preuve, pas de
+ * schéma : c'est la règle qui interdit la boucle sortie d'un manuel —, des
+ * journées filtrées sur le corpus, des motifs du fil reconnus par leur nom
+ * exact. Continuité comme pour les thèmes.
+ */
+export function validerSchemas(brut, dates, motifsConnus = new Set(), mem = memoire(null)) {
+  const out = [];
+  const vus = new Set();
+  const connus = new Set([...motifsConnus].map(m => String(m).toLowerCase()));
+  for (const s of (brut ?? []).slice(0, 8)) {
+    const nom = texte(s?.nom, 48).toLowerCase();
+    if (!nom || vus.has(nom)) continue;
+    const preuves = (s?.preuves ?? [])
+      .filter(p => !dates || dates.has(String(p?.date)))
+      .slice(0, 5)
+      .map(p => ({ date: String(p.date), extrait: texte(p.extrait, 240) }))
+      .filter(p => p.extrait);
+    if (!preuves.length) continue;
+    const maillons = {
+      declencheur: texte(s?.declencheur, 220), reaction: texte(s?.reaction, 220), comportement: texte(s?.comportement, 220),
+      effet: texte(s?.effet, 220), cout: texte(s?.cout, 260)
+    };
+    if (!maillons.declencheur || !maillons.reaction || !maillons.comportement) continue;
+    const fonction = String(s?.fonction ?? '').toLowerCase().trim().replace(/\s+/g, '_').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const jours = [...new Set([...(s?.jours ?? []).map(String), ...preuves.map(p => p.date)])]
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!dates || dates.has(d))).sort();
+    vus.add(nom);
+    out.push({
+      nom,
+      ...maillons,
+      fonction: FONCTIONS.includes(fonction) ? fonction : 'soulager',
+      force: borne(Math.round(s?.force), 1, 3),
+      preuves,
+      jours,
+      motifs: [...new Set((s?.motifs ?? []).map(m => texte(m, 60).toLowerCase()))].filter(m => connus.has(m)).slice(0, 8),
+      casse: texte(s?.casse, 300),
+      avantBrut: s?.avant
+    });
+    if (out.length === 6) break;
+  }
+  const ancetres = new Set();
+  for (const s of out) if (mem.schemas.has(s.nom)) ancetres.add(s.nom);
+  for (const s of out) { Object.assign(s, reprise(s.nom, s.avantBrut, mem.schemas, ancetres)); delete s.avantBrut; }
+  return out.sort((a, b) => (b.force - a.force) || (b.jours.length - a.jours.length));
+}
+
 export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
                               mem = memoire(null)) {
   const out = [];
@@ -1185,7 +1345,9 @@ export function requeteLecture(corpus, settings) {
       role: 'user',
       content: [{
         type: 'text',
-        text: `Tout son journal, du premier jour au dernier. Découpe les séries par ${grain}.\n\n${corpus.texte}`,
+        text: `${corpus.complet
+          ? 'Tout son journal, en entier cette fois — l’application a changé de façon de lire, et c’est le moment de tout relire. Les schémas se font sur l’ensemble ; ce que tu avais compris garde ses noms.'
+          : 'Tout son journal, du premier jour au dernier.'} Découpe les séries par ${grain}.\n\n${corpus.texte}`,
         cache_control: { type: 'ephemeral' }
       }]
     }]
@@ -1198,7 +1360,7 @@ function depouiller(res, corpus, settings) {
   if (!appel) throw new Error("Le modèle n'a rien rendu d'exploitable.");
   const u = res.usage ?? {};
   return {
-    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? [], corpus.precedente, corpus.lignes),
+    lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? [], corpus.precedente, corpus.lignes, corpus.motifsConnus ?? new Set()),
     modele: res.model ?? settings.anthropicModel,
     /*
      * LES TROIS SORTES DE JETONS D'ENTREE, SEPAREES.
