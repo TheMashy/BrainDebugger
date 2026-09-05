@@ -3364,6 +3364,100 @@ function fonctFigure(it, series) {
   if (it.type === 'mots') return fonctBarres({ v: it.appui.bas, lab: 'note la plus basse', txt: String(it.appui.bas.toFixed(1)).replace('.', ',') }, { v: it.appui.haut, lab: 'note la plus haute', txt: String(it.appui.haut.toFixed(1)).replace('.', ',') });
   return '';
 }
+
+/* ====================================================================
+ * LA CARTE DES FONCTIONNEMENTS, EN FLÈCHES.
+ *
+ * Les mêmes comptes que les cartes en dessous, posés sur un seul dessin :
+ * un nœud par mesure (coucher, sommeil, lever, note, écran, mots absolus),
+ * une flèche par lien « aujourd'hui → demain » avec son compte écrit dessus,
+ * un anneau pointillé sur ce qui a changé de niveau, une boucle sur la note
+ * qui reste du même côté, une étiquette pour la forme de la semaine.
+ *
+ * Ce que ce dessin N'EST PAS : un réseau estimé (des coefficients à deux
+ * décimales sur des flèches). Le banc a montré que le sens d'un couplage
+ * n'est identifiable que dans un cas sur dix ; ce qui tient, c'est le
+ * COMPTAGE, alors c'est le comptage qui est écrit sur la flèche. Un clic sur
+ * un nœud ou une flèche mène à la carte qui porte la phrase entière.
+ * ================================================================== */
+const FG_NOM = { note: 'ta note', sommeil_h: 'ton sommeil', coucher: 'ton coucher', lever: 'ton lever', ecran_min: 'ton écran', absolus: 'tes mots absolus' };
+/* Dans l'ordre d'une journée, de gauche à droite : le soir, la nuit, le matin, la journée. */
+const FG_POS = { coucher: [96, 258], sommeil_h: [238, 104], lever: [380, 258], note: [522, 104], absolus: [704, 214], ecran_min: [620, 312] };
+const fgCle = c => 'fonct-' + String(c).replace(/[^a-z0-9]+/gi, '-');
+function fonctGraphe(F) {
+  const items = F?.items ?? []; if (!items.length) return '';
+  const R = 20, W = 760;
+  const touche = new Set();
+  for (const it of items) { if (it.variable) touche.add(it.variable); if (it.de) touche.add(it.de); if (it.vers) touche.add(it.vers); if (it.type === 'mots') { touche.add('absolus'); touche.add('note'); } }
+  const noms = [...new Set([...Object.keys(FG_POS), ...touche])];
+  const pos = {}; let libre = 0;
+  for (const k of noms) pos[k] = FG_POS[k] ?? [120 + 150 * (libre++), 380];
+  const H = libre ? 430 : 356;
+  const nomDe = k => FG_NOM[k] ?? String(k).replace(/_/g, ' ');
+  const dateCourte = d => fmtDay(d).replace(/ \d{4}$/, '');
+  const titre = it => ` title="${esc(it.phrase)}"`;
+
+  /* Les flèches : une courbe d'un bord de nœud à l'autre, bombée d'un côté —
+     A→B et B→A se bombent chacune du sien, et ne se recouvrent pas. */
+  const fleches = [];
+  for (const it of items.filter(i => i.type === 'lien' && pos[i.de] && pos[i.vers] && i.de !== i.vers)) {
+    const [ax, ay] = pos[it.de], [bx, by] = pos[it.vers];
+    const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1, nx = dy / L, ny = -dx / L;
+    const cx = (ax + bx) / 2 + nx * 46, cy = (ay + by) / 2 + ny * 46;
+    const dep = [ax + (cx - ax) / Math.hypot(cx - ax, cy - ay) * (R + 3), ay + (cy - ay) / Math.hypot(cx - ax, cy - ay) * (R + 3)];
+    const arr = [bx + (cx - bx) / Math.hypot(cx - bx, cy - by) * (R + 7), by + (cy - by) / Math.hypot(cx - bx, cy - by) * (R + 7)];
+    const mx = 0.25 * dep[0] + 0.5 * cx + 0.25 * arr[0], my = 0.25 * dep[1] + 0.5 * cy + 0.25 * arr[1];
+    const b = it.appui.bas, h = it.appui.haut, txt = `${b.n}/${b.sur} · ${h.n}/${h.sur}`, lw = txt.length * 6.6 + 12;
+    fleches.push(`<g class="fge" data-fonct-cle="${esc(it.cle)}"${titre(it)}>
+      <path d="M${dep[0].toFixed(1)} ${dep[1].toFixed(1)}Q${cx.toFixed(1)} ${cy.toFixed(1)} ${arr[0].toFixed(1)} ${arr[1].toFixed(1)}" stroke-width="${(1.4 + 2 * (it.force ?? 0.5)).toFixed(1)}" marker-end="url(#fgfl)"/>
+      <g class="fglab"><rect x="${(mx - lw / 2).toFixed(1)}" y="${(my - 9).toFixed(1)}" width="${lw.toFixed(1)}" height="18" rx="4"/><text x="${mx.toFixed(1)}" y="${(my + 4).toFixed(1)}" text-anchor="middle">${esc(txt)}</text></g>
+    </g>`);
+  }
+  /* Les mots absolus et la note : le même jour, pas le lendemain — un trait, pas une flèche. */
+  for (const it of items.filter(i => i.type === 'mots')) {
+    const [ax, ay] = pos.absolus, [bx, by] = pos.note;
+    const txt = `${it.appui.bas.toFixed(0)} vs ${it.appui.haut.toFixed(0)} / 100 mots`, lw = txt.length * 6.6 + 12, mx = (ax + bx) / 2, my = (ay + by) / 2;
+    fleches.push(`<g class="fge mots" data-fonct-cle="${esc(it.cle)}"${titre(it)}>
+      <path d="M${ax} ${ay}L${bx} ${by}" stroke-width="1.6"/>
+      <g class="fglab"><rect x="${(mx - lw / 2).toFixed(1)}" y="${(my - 9).toFixed(1)}" width="${lw.toFixed(1)}" height="18" rx="4"/><text x="${mx}" y="${my + 4}" text-anchor="middle">${esc(txt)}</text></g>
+    </g>`);
+  }
+
+  /* Les nœuds, et ce qui les décore. */
+  const noeuds = noms.map(k => {
+    const [x, y] = pos[k], actif = touche.has(k);
+    const bascules = items.filter(i => i.type === 'bascule' && i.variable === k);
+    const rythmes = items.filter(i => i.type === 'rythme' && i.variable === k);
+    const inertie = items.find(i => i.type === 'inertie' && i.variable === k);
+    const regul = items.find(i => i.type === 'regularite' && i.variable === k);
+    const tags = [];
+    for (const b of bascules) tags.push({ txt: `↕ ${dateCourte(b.date)}`, cle: b.cle, phrase: b.phrase });
+    for (const r of rythmes) tags.push({ txt: `${r.appui.quand ?? 'la semaine'} ${r.appui.dedans > r.appui.dehors ? '↑' : '↓'}`, cle: r.cle, phrase: r.phrase });
+    if (regul) tags.push({ txt: regul.classe === 'stable' ? 'régulier' : 'irrégulier', cle: regul.cle, phrase: regul.phrase });
+    const haut = y < 180;   // les étiquettes vont du côté libre : au-dessus des nœuds du haut, en dessous des autres
+    const nomY = haut ? y - R - 10 : y + R + 16;
+    const tagY = i => haut ? nomY - 14 * (i + 1) : nomY + 14 * (i + 1);
+    const boucle = inertie ? `<g data-fonct-cle="${esc(inertie.cle)}" title="${esc(inertie.phrase)}" class="fgboucle">
+      <path d="M${(x + R * 0.5).toFixed(1)} ${(y - R * 0.87).toFixed(1)}C${(x + 44).toFixed(1)} ${(y - 62).toFixed(1)} ${(x + 70).toFixed(1)} ${(y - 12).toFixed(1)} ${(x + R + 5).toFixed(1)} ${(y + 3).toFixed(1)}" marker-end="url(#fgfl)"/>
+      <text x="${x + 62}" y="${y - 38}" class="fgtag">${esc(inertie.classe === 'basse' ? `${inertie.appui.tot - inertie.appui.meme}/${inertie.appui.tot} change` : `${inertie.appui.meme}/${inertie.appui.tot} pareil`)}</text>
+    </g>` : '';
+    return `<g class="fgn${actif ? ' actif' : ''}">
+      ${bascules.length ? `<circle cx="${x}" cy="${y}" r="${R + 6}" class="fgring" data-fonct-cle="${esc(bascules[0].cle)}"/>` : ''}
+      <circle cx="${x}" cy="${y}" r="${R}"${actif ? ` data-fonct-cle="${esc((bascules[0] ?? rythmes[0] ?? inertie ?? regul ?? items.find(i => i.de === k || i.vers === k))?.cle ?? '')}"` : ''}/>
+      <text x="${x}" y="${nomY}" text-anchor="middle" class="fgnom">${esc(nomDe(k))}</text>
+      ${tags.map((t, i) => `<text x="${x}" y="${tagY(i)}" text-anchor="middle" class="fgtag" data-fonct-cle="${esc(t.cle)}" title="${esc(t.phrase)}">${esc(t.txt)}</text>`).join('')}
+      ${boucle}
+    </g>`;
+  }).join('');
+
+  return `<figure class="fgraphwrap">
+    <svg viewBox="0 0 ${W} ${H}" class="fgraph" role="img" aria-label="La carte des fonctionnements : les mesures, et les liens comptés entre elles">
+      <defs><marker id="fgfl" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>
+      ${fleches.join('')}${noeuds}
+    </svg>
+    <figcaption class="fglegende">une flèche = « ceci aujourd’hui, cela demain », le chiffre = combien de fois sur combien, contre le reste · ↕ un changement de niveau · la boucle = la note qui reste du même côté · un clic mène à la phrase</figcaption>
+  </figure>`;
+}
 function fonctionnementsMarkup(F) {
   if (!F) return '';
   const p = F.periode;
@@ -3378,7 +3472,7 @@ function fonctionnementsMarkup(F) {
   const groupes = FONCT_ORDRE.filter(t => parType.has(t)).map(t => `
     <div class="fonctgroupe">
       <div class="foncttitre">${ico(FONCT_ICO[t], 14)}<span>${esc(FONCT_TITRE[t])}</span></div>
-      ${parType.get(t).map(it => `<article class="fonctcarte">
+      ${parType.get(t).map(it => `<article class="fonctcarte" id="${fgCle(it.cle)}">
         <p class="fonctphr">${esc(it.phrase)}</p>
         ${fonctFigure(it, F.series)}
         ${it.jours?.length ? `<details class="fonctjours"><summary>${it.jours.length === 1 ? 'cette journée' : `ces ${it.jours.length} journées`}</summary>
@@ -3388,7 +3482,7 @@ function fonctionnementsMarkup(F) {
   const rien = F.items.length ? '' : `<p class="sub" style="max-width:62ch">Sur cette période, rien ne se détache assez pour être compté, pour l’instant : pas de bascule nette, pas de lien confirmé au comptage, pas de forme de semaine, un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la veille sans non plus en repartir, des mots absolus qui ne suivent pas la note. C’est une réponse aussi : ce qui n’est pas là ne s’invente pas.</p>`;
   const manques = F.manques.length ? `<p class="sub fonctmanque">${F.manques.map(esc).join(' ')}</p>` : '';
   const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
-  return `<section class="fonct"><div class="lechead">${tete}</div>${rien}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
+  return `<section class="fonct"><div class="lechead">${tete}</div>${rien}${fonctGraphe(F)}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
 }
 
 async function renderLecture() {
@@ -3585,6 +3679,16 @@ function wireLecture() {
     // Une journée citée par un fonctionnement s'ouvre : la preuve est à un clic.
     const fj = e.target.closest('[data-fonct-jour]');
     if (fj) return renderMirror(fj.dataset.fonctJour);
+    // Un nœud ou une flèche du dessin : la carte qui porte la phrase entière se montre.
+    const fc = e.target.closest('[data-fonct-cle]');
+    if (fc) {
+      const carte = document.getElementById(fgCle(fc.dataset.fonctCle));
+      if (carte) {
+        carte.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        carte.classList.add('fonctvise'); setTimeout(() => carte.classList.remove('fonctvise'), 1800);
+      }
+      return;
+    }
     // Le panneau d'un nœud : le refermer, aller à un nœud voisin, ou descendre
     // sur la piste dont il vient de dire le poids.
     if (e.target.closest('[data-noeud-fermer]')) { NOEUD_OUVERT = null; return renderLecture(); }
