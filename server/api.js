@@ -8,7 +8,7 @@ import {
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
-  toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, joursEcrits,
+  toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, versionMachiTool, joursEcrits,
   mesuresEntre, poserMesure,
   redaterMessages, rebuildEntryText, tousMessagesUtilisateur
 } from './db.js';
@@ -1374,7 +1374,8 @@ export const routes = {
              // montre a cote du poste ; l'ecran choisit les mots.
              synchro: (() => {
                const ts = derniereSynchro(userId);
-               return { depuis_min: ts ? Math.max(0, Math.round((Date.now() - Date.parse(ts)) / 60000)) : null };
+               return { depuis_min: ts ? Math.max(0, Math.round((Date.now() - Date.parse(ts)) / 60000)) : null,
+                        version: versionMachiTool(userId) };
              })(),
              // Les notes apportees passent le plancher, pour la meme raison que
              // les reperes : ce sont des faits que la personne a poses
@@ -2135,7 +2136,10 @@ export const routes = {
           // ou « il y a deux jours ». Le serveur ne met pas en français une
           // durée dont il ne sait pas comment elle sera affichée.
           depuis_min: ts ? Math.max(0, Math.round((Date.now() - Date.parse(ts)) / 60000)) : null,
-          dernierJour
+          dernierJour,
+          // La version de l'application qui a parlé en dernier : c'est elle qui
+          // dit si « demande déposée » a une chance d'être lue.
+          version: versionMachiTool(userId)
         };
       })(),
 

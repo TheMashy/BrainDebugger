@@ -1445,6 +1445,24 @@ export function poserActiviteJour(userId, date, digest) {
   `).run(userId, date, new Date().toISOString(), JSON.stringify(digest));
 }
 
+/**
+ * LA VERSION DE MACHI TOOL QUI A PARLÉ EN DERNIER, ou null.
+ *
+ * Elle voyage dans le digest depuis la 1.20. C'est ce qui permet au site de
+ * dire « ta version ne sait pas encore lire les demandes » au lieu de
+ * « Machi Tool ne répond pas », qui ne dit rien de ce qu'il faut faire.
+ */
+export function versionMachiTool(userId = OWNER) {
+  const r = db.prepare(
+    'SELECT digest FROM activite_jours WHERE user_id = ? ORDER BY recu_le DESC LIMIT 1'
+  ).get(userId);
+  if (!r) return null;
+  try {
+    const v = JSON.parse(r.digest)?.version;
+    return typeof v === 'string' && /^\d+\.\d+/.test(v) ? v : null;
+  } catch { return null; }
+}
+
 /** Les derniers jours d'activité, du plus récent au plus ancien, digest déjà relu. */
 export const activiteJours = (userId = OWNER, limite = 120) =>
   db.prepare(

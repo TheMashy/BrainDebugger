@@ -6116,6 +6116,14 @@ let SYNC_APP = { etat: 'idle', message: '' };   // idle | encours | hors | echec
 let SYNC_DERNIERE = 0;                           // horodatage de la derniere tentative
 let SYNC_GEN = 0;                                // jeton de generation, contre les chevauchements
 
+/** La première version de Machi Tool qui relève la demande de synchro déposée sur le site. */
+const VERSION_LIT_LA_DEMANDE = '1.19.0';
+const versionAuMoins = (v, min) => {
+  const a = String(v).split('.').map(Number), b = String(min).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  return true;
+};
+
 function qsSynchroMarkup(sy) {
   const surAujourdhui = QS_JOUR === S.today;
   // L'état live d'une tentative ne concerne QUE le jour courant : sur un jour
@@ -6127,9 +6135,19 @@ function qsSynchroMarkup(sy) {
         ico('antenne', 11)}synchronisation…</span>`;
     // Une tentative a eu lieu et a échoué : on affiche SA RAISON, jamais un
     // simple « désynchronisé ». C'est tout l'objet du badge — dire pourquoi.
-    if (SYNC_APP.etat === 'hors' || SYNC_APP.etat === 'echec')
-      return `<span class="qssync tard" title="${esc(SYNC_APP.message)}">${
-        ico('antenne', 11)}${esc(SYNC_APP.message)}</span>`;
+    if (SYNC_APP.etat === 'hors' || SYNC_APP.etat === 'echec') {
+      /*
+       * LA VERSION, QUAND ELLE EXPLIQUE L'ÉCHEC. « Demande déposée, il l'enverra
+       * à son prochain relevé » suppose une application qui sait lire la
+       * demande (1.19 et plus). Si la dernière qui a parlé est plus vieille, la
+       * demande ne sera jamais lue : autant le dire, et dire quoi faire.
+       */
+      const v = sy?.version;
+      const vieille = v && !versionAuMoins(v, VERSION_LIT_LA_DEMANDE);
+      const msg = SYNC_APP.message + (vieille
+        ? ` · Machi Tool ${v} ne sait pas encore lire la demande, mets-le à jour (clic droit sur son icône)` : '');
+      return `<span class="qssync tard" title="${esc(msg)}">${ico('antenne', 11)}${esc(msg)}</span>`;
+    }
   }
   if (!sy) return '';
   if (sy.depuis_min == null) {
@@ -6142,7 +6160,7 @@ function qsSynchroMarkup(sy) {
   const quand = depuisMot(sy.depuis_min);
   if (frais)
     return `<span class="qssync"
-      title="Dernier envoi reçu ${esc(quand)}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}">${
+      title="Dernier envoi reçu ${esc(quand)}${sy.version ? ` par Machi Tool ${esc(sy.version)}` : ''}${sy.dernierJour ? ` · dernière journée couverte : ${fmtDay(sy.dernierJour)}` : ''}">${
       ico('antenne', 11)}à jour</span>`;
   /*
    * PAS FRAIS : ON N'ÉCRIT JAMAIS « désynchronisé · il y a 14 h » TOUT SEUL.
