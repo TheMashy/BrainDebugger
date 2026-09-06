@@ -3725,14 +3725,26 @@ async function renderLecture() {
         ? `<span class="lecmeta faint" title="${L.enLot
              ? 'Partie en tâche de fond, à moitié prix. Elle arrive dans l’heure.' : ''}">
              <span class="spin petit"></span> il relit${L.enLot ? ' — en fond' : ''}</span>`
-        : `<button class="btn ghost" data-lire title="Refait la lecture sur les journées les plus denses, tout de suite.">${ico('refaire')}relire</button>
-           <button class="btn ghost" data-lire-tout title="Relit TOUT le journal, chaque journée écrite, en fond : c’est long et c’est une vraie lecture.">${ico('oeil', 13)}relire tout</button>`) : ''}
-      ${/* RETISSER : la même lecture, mais REGARDÉE. Deux fois par jour, parce
-             que rien ne change en une heure, et qu'une toile qu'on rejoue
-             jusqu'à ce qu'elle plaise n'est plus une lecture. */''}
-      ${L.lecture && !LECTURE_EN_COURS && !L.enLot ? (L.retissage > 0
-        ? `<span class="lecmeta faint" title="Deux fois par jour, pas plus.">retisser — dans ${enClair(L.retissage)}</span>`
-        : `<button class="btn" id="retisser" title="Tout est relu, et tu regardes la toile se refaire.">${ico('carte', 13)}retisser</button>`) : ''}
+        : `<button class="btn ghost" data-lire title="Refait la lecture sur les journées les plus denses, tout de suite.">${ico('refaire')}relire</button>`) : ''}
+      ${/* UNE ACTION VISIBLE, LE RESTE SOUS UN REPLI.
+             Il y en avait trois côte à côte — relire, relire tout, retisser —
+             et trois boutons, c'est trois décisions avant de pouvoir lire.
+             « relire » est la seule qu'on prend souvent ; les autres servent de
+             temps en temps, et se rangent derrière un bouton discret. */''}
+      ${L.lecture && !LECTURE_EN_COURS && !L.enLot ? `
+      <details class="lecplus">
+        <summary aria-label="D’autres façons de refaire la carte" title="D’autres façons de refaire la carte">${ico('plus', 13)}</summary>
+        <div class="lecplusmenu">
+          <button class="btn ghost" data-lire-tout>${ico('oeil', 13)}relire tout le journal
+            <span class="lecplusdit">chaque journée écrite, en fond — c’est long, et c’est une vraie lecture</span></button>
+          ${L.retissage > 0
+            ? `<span class="lecplusfait">retisser — dans ${enClair(L.retissage)}<span class="lecplusdit">deux fois par jour, pas plus</span></span>`
+            : `<button class="btn ghost" id="retisser">${ico('carte', 13)}retisser la toile
+                <span class="lecplusdit">la même lecture, regardée se refaire</span></button>`}
+          <button class="btn ghost" data-ranger-nuits>${ico('lune', 13)}ranger sur les journées vécues
+            <span class="lecplusdit">chaque soirée rejoint la journée qu’elle terminait, d’après tes nuits</span></button>
+        </div>
+      </details>` : ''}
     </div>
     ${/* Une relecture qui échoue par-dessus une lecture existante ne peut pas
           prendre l'écran — l'ancienne vaut mieux que rien — mais elle ne peut
@@ -3905,6 +3917,23 @@ function wireLecture() {
     }
 
     if (e.target.closest('[data-lire-tout]')) return lancerLecture({ fond: true, complet: true });
+    /* RANGER LES SOIRÉES. Une journée finit au coucher, pas à minuit : ce
+       bouton relit les nuits de tout le journal et remet chaque soirée sur la
+       journée qu'elle terminait. */
+    if (e.target.closest('[data-ranger-nuits]')) {
+      const b = e.target.closest('[data-ranger-nuits]');
+      b.disabled = true;
+      try {
+        const r = await api('/api/nuits/ranger', {});
+        toast(r.messages
+          ? `${r.messages} passage${r.messages > 1 ? 's' : ''} rangé${r.messages > 1 ? 's' : ''} sur ${r.jours} journée${r.jours > 1 ? 's' : ''}.`
+          : 'Tout était déjà à sa place.');
+        LECTURE = FONCT = FONCT_AN = NUITS = null;
+        return renderLecture();
+      } catch (err) {
+        toast('Le rangement n’a pas abouti.');
+      } finally { b.disabled = false; }
+    }
     if (e.target.closest('[data-lire]')) return lancerLecture();
     if (e.target.closest('#retisser')) return retisser();
     if (e.target.closest('#tsfin')) return fermerTissage();

@@ -722,6 +722,12 @@ export function recentMessages(limit = 80, userId = OWNER) {
   return rows.reverse();
 }
 
+/** Les jours civils qui portent au moins un message écrit, du plus ancien au plus récent. */
+export const joursEcrits = (userId = OWNER) => db.prepare(
+  "SELECT DISTINCT date FROM messages WHERE user_id = ? AND role = 'user' " +
+  "AND text IS NOT NULL AND TRIM(text) <> '' ORDER BY date ASC"
+).all(userId).map(r => r.date);
+
 export function messagesForDate(date, userId = OWNER) {
   return db.prepare(
     'SELECT id, ts, source, role, text FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'

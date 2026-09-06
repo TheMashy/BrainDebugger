@@ -8,7 +8,7 @@ import {
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
-  toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro,
+  toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, joursEcrits,
   mesuresEntre, poserMesure,
   redaterMessages, rebuildEntryText, tousMessagesUtilisateur
 } from './db.js';
@@ -362,8 +362,11 @@ export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
  *
  * @returns {number} combien de messages ont change de journee.
  */
-export function recalerLaNuit(date, userId = OWNER) {
-  const { bornes, med } = bornesDe(userId);
+export function recalerLaNuit(date, userId = OWNER, bornesPretes = null) {
+  // Les bornes peuvent venir de l'appelant : quand on reprend tout le journal,
+  // les recalculer par jour ferait des milliers de requêtes pour le même
+  // résultat.
+  const { bornes, med } = bornesPretes ?? bornesDe(userId);
   const coupure = coupureDe(date, bornes, med);
   if (coupure == null) return 0;
 
@@ -449,6 +452,64 @@ export function reprendreLesNuits(userId = OWNER) {
   const fin = today();
   const debut = addDays(fin, -FENETRE_LEVERS + 1);
   return recalerSurBornes(mesuresEntre(debut, fin, userId), userId);
+}
+
+/* ==================================================================
+   RANGER TOUT LE JOURNAL SUR LES JOURNÉES VÉCUES.
+
+   `reprendreLesNuits` ne regarde que les cent vingt derniers jours, et
+   seulement les jours qui portent une MESURE. Deux trous, et le second est le
+   plus grave : pendant des mois, Machi Tool n'a envoyé aucun coucher (il le
+   calculait pour le mauvais jour), donc aucune nuit n'a jamais recalé quoi que
+   ce soit. Des soirées entières sont restées sur le lendemain.
+
+   Depuis, `server/nuits.js` sait relire ces nuits dans ce qui était DÉJÀ
+   stocké — la dernière touche du soir, la première du matin, les absences.
+   On peut donc reprendre tout le journal, une fois, du premier jour au
+   dernier : pour chaque journée, la coupure la plus sûre qu'on connaisse, et
+   les messages écrits avant elle rejoignent la soirée qu'ils terminaient.
+
+   L'ordre compte : du plus ANCIEN au plus récent. Un message déplacé de D vers
+   D−1 ne doit pas être redéplacé quand on traitera D−1 — le garde
+   d'idempotence de `recalerLaNuit` (le jour civil se lit sur le ts, jamais
+   réécrit) s'en charge, et le sens du parcours évite d'y revenir.
+   ================================================================== */
+
+/**
+ * Les coupures de TOUT le journal : les nuits relues d'abord (elles viennent du
+ * clavier, c'est la source la plus sûre), les mesures ensuite, la médiane pour
+ * les jours qui n'ont ni l'une ni l'autre.
+ *
+ * @returns {{bornes: Map<string, number>, med: number|null}}
+ */
+export function bornesDuJournal(userId = OWNER) {
+  const bornes = bornesConnues(toutesMesures(userId).map(m => ({ ...m, texte: m.texte ?? null })));
+  // Les nuits passent DEVANT : « couché à 04:17 » lu dans le clavier vaut mieux
+  // qu'une extinction de poste, et couvre les jours où aucune mesure n'existe.
+  for (const n of nuits(userId, { jours: 3650 })) {
+    const h = enMinutes(n.coucher);
+    if (h == null || h >= MIDI) continue;   // un coucher d'après-midi ne borne rien
+    bornes.set(n.date, h);
+  }
+  return { bornes, med: medianeBorne(bornes) };
+}
+
+/**
+ * RANGER TOUT LE JOURNAL. Rend ce qui a bougé, et sur combien de jours.
+ * @returns {{jours: number, messages: number, sans_coupure: number}}
+ */
+export function rangerToutLeJournal(userId = OWNER) {
+  const { bornes, med } = bornesDuJournal(userId);
+  const dates = joursEcrits(userId);
+  let messages = 0, jours = 0, sansCoupure = 0;
+  for (const d of dates) {
+    const coupure = coupureDe(d, bornes, med);
+    if (coupure == null) { sansCoupure++; continue; }
+    const bouges = recalerLaNuit(d, userId, { bornes, med });
+    if (bouges) { messages += bouges; jours++; }
+  }
+  if (messages) invalidate(userId);
+  return { jours, messages, sans_coupure: sansCoupure };
 }
 
 /* ==================================================================
@@ -2175,6 +2236,18 @@ export const routes = {
    * LES NUITS D'UNE PÉRIODE : coucher, lever, durée, et ce qui ne colle pas.
    * Lues dans l'activité du poste (server/nuits.js), le dit passant devant.
    */
+  /*
+   * RANGER TOUT LE JOURNAL SUR LES JOURNÉES VÉCUES.
+   *
+   * Une journée ne commence pas à minuit : elle commence au lever et finit au
+   * coucher, souvent bien après minuit. Pendant des mois, aucune nuit n'est
+   * arrivée (Machi Tool les calculait pour le mauvais jour), donc rien n'a
+   * jamais été rangé : des soirées entières sont restées sur le lendemain.
+   * Les nuits se relisent maintenant dans ce qui était déjà stocké — c'est ce
+   * bouton qui reprend le journal entier, du premier jour au dernier.
+   */
+  'POST /api/nuits/ranger': ({ userId }) => rangerToutLeJournal(userId),
+
   'GET /api/nuits': ({ query, userId }) => {
     const jours = Math.max(7, Math.min(730, parseInt(query.jours ?? '90', 10) || 90));
     return { jours, nuits: nuits(userId, { jours }) };

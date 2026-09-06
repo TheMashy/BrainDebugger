@@ -66,12 +66,23 @@ function instants(dig, digVeille) {
   return { fins: fins.sort((x, y) => x.t - y.t), debuts: debuts.sort((x, y) => x.t - y.t) };
 }
 
-/** Les silences : de chaque fin à la première reprise qui la suit. */
+/**
+ * Les silences : de chaque fin à la première reprise qui la suit.
+ *
+ * ET UN SILENCE NE CONTIENT AUCUNE ACTIVITÉ CONNUE. « Dernière touche à 23:50,
+ * première à 11:00 » a l'air d'une nuit de onze heures — mais si on sait qu'il
+ * y a eu du clavier à 03:30, ce n'en est pas une : la vraie nuit va de 03:30 à
+ * 11:00. Sans cette règle, la plus longue l'emportait, et le coucher tombait
+ * quatre heures trop tôt.
+ */
 function silences(fins, debuts) {
   const out = [];
+  const connus = [...fins, ...debuts].map(x => x.t);
   for (const f of fins) {
     const d = debuts.find(x => x.t > f.t);
     if (!d) continue;
+    // Un instant d'activité connu strictement à l'intérieur : ce n'est pas un silence.
+    if (connus.some(t => t > f.t + 1 && t < d.t - 1)) continue;
     // Deux fins pour la même reprise (la dernière touche à 23:00, l'extinction à
     // 23:30) : on garde les deux, la plus longue nuit RECEVABLE l'emportera —
     // ne garder que la plus ancienne laissait une nuit de trente heures
