@@ -37,7 +37,8 @@
  *    100 jours sur un témoin), « local » = un choix fait ici, dit comme tel, à
  *    recalibrer dans tools/banc-approches/calibrer.mjs — pas ici.
  */
-import { allEntries, activiteEntre, mesuresEntre, OWNER } from './db.js';
+import { allEntries, activiteEntre, mesuresEntre, messagesForDate, OWNER } from './db.js';
+import { veilleDuJour, niveauDuTexte } from './veille.js';
 import { nuitDuJour } from './nuits.js';
 import { jourLocal } from './temps.js';
 import { addDays } from './stats.js';
@@ -450,7 +451,86 @@ export function analyserTable(T) {
     series: { dates: T.jours.map(j => j.date), note: T.jours.map(j => j.note), sommeil_h: T.jours.map(j => j.sommeil_h), coucher: T.jours.map(j => j.coucher), we: T.jours.map(j => j.we) },
   };
 }
-export function fonctionnements(userId = OWNER, opts = {}) { return analyserTable(tableDe(userId, opts)); }
+export function fonctionnements(userId = OWNER, opts = {}) {
+  const T = tableDe(userId, opts);
+  return { ...analyserTable(T), surveilles: joursSurveilles(T, userId) };
+}
+
+/* ------------------------------------------------------------------ */
+/* LES JOURS À SURVEILLER, ET CE QUI REVIENT AUTOUR                      */
+/*                                                                      */
+/* La veille marque des jours (rouge : une blessure, une surdose ;      */
+/* jaune : le suicide évoqué, un moyen à portée, un excès, le réel qui  */
+/* se décolle). Ici on regarde ce qui REVIENT autour de ces jours-là,   */
+/* compté contre les autres jours de la même période : la nuit d'avant  */
+/* était-elle courte, le coucher tard, la note de la veille basse ; à   */
+/* quelle heure ça s'écrit ; le week-end ou pas ; les mots absolus ; et */
+/* à quel rythme ça revient. Ce sont des comptes, pas des causes — on   */
+/* ne dit jamais que la nuit courte a FAIT le jour rouge, on dit qu'ils  */
+/* vont ensemble 5 fois sur 7, contre 40 sur 150. Un souvenir raconté   */
+/* (« évoqué ») n'est pas un jour à surveiller.                          */
+/* ------------------------------------------------------------------ */
+const GENRES_SURVEILLES = new Set(['blessure', 'surdose', 'suicide', 'moyen', 'substance', 'dereel']);
+function heureDe(ts) {
+  try { const s = new Date(ts).toLocaleTimeString('fr-FR', { timeZone: process.env.TZ || 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false }); const m = /^(\d{2}):(\d{2})/.exec(s); return m ? +m[1] + +m[2] / 60 : null; } catch { return null; }
+}
+export function joursSurveilles(T, userId = OWNER, { veille = veilleDuJour, messages = messagesForDate, niveau = niveauDuTexte } = {}) {
+  const N = T.jours.length, parDate = new Map(T.jours.map((j, i) => [j.date, i]));
+  const jours = [];
+  for (const j of T.jours) {
+    const v = veille(j.date, userId);
+    if (!v?.niveau) continue;
+    const genres = (v.motifs ?? []).map(m => m.genre).filter(g => GENRES_SURVEILLES.has(g));
+    if (!genres.length) continue;
+    // L'heure du premier message qui porte le signe.
+    let heure = null;
+    for (const m of messages(j.date, userId)) {
+      if (m.role !== 'user' || !m.text?.trim()) continue;
+      const r = niveau(m.text, { aujourdhui: j.date });
+      if (r?.niveau && r.motifs.some(x => GENRES_SURVEILLES.has(x.genre))) { heure = heureDe(m.ts); break; }
+    }
+    jours.push({ date: j.date, niveau: v.niveau, genres: [...new Set(genres)], heure });
+  }
+  const n = jours.length;
+  if (n < 3) return { n, jours, phrases: [], manque: n ? `${pl(n, 'jour à surveiller', 'jours à surveiller')} sur la période : il en faut 3 pour compter ce qui revient autour.` : null };
+
+  const set = new Set(jours.map(j => j.date));
+  const phrases = [];
+  const compte = (cle, quoi, dans, hors, texteDans, texteHors) => {
+    // dans / hors : [n, sur] ; on ne compare qu'avec au moins 5 de chaque côté, et on dit si c'est net (Fisher ≤ 5 %).
+    if (dans[1] < 3 || hors[1] < 5) return;
+    const p = fisher(dans[0], dans[1], hors[0], hors[1]);
+    const net = p <= 0.05 && dans[0] / dans[1] > hors[0] / hors[1];
+    phrases.push({ cle, quoi, phrase: `${texteDans} ${dans[0]} fois sur ${dans[1]} — contre ${hors[0]} sur ${hors[1]} ${texteHors}.${net ? '' : ' Trop peu pour trancher.'}`, appui: { n: dans[0], sur: dans[1], hors_n: hors[0], hors_sur: hors[1], net, p: Math.round(p * 1000) / 1000 } });
+  };
+  const v = k => T.jours.map(j => j[k]);
+  const medS = mediane(v('sommeil_h')), medC = mediane(v('coucher')), medN = mediane(v('note')), medA = mediane(v('absolus'));
+  const deuxGroupes = (pred) => {
+    let dn = 0, ds = 0, hn = 0, hs = 0;
+    for (const j of T.jours) { const r = pred(j); if (r == null) continue; if (set.has(j.date)) { ds++; if (r) dn++; } else { hs++; if (r) hn++; } }
+    return [[dn, ds], [hn, hs]];
+  };
+  if (medS != null) { const [d, h] = deuxGroupes(j => fini(j.sommeil_h) ? j.sommeil_h < medS : null); compte('nuit_courte', 'la nuit d’avant', d, h, `La nuit qui ouvre un jour à surveiller est plus courte que ta médiane (${fmt('sommeil_h', medS)})`, 'les autres jours'); }
+  if (medC != null) { const [d, h] = deuxGroupes(j => { const i = parDate.get(j.date); const c = i > 0 ? T.jours[i - 1].coucher : null; return fini(c) ? c > medC : null; }); compte('coucher_tard', 'le coucher de la veille', d, h, `La veille d’un jour à surveiller, tu t’es couché plus tard que ta médiane (${fmt('coucher', medC)})`, 'les autres veilles'); }
+  if (medN != null) { const [d, h] = deuxGroupes(j => { const i = parDate.get(j.date); const x = i > 0 ? T.jours[i - 1].note : null; return fini(x) ? x < medN : null; }); compte('note_veille', 'la note de la veille', d, h, `La veille d’un jour à surveiller, ta note était sous ta médiane (${fmt('note', medN)})`, 'les autres veilles'); }
+  { const [d, h] = deuxGroupes(j => j.we === 1); compte('week_end', 'le jour de la semaine', d, h, 'Un jour à surveiller tombe le week-end', 'les autres jours (deux sur sept attendus)'); }
+  if (medA != null) { const [d, h] = deuxGroupes(j => fini(j.absolus) ? j.absolus > medA : null); compte('absolus', 'les mots absolus', d, h, `Un jour à surveiller, tes mots absolus dépassent ta médiane`, 'les autres jours écrits'); }
+  // L'heure : la nuit (22 h → 5 h), sans groupe de comparaison — un simple compte.
+  const heures = jours.map(j => j.heure).filter(fini);
+  if (heures.length >= 3) { const nuit = heures.filter(h => h >= 22 || h < 5).length; phrases.push({ cle: 'heure', quoi: 'l’heure', phrase: `Ce qui fait un jour à surveiller s’écrit la nuit (22 h → 5 h) ${nuit} fois sur ${heures.length}.`, appui: { n: nuit, sur: heures.length, net: null } }); }
+  // Le lendemain : la note remonte-t-elle ?
+  { let dif = []; for (const j of jours) { const i = parDate.get(j.date); if (i == null || i + 1 >= N) continue; const a = T.jours[i].note, b = T.jours[i + 1].note; if (fini(a) && fini(b)) dif.push(b - a); }
+    if (dif.length >= 3) { const md = mediane(dif); phrases.push({ cle: 'lendemain', quoi: 'le lendemain', phrase: `Le lendemain d’un jour à surveiller, ta note bouge de ${md > 0 ? '+' : ''}${String(Math.round(md * 10) / 10).replace('.', ',')} en médiane (${pl(dif.length, 'lendemain noté', 'lendemains notés')}).`, appui: { n: dif.length, mediane: md, net: null } }); } }
+  // Le rythme : l'écart médian entre deux jours à surveiller, et les grappes (à 3 jours ou moins).
+  const dates = jours.map(j => Date.parse(j.date + 'T00:00:00Z')).sort((a, b) => a - b);
+  const ecarts = []; let grappes = 0, dansGrappe = false;
+  for (let i = 1; i < dates.length; i++) { const e = Math.round((dates[i] - dates[i - 1]) / 864e5); ecarts.push(e); if (e <= 3) { if (!dansGrappe) grappes++; dansGrappe = true; } else dansGrappe = false; }
+  const ecartMed = mediane(ecarts);
+  const rythme = ecartMed != null ? `${pl(n, 'jour à surveiller', 'jours à surveiller')} sur ${N} jours, ${ecartMed} jours d’écart en médiane${grappes ? `, ${pl(grappes, 'grappe', 'grappes')} de jours qui se suivent` : ''}.` : null;
+  // Ce qui s'écrit ces jours-là : les genres, comptés.
+  const parGenre = {}; for (const j of jours) for (const g of j.genres) parGenre[g] = (parGenre[g] ?? 0) + 1;
+  return { n, jours, rythme, ecart_median: ecartMed, grappes, genres: parGenre, phrases, manque: null };
+}
 
 /* Ce que la machine dit À SON COMPTE ne nomme jamais un trouble, une cause, un
    état clinique. Les « … » sont les mots de la personne : elle a le droit de les
