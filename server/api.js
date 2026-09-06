@@ -1,6 +1,6 @@
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
-  addMessage, messagesForDate, recentMessages, allEvents, deleteEvent,
+  addMessage, messagesForDate, recentMessages, filAncre, allEvents, deleteEvent,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
@@ -101,7 +101,11 @@ function series(userId = OWNER) {
  * arrive par la lecture. Le fil ne sert qu'a une chose -- savoir de quoi on
  * est en train de parler -- et vingt-cinq messages, c'est une soiree entiere.
  */
-export const FIL_TRANSMIS = 25;
+/*
+ * Pair, parce que la fenetre est ancree par paliers pairs (voir `filAncre`) :
+ * un debut de fenetre qui tombe toujours sur un message de la personne.
+ */
+export const FIL_TRANSMIS = 24;
 
 export function recentMemory(date, userId = OWNER, texte = null) {
   const s = getSettings(userId);
@@ -1095,7 +1099,7 @@ export const routes = {
     addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
     invalidate(userId);
 
-    const history = recentMessages(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
+    const history = filAncre(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
     const m = recentMemory(date, userId, text);
     const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos });
     if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'chat');
@@ -2807,7 +2811,7 @@ export async function streamMessage(body, send, userId = OWNER) {
   invalidate(userId);
   send('user', { messages: recentMessages(80, userId) });
 
-  const history = recentMessages(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
+  const history = filAncre(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
   // Les pieces s'accrochent au message qu'on vient d'ecrire, pas a l'historique.
   if (pieces.length && history.length) history[history.length - 1].pieces = pieces;
   const settings = getSettings(userId);

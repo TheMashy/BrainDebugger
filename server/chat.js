@@ -525,7 +525,22 @@ ${lignes.join('\n\n')}`;
  */
 export function motifBlock(motifs) {
   if (!motifs?.length) return null;
-  const lignes = motifs.map(m => `[${m.id}] ${neutraliser(m.nom)} — ${neutraliser(m.mecanisme)} (reconnu ${m.vues} fois)`);
+  /*
+   * NI LE COMPTE DES VUES, NI L'ORDRE PAR FREQUENCE.
+   *
+   * Ce bloc est dans la partie MISE EN CACHE du prompt, avant tout le fil. Il
+   * portait « (reconnu N fois) » et suivait l'ordre `vues DESC` de la base :
+   * chaque `marquer_motif` en cours de conversation changeait donc le texte, et
+   * parfois l'ordre des lignes -- un octet de plus dans le prefixe, et au
+   * message suivant TOUTE la conversation etait relue plein tarif, puis
+   * reecrite en cache avec le quart de surcout. Le compagnon n'avait rien a
+   * faire de ce chiffre pour reconnaitre un motif ; il l'a a l'ecran s'il veut.
+   *
+   * Trie par identifiant ICI, pas en s'en remettant a la requete : c'est le
+   * rendu qui doit etre stable, quel que soit l'ordre dans lequel on le nourrit.
+   */
+  const lignes = motifs.slice().sort((a, b) => a.id - b.id)
+    .map(m => `[${m.id}] ${neutraliser(m.nom)} — ${neutraliser(m.mecanisme)}`);
   return `Les mécanismes que tu as décidé de suivre chez lui. Ce sont les tiens : tu les as
 nommés, tu peux en ajouter, et tu marques une occurrence quand tu en reconnais une dans ce
 qu'il vient d'écrire.
@@ -1108,23 +1123,44 @@ export function assemblerPrompt({ memory = null, echos = null, history = [] } = 
   const system = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
   if (memory) system.push({ type: 'text', text: memory, cache_control: { type: 'ephemeral' } });
 
-  const messages = toChatMessages(history, { blocs: true });
   /*
-   * LES ECHOS SE POSENT DANS LE DERNIER TOUR, PAS DANS LE SYSTEME.
+   * TOUS LES MESSAGES EN BLOCS, TOUJOURS. Un tour rendu `content: "texte"` un
+   * jour et `content: [{text}]` le lendemain n'est pas le meme octet pour le
+   * cache ; on ne laisse pas la forme dependre de la position dans le fil.
+   */
+  const messages = toChatMessages(history, { blocs: true }).map(m => ({
+    role: m.role,
+    content: Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content) }]
+  }));
+  /*
+   * LES ECHOS SE POSENT DANS LE DERNIER TOUR, PAS DANS LE SYSTEME -- ET APRES
+   * LE TEXTE, AVEC LE POINT DE REPRISE SUR LE TEXTE.
    *
    * Ils dependent de ce qui vient d'etre ecrit : places avant l'historique,
-   * ils invalideraient a chaque phrase le cache de toute la conversation, et
-   * on paierait en plus le quart de surcout de l'ecriture pour un cache qui
-   * ne prend jamais. Ici, ils ne coutent qu'eux-memes.
+   * ils invalideraient a chaque phrase le cache de toute la conversation.
    *
-   * DEVANT le texte de la personne dans le meme tour : c'est du contexte pour
-   * lire ce qu'elle vient de dire, pas une remarque apres coup.
+   * Mais les poser DEVANT le texte dans le dernier tour ne suffisait pas non
+   * plus, et c'etait invisible : le cache est relu a un endroit ou une requete
+   * precedente a ECRIT. La requete N ecrivait son entree sur « ...texte N,
+   * precede des echos » ; la requete N+1 rendait ce meme message sans les
+   * echos (ils sont pour le tour en cours). Aucun prefixe de N+1 ne
+   * correspondait plus a rien d'ecrit : le fil entier repartait plein tarif a
+   * CHAQUE echange, et seuls le systeme et la memoire etaient relus.
+   *
+   * Ici, le texte de la personne est un bloc a lui, marque comme point de
+   * reprise, et les echos viennent APRES, dans un bloc separe. La requete N
+   * ecrit donc une entree qui s'arrete juste apres le texte -- exactement le
+   * prefixe que la requete N+1 presente, quand ce message est rendu seul.
+   * Les echos ne coutent qu'eux-memes, et cette fois c'est vrai.
+   *
+   * Trois marqueurs explicites (systeme, memoire, texte) plus l'automatique de
+   * la requete : quatre, la limite de l'API.
    */
   const dernier = messages[messages.length - 1];
-  if (echos && dernier?.role === 'user') {
-    const corps = Array.isArray(dernier.content)
-      ? dernier.content : [{ type: 'text', text: String(dernier.content) }];
-    dernier.content = [{ type: 'text', text: echos }, ...corps];
+  if (dernier?.role === 'user') {
+    const texte = dernier.content[dernier.content.length - 1];   // les documents sont devant
+    texte.cache_control = { type: 'ephemeral' };
+    if (echos) dernier.content.push({ type: 'text', text: echos });
   }
   return { system, messages };
 }

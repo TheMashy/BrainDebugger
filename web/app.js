@@ -161,6 +161,11 @@ function drawGaugePanel() {
       <p class="sub" style="margin:0 0 12px">
         Remise à zéro le ${fmtDay(u.resetsOn)}. ${u.calls} échange${u.calls > 1 ? 's' : ''} depuis le début du mois.
       </p>`}
+    ${/* Le gros du chiffre, ce sont des relectures du cache à un dixième du
+          prix : le dire évite de lire « 14 M » comme une dépense. */''}
+    ${u.cacheLu ? `<p class="sub cachepart" style="margin:-6px 0 12px">
+      dont ${fmtTok(u.cacheLu)} relus du cache, à un dixième du prix.
+      Au tarif plein, ça vaut <b>${fmtTok(u.equivalent)}</b> jetons.</p>` : ''}
     ${/* Cette phrase suppose que c'est la clé de l'hébergeur qui règle. Sans
           enveloppe, elle ne le suppose plus : c'est la clé de celui qui lit. */''}
     ${u.illimitee ? '' : `<p class="paid">Tu n'as rien à payer. C'est BrainDebugger qui règle.</p>`}

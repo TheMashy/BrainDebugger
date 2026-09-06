@@ -722,6 +722,43 @@ export function recentMessages(limit = 80, userId = OWNER) {
   return rows.reverse();
 }
 
+/**
+ * LE FIL TRANSMIS AU MODELE : UNE FENETRE ANCREE, PAS GLISSANTE.
+ *
+ * « Les 25 derniers messages » a l'air innocent, et c'est le plus gros
+ * invalidateur de cache du produit. Chaque echange ajoute deux messages ; a
+ * partir du vingt-sixieme, les deux plus anciens SORTENT de la fenetre, et le
+ * premier message envoye n'est plus le meme qu'au tour d'avant. Le cache est
+ * un accord de prefixe : rien du fil ne correspond plus, et les vingt-cinq
+ * messages repartent plein tarif -- a chaque echange, a chaque tour d'outil.
+ * Seuls le systeme et les outils restaient en cache.
+ *
+ * Ici le DEBUT de la fenetre ne bouge que par paliers de `pas` messages : entre
+ * deux paliers, la fenetre grandit (de `limite` a `limite + pas - 1`), et tout
+ * ce qui a deja ete envoye reste un prefixe exact de l'envoi suivant. Les
+ * messages en plus sont relus du cache a un dixieme du prix ; la fenetre qui
+ * glissait, elle, faisait repayer chaque message a chaque fois.
+ *
+ * Le pas est pair pour retomber sur la meme parite (personne / compagnon), et
+ * on coupe de toute facon ce qui precede le premier message de la personne :
+ * l'API veut que ce soit elle qui ouvre.
+ */
+export const FIL_PAS = 16;
+
+export function filAncre(limite = 24, userId = OWNER, pas = FIL_PAS) {
+  const since = getSettings(userId).chatSince;
+  const where = since ? 'user_id = ? AND ts >= ?' : 'user_id = ?';
+  const args = since ? [userId, since] : [userId];
+  const n = db.prepare(`SELECT COUNT(*) c FROM messages WHERE ${where}`).get(...args).c;
+  const debut = n <= limite ? 0 : Math.floor((n - limite) / pas) * pas;
+  const rows = db.prepare(
+    `SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE ${where}
+     ORDER BY ts ASC, id ASC LIMIT ? OFFSET ?`
+  ).all(...args, n - debut, debut);
+  while (rows.length && rows[0].role !== 'user') rows.shift();
+  return rows;
+}
+
 /** Les jours civils qui portent au moins un message écrit, du plus ancien au plus récent. */
 export const joursEcrits = (userId = OWNER) => db.prepare(
   "SELECT DISTINCT date FROM messages WHERE user_id = ? AND role = 'user' " +

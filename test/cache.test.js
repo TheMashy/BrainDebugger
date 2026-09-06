@@ -164,17 +164,48 @@ test('les échos ne touchent jamais le système', () => {
   const r = chat.assemblerPrompt({ memory: 'STABLE', echos: 'CE QUE TU AVAIS ÉCRIT', history: hist });
   assert.equal(JSON.stringify(r.system).includes('CE QUE TU AVAIS ÉCRIT'), false);
 
-  // Ils sont dans le DERNIER tour, et DEVANT le texte de la personne : c'est du
-  // contexte pour lire ce qu'elle vient de dire, pas une remarque après coup.
+  // Ils sont dans le DERNIER tour, APRÈS le texte de la personne, qui porte le
+  // point de reprise : ce qui est écrit en cache s'arrête au texte, et c'est
+  // exactement ce que le tour suivant présentera.
   const dernier = r.messages[r.messages.length - 1];
   assert.equal(dernier.role, 'user');
-  assert.equal(dernier.content[0].text, 'CE QUE TU AVAIS ÉCRIT');
-  assert.match(dernier.content[1].text, /je dors mal/);
+  assert.match(dernier.content[0].text, /je dors mal/);
+  assert.deepEqual(dernier.content[0].cache_control, { type: 'ephemeral' });
+  assert.equal(dernier.content[1].text, 'CE QUE TU AVAIS ÉCRIT');
+  assert.equal(dernier.content[1].cache_control, undefined);
 
   // Et le préfixe est intact : les tours d'avant sont identiques sans échos.
   const sans = chat.assemblerPrompt({ memory: 'STABLE', history: hist });
   assert.deepEqual(r.messages.slice(0, -1), sans.messages.slice(0, -1),
                    'les échos ont déteint sur les tours précédents');
+});
+
+test('ce que la requête N a écrit en cache est un préfixe exact de la requête N+1', () => {
+  /*
+   * LA GARDE QUI MANQUAIT. Le cache est relu là où une requête précédente a
+   * écrit. Les échos posés DEVANT le texte faisaient écrire une entrée que le
+   * tour suivant, qui rend ce message sans échos, ne présentait jamais : le fil
+   * entier repartait plein tarif à chaque échange, sans qu'aucun test ne tombe.
+   */
+  const hist = [
+    { role: 'user', text: 'bonjour', ts: '2026-01-01T10:00:00Z' },
+    { role: 'pet', text: 'salut', ts: '2026-01-01T10:01:00Z' },
+    { role: 'user', text: 'je dors mal en ce moment', ts: '2026-01-01T10:02:00Z' }
+  ];
+  const n = chat.assemblerPrompt({ memory: 'STABLE', echos: 'ÉCHOS DU TOUR N', history: hist });
+  const n1 = chat.assemblerPrompt({ memory: 'STABLE', echos: 'ÉCHOS DU TOUR N+1', history: [
+    ...hist,
+    { role: 'pet', text: 'depuis quand ?', ts: '2026-01-01T10:03:00Z' },
+    { role: 'user', text: 'une semaine', ts: '2026-01-01T10:04:00Z' }
+  ] });
+  // Ce qui est écrit en cache par N : tout, jusqu'au bloc qui porte le marqueur.
+  const sansMarqueur = o => JSON.parse(JSON.stringify(o, (k, v) => k === 'cache_control' ? undefined : v));
+  const ecrit = sansMarqueur(n.messages);
+  const dernierBloc = ecrit.at(-1).content;
+  dernierBloc.length = dernierBloc.findIndex(b => b.text === 'je dors mal en ce moment' || /je dors mal/.test(b.text)) + 1;
+  const presente = sansMarqueur(n1.messages).slice(0, ecrit.length);
+  presente.at(-1).content = presente.at(-1).content.slice(0, dernierBloc.length);
+  assert.deepEqual(presente, ecrit, 'le tour N+1 ne présente pas ce que le tour N a écrit : le fil ne sera jamais relu');
 });
 
 test('au plus quatre points de reprise, l’automatique compris', () => {
@@ -229,4 +260,79 @@ test('un lot en cours empêche d’en lancer un deuxième', async () => {
   assert.equal(e.enLot, true);
   assert.equal(e.arelire, false, 'la relance automatique repartirait sur un lot déjà en cours');
   setSettings({ lectureLot: null }, OWNER);
+});
+
+/* ============ CE QUI CASSAIT LE CACHE SANS BRUIT ============ */
+
+test('marquer un motif entre deux messages ne change pas la partie stable', async () => {
+  /*
+   * Le bloc des motifs est dans le préfixe mis en cache. Il portait
+   * « (reconnu N fois) » et suivait l'ordre par fréquence : chaque
+   * `marquer_motif` en cours de conversation changeait le texte, parfois
+   * l'ordre, et toute la conversation repartait plein tarif au message suivant.
+   */
+  const { addMotif, marquerMotif } = await import('../server/db.js');
+  setSettings({ memoryDays: 14 }, OWNER);
+  const a = addMotif({ nom: 'minimiser', mecanisme: "dire « c'est rien » juste après avoir décrit une crise", userId: OWNER });
+  const b = addMotif({ nom: 'anticiper', mecanisme: 'la peur monte la veille d’une sortie, pas pendant', userId: OWNER });
+  const id = addMessage({ ts: '2026-03-01T20:00:00.000Z', date: '2026-03-01', source: 'web', role: 'user',
+                          text: 'demain je dois sortir et déjà ça serre', userId: OWNER });
+  // b passe devant a par le nombre de vues : l'ordre en base change, le bloc non.
+  marquerMotif(b.id, id, OWNER);
+  const avant = api.recentMemory('2026-03-01', OWNER, 'rien de spécial').stable;
+  marquerMotif(b.id, id + 1000, OWNER);
+  marquerMotif(b.id, id + 1001, OWNER);
+  marquerMotif(a.id, id + 1002, OWNER);
+  const apres = api.recentMemory('2026-03-01', OWNER, 'rien de spécial').stable;
+
+  assert.ok(avant.includes(`[${a.id}] minimiser`), 'le motif est bien transmis');
+  assert.equal(avant.includes('reconnu'), false, 'le compte des vues est écrit dans le préfixe en cache');
+  assert.equal(apres, avant, 'marquer un motif a changé la partie stable : la conversation repart plein tarif');
+  assert.ok(avant.indexOf(`[${a.id}]`) < avant.indexOf(`[${b.id}]`), 'les motifs ne sont pas dans un ordre stable');
+});
+
+test('le fil transmis garde le même début pendant plusieurs échanges', async () => {
+  /*
+   * « Les 25 derniers messages » glissait de deux à chaque échange : passé le
+   * vingt-sixième, le premier message envoyé n'était plus jamais le même, et
+   * le fil entier repartait plein tarif à chaque tour. La fenêtre est ancrée :
+   * son début ne bouge que par paliers.
+   */
+  const { filAncre, FIL_PAS } = await import('../server/db.js');
+  const U = 'fil-ancre';
+  const t = i => `2026-04-01T${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00.000Z`;
+  let n = 0;
+  const echange = () => {
+    addMessage({ ts: t(n++), date: '2026-04-01', source: 'web', role: 'user', text: `moi ${n}`, userId: U });
+    addMessage({ ts: t(n++), date: '2026-04-01', source: 'web', role: 'pet', text: `lui ${n}`, userId: U });
+  };
+  for (let i = 0; i < 12; i++) echange();          // 24 messages : tout tient
+  const f0 = filAncre(24, U);
+  assert.equal(f0.length, 24);
+  assert.equal(f0[0].role, 'user', 'c’est la personne qui ouvre');
+
+  const debuts = new Set();
+  for (let i = 0; i < FIL_PAS / 2 - 1; i++) {      // sept échanges de plus : 26 à 38 messages
+    echange();
+    const f = filAncre(24, U);
+    debuts.add(f[0].id);
+    assert.ok(f.length >= 24 && f.length < 24 + FIL_PAS, `${f.length} messages transmis`);
+    assert.equal(f[0].role, 'user');
+  }
+  assert.equal(debuts.size, 1, 'le début de la fenêtre a bougé : le cache du fil ne prend plus');
+  // Et au palier suivant, il avance d'un coup, puis se stabilise de nouveau.
+  echange();
+  const f1 = filAncre(24, U);
+  assert.notEqual(f1[0].id, f0[0].id, 'le palier n’avance jamais : la fenêtre grandirait sans fin');
+  assert.equal(f1.length, 24);
+  // La fenêtre ne perd rien de récent : le dernier message est toujours là.
+  assert.equal(f1.at(-1).text, `lui ${n}`);
+});
+
+test('la jauge dit aussi ce que les jetons valent au tarif plein', () => {
+  usage.record('equiv', 'claude-sonnet-5', 100_000, 10_000, 1_000_000, 40_000);
+  const u = usage.usageFor('equiv');
+  assert.equal(u.used, 1_150_000, 'ce qui a traversé le modèle, cache compris');
+  assert.equal(u.equivalent, 100_000 + 10_000 + 100_000 + 50_000, 'relu à un dixième, écrit à cinq quarts');
+  assert.ok(u.equivalent < u.used / 4, 'l’équivalent doit rendre visible l’effet du cache');
 });

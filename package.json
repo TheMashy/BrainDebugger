@@ -12,7 +12,8 @@
     "import": "node server/import-csv.js",
     "test": "node --test test/*.test.js",
     "banc:carte": "node tools/banc-carte/rapport.mjs",
-    "banc:synth": "node tools/banc-carte/banc.mjs"
+    "banc:synth": "node tools/banc-carte/banc.mjs",
+    "cout:cache": "node tools/cout-cache.mjs"
   },
   "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.120.0"

@@ -15,7 +15,7 @@ import { db, getUser, getSettings } from './db.js';
 export const DEFAULT_ALLOWANCE = Number(process.env.BD_TOKEN_ALLOWANCE ?? 500_000);
 
 /** Tarifs publics, en dollars par million de jetons. Sert au suivi cote operateur. */
-const PRICES = {
+export const PRICES = {
   'claude-opus-5':   { in: 5,  out: 25 },
   'claude-sonnet-5': { in: 2,  out: 10 },
   'claude-haiku-4-5':{ in: 1,  out: 5 }
@@ -30,8 +30,8 @@ const PRICES = {
  * relue, le total afficherait presque dix fois la depense reelle, et on
  * conclurait que le cache n'a rien change.
  */
-const LECTURE_CACHE = 0.1;
-const ECRITURE_CACHE = 1.25;
+export const LECTURE_CACHE = 0.1;
+export const ECRITURE_CACHE = 1.25;
 
 export const currentMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -84,6 +84,14 @@ export function usageFor(userId) {
    * qui bouge quand le tarif change.
    */
   const used = row.i + row.o + row.cl + row.ce;
+  /*
+   * ET, A COTE, CE QUE CA AURAIT COUTE SANS CACHE -- OU PLUTOT L'INVERSE :
+   * les memes jetons ramenes au tarif plein. Quatorze millions « traverses »
+   * dont douze relus a un dixieme, c'est trois millions payes. Sans ce second
+   * chiffre, la jauge fait peur pour rien, et on ne peut pas voir si le cache
+   * prend : c'est l'ecart entre les deux qui le dit.
+   */
+  const equivalent = Math.round(row.i + row.o + row.cl * LECTURE_CACHE + row.ce * ECRITURE_CACHE);
   const allowance = allowanceFor(userId);
   const illimitee = allowance <= 0;
   const remaining = illimitee ? null : Math.max(0, allowance - used);
@@ -105,7 +113,7 @@ export function usageFor(userId) {
     // Ce que le cache a evite de repayer. Sans ce chiffre, on ne peut pas
     // savoir si le cache fonctionne -- et un cache qui ne prend jamais coute
     // un quart de plus que pas de cache du tout.
-    cacheLu: row.cl, cacheEcrit: row.ce,
+    cacheLu: row.cl, cacheEcrit: row.ce, equivalent,
     level: illimitee ? 'green' : level(remaining, allowance),
     exhausted: !illimitee && remaining <= 0,
     costUsd: Math.round(cost * 100) / 100,
