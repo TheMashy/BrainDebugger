@@ -390,7 +390,10 @@ export function versGraphe(carte, pistes = []) {
 
   const lesLiens = (carte?.liens ?? []).map(l => ({
     s: index.get(l.de), t: index.get(l.vers),
-    quoi: l.quoi, force: l.force / 3
+    quoi: l.quoi, force: l.force / 3,
+    // Le sens compté par le serveur (sens.js), s'il y en a un : c'est lui qui
+    // decide d'une pointe, jamais le verbe seul.
+    appui: l.appui ?? null
   })).filter(l => l.s !== undefined && l.t !== undefined);
 
   return {
@@ -617,6 +620,50 @@ function tracer(ctx, bord) {
 }
 
 const RAYON = n => 4 + n.poids * 2.6;
+
+/*
+ * LA POINTE D'UNE FLÈCHE, AU BORD DU NŒUD D'ARRIVÉE.
+ *
+ * Le trait va de centre a centre, sous les anneaux ; une pointe au centre
+ * serait cachee par le noeud. On la pose donc sur la courbe, a un rayon du
+ * bout, et on l'oriente sur la TANGENTE de la courbe a cet endroit -- pas sur
+ * la corde, sinon elle regarde a cote de son propre trait.
+ */
+export function pointeFleche(ctx, a, c, b, rCible, taille) {
+  const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const t = Math.max(0.5, 1 - (rCible + taille * 0.55) / L);   // le bout de la pointe affleure le bord
+  const u = 1 - t;
+  const px = u * u * a.x + 2 * t * u * c.x + t * t * b.x;
+  const py = u * u * a.y + 2 * t * u * c.y + t * t * b.y;
+  let dx = 2 * u * (c.x - a.x) + 2 * t * (b.x - c.x);
+  let dy = 2 * u * (c.y - a.y) + 2 * t * (b.y - c.y);
+  const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+  ctx.beginPath();
+  ctx.moveTo(px + dx * taille * 0.55, py + dy * taille * 0.55);
+  ctx.lineTo(px - dx * taille * 0.55 - dy * taille * 0.42, py - dy * taille * 0.55 + dx * taille * 0.42);
+  ctx.lineTo(px - dx * taille * 0.55 + dy * taille * 0.42, py - dy * taille * 0.55 - dx * taille * 0.42);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** Ce que le compte ajoute au verbe, au survol : « 7/12 le lendemain, contre 3/40 ». */
+export function appuiTexte(l) {
+  const ap = l?.appui;
+  if (!ap?.sens) return '';
+  if (ap.sens === 'deux') return ' · dans les deux sens';
+  const x = ap.sens === 'de' ? ap.de : ap.vers;
+  return ` · ${x.apres}/${x.sur} le lendemain, contre ${x.hors}/${x.hors_sur}`;
+}
+
+/** Pose la pointe si le sens est compte : vers `t` pour « de », vers `s` pour « vers ». */
+function fleche(ctx, l, a, b, cx, cy, G, taille) {
+  const sens = l.appui?.sens;
+  if (sens !== 'de' && sens !== 'vers') return;
+  const versB = sens === 'de';
+  ctx.fillStyle = ctx.strokeStyle;
+  pointeFleche(ctx, versB ? a : b, { x: cx, y: cy }, versB ? b : a,
+               RAYON(G.noeuds[versB ? l.t : l.s]), taille);
+}
 
 /*
  * LA VUE : UN DEPLACEMENT ET UNE ECHELLE, RIEN DE PLUS.
@@ -959,6 +1006,9 @@ export function dessinerRelations(ctx, G, dispo,
     ctx.globalAlpha = actif ? 0.16 + l.force * 0.5 : 0.05;
     ctx.lineWidth = 0.7 + l.force * 2;
     ctx.stroke();
+    // La pointe, seulement la ou le compte tient (sens.js). Un verbe declare
+    // sans compte reste un trait : on ne dessine pas ce qu'on n'a pas verifie.
+    fleche(ctx, l, a, b, cx, cy, G, 6 + l.force * 5);
 
     /*
      * LE VERBE, ET SEULEMENT AU SURVOL.
@@ -984,7 +1034,7 @@ export function dessinerRelations(ctx, G, dispo,
       ctx.font = `500 ${(10.5 / v.k).toFixed(2)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const quoi = mot(l.quoi);
+      const quoi = mot(l.quoi) + appuiTexte(l);
       const w = ctx.measureText(quoi).width;
       ctx.fillStyle = 'rgba(10,12,11,.88)';
       ctx.beginPath();
@@ -1038,13 +1088,14 @@ export function dessinerRelations(ctx, G, dispo,
     ctx.globalAlpha = actif ? 0.26 + l.force * 0.26 : 0.05;
     ctx.lineWidth = (0.7 + l.force * 1.3) / v.k * Math.max(0.9, ech);
     ctx.stroke();
+    fleche(ctx, l, a, b, cx, cy, G, (6 + l.force * 4) / v.k * Math.max(0.9, ech));
 
     if (!actif) continue;
     const t = 0.5, u = 1 - t;
     versPonts.push({
       lien: l,
       paire: [siensDe(G.noeuds[l.s])[0], siensDe(G.noeuds[l.t])[0]].sort((x, y) => x - y).join('|'),
-      texte: mot(l.quoi),
+      texte: mot(l.quoi) + appuiTexte(l),
       x: u * u * a.x + 2 * t * u * cx + t * t * b.x,
       y: u * u * a.y + 2 * t * u * cy + t * t * b.y
     });

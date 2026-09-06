@@ -3181,6 +3181,11 @@ function carteMarkup(carte) {
             plein est mesuré. */''}
       ${carte.noeuds.some(n => n.jours?.length)
         ? `<span class="cartepoints">un point&nbsp;= une journée</span>` : ''}
+      ${/* La pointe est COMPTÉE, pas déclarée : la légende le dit, sinon on
+            lirait la flèche comme le verbe du modèle, alors qu'elle est ce
+            que les journées ont confirmé. */''}
+      ${carte.liens?.some(l => l.appui?.sens === 'de' || l.appui?.sens === 'vers')
+        ? `<span class="cartepoints">une pointe&nbsp;= compté : ceci un jour, cela le lendemain</span>` : ''}
     </div>
   </div>`;
 }

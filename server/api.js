@@ -27,6 +27,7 @@ import { nuits, nuitDuJour } from './nuits.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
+import { sensDesLiens } from './sens.js';
 import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
          chiffresDuJour, contient, COUCHER, LEVER, DERNIERE, PREMIERE } from './allure.js';
 import { lireDigest } from './digest.js';
@@ -829,6 +830,14 @@ function decorerCarte(lecture, byDate, parJour = new Map()) {
     ...lecture,
     carte: {
       ...c,
+      /*
+       * LE SENS DES LIENS, COMPTÉ. Le modèle déclare « précède » ; les
+       * journées des deux nœuds permettent de le vérifier -- ceci un jour,
+       * cela le lendemain, contre le reste. La toile ne pose une flèche que
+       * là où le compte tient (voir sens.js) ; ailleurs le trait reste nu et
+       * le verbe reste au survol.
+       */
+      liens: sensDesLiens(c, new Set(parJour.keys())),
       noeuds: c.noeuds.map(n => {
         const jours = (n.jours ?? []).map(d => {
           const j = byDate.get(d);

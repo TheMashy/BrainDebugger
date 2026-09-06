@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { versGraphe, cadrer, couronne, journeeAu, recadrer, vueNeutre, versCarte, zoomer,
          contour, poidsDuNoeud, ilotDesNoeuds, appuyer, siensDe, tenueDe, SEUIL_APPUI, SEUIL_PART,
-         LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE } from '../web/relations.js';
+         LIBRE, K_MIN, K_MAX, TEINTE_GENRE, NOM_GENRE, appuiTexte, pointeFleche } from '../web/relations.js';
 import { disposer } from '../web/carte.js';
 import { GENRES } from '../server/lecture.js';
 import { TEINTES_DECLAREES } from '../web/reperes.js';
@@ -23,6 +23,16 @@ test('les liens sont traduits en indices, dans les deux sens', () => {
   const G = versGraphe(CARTE);
   assert.deepEqual(G.liens.map(l => [l.s, l.t]), [[0, 1], [2, 0]]);
   assert.deepEqual(G.liens.map(l => l.quoi), ['précède', 'fait retomber']);
+});
+
+test('le sens compté voyage avec le lien, et un lien sans compte reste sans pointe', () => {
+  const appui = { sens: 'de', meme: 0, de: { apres: 7, sur: 12, hors: 3, hors_sur: 40, p: 0.001 }, vers: { apres: 0, sur: 12, hors: 5, hors_sur: 40, p: 1 } };
+  const G = versGraphe({ noeuds: CARTE.noeuds, liens: [{ ...CARTE.liens[0], appui }, CARTE.liens[1]] });
+  assert.deepEqual(G.liens[0].appui, appui);
+  assert.equal(G.liens[1].appui, null);
+  assert.equal(appuiTexte(G.liens[0]), ' · 7/12 le lendemain, contre 3/40');
+  assert.equal(appuiTexte(G.liens[1]), '');
+  assert.equal(appuiTexte({ appui: { sens: 'deux' } }), ' · dans les deux sens');
 });
 
 test('un lien vers un nom absent ne devient pas un lien vers l’indice 0', () => {
@@ -760,4 +770,18 @@ test('un noeud hors de tout ilot ne compte dans aucun', () => {
   assert.equal(a.n, 2);
   assert.equal(a.dedans, 1);
   assert.equal(a.dehors, 0);
+});
+
+test('la pointe se pose au bord du nœud d’arrivée, orientée le long du trait', () => {
+  // Un trait horizontal de (0,0) à (100,0), sans courbure : la pointe doit
+  // finir juste avant le bord du nœud d'arrivée (rayon 10), et regarder vers +x.
+  const traces = [];
+  const ctx = { beginPath() {}, closePath() {}, fill() {},
+                moveTo(x, y) { traces.push([x, y]); }, lineTo(x, y) { traces.push([x, y]); } };
+  pointeFleche(ctx, { x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }, 10, 8);
+  const [bout, g, d] = traces;
+  assert.ok(bout[0] > g[0] && bout[0] > d[0], 'la pointe regarde vers le nœud d’arrivée');
+  assert.ok(bout[0] <= 90.01 && bout[0] > 80, `le bout (${bout[0].toFixed(1)}) est au bord du nœud, pas dedans`);
+  assert.ok(Math.abs(bout[1]) < 1e-9, 'sur l’axe du trait');
+  assert.ok(Math.abs(g[1] + d[1]) < 1e-9, 'les deux ailes sont symétriques');
 });
