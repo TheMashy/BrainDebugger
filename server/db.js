@@ -465,6 +465,9 @@ export const DEFAULT_SETTINGS = {
    * seul navigateur qui la recoit est celui de la session deja ouverte.
    */
   passerelleCle: '',
+  // La demande de synchro déposée par le site, que Machi Tool ramasse à son
+  // prochain relevé. Effacée dès qu'un digest arrive.
+  demandeSynchro: null,
   /*
    * L'enveloppe de jetons levee. UN OUTIL DE DEVELOPPEUR, ET RIEN D'AUTRE.
    *
@@ -741,7 +744,9 @@ export function recentUserMessages(limit = 40, userId = OWNER) {
  */
 export function tousMessagesUtilisateur(userId = OWNER) {
   return db.prepare(
-    "SELECT ts, date, text, COALESCE(rangee, 0) rangee FROM messages " +
+    // `id` : la recherche s'en sert pour ALLUMER la phrase trouvée dans la
+    // journée qu'elle ouvre — sans lui, on retombe sur le jour et on cherche.
+    "SELECT id, ts, date, text, COALESCE(rangee, 0) rangee FROM messages " +
     "WHERE user_id = ? AND role = 'user' AND text IS NOT NULL AND TRIM(text) <> '' " +
     "ORDER BY ts DESC"
   ).all(userId);

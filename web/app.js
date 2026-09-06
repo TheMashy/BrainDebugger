@@ -2458,6 +2458,7 @@ const veilleTitre = n => n === 'rouge'
 const VEILLE_DIT = {
   suicide:  'le suicide a été évoqué',
   moyen:    'quelque chose pour se faire mal était à portée',
+  en_main:  'quelque chose pour se faire mal était dans ta main, en écrivant',
   dereel:   'un moment où le réel s’est décollé',
   blessure: 'une blessure est écrite ce jour-là',
   evoque_passe: 'une blessure ou une surdose passée a été évoquée',
@@ -3436,7 +3437,7 @@ function schemasMarkup(schemas) {
  * dans lesquelles ces jours tombent : « la porte » a 4 de ses 6 journées
  * parmi eux. Des comptes, jamais des causes.
  * ================================================================== */
-const SURV_GENRE = { blessure: 'une blessure écrite', surdose: 'une surdose écrite', suicide: 'le suicide évoqué', moyen: 'un moyen à portée', substance: 'un excès', dereel: 'le réel qui se décolle' };
+const SURV_GENRE = { blessure: 'une blessure écrite', surdose: 'une surdose écrite', suicide: 'le suicide évoqué', moyen: 'un moyen à portée', en_main: 'un moyen dans la main', substance: 'un excès', dereel: 'le réel qui se décolle' };
 function surveillesMarkup(C, schemas) {
   if (!C) return '';
   if (!C.n) return '';
@@ -4233,6 +4234,28 @@ function estimeMarkup(e) {
  * C'est une désignation, pas une sélection : re-cliquer éteint, cliquer
  * ailleurs éteint. Rien n'est enregistré, rien ne change de place.
  */
+/**
+ * ALLUMER UN MESSAGE PRÉCIS dans la journée qu'on vient d'ouvrir, et l'amener
+ * sous les yeux. C'est ce qui fait qu'un résultat de recherche mène VRAIMENT à
+ * sa phrase, au lieu de mener au jour où elle est quelque part.
+ */
+function allumerMessage(id) {
+  for (const el of document.querySelectorAll('.vise')) el.classList.remove('vise');
+  const cle = String(id);
+  // `data-ids` est une liste séparée par des virgules : `~=` ne la lit pas
+  // (il attend des espaces), alors on la coupe nous-mêmes.
+  const cible = document.querySelector(`.jsphr[data-id="${CSS.escape(cle)}"]`)
+             ?? [...document.querySelectorAll('.jmoment[data-ids]')]
+                  .find(el => (el.dataset.ids ?? '').split(',').includes(cle));
+  if (!cible) return false;
+  cible.classList.add('vise');
+  cible.scrollIntoView({
+    behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'center'
+  });
+  return true;
+}
+
 function montrerLePassage(moment) {
   const dejaLa = moment?.classList.contains('vise');
   for (const el of document.querySelectorAll('.jmoment.vise, .jsujet.vise, .jsphr.vise, .dayText.vise'))
@@ -4461,12 +4484,17 @@ function posteMarkup(p, synchro) {
   // COUCHER (dite, ou l'extinction du poste), on la montre seule : « je n'ai
   // aucun temps de coucher » ne doit pas rester vrai dès qu'on sait l'heure.
   const aDormi = p.sommeil_h != null;
-  const sommeil = aDormi
-    ? `<span class="jpost lu" title="sommeil (extinction → réveil du poste)">${ico('lune', 13)}${
-        p.dormi_de ? heure(p.dormi_de) + ' · ' : ''}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span>`
-    : (p.coucher?.heure || p.dormi_de)
-      ? `<span class="jpost" title="couché">${ico('lune', 13)}${heure(p.coucher?.heure || p.dormi_de)}</span>`
-      : '';
+  const heureCoucher = p.dormi_de || p.coucher?.heure || null;
+  const sommeil = heureCoucher
+    ? `<span class="jpost${aDormi ? ' lu' : ''}" title="couché">${ico('lune', 13)}${heure(heureCoucher)}</span>`
+    : '';
+  // LA DUREE SUR SA PROPRE LIGNE. « couché 04:17 · 12,1 h » se lisait comme une
+  // seule chose, et l'heure qu'on cherche le matin — combien de temps — se
+  // perdait derrière l'heure du coucher. Un lit, la durée, en dessous.
+  const dormi = aDormi
+    ? `<div class="jpdormi"><span class="jpost lu" title="temps de sommeil (du coucher au lever)">${
+        ico('lit', 13)}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span></div>`
+    : '';
 
   // Le temps d'écran : appli / web. La colonne se REPLIE — on ne voit que le
   // total (le gras) ; cliquer « appli » ou « web » déplie les cinq plus regardés,
@@ -4484,22 +4512,29 @@ function posteMarkup(p, synchro) {
       <ol class="jpetop">${top.map(item).join('')}</ol>
     </details>`;
   };
-  const ecran = p.ecran ? `<div class="jpecran">
-    ${colonne('oeil', 'appli', p.ecran.app_min, p.ecran.top_app)}
-    ${colonne('globe', 'web', p.ecran.web_min, p.ecran.top_web)}
-  </div>` : '';
+  /* UNE COLONNE A ZERO NE SE MONTRE PAS. « 0 min appli » n'est pas une mesure,
+     c'est l'absence de mesure — et affiché comme un chiffre, il se lit comme
+     une journée sans écran, ce qui est faux : c'est une journée que Machi Tool
+     n'a pas envoyée. Le badge de synchro juste en dessous dit déjà ce qui
+     manque, et il le dit justement. */
+  const colonnes = [
+    p.ecran?.app_min ? colonne('oeil', 'appli', p.ecran.app_min, p.ecran.top_app) : '',
+    p.ecran?.web_min ? colonne('globe', 'web', p.ecran.web_min, p.ecran.top_web) : ''
+  ].filter(Boolean).join('');
+  const ecran = colonnes ? `<div class="jpecran">${colonnes}</div>` : '';
 
   // L'état de la synchro : réutilise le badge (à jour / rien reçu depuis… /
   // Machi Tool ne répond pas), tenu à jour en direct via #qssyncbadge.
   const sync = `<div class="jpsync"><span id="qssyncbadge">${qsSynchroMarkup(synchro ?? QS_DATA?.synchro ?? null)}</span></div>`;
 
-  if (!lever && !sommeil && !ecran) {
+  if (!lever && !sommeil && !dormi && !ecran) {
     // Rien mesuré : on montre quand même la synchro (elle dit pourquoi).
     return `<div class="jposte"><div class="k faint">Ce qui a été mesuré</div>${sync}</div>`;
   }
   return `<div class="jposte">
     <div class="k faint">Ce qui a été mesuré</div>
     <div class="jpostligne">${lever}${sommeil}</div>
+    ${dormi}
     ${ecran}
     ${sync}
   </div>`;
@@ -4775,7 +4810,17 @@ function wireMirror() {
     // Effacer la recherche : on replie la barre et on revient à la journée.
     if (e.target.closest('#rechClear')) { RECH = { q: '', data: null }; return rejouer(MIRROR_DATE, { garderCal: true }); }
     const g = e.target.closest('[data-goto]');
-    if (g) return rejouer(g.dataset.goto);
+    if (g) {
+      /* OUVRIR LE JOUR, ET ALLUMER LA PHRASE.
+         Un résultat de recherche qui ne fait qu'ouvrir la journée oblige à
+         chercher une deuxième fois, dans une colonne qui peut faire trois
+         écrans. On garde donc l'identifiant du message, et on l'allume une
+         fois la journée dessinée — le même chemin que les humeurs. */
+      const vise = g.dataset.vise || null;
+      const r = rejouer(g.dataset.goto);
+      if (vise) Promise.resolve(r).then(() => allumerMessage(vise));
+      return r;
+    }
     if (e.target.closest('#backToChat')) return go('tonight');
 
     const del = e.target.closest('[data-erase]');
@@ -6513,8 +6558,14 @@ async function synchroniserDepuisApp(jour, { relance = true } = {}) {
     // Injoignable ou muet : sans doute éteint. On le relance, puis un unique
     // nouvel essai — mais seulement si aucune tentative plus récente n'a pris la
     // main entre-temps (jeton de génération).
+    /* LE FILET : la demande part par le site.
+       Machi Tool interroge le site toutes les quelques minutes ; on y dépose
+       « envoie ta journée ». C'est ce qui fait marcher « synchroniser » depuis
+       un téléphone, ou quand le serveur local ne répond pas. */
+    api('/api/passerelle/synchro', {}).catch(() => null);
     SYNC_APP = { etat: 'hors', message: relance
-      ? 'Machi Tool ne répond pas — relance en cours' : 'Machi Tool ne répond pas' };
+      ? 'Machi Tool ne répond pas — relance en cours, et la demande est déposée'
+      : 'Machi Tool ne répond pas — demande déposée, il l’enverra à son prochain relevé' };
     rafraichirBadgeSync();
     if (relance) {
       lancerApp();
@@ -6610,7 +6661,8 @@ function rechResultatsMarkup(d) {
     <section class="rechjour">
       <button class="rechdate" data-goto="${j.date}">${fmtDay(j.date)}<span class="faint mono"> · ${j.hits.length}</span></button>
       <ul class="rechhits">
-        ${j.hits.map(h => `<li class="rechhit" data-goto="${j.date}" title="Ouvrir le ${fmtDay(j.date)}">
+        ${j.hits.map(h => `<li class="rechhit" data-goto="${j.date}"${
+          h.id ? ` data-vise="${esc(String(h.id))}"` : ''} title="Ouvrir le ${fmtDay(j.date)} sur cette phrase">
           <span class="rechh mono">${fmtTime(h.ts)}</span>
           <span class="rechtx">${surlignerTerme(h.extrait, d.q)}${h.rangee ? ' <span class="rechrangee">note</span>' : ''}</span>
         </li>`).join('')}

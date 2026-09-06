@@ -3360,6 +3360,8 @@ table.grid td.cell.abascule { cursor: pointer; }
    l'œil d'une heure dite ou mesurée. Survol = source (title) ou top 3 (data-tip). */
 .jposte { display: flex; flex-direction: column; gap: 8px; }
 .jpostligne { display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; }
+/* La duree dormie, sur sa propre ligne : c'est elle qu'on cherche le matin. */
+.jpdormi { margin-top: 4px; }
 .jpost { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
 .jpost .ico { color: var(--ink-faint); flex: none; }
 .jpost .mono { font-variant-numeric: tabular-nums; }

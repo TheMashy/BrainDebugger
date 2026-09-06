@@ -83,9 +83,26 @@ const HYPERBOLE = /\b(?:va|vont|veut|veulent|voudrait|voudraient|pourrait|pourra
  * ------------------------------------------------------------------ */
 const MOYEN = ['couteau', 'cutter', 'lame', 'rasoir', 'ciseaux', 'corde',
                'boite de cachets', 'boite de medicaments', 'plaquette', 'flingue', 'arme'];
-const A_PORTEE = ['a cote', 'a portee', 'dans la main', 'dans les mains', 'je joue avec',
-                  'je tiens', 'je le garde', 'je la garde', 'devant moi', 'sur la table',
-                  'sous mon lit', 'dans ma poche', 'je le touche', 'je regarde la'];
+const A_PORTEE = ['a cote', 'a portee', 'devant moi', 'sur la table',
+                  'sous mon lit', 'dans ma poche', 'je le garde', 'je la garde',
+                  'je regarde la'];
+/*
+ * EN MAIN, MAINTENANT : c'est un ROUGE, pas un jaune.
+ *
+ * « Là je suis devant l'ordi, je joue avec un couteau et je te parle », écrit à
+ * 5 h 55. Un objet POSÉ à côté est un moyen à portée — un signe, pas un geste.
+ * Un objet qu'on a DANS LA MAIN pendant qu'on écrit est autre chose : la
+ * distance entre l'intention et l'acte a déjà été franchie, et c'est très
+ * exactement le moment où un signe sert.
+ *
+ * On ne demande pas de contexte de crise en plus : la phrase se suffit. Le prix
+ * d'un rouge de trop ici est un rouge de trop ; le prix d'un jaune de trop est
+ * une soirée où personne ne regarde.
+ */
+const EN_MAIN = ['dans la main', 'dans les mains', 'je joue avec', 'je m amuse avec',
+                 'je tiens', 'je le tiens', 'je la tiens', 'je le touche', 'je la touche',
+                 'je le passe sur', 'je la passe sur', 'contre ma peau', 'sur mon poignet',
+                 'sur mes bras', 'contre mon bras', 'je le pose sur', 'je la pose sur'];
 
 /* ---------------------------------------------------------------------
  * JAUNE ENCORE : la déréalisation, quand elle se NOMME.
@@ -376,7 +393,12 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
     /* L'objet ET la proximité, dans la même phrase : c'est la paire qui
        distingue un objet mentionné d'un objet tenu. */
     const objet = dedans(np, MOYEN);
-    if (objet && dedans(np, A_PORTEE)) poser('moyen', 'jaune', objet, p);
+    if (objet) {
+      // Un tiers qui tient un couteau, une négation, un souvenir : pas un geste.
+      const pasLui = TIERS.test(np) || NEGATION.test(np) || estPasse(np, aujourdhui);
+      if (dedans(np, EN_MAIN) && !pasLui) poser('en_main', 'rouge', objet, p);
+      else if (dedans(np, A_PORTEE)) poser('moyen', 'jaune', objet, p);
+    }
 
     const d = dedans(np, DEREALISATION);
     if (d) poser('dereel', 'jaune', d, p);
@@ -452,6 +474,7 @@ export function pireNiveau(veilles) {
 export const DIT = {
   suicide:  'le suicide a été évoqué ce jour-là',
   moyen:    'quelque chose pour se faire mal était à portée',
+  en_main:  'quelque chose pour se faire mal était dans ta main, en écrivant',
   dereel:   'un moment où le réel s’est décollé',
   blessure: 'une blessure est écrite ce jour-là',
   // Une blessure ANCIENNE, racontée. Pas « ce jour-là » : c'est un souvenir qui

@@ -117,22 +117,33 @@ test('MAIS « hier » et « ce matin » restent un vrai rouge', () => {
 
 /* ==================== un moyen à portée ==================== */
 
-test('UN MOYEN À PORTÉE, c’est un signe — même sans le mot suicide', () => {
+test('UN MOYEN DANS LA MAIN, c’est un rouge — même sans le mot suicide', () => {
   /*
    * « Là je suis devant l'ordi, je joue avec un couteau et je te parle », écrit
    * à 5 h 53. Pas un mot de suicide, pas de blessure : la première version de
-   * ce fichier ne voyait RIEN. C'est pourtant le signe le plus concret qu'un
-   * texte puisse porter — un moyen, à portée, maintenant.
+   * ce fichier ne voyait RIEN, la deuxième un jaune. C'est pourtant le signe le
+   * plus concret qu'un texte puisse porter — l'objet est DANS LA MAIN pendant
+   * qu'on écrit, la distance entre l'intention et l'acte est déjà franchie.
+   * Un objet posé à côté reste un jaune : c'est un moyen, pas un geste.
    */
   const vrai = "Là je suis devant l'ordi, je joue avec un couteau et je te parle";
   const r = niveauDuTexte(vrai);
-  assert.equal(r.niveau, 'jaune');
-  assert.equal(r.motifs[0].genre, 'moyen');
+  assert.equal(r.niveau, 'rouge');
+  assert.equal(r.motifs[0].genre, 'en_main');
+  const pose = niveauDuTexte("j'ai un couteau à côté là");
+  assert.equal(pose.niveau, 'jaune');
+  assert.equal(pose.motifs[0].genre, 'moyen');
   assert.equal(r.motifs[0].mot, 'couteau');
 
+  // POSÉ : un moyen, un jaune.
   for (const p of ["j'ai un couteau à côté là", 'le rasoir est dans ma poche',
-                   'la lame devant moi', 'je tiens le cutter']) {
+                   'la lame devant moi']) {
     assert.equal(niveauDuTexte(p).niveau, 'jaune', `« ${p} » n’a pas été vu`);
+  }
+  // EN MAIN : un rouge.
+  for (const p of ['je tiens le cutter', 'je joue avec la lame',
+                   'le rasoir contre mon poignet, je le touche']) {
+    assert.equal(niveauDuTexte(p).niveau, 'rouge', `« ${p} » n’a pas été vu`);
   }
 });
 
@@ -245,7 +256,7 @@ test('les phrases sont des FAITS, jamais des consignes ni des verdicts', () => {
    * comment elle va, et un rappel formulé comme un reproche est un rappel
    * qu'on ferme. On dit ce qui est écrit, au passé, et c'est tout.
    */
-  assert.deepEqual(Object.keys(DIT).sort(), ['blessure', 'dereel', 'evoque_passe', 'moyen', 'substance', 'suicide', 'surdose']);
+  assert.deepEqual(Object.keys(DIT).sort(), ['blessure', 'dereel', 'en_main', 'evoque_passe', 'moyen', 'substance', 'suicide', 'surdose']);
   for (const phrase of Object.values(DIT)) {
     for (const mot of ['tu devrais', 'attention', 'danger', 'grave', 'inquiét',
                        'il faut', 'arrête', 'tu vas mal']) {

@@ -144,7 +144,11 @@ test('LE JOURNAL NE PASSE PAS', () => {
   setNote(jour(0), 7, 'journal-fuite');
   const a = P.attente('journal-fuite', { ambiance: { scene: 'brume', force: 1 } });
   assert.deepEqual(Object.keys(a).sort(),
-                   ['humeur', 'jours', 'lecture', 'rappels', 'reperes']);
+                   ['humeur', 'jours', 'lecture', 'rappels', 'reperes', 'synchro']);
+  // `synchro` ne porte que des horodatages : la demande déposée, et ce que le
+  // site a reçu en dernier. Rien du journal ne passe par là non plus.
+  assert.deepEqual(Object.keys(a.synchro).sort(), ['demande_le', 'recu_le']);
+  for (const v of Object.values(a.synchro)) assert.ok(v === null || /^\d{4}-\d{2}-\d{2}T/.test(v));
   assert.deepEqual(Object.keys(a.humeur).sort(), ['couleur', 'date', 'libelle', 'valeur']);
   for (const j of a.jours) assert.deepEqual(Object.keys(j).sort(), ['couleur', 'date', 'note']);
   for (const r of a.reperes) assert.deepEqual(Object.keys(r).sort(), ['couleur', 'date', 'titre']);

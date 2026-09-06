@@ -434,5 +434,40 @@
 "phrase": "J'ai lu un article sur les scarifications chez les ados, ça m'a fait penser à moi à 15 ans.",
 "attendu": "jaune",
 "pourquoi": "Lecture + souvenir daté par un âge (« moi à 15 ans ») ; actuellement ROUGE car « à N ans » sans « quand j'avais » n'est pas un marqueur de passé."
+},
+{
+"phrase": "Là je suis devant l'ordi, je joue avec un couteau et je te parle",
+"attendu": "rouge",
+"pourquoi": "Un objet dans la main PENDANT qu'on écrit : la distance entre l'intention et l'acte est déjà franchie. Un objet posé à côté reste jaune ; celui-ci non."
+},
+{
+"phrase": "j'ai un couteau à côté là",
+"attendu": "jaune",
+"pourquoi": "À portée, pas en main : un moyen, un signe, pas un geste."
+},
+{
+"phrase": "je tiens la lame contre mon poignet",
+"attendu": "rouge",
+"pourquoi": "En main, sur la peau."
+},
+{
+"phrase": "mon frère joue avec un couteau devant la télé",
+"attendu": "rien",
+"pourquoi": "Un tiers."
+},
+{
+"phrase": "je ne joue plus avec le cutter depuis des mois",
+"attendu": "rien",
+"pourquoi": "Négation."
+},
+{
+"phrase": "ado je jouais avec un couteau quand j'allais mal",
+"attendu": "jaune",
+"pourquoi": "Récit ancien : évoqué, pas ce jour-là."
+},
+{
+"phrase": "je tiens le couteau à pain, je fais des tartines",
+"attendu": "rouge",
+"pourquoi": "Faux positif ASSUMÉ : « je tiens » + « couteau » suffit, sans contexte de crise. Le prix d'un rouge de trop ici est un rouge de trop ; celui d'un jaune de trop est une soirée où personne ne regarde."
 }
 ]

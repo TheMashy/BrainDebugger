@@ -119,7 +119,7 @@ test('la lecture de la passerelle marche toujours — les deux sens coexistent',
   const r = await fetch(`${BASE}/api/machitool/attente`, { headers: { Authorization: `Bearer ${CLE}` } });
   assert.equal(r.status, 200);
   const j = await r.json();
-  assert.deepEqual(Object.keys(j).sort(), ['humeur', 'jours', 'lecture', 'rappels', 'reperes']);
+  assert.deepEqual(Object.keys(j).sort(), ['humeur', 'jours', 'lecture', 'rappels', 'reperes', 'synchro']);
 });
 
 test('LE JOURNAL NE SORT PAS PAR LA PASSERELLE', async () => {

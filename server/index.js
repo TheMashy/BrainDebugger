@@ -6,7 +6,7 @@ import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
          reprendreLesNuits } from './api.js';
-import { attente, cleDeLaRequete, proprietaireDeLaCle } from './passerelle.js';
+import { attente, cleDeLaRequete, proprietaireDeLaCle, synchroHonoree } from './passerelle.js';
 import { analyser, apercuDe } from './mesures.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
 import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi,
@@ -333,6 +333,10 @@ async function traiter(req, res) {
         const r = rangerUnJour(d);
         if (r) rangés.push(r);
       }
+      // Le digest est arrivé : si quelqu'un l'avait demandé depuis le site, la
+      // demande est honorée et s'efface — sinon Machi Tool renverrait à chaque
+      // relevé, indéfiniment.
+      if (rangés.length) synchroHonoree(userId);
       if (!rangés.length) {
         noterEnvoi({ userId, source: 'machitool', statut: 400, refus: 'aucune date de digest lisible' });
         return json(res, 400, { error: 'aucune date de digest lisible' });

@@ -19,7 +19,7 @@
  * guirlande qui montrerait le texte du soir serait une fuite avec un joli nom.
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { db, getSettings, setSettings, OWNER, allEntries, allEvents, getLecture } from './db.js';
+import { db, getSettings, setSettings, OWNER, allEntries, allEvents, getLecture, derniereSynchro } from './db.js';
 import { deltaColor } from '../web/charts.js';
 import { SENS, DEFAUT } from './mood.js';
 
@@ -230,9 +230,36 @@ export function reperesPour(userId = OWNER) {
  * dépend de la conversation en cours, et la recalculer ailleurs donnerait deux
  * réponses à la même question.
  */
+/**
+ * CE QUE LE SITE DEMANDE À MACHI TOOL, ET CE QU'IL A DÉJÀ REÇU.
+ *
+ * Rien, depuis Internet, ne peut joindre la machine où tourne Machi Tool : le
+ * site ne peut donc RIEN pousser. Quand quelqu'un clique « synchroniser »
+ * ailleurs que sur cette machine — un téléphone, un autre poste, ou quand le
+ * serveur local ne répond pas — la demande se dépose ici, et Machi Tool la
+ * ramasse à son prochain relevé.
+ *
+ * `recu_le` complète la paire : Machi Tool y lit que le site n'a rien reçu
+ * depuis longtemps et repart de lui-même, sans que personne ait à le demander.
+ */
+export function synchroDemandee(userId = OWNER) {
+  const t = new Date().toISOString();
+  setSettings({ demandeSynchro: t }, userId);
+  return t;
+}
+
+/** Appelée quand un digest arrive : la demande est honorée, elle s'efface. */
+export function synchroHonoree(userId = OWNER) {
+  if (getSettings(userId).demandeSynchro) setSettings({ demandeSynchro: null }, userId);
+}
+
 export function attente(userId = OWNER, { ambiance = null, maintenant = new Date() } = {}) {
   const l = getLecture(userId);
   return {
+    synchro: {
+      demande_le: getSettings(userId).demandeSynchro || null,
+      recu_le: derniereSynchro(userId)
+    },
     humeur: humeurPour(userId, ambiance, maintenant),
     rappels: rappelsPour(userId, maintenant),
     jours: joursPour(userId),

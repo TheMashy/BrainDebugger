@@ -25,7 +25,7 @@ import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
 import { nuits, nuitDuJour } from './nuits.js';
 import { horizonBlock } from './horizons.js';
-import { attente, poserCle, retirerCle } from './passerelle.js';
+import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
 import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
          chiffresDuJour, contient, COUCHER, LEVER, DERNIERE, PREMIERE } from './allure.js';
@@ -695,7 +695,7 @@ export function chercher(terme, userId = OWNER) {
       if (!normCherche(p).includes(q)) continue;
       if (total >= MAX_RESULTATS) { tronque = true; break; }
       const e = parJour.get(r.date) ?? [];
-      e.push({ ts: r.ts, extrait: p.slice(0, 400), rangee: !!r.rangee });
+      e.push({ id: r.id, ts: r.ts, extrait: p.slice(0, 400), rangee: !!r.rangee });
       parJour.set(r.date, e);
       total++;
     }
@@ -1807,6 +1807,21 @@ export const routes = {
      Creer la cle et la retirer se font depuis la session, comme tout le reste
      des reglages. C'est la LECTURE de /api/passerelle/attente qui se passe de
      session : elle est appelee par un programme, pas par un navigateur. */
+  /*
+   * « SYNCHRONISER » QUAND L'APPLICATION N'EST PAS À PORTÉE.
+   *
+   * Le site ne peut rien pousser vers la machine de Machi Tool : elle n'a pas
+   * d'adresse joignable depuis Internet. Depuis un téléphone, un autre poste,
+   * ou quand le serveur local ne répond pas, la demande se DÉPOSE ici et Machi
+   * Tool la ramasse à son prochain relevé (quelques minutes). Le chemin direct
+   * — le navigateur qui interroge 127.0.0.1 — reste le plus rapide et passe
+   * d'abord ; celui-ci est le filet.
+   */
+  'POST /api/passerelle/synchro': ({ userId }) => ({
+    demande_le: synchroDemandee(userId),
+    // De quoi écrire une phrase juste à l'écran, sans supposer l'intervalle.
+    delai_max_min: 10
+  }),
   'POST /api/passerelle/cle': ({ userId }) => ({ cle: poserCle(userId) }),
   'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
 

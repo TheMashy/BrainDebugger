@@ -64,6 +64,11 @@ export const TRAITS = {
      d'apprendre, et ils remplacent deux mots qu'on relisait chaque matin. */
   lune:     '<path d="M14.6 11.4A6.3 6.3 0 0 1 6.6 3.4a6.3 6.3 0 1 0 8 8z"/>',
   soleil:   '<circle cx="9" cy="9" r="3.3"/><path d="M9 1.7v1.7M9 14.6v1.7M1.7 9h1.7M14.6 9h1.7M3.8 3.8l1.2 1.2M13 13l1.2 1.2M14.2 3.8 13 5M5 13l-1.2 1.2"/>',
+  /* Le lit : la DUREE dormie, pas une borne. La lune dit « couche a », le
+     soleil « leve a » ; entre les deux il manquait la seule chose qu'on
+     regarde vraiment le matin -- combien de temps. Un dossier, un matelas,
+     un oreiller, un pied : reconnaissable a treize pixels. */
+  lit:      '<path d="M2.2 12.6V6.2M2.2 9.4h13.6v3.2M15.8 12.6v1.6M2.2 12.6v1.6"/><path d="M5.6 9.4V7.6a1 1 0 0 1 1-1h7.2a2 2 0 0 1 2 2v.8"/>',
 
   /* ---- la journee d'ordinateur ----
      UNE FORME D'USAGE, PAS UNE PERSONNE. Ces cinq dessins tiennent la meme
