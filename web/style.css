@@ -1512,10 +1512,25 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   border-color: color-mix(in srgb, hsl(var(--m) 55% 55%) 32%, transparent);
 }
 
+/*
+ * UNE GRILLE, PAS UN FLEX : C'EST CE QUI ALIGNE LES BARRES.
+ *
+ * En flex, chaque barre commençait là où finissait son nom — donc à un endroit
+ * différent sur chaque ligne. Des longueurs qui ne partent pas de la même base
+ * ne se comparent pas ; c'est précisément ce qu'on demande à cette barre de
+ * faire. Quatre colonnes fixes : la pastille, le nom, la barre, le compte.
+ */
 .mhead {
-  display: flex; align-items: center; gap: 13px; width: 100%;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) 84px 26px;
+  align-items: center; gap: 11px; width: 100%;
   background: none; border: 0; padding: 11px 14px; text-align: left; color: inherit;
 }
+/* La barre : une longueur sur une base commune — l'encodage le plus lisible
+   après la position, et celui qui répond sans lecture à « lequel revient le
+   plus ». Son rail reste visible : sans lui, une barre courte flotte. */
+.mbarre { height: 6px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.mbarre i { display: block; height: 100%; border-radius: 999px; background: hsl(var(--m) 55% 58%); }
+.meca.ouvert .mbarre i, .mhead:hover .mbarre i { background: hsl(var(--m) 62% 66%); }
 /* L'intensité est une TAILLE, la couleur dit de quel mécanisme il s'agit.
    Les deux ensemble : on repère un mécanisme à sa couleur d'un écran à
    l'autre, et on lit où il en est à la taille de sa pastille. */
@@ -1530,10 +1545,8 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   color: hsl(var(--m) 45% 84%);
 }
 .mcompte {
-  flex: none; font-size: 13px; color: hsl(var(--m) 50% 70%);
-  font-variant-numeric: tabular-nums;
+  font: 500 11.5px/1 var(--mono); color: var(--ink-faint); text-align: right;
 }
-.mcompte small { font-size: 10px; opacity: .6; }
 
 /* La série : une forme, pas un graphe. Pas d'axe, pas d'échelle — on y lit
    « ça monte », « ça revient par vagues », et c'est tout ce qu'on lui demande. */
@@ -4108,3 +4121,35 @@ details.jpecol .jpetop { margin-top: 5px; }
 .survboucle { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); max-width: 80ch; }
 .survnote { max-width: 76ch; margin: 0; font-size: 12.5px; }
 
+
+/* ==================================================================
+   CE QU'IL MANQUE, EN JAUGES — et non plus en quatre phrases.
+   Une base commune, donc des distances comparables : « 1 sur 30 » et
+   « 28 sur 30 » ne demandent pas la même patience.
+   ================================================================== */
+.fjauges { display: grid; gap: 6px; margin: 10px 0 2px; max-width: 620px; }
+.fjauge {
+  display: grid; grid-template-columns: 122px 110px 52px minmax(0, 1fr);
+  align-items: center; gap: 10px; font-size: 11.5px; cursor: help;
+}
+.fjnom { color: var(--ink-dim); }
+.fjrail { height: 5px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.fjrail i { display: block; height: 100%; border-radius: 999px; background: var(--accent); opacity: .75; }
+.fjn { font-size: 11px; color: var(--ink-dim); text-align: right; }
+.fjpour { font-size: 11px; }
+.fonctrien { max-width: 62ch; margin: 8px 0 0; }
+@media (max-width: 560px) {
+  .fjauge { grid-template-columns: 1fr 64px; }
+  .fjrail, .fjpour { display: none; }
+}
+
+/* Les comptes que le hasard explique encore : repliés, et le repli dit quoi. */
+.survflous { margin-top: 10px; }
+.survflous > summary {
+  cursor: pointer; font-size: 11.5px; color: var(--ink-faint);
+  padding: 5px 0; list-style: none;
+}
+.survflous > summary::-webkit-details-marker { display: none; }
+.survflous > summary::before { content: '› '; }
+.survflous[open] > summary::before { content: '⌄ '; }
+.survflous > summary:hover { color: var(--ink-dim); }

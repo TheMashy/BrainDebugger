@@ -445,9 +445,29 @@ export function analyserTable(T) {
   else { const { paires } = ar1(T.jours.map(j => j.note)); if (paires < SEUILS.min_paires) manques.push(`${pl(notes, 'journée notée', 'journées notées')} mais ${pl(paires, 'lendemain noté', 'lendemains notés')} : la note d’un jour à l’autre se lit sur deux jours de suite.`); }
   if (nuits < SEUILS.min_nuits) manques.push(nuits ? `${pl(nuits, 'nuit mesurée', 'nuits mesurées')} : il en faut ${SEUILS.min_nuits} pour les bascules et la régularité.` : 'Aucune nuit mesurée : rien n’est arrivé de Machi Tool, ni d’une montre par la passerelle.');
   if (textes < SEUILS.mots.min_jours) manques.push(textes ? `${pl(textes, 'journée écrite', 'journées écrites')} d’au moins ${SEUILS.mots.min_mots} mots : il en faut ${SEUILS.mots.min_jours} pour lire les mots absolus.` : `Aucune journée écrite d’au moins ${SEUILS.mots.min_mots} mots : il en faut ${SEUILS.mots.min_jours} pour lire les mots absolus.`);
+  /*
+   * CE QUI MANQUE, EN CHIFFRES PLUTÔT QU'EN PHRASES.
+   *
+   * `manques` dit la même chose en toutes lettres, et quatre phrases de deux
+   * lignes chacune finissent par se lire comme un reproche. Les mêmes données
+   * sous forme de jauges — j'en ai tant, il en faut tant, pour ça — se lisent
+   * d'un coup d'œil et disent aussi la DISTANCE : « 1 nuit sur 30 » et
+   * « 28 nuits sur 30 » ne demandent pas la même patience, et la phrase seule
+   * ne les distinguait pas.
+   *
+   * Les phrases restent : elles vont dans le repli, pour qui veut le détail.
+   */
+  const paires = notes >= SEUILS.min_notes ? ar1(T.jours.map(j => j.note)).paires : null;
+  const jauges = [
+    { cle: 'notes', quoi: 'journées notées', a: notes, faut: SEUILS.min_notes, pour: 'les liens, la note d’un jour à l’autre' },
+    { cle: 'paires', quoi: 'lendemains notés', a: paires, faut: SEUILS.min_paires, pour: 'la note d’un jour à l’autre' },
+    { cle: 'nuits', quoi: 'nuits mesurées', a: nuits, faut: SEUILS.min_nuits, pour: 'les bascules, la régularité' },
+    { cle: 'textes', quoi: 'journées écrites', a: textes, faut: SEUILS.mots.min_jours, pour: 'les mots absolus' }
+  ].filter(j => j.a != null && j.a < j.faut);
+
   return {
     periode: { de: T.de, a: T.a, jours: T.jours.length, notes, nuits, ecrans, textes },
-    assez, items, manques, exclus: EXCLUS,
+    assez, items, manques, jauges, exclus: EXCLUS,
     series: { dates: T.jours.map(j => j.date), note: T.jours.map(j => j.note), sommeil_h: T.jours.map(j => j.sommeil_h), coucher: T.jours.map(j => j.coucher), we: T.jours.map(j => j.we) },
   };
 }

@@ -2823,19 +2823,46 @@ function teinteTheme(t, i, pistes = []) {
  *
  * @param {object} m  { cle, nom, teinte, intensite, serie, quoi, compte, corps }
  */
-function mecaMarkup(m) {
+/**
+ * UN MÉCANISME : SON NOM, ET UNE BARRE PLUTÔT QU'UN NOMBRE.
+ *
+ * « 16× » demande de lire un nombre, puis de le comparer au précédent, puis au
+ * suivant. Une longueur posée sur une base commune se compare sans être lue :
+ * c'est le deuxième encodage le plus précis après la position (Cleveland &
+ * McGill), et de loin le plus rapide pour « lequel revient le plus ».
+ *
+ * On retire aussi la petite série : elle encodait une troisième fois ce que le
+ * nombre et la barre disaient déjà, dans quinze pixels où rien ne se distingue.
+ * Elle reste dans le détail, ouvert au clic, à une taille où elle veut dire
+ * quelque chose.
+ *
+ * `max` est le plus grand compte de la liste : c'est lui qui donne la base
+ * commune. Sans lui, chaque barre serait à sa propre échelle et les longueurs
+ * ne se compareraient plus — le défaut exact qu'on vient corriger.
+ */
+function mecaMarkup(m, max = 0) {
   const ouvert = MIR_THEME === m.cle;
+  const part = max > 0 && m.compte ? Math.max(6, Math.round(100 * m.compte / max)) : 0;
   return `<div class="meca${ouvert ? ' ouvert' : ''}" style="--m:${m.teinte}"
        data-meca="${esc(m.cle)}">
-    <button class="mhead" aria-expanded="${ouvert}">
+    <button class="mhead" aria-expanded="${ouvert}"
+      ${m.compte ? `title="reconnu ${m.compte} fois dans vos conversations"` : ''}>
       <span class="tpuce" data-i="${m.intensite}"></span>
       <span class="tnom">${esc(m.nom)}</span>
-      ${m.compte ? `<span class="mcompte mono">${m.compte}<small>×</small></span>` : ''}
-      ${serieMarkup(m.serie)}
+      ${m.compte
+        ? `<span class="mbarre"><i style="width:${part}%"></i></span>
+           <span class="mcompte mono">${m.compte}</span>`
+        : `<span class="mbarre"></span><span class="mcompte"></span>`}
     </button>
-    ${ouvert ? `<div class="tcorps">${m.corps}</div>` : ''}
+    ${ouvert ? `<div class="tcorps">${serieMarkup(m.serie)}${m.corps}</div>` : ''}
   </div>`;
 }
+
+/** Une liste de mécanismes, tous à la même échelle : c'est ce qui les rend comparables. */
+const mecaListe = liste => {
+  const max = Math.max(0, ...liste.map(m => m.compte ?? 0));
+  return liste.map(m => mecaMarkup(m, max)).join('');
+};
 
 /** Un thème de la lecture : ses preuves datées, son chiffre, ses liens. */
 function themeMeca(t, i, pistes = []) {
@@ -2897,10 +2924,25 @@ function motifMeca(m) {
  * ce qui est l'ordre dans lequel on veut les lire.
  */
 function mecanismes(lecture) {
-  const t = (lecture?.themes ?? []).map((x, i) => themeMeca(x, i, lecture?.pistes ?? []));
-  const m = (S.motifs?.liste ?? []).map(motifMeca);
-  return [...t, ...m].sort((a, b) =>
-    (b.intensite - a.intensite) || ((b.serie?.length ?? 0) - (a.serie?.length ?? 0)));
+  /*
+   * DEUX ÉCHELLES QUI NE SE COMPARENT PAS, ET UN SEUL TRI : C'ÉTAIT LE DÉSORDRE.
+   *
+   * Un thème porte une `intensite` donnée par le modèle ; un motif porte celle
+   * de son dernier point de série. Trier la liste mélangée sur ce champ donnait
+   * un ordre qui n'était celui d'aucune des deux grandeurs — à l'écran :
+   * 16×, 11×, 6×, 6×, 5×, 5×, 4×, 1×, 20×, 6×, 6×, 12×. On cherchait une
+   * logique qu'il n'y avait pas.
+   *
+   * Chaque sorte est donc ordonnée par SA grandeur, et elles ne s'entrelacent
+   * jamais : les motifs d'abord, par nombre de fois reconnus — c'est le chiffre
+   * qu'ils portent et celui qu'on vient lire — puis les thèmes par intensité.
+   * Un rang, une grandeur : la première règle d'une liste qui se lit.
+   */
+  const themes = (lecture?.themes ?? []).map((x, i) => themeMeca(x, i, lecture?.pistes ?? []))
+    .sort((a, b) => (b.intensite - a.intensite) || ((b.serie?.length ?? 0) - (a.serie?.length ?? 0)));
+  const motifs = (S.motifs?.liste ?? []).map(motifMeca)
+    .sort((a, b) => (b.compte - a.compte) || a.nom.localeCompare(b.nom, 'fr'));
+  return [...motifs, ...themes];
 }
 
 /**
@@ -2982,7 +3024,7 @@ function mecaGroupes(lecture) {
   const tous = mecanismes(lecture);
   const pistes = lecture?.pistes ?? [];
   const noeuds = lecture?.carte?.noeuds ?? [];
-  if (!pistes.length && !noeuds.length) return tous.map(mecaMarkup).join('');
+  if (!pistes.length && !noeuds.length) return mecaListe(tous);
 
   const ilotDe = ilotDesNoeuds(lecture?.carte, pistes);
   const restant = new Set(tous.map(m => m.cle));
@@ -3038,7 +3080,7 @@ function mecaGroupes(lecture) {
     bloc.push(`<div class="mecagroupe" style="--p:${teinte}" data-ilot="${i}">
       <button class="mecatitre" data-ilot-voir="${i}"
               title="Le montrer sur la carte"><span></span>${esc(p.nom)}</button>
-      ${meca.length ? `<div class="mecasous">${meca.map(mecaMarkup).join('')}</div>` : ''}
+      ${meca.length ? `<div class="mecasous">${mecaListe(meca)}</div>` : ''}
       ${chosesMarkup(dedans, !meca.length)}
     </div>`);
   });
@@ -3053,7 +3095,7 @@ function mecaGroupes(lecture) {
   if (libres.length || seuls.length) {
     bloc.push(`<div class="mecagroupe seuls">
       <div class="mecatitre"><span></span>pas encore regroupé</div>
-      ${seuls.length ? `<div class="mecasous">${seuls.map(mecaMarkup).join('')}</div>` : ''}
+      ${seuls.length ? `<div class="mecasous">${mecaListe(seuls)}</div>` : ''}
       ${chosesMarkup(libres, !seuls.length)}
     </div>`);
   }
@@ -3524,16 +3566,32 @@ const SURV_GENRE = { blessure: 'une blessure écrite', surdose: 'une surdose éc
 function surveillesMarkup(C, schemas) {
   if (!C) return '';
   if (!C.n) return '';
-  const tete = `<div class="lechead"><div class="fonctete"><div class="k faint">Les jours à surveiller, ce qui revient autour</div>
+  const tete = `<div class="lechead"><div class="fonctete"><div class="k faint"
+      title="Des comptes contre les autres jours de la même période, jamais des causes. « net » veut dire que le hasard n’explique pas l’écart (test exact de Fisher à 5 %) ; sans « net », c’est un compte à regarder, pas une conclusion.">Les jours à surveiller, ce qui revient autour</div>
     <span class="lecmeta faint">${C.rythme ? esc(C.rythme) : `${C.n} ${C.n > 1 ? 'jours' : 'jour'} sur la période`}</span></div></div>`;
   if (C.manque) return `<section class="surv">${tete}<p class="sub" style="max-width:62ch">${esc(C.manque)}</p></section>`;
   const genres = Object.entries(C.genres ?? {}).sort((a, b) => b[1] - a[1]).map(([g, n]) => `<span class="survgenre">${esc(SURV_GENRE[g] ?? g)} <b class="mono">${n}</b></span>`).join('');
   const jours = C.jours.slice(-40).map(j => `<button class="fjour ${j.niveau}" data-fonct-jour="${esc(j.date)}" title="${esc(j.genres.map(g => SURV_GENRE[g] ?? g).join(' · '))}">${esc(fmtDay(j.date).replace(/ \d{4}$/, ''))}</button>`).join('');
-  const phrases = C.phrases.map(p => `<article class="fonctcarte survcarte${p.appui?.net ? ' net' : ''}">
+  /*
+   * CE QUI TIENT SE MONTRE ; CE QUI NE TIENT PAS SE REPLIE.
+   *
+   * Cinq cartes de la même taille, chacune avec ses deux barres et sa phrase,
+   * dont trois finissaient par « Trop peu pour trancher ». À poids égal à
+   * l'écran, on lisait cinq résultats là où il y en avait deux — et rien ne
+   * disait lesquels. Ce qui est « net » (le hasard n'explique pas l'écart)
+   * garde sa carte ; le reste devient une ligne, sous un repli qui dit
+   * exactement ce qu'il contient.
+   */
+  const carte = p => `<article class="fonctcarte survcarte${p.appui?.net ? ' net' : ''}">
       <div class="survquoi">${esc(p.quoi)}${p.appui?.net ? '<span class="survnet">net</span>' : ''}</div>
       <p class="fonctphr">${esc(p.phrase)}</p>
       ${p.appui?.sur && p.appui?.hors_sur ? fonctBarres({ n: p.appui.n, d: p.appui.sur, lab: 'jours à surveiller', txt: `${p.appui.n} / ${p.appui.sur}` }, { n: p.appui.hors_n, d: p.appui.hors_sur, lab: 'les autres', txt: `${p.appui.hors_n} / ${p.appui.hors_sur}` }) : ''}
-    </article>`).join('');
+    </article>`;
+  const nets = C.phrases.filter(p => p.appui?.net), flous = C.phrases.filter(p => !p.appui?.net);
+  const phrases = nets.length ? `<div class="fonctgrille">${nets.map(carte).join('')}</div>` : '';
+  const replies = flous.length ? `<details class="survflous">
+    <summary>${flous.length} ${flous.length > 1 ? 'comptes regardés' : 'compte regardé'} sans que le hasard soit écarté</summary>
+    <div class="fonctgrille">${flous.map(carte).join('')}</div></details>` : '';
   // Les boucles où ces jours tombent.
   const set = new Set(C.jours.map(j => j.date));
   const boucles = (schemas ?? []).map(sc => { const dedans = (sc.jours ?? []).filter(d => set.has(d)); return dedans.length ? { sc, dedans } : null; }).filter(Boolean).sort((a, b) => b.dedans.length - a.dedans.length);
@@ -3542,9 +3600,10 @@ function surveillesMarkup(C, schemas) {
   return `<section class="surv">${tete}
     <div class="survgenres">${genres}</div>
     <div class="fonctliste survjours">${jours}${C.jours.length > 40 ? `<span class="faint">… et ${C.jours.length - 40} autres</span>` : ''}</div>
-    ${phrases ? `<div class="fonctgrille">${phrases}</div>` : ''}
+    ${phrases}${replies}
     ${boucleHtml}
-    <p class="sub survnote">Des comptes contre les autres jours de la même période, jamais des causes. « net » veut dire que le hasard n’explique pas l’écart (test exact de Fisher à 5 %) ; sans « net », c’est un compte à regarder, pas une conclusion.</p>
+    ${/* La méthode se lit une fois, pas à chaque visite : elle passe au survol
+          du titre plutôt qu'en pied de section. */''}
   </section>`;
 }
 /* ==================================================================
@@ -3689,6 +3748,28 @@ function fonctGraphe(F) {
     <figcaption class="fglegende">une flèche = « ceci aujourd’hui, cela demain », le chiffre = combien de fois sur combien, contre le reste · ↕ un changement de niveau · la boucle = la note qui reste du même côté · un clic mène à la phrase</figcaption>
   </figure>`;
 }
+/**
+ * CE QU'IL MANQUE, EN JAUGES.
+ *
+ * Quatre phrases de deux lignes disaient « il en faut trente ». Les mêmes
+ * données sur une base commune disent en plus la DISTANCE : « 1 sur 30 » et
+ * « 28 sur 30 » ne demandent pas la même patience, et la phrase seule ne les
+ * distinguait pas. C'est aussi ce qui transforme un reproche en compte à
+ * rebours — on voit ce qui approche.
+ */
+function jaugesMarkup(jauges, manques) {
+  if (!jauges?.length) return manques?.length ? `<p class="sub fonctmanque">${manques.map(esc).join(' ')}</p>` : '';
+  return `<div class="fjauges">${jauges.map(j => {
+    const part = Math.min(100, Math.round(100 * j.a / j.faut));
+    return `<div class="fjauge" title="${esc(`${j.a} sur ${j.faut} — pour ${j.pour}`)}">
+      <span class="fjnom">${esc(j.quoi)}</span>
+      <span class="fjrail"><i style="width:${part}%"></i></span>
+      <span class="fjn mono">${j.a}<span class="faint">/${j.faut}</span></span>
+      <span class="fjpour faint">${esc(j.pour)}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 function fonctionnementsMarkup(F) {
   if (!F) return '';
   const p = F.periode;
@@ -3710,9 +3791,19 @@ function fonctionnementsMarkup(F) {
           <div class="fonctliste">${it.jours.slice(0, 40).map(d => `<button class="fjour" data-fonct-jour="${esc(d)}">${esc(fmtDay(d))}</button>`).join('')}${it.jours.length > 40 ? `<span class="faint">… et ${it.jours.length - 40} autres</span>` : ''}</div></details>` : ''}
       </article>`).join('')}
     </div>`).join('');
-  const rien = F.items.length ? '' : `<p class="sub" style="max-width:62ch">Sur cette période, rien ne se détache assez pour être compté, pour l’instant : pas de bascule nette, pas de lien confirmé au comptage, pas de forme de semaine, un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la veille sans non plus en repartir, des mots absolus qui ne suivent pas la note. C’est une réponse aussi : ce qui n’est pas là ne s’invente pas.</p>`;
-  const manques = F.manques.length ? `<p class="sub fonctmanque">${F.manques.map(esc).join(' ')}</p>` : '';
-  const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
+  /*
+   * « RIEN NE SE DÉTACHE » SE DIT EN UNE LIGNE, PAS EN SIX.
+   *
+   * Le paragraphe énumérait les six choses non trouvées, une par une. Il
+   * occupait le tiers de l'écran pour dire « pas encore », et se lisait comme
+   * un constat d'échec là où c'est une réponse honnête. La liste complète va
+   * dans le repli, avec le reste de ce qu'on ne montre pas.
+   */
+  const rien = F.items.length ? '' : `<p class="sub fonctrien">Sur cette période, aucun compte ne se détache pour l’instant : ce qui n’est pas là ne s’invente pas.</p>`;
+  const manques = jaugesMarkup(F.jauges, F.manques);
+  const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${
+    (F.items.length ? [] : ['Pas de bascule nette, pas de lien confirmé au comptage, pas de forme de semaine ; un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la veille sans non plus en repartir, des mots absolus qui ne suivent pas la note.']).concat(F.manques ?? []).map(x => `<li>${esc(x)}</li>`).join('')
+  }${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
   return `<section class="fonct"><div class="lechead">${tete}</div>${rien}${fonctGraphe(F)}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
 }
 
