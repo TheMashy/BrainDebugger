@@ -88,7 +88,10 @@ export const FAMILLES = [
   { cle: 'alcool', nom: 'l’alcool', sym: 'verre',
     mots: /\b(?:alcool|biere|bieres|vin|vodka|whisky|rhum|gin|pastis|ricard|champagne|tequila|jaeger|shot|shots|pinte|pintes|verre|verres|bouteille|bouteilles|apero|aperitif)\b/,
     verbe: V_BOIRE, sauf: SANS_ALCOOL,
-    franc: /\bj ai (?:encore |trop |beaucoup |pas mal |un peu |bien )?bu\b|\bje me suis bourre(?:e)?\b|\bbourre(?:e|es|s)?\b|\bivre\b|\b(?:une |grosse |la )?cuite\b|\bblack ?out\b|\bgueule de bois\b|\btorche(?:e|es)?\b|\balcoolise(?:e)?\b|\bcoma ethylique\b/ },
+    /* UN NOMBRE ET UN VERRE SUFFISENT. « trois verres de vin, encore une fois »
+       n'a pas de verbe : exiger « bu » perdait un jour planté sur quatre au
+       banc, et c'est une des façons les plus courantes de l'écrire. */
+    franc: /\b(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|douze|quelques|plusieurs|\d+) (?:verres?|bieres?|pintes?|shots?|coupes?|bouteilles?|canettes?)\b|\bverres? de (?:vin|rouge|blanc|rose|whisky|vodka|rhum|gin|champagne)\b|\bl? ?apero\b|\bj ai (?:encore |trop |beaucoup |pas mal |un peu |bien )?bu\b|\bje me suis bourre(?:e)?\b|\bbourre(?:e|es|s)?\b|\bivre\b|\b(?:une |grosse |la )?cuite\b|\bblack ?out\b|\bgueule de bois\b|\btorche(?:e|es)?\b|\balcoolise(?:e)?\b|\bcoma ethylique\b/ },
 
   { cle: 'cannabis', nom: 'le cannabis', sym: 'feuille',
     mots: /\b(?:cannabis|beuh|weed|shit|herbe|bedo|bedos|joint|joints|spliff|spliffs|bang|bangs|pet|pets|teuh|ganja)\b/,
