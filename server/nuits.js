@@ -8,23 +8,36 @@
  *     elle-même (démarrage et extinction du poste), avec `sommeil_h` ;
  *   — l'ACTIVITÉ : `plage` (première et dernière minute où quelqu'un
  *     touchait le clavier ce jour-là) et `trous` (les absences de plus de
- *     vingt minutes, poste allumé). C'est plus juste que le poste : un
- *     ordinateur qu'on laisse allumé la nuit n'a ni extinction ni démarrage,
- *     et pourtant on y a dormi — entre la dernière touche du soir et la
- *     première du matin.
+ *     vingt minutes, poste allumé — y compris, depuis peu, l'absence entre
+ *     la dernière touche avant une extinction et la première touche après
+ *     le rallumage). C'est plus juste que le poste : un ordinateur qu'on
+ *     laisse allumé la nuit n'a ni extinction ni démarrage, et pourtant on y
+ *     a dormi — entre la dernière touche du soir et la première du matin.
  *
- * LA NUIT QUI OUVRE LE JOUR D, c'est le plus long silence qui se termine le
- * matin de D : une fin d'activité (dernière touche de D-1, ou un trou qui
- * s'ouvre après minuit, ou une extinction) suivie de la première reprise.
+ * LA NUIT QUI OUVRE LE JOUR D, c'est le plus long silence qui SE TERMINE DANS
+ * LA JOURNÉE CIVILE D : une fin d'activité (dernière touche de D-1, un trou,
+ * une extinction) suivie de la première reprise du clavier, cherché sur
+ * trente-six heures — de midi la veille à minuit le soir de D. Seule la DURÉE
+ * borne : de 2 h à 16 h. Aucune heure civile ne le fait — un lever à 16:15
+ * vaut un lever à 08:00. La règle « la nuit se termine avant 16 h » jetait
+ * une nuit sur deux chez quelqu'un qui se couche vers 5 h et se lève vers
+ * 16 h, et laissait le bord du fichier civil (00:00) passer pour un lever.
+ *
+ * QUAND PLUSIEURS SILENCES SONT RECEVABLES, le plus long gagne — sauf si le
+ * rythme de la personne est connu (sept nuits complètes au moins sur
+ * quatre-vingt-dix jours) : alors, parmi les silences d'au moins la moitié du
+ * plus long, on prend celui qui colle le mieux à SON rythme, et `souci` dit
+ * quand ce n'est pas le plus long. Sans nuit recevable, pas de nuit : jamais
+ * un réveil inventé depuis `plage.de`, jamais un lever sans coucher.
+ *
  * Deux silences séparés par moins de trente minutes de clavier — se lever
- * pour boire un verre d'eau — ne sont qu'une nuit. Une durée hors de 2 h à
- * 16 h n'est pas une nuit, c'est une coupure ou un week-end sans ordinateur.
+ * pour boire un verre d'eau — ne sont qu'une nuit.
  *
  * ET CE QUI NE COLLE PAS SE DIT. `poste.sommeil_h` qui ne vaut pas
- * lever − coucher, un coucher à 15 h, un lever à 3 h : chaque nuit porte
- * `souci`, une phrase, ou rien. On ne corrige pas en silence — la personne
- * regarde ses nuits pour savoir si elles sont justes, et un chiffre lissé
- * lui mentirait.
+ * lever − coucher, un silence plus long pris pour une absence : chaque nuit
+ * porte `souci`, une phrase, ou rien. On ne corrige pas en silence — la
+ * personne regarde ses nuits pour savoir si elles sont justes, et un chiffre
+ * lissé lui mentirait.
  * =====================================================================
  */
 
@@ -33,6 +46,10 @@ import { addDays } from './stats.js';
 
 const MIN_NUIT = 2, MAX_NUIT = 16;           // heures ; en dehors, ce n'est pas une nuit
 const FUSION_MIN = 30;                       // minutes de clavier qui ne coupent pas une nuit
+const FENETRE = [-12 * 60, 24 * 60];         // minutes : de midi la veille à minuit le soir de D
+const MIN_POUR_RYTHME = 7;                   // nuits complètes avant de prétendre connaître un rythme
+const RYTHME_JOURS = 90;                     // jours sur lesquels ce rythme se lit
+const RYTHME_PART = 0.5;                     // un silence ne concourt au rythme qu'à la moitié du plus long
 
 const enMinutes = hhmm => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm ?? '').trim()); return m ? +m[1] * 60 + +m[2] : null; };
 const hhmm = min => { min = ((Math.round(min) % 1440) + 1440) % 1440; return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`; };
@@ -46,22 +63,30 @@ function instants(dig, digVeille) {
   const fins = [], debuts = [];
   const pV = digVeille?.plage ?? {}, pD = dig?.plage ?? {};
   const a = enMinutes(pV.a); if (a != null) fins.push({ t: a - 1440, src: 'activite' });
-  for (const tr of digVeille?.trous ?? []) {                    // un trou de la veille qui s'ouvre le soir
+  for (const tr of digVeille?.trous ?? []) {                    // un trou de la veille qui s'ouvre l'après-midi ou le soir
     const de = enMinutes(tr.de), ta = enMinutes(tr.a);
-    if (de != null && de >= 18 * 60) { fins.push({ t: de - 1440, src: 'activite' }); if (ta != null && ta > de) debuts.push({ t: ta - 1440, src: 'activite' }); }
+    if (de != null && de >= 12 * 60) { fins.push({ t: de - 1440, src: 'activite' }); if (ta != null && ta > de) debuts.push({ t: ta - 1440, src: 'activite' }); }
   }
+  // `plage.de` à 00:00 est un début comme un autre : le bord du fichier civil
+  // chez quelqu'un encore debout à minuit. Il ne fera jamais une nuit à lui
+  // seul, puisqu'aucune fin recevable ne le précède d'au moins deux heures.
   const de = enMinutes(pD.de); if (de != null) debuts.push({ t: de, src: 'activite' });
-  for (const tr of dig?.trous ?? []) {                          // un trou du jour : le poste est resté allumé
+  for (const tr of dig?.trous ?? []) {                          // un trou du jour : le poste est resté allumé, ou a été rallumé
     const d0 = enMinutes(tr.de), d1 = enMinutes(tr.a);
     if (d0 != null && d1 != null && d1 > d0) { fins.push({ t: d0, src: 'activite' }); debuts.push({ t: d1, src: 'activite' }); }
   }
-  // Le poste lui-même — SEULEMENT quand le clavier ne dit rien. Un démarrage
-  // n'est pas une reprise : Windows redémarre seul à 00:30, personne ne s'est
-  // levé. Mêlé aux instants du clavier, il couperait la nuit en deux.
+  // Le poste lui-même — SEULEMENT quand le clavier ne dit rien, et SEULEMENT
+  // apparié (coucher ET réveil). Un démarrage n'est pas une reprise : Windows
+  // redémarre seul à 00:30, personne ne s'est levé. Mêlé aux instants du
+  // clavier, il couperait la nuit en deux. Et un réveil sans coucher — ce que
+  // les vieux digests portent comme {reveil: '00:00'} — n'est pas une borne :
+  // c'était le bord du fichier civil, pas un lever.
   if (!fins.length && !debuts.length) {
     const pc = enMinutes(dig?.poste?.coucher), pr = enMinutes(dig?.poste?.reveil);
-    if (pc != null) fins.push({ t: pc >= 12 * 60 ? pc - 1440 : pc, src: 'poste' });
-    if (pr != null) debuts.push({ t: pr, src: 'poste' });
+    if (pc != null && pr != null) {
+      fins.push({ t: pc >= 12 * 60 ? pc - 1440 : pc, src: 'poste' });
+      debuts.push({ t: pr, src: 'poste' });
+    }
   }
   return { fins: fins.sort((x, y) => x.t - y.t), debuts: debuts.sort((x, y) => x.t - y.t) };
 }
@@ -74,10 +99,14 @@ function instants(dig, digVeille) {
  * y a eu du clavier à 03:30, ce n'en est pas une : la vraie nuit va de 03:30 à
  * 11:00. Sans cette règle, la plus longue l'emportait, et le coucher tombait
  * quatre heures trop tôt.
+ *
+ * Mais seul le CLAVIER prouve qu'on était debout. Une extinction du poste à
+ * 09:00 au milieu d'un silence 05:26 → 16:15 (un redémarrage de mise à jour)
+ * n'est qu'une fin de plus : elle ne coupe pas la nuit.
  */
 function silences(fins, debuts) {
   const out = [];
-  const connus = [...fins, ...debuts].map(x => x.t);
+  const connus = [...fins, ...debuts].filter(x => x.src === 'activite').map(x => x.t);
   for (const f of fins) {
     const d = debuts.find(x => x.t > f.t);
     if (!d) continue;
@@ -100,36 +129,82 @@ function silences(fins, debuts) {
   return fondus;
 }
 
+/** L'écart d'heure à heure, dans le sens du temps : 23:00 → 07:00 vaut 8 h. */
+const versLAvant = (de, a) => (((a - de) % 1440) + 1440) % 1440;
+
+/** L'écart au rythme habituel, dans un sens ou dans l'autre. */
+const ecartCirculaire = (a, b) => Math.min(versLAvant(a, b), versLAvant(b, a));
+
+/**
+ * LE CHOIX ENTRE PLUSIEURS SILENCES RECEVABLES.
+ *
+ * Sans rythme connu, le plus long : c'est le seul indice qu'on ait. Avec le
+ * rythme de la personne, la longueur ne suffit plus — chez quelqu'un qui dort
+ * de 5 h à 16 h, une journée entière loin du poste (12:00 → 21:00) est plus
+ * longue qu'une nuit courte (05:30 → 10:00), et pourtant ce n'est pas elle
+ * la nuit. Parmi les silences d'au moins la moitié du plus long, on prend
+ * donc celui dont le coucher et le lever sont les plus proches de SES
+ * médianes ; à égalité, le plus long. Le seuil de la moitié écarte la sieste
+ * de deux heures qui collerait mieux au lever habituel que la vraie nuit.
+ *
+ * @returns {{nuit, autre}} `autre` : le plus long, quand ce n'est pas lui
+ *   qui a été retenu — pour le dire, jamais pour le cacher.
+ */
+function choisir(nuits, rythme) {
+  if (!nuits.length) return { nuit: null, autre: null };
+  const plusLong = nuits.reduce((a, b) => (b.duree > a.duree ? b : a));
+  const mC = rythme?.coucher ?? null, mL = rythme?.lever ?? null;
+  if (mC == null && mL == null) return { nuit: plusLong, autre: null };
+  const score = s => (mL != null ? ecartCirculaire(enMinutes(hhmm(s.d.t)), mL) : 0)
+                   + (mC != null ? ecartCirculaire(enMinutes(hhmm(s.f.t)), mC) : 0);
+  let nuit = plusLong, meilleur = score(plusLong);
+  for (const s of nuits) {
+    if (s === plusLong || s.duree < RYTHME_PART * plusLong.duree) continue;
+    const sc = score(s);
+    if (sc < meilleur) { nuit = s; meilleur = sc; }
+  }
+  return { nuit, autre: nuit === plusLong ? null : plusLong };
+}
+
 /**
  * LA NUIT QUI OUVRE `date`, lue dans son digest et celui de la veille.
+ * @param {object} [options.rythme] `{coucher, lever}` en minutes (voir
+ *   `rythmeDe`) : les médianes de la personne, qui départagent les silences.
  * @returns {{coucher, lever, sommeil_h, source, souci} | null}
  *   coucher/lever en HH:MM ; sommeil_h en heures (une décimale) ;
  *   source : 'activite' (dérivée du clavier) | 'poste' (appariée par Machi Tool) ;
  *   souci : une phrase quand quelque chose ne colle pas, sinon null.
  */
-export function nuitDuJour(dig, digVeille = null) {
+export function nuitDuJour(dig, digVeille = null, { rythme = null } = {}) {
   if (!dig) return null;
   const { fins, debuts } = instants(dig, digVeille);
+  // Se termine dans la journée civile D, commence après midi la veille : c'est
+  // la seule fenêtre. L'heure de la reprise, elle, ne juge de rien.
   const cands = silences(fins, debuts)
-    .filter(s => s.d.t >= 0 && s.d.t <= 16 * 60 && s.f.t >= -12 * 60);   // se termine le matin de D, commence après midi la veille
+    .filter(s => s.d.t >= 0 && s.d.t < FENETRE[1] && s.f.t >= FENETRE[0]);
   const nuits = cands.filter(s => s.duree >= MIN_NUIT * 60 && s.duree <= MAX_NUIT * 60);
   const poste = dig.poste ?? {};
-  let nuit = null, source = null;
-  if (nuits.length) {
-    nuit = nuits.reduce((a, b) => (b.duree > a.duree ? b : a));
-    source = nuit.f.src === 'activite' || nuit.d.src === 'activite' ? 'activite' : 'poste';
+  const { nuit, autre } = choisir(nuits, rythme);
+  if (nuit) {
+    const source = nuit.f.src === 'activite' || nuit.d.src === 'activite' ? 'activite' : 'poste';
+    const r = { coucher: hhmm(nuit.f.t), lever: hhmm(nuit.d.t), sommeil_h: Math.round(nuit.duree / 6) / 10, source, souci: null };
+    return souci(r, poste, autre);
   }
-  // Rien de dérivable : le poste seul, tel que Machi Tool l'a apparié.
-  if (!nuit && poste.reveil) {
+  // Rien de dérivable : le poste seul, tel que Machi Tool l'a apparié — et
+  // seulement apparié. Un réveil sans coucher n'est pas une nuit, c'est le
+  // bord d'un fichier (voir `instants`) ; on rend null plutôt qu'un lever
+  // qui n'a rien devant lui.
+  if (poste.reveil && poste.coucher) {
     const pc = enMinutes(poste.coucher), pr = enMinutes(poste.reveil);
-    const duree = pc != null ? pr - (pc >= 12 * 60 ? pc - 1440 : pc) : null;
-    const r = { coucher: poste.coucher ?? null, lever: poste.reveil, sommeil_h: poste.sommeil_h ?? (duree != null && duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60 ? Math.round(duree / 6) / 10 : null), source: 'poste', souci: null };
-    return souci(r, poste);
+    const duree = pc != null && pr != null ? pr - (pc >= 12 * 60 ? pc - 1440 : pc) : null;
+    const r = { coucher: poste.coucher, lever: poste.reveil, sommeil_h: poste.sommeil_h ?? (duree != null && duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60 ? Math.round(duree / 6) / 10 : null), source: 'poste', souci: null };
+    return souci(r, poste, null);
   }
-  if (!nuit) return null;
-  const r = { coucher: hhmm(nuit.f.t), lever: hhmm(nuit.d.t), sommeil_h: Math.round(nuit.duree / 6) / 10, source, souci: null };
-  return souci(r, poste);
+  return null;
 }
+
+/** Une durée en heures, lisible : 540 min → « 9 h », 654 → « 10,9 h ». */
+const enHeuresLisibles = min => `${String(Math.round(min / 6) / 10).replace('.', ',')} h`;
 
 /**
  * CE QUI NE COLLE PAS, DIT EN UNE PHRASE — ET SEULEMENT CE QUI EST FAUX EN SOI.
@@ -142,21 +217,20 @@ export function nuitDuJour(dig, digVeille = null) {
  *
  * Ne restent donc ici que les incohérences qui ne dépendent d'aucune
  * habitude : deux sources qui se contredisent, une durée qui n'est pas une
- * nuit. L'écart au rythme de la personne se juge ailleurs, sur SON rythme à
+ * nuit, un silence plus long écarté au profit de celui qui colle au rythme.
+ * L'écart au rythme de la personne se juge ailleurs, sur SON rythme à
  * elle, et une fois toutes les nuits connues (voir `ecartsAuRythme`).
  */
-function souci(r, poste) {
+function souci(r, poste, autre = null) {
   const soucis = [];
   if (r.sommeil_h != null && poste?.sommeil_h != null && Math.abs(poste.sommeil_h - r.sommeil_h) > 0.5)
     soucis.push(`le poste dit ${String(poste.sommeil_h).replace('.', ',')} h, le clavier ${String(r.sommeil_h).replace('.', ',')} h`);
   if (r.sommeil_h != null && r.sommeil_h < 3) soucis.push(`${String(r.sommeil_h).replace('.', ',')} h seulement : une coupure plutôt qu'une nuit ?`);
   if (r.sommeil_h != null && r.sommeil_h > 13) soucis.push(`${String(r.sommeil_h).replace('.', ',')} h : l'ordinateur est peut-être resté fermé plus longtemps que toi`);
+  if (autre) soucis.push(`un silence plus long, de ${hhmm(autre.f.t)} à ${hhmm(autre.d.t)} (${enHeuresLisibles(autre.duree)}), pris pour une absence`);
   r.souci = soucis.length ? soucis.join(' · ') : null;
   return r;
 }
-
-/** L'écart d'heure à heure, dans le sens du temps : 23:00 → 07:00 vaut 8 h. */
-const versLAvant = (de, a) => (((a - de) % 1440) + 1440) % 1440;
 
 /** La médiane d'un tableau d'heures-minutes, sur le cercle (voir web/nuits-axe.js). */
 function medianeHoraire(minutes) {
@@ -172,8 +246,21 @@ function medianeHoraire(minutes) {
   return (apres + m) % 1440;
 }
 
-/** L'écart au rythme habituel, dans un sens ou dans l'autre. */
-const ecartCirculaire = (a, b) => Math.min(versLAvant(a, b), versLAvant(b, a));
+/**
+ * LE RYTHME DE LA PERSONNE : ses médianes circulaires de coucher et de lever,
+ * en minutes, sur les nuits COMPLÈTES (coucher ET lever) d'une liste.
+ *
+ * Une nuit à une seule borne n'y entre jamais : le vieux repli {reveil: '00:00'}
+ * aurait tiré le lever médian vers minuit, et le rythme aurait ensuite choisi
+ * les nuits qui lui ressemblent — un cercle vicieux qui censure. En dessous de
+ * sept nuits, ce n'est pas un rythme : {coucher: null, lever: null}.
+ */
+export function rythmeDe(liste, { minPourRythme = MIN_POUR_RYTHME } = {}) {
+  const completes = liste.filter(n => enMinutes(n.coucher) != null && enMinutes(n.lever) != null);
+  if (completes.length < minPourRythme) return { coucher: null, lever: null };
+  return { coucher: medianeHoraire(completes.map(n => enMinutes(n.coucher))),
+           lever: medianeHoraire(completes.map(n => enMinutes(n.lever))) };
+}
 
 /*
  * L'ÉCART AU RYTHME SE JUGE SUR LE RYTHME DE LA PERSONNE.
@@ -186,13 +273,10 @@ const ecartCirculaire = (a, b) => Math.min(versLAvant(a, b), versLAvant(b, a));
  * En dessous de sept nuits connues, on ne dit rien : une médiane sur trois
  * nuits n'est pas un rythme, et se tromper ici coûte plus que se taire.
  */
-const ECART_H = 5, MIN_POUR_RYTHME = 7;
+const ECART_H = 5;
 
 export function ecartsAuRythme(liste, { ecartH = ECART_H, minPourRythme = MIN_POUR_RYTHME } = {}) {
-  const couchers = liste.map(n => enMinutes(n.coucher)).filter(x => x != null);
-  const levers = liste.map(n => enMinutes(n.lever)).filter(x => x != null);
-  const mC = couchers.length >= minPourRythme ? medianeHoraire(couchers) : null;
-  const mL = levers.length >= minPourRythme ? medianeHoraire(levers) : null;
+  const { coucher: mC, lever: mL } = rythmeDe(liste, { minPourRythme });
   const seuil = ecartH * 60;
   for (const n of liste) {
     const dits = [];
@@ -208,6 +292,13 @@ export function ecartsAuRythme(liste, { ecartH = ECART_H, minPourRythme = MIN_PO
 
 /**
  * LES NUITS D'UNE PÉRIODE, une par jour, ce qui a été DIT passant devant.
+ *
+ * EN DEUX PASSES : d'abord sans rythme (le plus long silence, dits compris),
+ * puis, si sept nuits complètes en sortent, une seconde fois avec les médianes
+ * ainsi trouvées — pour que chaque jour départage ses silences selon la
+ * personne, et non selon la seule longueur. Le rythme se lit sur des nuits
+ * larges, jamais sur des nuits déjà filtrées par lui.
+ *
  * @returns {Array<{date, coucher, lever, sommeil_h, source, souci}>}
  */
 export function nuits(userId = OWNER, { jours = 90, jusquA = null } = {}) {
@@ -215,34 +306,62 @@ export function nuits(userId = OWNER, { jours = 90, jusquA = null } = {}) {
   const debut = addDays(fin, -(jours - 1));
   const parDate = new Map();
   for (const j of activiteEntre(addDays(debut, -1), fin, userId)) if (j.digest) parDate.set(j.date, j.digest);
-  const out = [];
-  for (let d = debut; d <= fin; d = addDays(d, 1)) {
-    const n = nuitDuJour(parDate.get(d) ?? null, parDate.get(addDays(d, -1)) ?? null);
-    // « Je me couche » / « je me lève » écrits ce jour-là : la personne a le dernier mot.
-    const dits = mesuresDuJour(d, userId).filter(m => m.source === 'dit');
-    const ditLever = dits.find(m => m.cle === 'lever_dit')?.texte ?? null;
-    const ditCoucher = mesuresDuJour(addDays(d, -1), userId).find(m => m.source === 'dit' && m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 0) >= 12 * 60)?.texte
-      ?? dits.find(m => m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 1440) < 12 * 60)?.texte ?? null;
-    if (!n && !ditLever && !ditCoucher) continue;
-    const r = n ? { ...n } : { coucher: null, lever: null, sommeil_h: null, source: 'dit', souci: null };
-    if (ditLever) { r.lever = ditLever; r.source = 'dit'; }
-    if (ditCoucher) { r.coucher = ditCoucher; r.source = 'dit'; }
-    if ((ditLever || ditCoucher) && r.coucher && r.lever) {
-      const c = enMinutes(r.coucher), l = enMinutes(r.lever);
-      const duree = l - (c >= 12 * 60 ? c - 1440 : c);
-      if (duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60) r.sommeil_h = Math.round(duree / 6) / 10;
+  const passe = rythme => {
+    const out = [];
+    for (let d = debut; d <= fin; d = addDays(d, 1)) {
+      const n = nuitDuJour(parDate.get(d) ?? null, parDate.get(addDays(d, -1)) ?? null, { rythme });
+      // « Je me couche » / « je me lève » écrits ce jour-là : la personne a le dernier mot.
+      const dits = mesuresDuJour(d, userId).filter(m => m.source === 'dit');
+      const ditLever = dits.find(m => m.cle === 'lever_dit')?.texte ?? null;
+      const ditCoucher = mesuresDuJour(addDays(d, -1), userId).find(m => m.source === 'dit' && m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 0) >= 12 * 60)?.texte
+        ?? dits.find(m => m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 1440) < 12 * 60)?.texte ?? null;
+      if (!n && !ditLever && !ditCoucher) continue;
+      const r = n ? { ...n } : { coucher: null, lever: null, sommeil_h: null, source: 'dit', souci: null };
+      if (ditLever) { r.lever = ditLever; r.source = 'dit'; }
+      if (ditCoucher) { r.coucher = ditCoucher; r.source = 'dit'; }
+      if ((ditLever || ditCoucher) && r.coucher && r.lever) {
+        const c = enMinutes(r.coucher), l = enMinutes(r.lever);
+        const duree = l - (c >= 12 * 60 ? c - 1440 : c);
+        if (duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60) r.sommeil_h = Math.round(duree / 6) / 10;
+      }
+      /*
+       * LE SOUCI SE RECALCULE APRÈS CE QUI A ÉTÉ DIT.
+       *
+       * Il était posé sur les heures DÉRIVÉES, puis « je me suis levé à 15:30 »
+       * remplaçait le lever sans toucher au souci : l'infobulle affichait
+       * « levé 15:30 ⚠ un lever à 00:58 » — un reproche sur une heure qui
+       * n'était plus là. Ce qu'on montre et ce qu'on commente doivent être la
+       * même chose.
+       */
+      if (ditLever || ditCoucher) souci(r, n ? undefined : null);
+      out.push({ date: d, ...r });
     }
-    /*
-     * LE SOUCI SE RECALCULE APRÈS CE QUI A ÉTÉ DIT.
-     *
-     * Il était posé sur les heures DÉRIVÉES, puis « je me suis levé à 15:30 »
-     * remplaçait le lever sans toucher au souci : l'infobulle affichait
-     * « levé 15:30 ⚠ un lever à 00:58 » — un reproche sur une heure qui
-     * n'était plus là. Ce qu'on montre et ce qu'on commente doivent être la
-     * même chose.
-     */
-    if (ditLever || ditCoucher) souci(r, n ? undefined : null);
-    out.push({ date: d, ...r });
-  }
+    return out;
+  };
+  let out = passe(null);
+  const ry = rythmeDe(out);
+  if (ry.lever != null || ry.coucher != null) out = passe(ry);
   return ecartsAuRythme(out);
 }
+
+/*
+ * LE RYTHME D'UNE PERSONNE, MÉMORISÉ CINQ MINUTES.
+ *
+ * `posteDuJour` en a besoin à chaque jour affiché, et le calculer, c'est relire
+ * quatre-vingt-dix jours de digests deux fois. Une fois par personne et par
+ * cinq minutes suffit : un rythme ne change pas d'une requête à l'autre. La
+ * route qui reçoit un digest l'oublie (`oublierRythme`), pour que la nuit qui
+ * vient d'arriver compte tout de suite.
+ */
+const MEMO_RYTHME = new Map();
+const RYTHME_TTL_MS = 5 * 60 * 1000;
+
+export function rythmeUtilisateur(userId = OWNER) {
+  const memo = MEMO_RYTHME.get(userId);
+  if (memo && Date.now() - memo.t < RYTHME_TTL_MS) return memo.rythme;
+  const rythme = rythmeDe(nuits(userId, { jours: RYTHME_JOURS }));
+  MEMO_RYTHME.set(userId, { t: Date.now(), rythme });
+  return rythme;
+}
+
+export function oublierRythme(userId = OWNER) { MEMO_RYTHME.delete(userId); }

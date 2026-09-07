@@ -288,10 +288,32 @@ nav button:focus-visible .navnom { max-width: 9em; opacity: 1; margin-left: 8px;
 .tonight .thread { flex: 0 1 auto; min-height: 0; max-height: 46vh; }
 
 /* Le fondu ne se pose QUE si ca deborde vraiment : sur une conversation courte,
-   il effacerait le premier message sans rien cacher. */
+   il effacerait le premier message sans rien cacher.
+
+   IL MONTE PLUS HAUT, ET IL MONTE PLUS DOUCEMENT. A 72 px, la rampe tenait
+   dans une ligne et demie : le haut du fil ne s'effacait pas, il se COUPAIT,
+   et la premiere phrase visible arrivait a moitie grise sans qu'on comprenne
+   pourquoi. Le fondu doit dire « ca continue au-dessus », pas « ca s'arrete
+   ici » -- il lui faut la hauteur de deux ou trois lignes.
+
+   La rampe est proportionnelle a la fenetre (bornee), parce que le fil l'est
+   aussi (max-height: 46vh) : une valeur fixe fait un cinquieme du fil sur un
+   ecran de portable et un vingtieme sur un 4K, pour le meme dessin.
+
+   Les deux points intermediaires donnent la courbe. Une rampe lineaire sur
+   cette hauteur laisse une bande grise franche au milieu ; en partant lentement
+   pour finir vite, l'oeil ne voit plus qu'un effacement. Ils se calculent SUR
+   --fondu et pas en pourcentage : un pourcentage porte sur la hauteur du fil
+   entier, donc 38 % valent 240 px sur un fil de 640 -- au-dela du dernier
+   point, et CSS remet alors les points dans l'ordre en les ecrasant. */
 .thread.fondu {
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 72px);
-          mask-image: linear-gradient(to bottom, transparent 0, #000 72px);
+  --fondu: clamp(110px, 19vh, 210px);
+  -webkit-mask-image: linear-gradient(to bottom,
+    transparent 0, rgba(0, 0, 0, .18) calc(var(--fondu) * .38),
+    rgba(0, 0, 0, .62) calc(var(--fondu) * .7), #000 var(--fondu));
+          mask-image: linear-gradient(to bottom,
+    transparent 0, rgba(0, 0, 0, .18) calc(var(--fondu) * .38),
+    rgba(0, 0, 0, .62) calc(var(--fondu) * .7), #000 var(--fondu));
 }
 /* On remonte : le fil prend toute la place et le fondu se leve — on est venu
    lire, plus repondre. */

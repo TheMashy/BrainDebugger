@@ -1370,6 +1370,19 @@ export function poserMesure({ date, ts = null, source, cle, valeur = null,
   return info.changes > 0;
 }
 
+/**
+ * EFFACE LES MESURES D'UNE SOURCE POUR UN JOUR — avant de les reposer.
+ *
+ * `poserMesure` remplace clé par clé, mais n'efface jamais une clé que la
+ * nouvelle version ne porte plus : un `poste_reveil` posé le matin survivait
+ * au digest du soir qui ne l'avait plus, et le digest brut et ses mesures se
+ * contredisaient. Un digest est un tout ; ses mesures dérivées aussi.
+ */
+export function effacerMesures(userId, source, date) {
+  return db.prepare('DELETE FROM mesures WHERE user_id = ? AND source = ? AND date = ?')
+           .run(userId, source, date).changes;
+}
+
 /** Toutes les mesures numériques : ce que la recherche de liens croise avec les notes. */
 export const toutesMesures = (userId = OWNER) => db.prepare(
   'SELECT date, source, cle, valeur, unite FROM mesures WHERE user_id = ? AND valeur IS NOT NULL ORDER BY date ASC'

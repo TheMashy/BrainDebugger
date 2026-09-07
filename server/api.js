@@ -23,7 +23,7 @@ import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
-import { nuits, nuitDuJour } from './nuits.js';
+import { nuits, nuitDuJour, rythmeUtilisateur } from './nuits.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
@@ -690,8 +690,12 @@ export function posteDuJour(date, userId = OWNER) {
   const poste = dig?.poste ?? {};
   const plage = dig?.plage ?? {};
   // LA NUIT LUE DANS LE CLAVIER (server/nuits.js) : plus juste que le poste
-  // quand l'ordinateur reste allumé, et elle dit ce qui ne colle pas.
-  const nuit = nuitDuJour(dig, activiteDuJour(addDays(date, -1), userId)?.digest ?? null);
+  // quand l'ordinateur reste allumé, et elle dit ce qui ne colle pas. Le rythme
+  // de la personne (ses médianes sur quatre-vingt-dix jours) départage les
+  // silences du jour — sans lui, une journée loin du poste passerait devant
+  // une nuit plus courte.
+  const rythme = rythmeUtilisateur(userId);
+  const nuit = nuitDuJour(dig, activiteDuJour(addDays(date, -1), userId)?.digest ?? null, { rythme });
   // LE COUCHER MESURÉ QUI FERME LE JOUR EST DANS LE DIGEST DU LENDEMAIN.
   //
   // `poste.coucher` de D est la dernière extinction AVANT le réveil de D —
@@ -707,7 +711,7 @@ export function posteDuJour(date, userId = OWNER) {
    * exactement l'heure où la journée vécue D s'est arrêtée — y compris quand
    * elle s'arrête à 3 h du matin.
    */
-  const nuitFin = nuitDuJour(digDemain, dig);
+  const nuitFin = nuitDuJour(digDemain, dig, { rythme });
   /*
    * 23:59 N'EST PAS UNE HEURE DE COUCHER, C'EST UNE FIN DE JOURNÉE CIVILE.
    *
@@ -764,13 +768,25 @@ export function posteDuJour(date, userId = OWNER) {
     }
     return null;
   };
+  /*
+   * 00:00 N'EST PAS UN LEVER NON PLUS, C'EST LE BORD OÙ LE FICHIER S'OUVRE.
+   *
+   * Symétrique de 23:59 : chez quelqu'un encore debout à minuit, la première
+   * touche du fichier du jour est 00:00 — la suite de la veille, pas un réveil.
+   * Les vieux digests de Machi Tool en faisaient un `poste.reveil` sans
+   * coucher, que l'écran affichait « levé 00:00 (mesure) » pendant que la vraie
+   * nuit (05:26 → 16:15) n'était nulle part. Une mesure de lever a un coucher
+   * devant elle, sinon ce n'est pas une nuit — et une estimation sur `plage.de`
+   * ne vaut qu'au delà des cinq premières minutes du jour civil.
+   */
+  const auBordDeMinuitOuvrant = h => (enMinutes(h) ?? 0) <= 5;
   const borne = g => {
     if (g === 'lever') {
       const d = ditLever();
       if (d) return { heure: d, source: 'dit' };
-      if (nuit?.lever) return { heure: nuit.lever, source: 'mesure' };
-      if (poste.reveil) return { heure: poste.reveil, source: 'mesure' };
-      if (plage.de) return { heure: plage.de, source: 'estime' };
+      if (nuit?.lever && nuit.coucher) return { heure: nuit.lever, source: 'mesure' };
+      if (poste.reveil && poste.coucher) return { heure: poste.reveil, source: 'mesure' };
+      if (plage.de && !auBordDeMinuitOuvrant(plage.de)) return { heure: plage.de, source: 'estime' };
       return { heure: null, source: null };
     }
     /*
@@ -779,7 +795,7 @@ export function posteDuJour(date, userId = OWNER) {
      * me coucher »), sinon l'estimation par le silence. `plage.a` (la dernière
      * activité relevée) reste le tout dernier filet.
      */
-    if (posteFin.coucher) return { heure: posteFin.coucher, source: 'mesure' };
+    if (posteFin.coucher && posteFin.reveil) return { heure: posteFin.coucher, source: 'mesure' };
     // Le silence du clavier qui ferme D : il traverse minuit sans se faire
     // couper, là où `plage.a` s'arrête au bord du fichier du jour.
     if (nuitFin?.coucher) return { heure: nuitFin.coucher, source: 'mesure' };
@@ -787,7 +803,11 @@ export function posteDuJour(date, userId = OWNER) {
     if (dit) return { heure: dit, source: 'dit' };
     const est = estimeCoucherParSilence();
     if (est) return { heure: est, source: 'estime' };
-    if (plage.a && !auBordDeMinuit(plage.a)) return { heure: plage.a, source: 'estime' };
+    // `plage.a` est la dernière touche RELEVÉE, pas la dernière de la journée :
+    // sur une journée en cours, c'est « maintenant » — le digest arrivé à 19:47
+    // affichait « couché 19:47 » à quelqu'un qui n'a pas quitté sa chaise. Elle
+    // ne vaut estimation que sur une journée close.
+    if (plage.a && !auBordDeMinuit(plage.a) && date < today()) return { heure: plage.a, source: 'estime' };
     return { heure: null, source: null };
   };
   const tp = dig?.temps_par_contexte_s ?? {};
@@ -808,8 +828,10 @@ export function posteDuJour(date, userId = OWNER) {
   /*
    * LE COUCHER FERME LA JOURNÉE QUE LE LEVER A OUVERTE — ou il n'est pas là.
    *
-   * Une journée en cours n'a pas encore de coucher, et c'est une réponse :
-   * « — » se lit tout de suite, « couché 23:59 » se croit.
+   * Une journée en cours n'a pas encore de coucher (voir `borne`, qui refuse
+   * `plage.a` tant que le jour n'est pas clos), et c'est une réponse : « — »
+   * se lit tout de suite, « couché 23:59 » se croit. Reste le cas où un coucher
+   * proposé est réfuté par une phrase écrite plus tard.
    */
   if (lever.heure && coucher.heure) {
     const fin = depuisLever(coucher.heure, lever.heure);

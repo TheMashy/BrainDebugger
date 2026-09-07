@@ -8,9 +8,10 @@ import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
          reprendreLesNuits } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle, synchroHonoree } from './passerelle.js';
 import { analyser, apercuDe } from './mesures.js';
+import { oublierRythme } from './nuits.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
 import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi,
-         poserActiviteJour, activiteJours } from './db.js';
+         poserActiviteJour, activiteJours, effacerMesures } from './db.js';
 import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
 import * as discord from './discord.js';
@@ -313,6 +314,10 @@ async function traiter(req, res) {
          */
         const { gardees: chiffres } = dansLaZone(zone,
           () => analyser({ ...digest, date }, { source: 'machitool', zone }));
+        // Les mesures de ce digest sont un tout : celles de la version précédente
+        // s'effacent d'abord, sinon un `poste_reveil` que le nouveau digest ne
+        // porte plus resterait en base comme un lever fantôme.
+        effacerMesures(userId, 'machitool', date);
         for (const m of chiffres) poserMesure({ ...m, userId });
 
         /*
@@ -335,8 +340,9 @@ async function traiter(req, res) {
       }
       // Le digest est arrivé : si quelqu'un l'avait demandé depuis le site, la
       // demande est honorée et s'efface — sinon Machi Tool renverrait à chaque
-      // relevé, indéfiniment.
-      if (rangés.length) synchroHonoree(userId);
+      // relevé, indéfiniment. Et le rythme mémorisé de la personne s'oublie,
+      // pour que la nuit qui vient d'arriver compte tout de suite.
+      if (rangés.length) { synchroHonoree(userId); oublierRythme(userId); }
       if (!rangés.length) {
         noterEnvoi({ userId, source: 'machitool', statut: 400, refus: 'aucune date de digest lisible' });
         return json(res, 400, { error: 'aucune date de digest lisible' });
