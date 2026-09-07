@@ -3235,23 +3235,37 @@ const ICO_SIGNE = { arreter: 'pause', craque: 'casse', manque: 'refaire',
                     plus_que_prevu: 'plus', cache: 'oeilbarre' };
 
 /** Les séries sans, en barres sur une base commune : la plus longue donne l'échelle. */
-function seriesMarkup(series) {
+function seriesMarkup(p) {
+  const series = p.series;
   if (!series?.length) return '';
+  /* Journal tenu : ce sont des séries SANS, et la plus longue est un record.
+     Journal ouvert un jour sur douze : ce ne sont que des écarts entre deux
+     fois — on ne sait pas ce qui s'est passé dedans, on ne le raconte donc
+     pas comme une abstinence. Voir `analyserPrises`. */
+  const sans = p.lecture !== 'ecarts';
   const vues = series.slice(-14);
   const haut = Math.max(...vues.map(s => s.jours), 1);
   const barres = vues.map(s => {
     const h = Math.max(3, Math.round(s.jours / haut * 34));
-    const cl = ['pbar', s.encours ? 'encours' : '', s.maigre ? 'maigre' : ''].filter(Boolean).join(' ');
-    const dit = `${s.jours} jour${s.jours > 1 ? 's' : ''} sans, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
-      + (s.trou > 21 ? ` — mais ${s.trou} jours sans rien écrire au milieu`
-         : s.maigre ? ` — journal ouvert ${s.ecrites} fois seulement` : '');
+    // Les pointillés ne servent qu'à distinguer, dans une lecture « sans », la
+    // série qu'on ne peut pas revendiquer. En lecture « écarts » ils n'ont plus
+    // rien à dire : tout le monde est logé à la même enseigne.
+    const cl = ['pbar', s.encours ? 'encours' : '', sans && s.maigre ? 'maigre' : ''].filter(Boolean).join(' ');
+    const dit = sans
+      ? `${s.jours} jour${s.jours > 1 ? 's' : ''} sans, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
+        + (s.trou > 21 ? ` — mais ${s.trou} jours sans rien écrire au milieu`
+           : s.maigre ? ` — journal ouvert ${s.ecrites} fois seulement` : '')
+      : `${s.jours} jours entre deux fois, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
+        + ` — journal ouvert ${s.ecrites} fois dedans`;
     return `<span class="${cl}" style="height:${h}px" title="${esc(dit)}"><i></i></span>`;
   }).join('');
-  const record = Math.max(...series.filter(s => !s.maigre).map(s => s.jours), 0);
+  const record = sans ? p.plus_longue : p.plus_long_ecart;
   return `<div class="pseries">
     <div class="pbarres">${barres}</div>
-    <span class="psleg faint">${vues.length < series.length ? 'tes dernières séries sans' : 'tes séries sans'},
-      de la plus ancienne à maintenant${record ? ` · la plus longue&nbsp;: <b>${record} j</b>` : ''}</span>
+    <span class="psleg faint">${sans
+      ? `${vues.length < series.length ? 'tes dernières séries sans' : 'tes séries sans'}, de la plus ancienne à maintenant`
+      : 'ce qui s’écoule entre deux fois'}${
+      record ? ` · le plus long&nbsp;: <b>${record} j</b>` : ''}</span>
   </div>`;
 }
 
@@ -3281,7 +3295,7 @@ function priseMarkup(p) {
     ${avant ? `<p class="pavant">${ico('fleche', 13)}
       <span>ça revient après <b>${esc(avant.nom)}</b> — ${avant.apres} fois sur ${avant.sur}</span></p>` : ''}
 
-    ${seriesMarkup(p.series)}
+    ${seriesMarkup(p)}
 
     <p class="pfen">
       <span class="pf"><b>${p.recent}</b> <span class="faint">sur tes ${p.recent_sur ?? p.fenetre ?? 30} dernières journées</span></span>
@@ -5917,6 +5931,15 @@ async function renderBackendCfg() {
       <br>Hors ligne, le compagnon n'a ni tes journées ni tes notes.
     </p>
     <label class="field" style="margin-top:14px"><span>
+      <input type="checkbox" id="prisesMemoire" ${s.prisesMemoire !== false ? 'checked' : ''}
+             style="width:auto;margin-right:7px">
+      Lui transmettre ce qui a de la prise</span></label>
+    <p class="sub" style="margin:0;font-size:12px">
+      Les comptages de « Ce qui a de la prise » — les jours, ce qui vient avant, et les phrases
+      que <b>tu as écrites</b>. Il n'ouvre jamais le sujet de lui-même&nbsp;; il a les nombres
+      quand c'est toi qui en parles. Décocher les retire du contexte sans rien effacer.
+    </p>
+    <label class="field" style="margin-top:14px"><span>
       <input type="checkbox" id="lectureEnLot" ${s.lectureEnLot !== false ? 'checked' : ''}
              style="width:auto;margin-right:7px">
       La lecture de fond part en tâche de fond</span></label>
@@ -6075,6 +6098,9 @@ async function renderBackendCfg() {
   $('#lectureEnLot')?.addEventListener('change', async e => {
     await saveSettings({ lectureEnLot: e.target.checked });
     toast(e.target.checked ? 'La lecture de fond partira en tâche de fond' : 'La lecture de fond sera immédiate');
+  });
+  $('#prisesMemoire')?.addEventListener('change', async e => {
+    await saveSettings({ prisesMemoire: e.target.checked });
   });
   $('#carnetMemoire')?.addEventListener('change', async e => {
     await saveSettings({ carnetMemoire: e.target.checked });

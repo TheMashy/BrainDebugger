@@ -45,7 +45,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock,
+import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
@@ -56,8 +56,27 @@ import { prises } from './prises.js';
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
    l'autre, ce qui serait la pire fuite possible sur ce produit. */
 const _cache = new Map();
+/*
+ * LES PRISES ONT LEUR CACHE, ET IL EST OBLIGATOIRE.
+ *
+ * `prises()` repasse les expressions de six familles sur TOUT le journal :
+ * mesuré à 270 ms sur 750 journées d'un millier de caractères. Ce n'est rien
+ * pour un onglet qu'on ouvre, et c'est inacceptable dans `recentMemory`, qui
+ * tourne à CHAQUE message envoyé — un quart de seconde de calcul bloquant
+ * ajouté à chaque phrase, sur le seul fil du serveur.
+ *
+ * Le calcul ne dépend que du journal et de la carte, et `invalidate` est déjà
+ * appelé à chaque écriture. Le même cache, la même clé, la même vidange.
+ */
+const _prises = new Map();
 export function invalidate(userId) {
-  if (userId === undefined) _cache.clear(); else _cache.delete(userId);
+  if (userId === undefined) { _cache.clear(); _prises.clear(); }
+  else { _cache.delete(userId); _prises.delete(userId); }
+}
+function prisesDe(userId = OWNER) {
+  if (!_prises.has(userId))
+    _prises.set(userId, prises(userId, { carte: getLecture(userId)?.contenu?.carte ?? null }));
+  return _prises.get(userId);
 }
 function series(userId = OWNER) {
   if (!_cache.has(userId)) {
@@ -182,6 +201,26 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   if (days && s.carnetMemoire !== false) {
     const c = carnetBlock(series(userId).carnet);
     if (c) morceaux.push(c);
+  }
+
+  /*
+   * CE QUI A DE LA PRISE, SOUS LA MEME GARDE.
+   *
+   * Meme raison que le carnet : a memoire zero, l'interface promet qu'il ne
+   * connait que la conversation du jour. Et un reglage a lui, parce que se
+   * savoir compte sur ce terrain-la n'est pas la meme chose que se savoir lu.
+   *
+   * Le bloc est calcule ici et pas mis en cache ailleurs : `prises()` relit le
+   * journal entier, mais uniquement du texte deja charge, et le resultat ne
+   * change qu'avec les comptages -- donc il se met en cache avec le reste de la
+   * memoire stable, ce qui est tout l'interet de le poser ici plutot que dans
+   * le tour en cours.
+   */
+  if (days && s.prisesMemoire !== false) {
+    try {
+      const p = prisesBlock(prisesDe(userId));
+      if (p) morceaux.push(p);
+    } catch { /* un comptage qui echoue ne doit pas emporter la conversation */ }
   }
 
   /*
@@ -2344,9 +2383,7 @@ export const routes = {
    * comptages, les séries et les signes ne demandent que le journal ; seul le
    * déclencheur manque, et il manque en silence plutôt que de tout retenir.
    */
-  'GET /api/prises': ({ userId }) => {
-    return prises(userId, { carte: getLecture(userId)?.contenu?.carte ?? null });
-  },
+  'GET /api/prises': ({ userId }) => prisesDe(userId),
 
   'GET /api/lecture': async ({ userId }) => {
     /*

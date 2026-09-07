@@ -552,6 +552,56 @@ dessus, tu réponds honnêtement.
 ${lignes.join('\n')}`;
 }
 
+/**
+ * CE QUI A DE LA PRISE, POUR LE COMPAGNON.
+ *
+ * Les moteurs comptaient « après la solitude, ça revient 9 fois sur 11 », et
+ * celui qui lui parle tous les soirs ne le savait pas. Le résultat restait dans
+ * un onglet, à côté d'une conversation qui ne pouvait pas s'en servir — et
+ * c'est le soir où il écrit qu'il est seul que ça compterait.
+ *
+ * TROIS RÈGLES DE FORME, TOUTES POUR LA MÊME RAISON.
+ *
+ * Des chiffres, jamais un jugement : il doit pouvoir CITER « 9 fois sur 11 »,
+ * pas déduire « tu bois trop ». Un compagnon qui reformule un comptage en
+ * verdict est un compagnon qu'on cesse d'ouvrir les mauvais soirs, c'est-à-dire
+ * exactement ceux-là.
+ *
+ * Rien qui bouge d'un message à l'autre : ce bloc est dans la partie mise en
+ * cache, avant tout le fil. Pas de « depuis N jours », qui changerait chaque
+ * nuit ; les bornes des fenêtres, elles, ne bougent qu'avec les comptages.
+ *
+ * Et la phrase qu'il a écrite lui-même, telle quelle. C'est la seule chose de
+ * ce bloc dont il ne peut pas contester la provenance.
+ */
+export function prisesBlock(prises) {
+  const liste = (prises?.prises ?? []).slice(0, 3);
+  if (!liste.length) return null;
+  const lignes = liste.map(p => {
+    const l = [`${p.nom} — ${p.n} journées où c'est écrit`
+      + (p.compare ? ` ; ${p.recent} sur ses ${p.recent_sur} dernières, ${p.avant} sur les ${p.avant_sur} d'avant` : '')];
+    const av = p.avant_ca?.[0];
+    if (av) l.push(`  ça tombe surtout sur la journée écrite d'après « ${neutraliser(av.nom)} » — ${av.apres} fois sur ${av.sur}`);
+    if (p.apres_ca?.tient)
+      l.push(`  le lendemain écrit, sa note est basse ${p.apres_ca.bas} fois sur ${p.apres_ca.sur}`
+             + ` (${Math.round(p.apres_ca.hors_bas / p.apres_ca.hors * 100)} % les autres jours)`);
+    for (const g of (p.signes ?? []).slice(0, 2)) l.push(`  il a écrit : « ${neutraliser(g.phrase)} »`);
+    return l.join('\n');
+  });
+  return `Ce que l'application a COMPTÉ dans son journal, sur les mots qu'il emploie lui-même.
+Des jours, pas un diagnostic : elle ne sait pas ce que ça veut dire pour lui, et toi non plus.
+
+Tu n'ouvres pas le sujet. Poser « tu as bu combien de fois ce mois-ci ? » à quelqu'un qui
+venait parler d'autre chose transforme la conversation en contrôle, et on cesse d'ouvrir un
+outil qui contrôle — les mauvais soirs d'abord, c'est-à-dire ceux qui comptent.
+
+Mais quand LUI en parle, tu as les nombres, et tu les donnes tels quels sans les commenter.
+Et quand ce qui vient juste avant est écrit noir sur blanc dans ce qu'il vient de te dire, tu
+peux le lui rappeler une fois, comme un fait daté, sans en tirer de conclusion ni de conseil.
+
+${lignes.join('\n')}`;
+}
+
 /*
  * Les bornes du carnet, ecrites et non heritees.
  *

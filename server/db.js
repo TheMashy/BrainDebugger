@@ -499,6 +499,8 @@ export const DEFAULT_SETTINGS = {
    */
   pudique: false,
   memoryDays: 14,             // journees passees transmises au compagnon (0 = aucune)
+  prisesMemoire: true,        // ce qui a de la prise est transmis au compagnon
+                              // (meme garde que le carnet : a memoryDays 0, rien)
   carnetMemoire: true,        // le carnet est transmis au compagnon
                               // (coupe de toute facon quand memoryDays vaut 0 :
                               //  l'interface promet qu'a 0 il ne connait que la

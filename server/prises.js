@@ -323,9 +323,27 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null } = {}
       apres_ca: leLendemain(v.jours, suite, noteDe, seuilBas)
     });
   }
-  // Le record ne se prend que sur des séries qu'on a vécues journal ouvert.
-  for (const p of prises)
+  /*
+   * DEUX LECTURES DE LA MÊME LISTE, ET C'EST LA DENSITÉ QUI TRANCHE.
+   *
+   * Entre deux occurrences il y a un intervalle. Quand le journal est tenu, cet
+   * intervalle est une SÉRIE SANS : on sait ce qui s'est passé dedans, et le
+   * plus long est un record qui veut dire quelque chose. Quand il est ouvert un
+   * jour sur treize — le cas normal ici — on ne sait rien de ce qui s'est passé
+   * dedans, et l'appeler « série sans » serait un compliment inventé.
+   *
+   * On ne cachait pas le problème : chaque série était marquée maigre, le
+   * record tombait à zéro, et la vue affichait onze barres en pointillés sans
+   * rien en dire. Honnête et inutile. L'intervalle, lui, se mesure quelle que
+   * soit la densité — les deux bornes sont écrites. On le nomme donc pour ce
+   * qu'il est, et le panneau redevient lisible sans rien promettre de faux.
+   */
+  for (const p of prises) {
     p.plus_longue = p.series.filter(s => !s.maigre).reduce((m, s) => Math.max(m, s.jours), 0);
+    p.plus_long_ecart = p.series.reduce((m, s) => Math.max(m, s.jours), 0);
+    const tenues = p.series.filter(s => !s.maigre).length;
+    p.lecture = p.series.length && tenues >= p.series.length / 2 ? 'series' : 'ecarts';
+  }
 
   /* L'ordre : ce qui a des signes d'abord, puis ce qui monte, puis le
      nombre. Le tabac, constant et sans signe, ne doit pas occuper la

@@ -216,3 +216,27 @@ test('la comparaison s’affiche pour qui écrit peu', () => {
   assert.ok(a.avant_sur > 0 && a.recent_sur > 0, 'les deux tailles sont rendues, pour que la vue dise « sur combien »');
   assert.ok(a.recent / a.recent_sur > a.avant / a.avant_sur, 'et la montée se voit');
 });
+
+test('un journal ouvert un jour sur douze parle d’écarts, pas de séries sans', () => {
+  /* Trouvé sur dossier : avec une entrée tous les treize jours, chaque série
+     était marquée maigre, le record tombait à zéro, et le panneau affichait
+     onze barres en pointillés sans rien en dire. Honnête et inutile.
+     L'intervalle entre deux occurrences, lui, se mesure quoi qu'il arrive :
+     ses deux bornes sont écrites. */
+  const rows = [];
+  for (let i = 0; i < 480; i += 13)
+    rows.push({ date: J(i), note: 6, text: i % 39 === 0 ? "j'ai bu quatre bières" : 'journée ordinaire' });
+  const a = analyserPrises(rows, { aujourdhui: J(475) }).prises.find(p => p.cle === 'alcool');
+  assert.equal(a.lecture, 'ecarts');
+  assert.equal(a.plus_longue, 0, 'aucune abstinence ne peut être revendiquée');
+  assert.ok(a.plus_long_ecart >= 26, `l’écart, lui, se mesure : ${a.plus_long_ecart}`);
+});
+
+test('un journal tenu garde la lecture « séries sans »', () => {
+  const rows = [];
+  for (let i = 0; i < 200; i++)
+    rows.push({ date: J(i), note: 6, text: i % 40 === 0 ? "j'ai bu quatre bières" : 'journée ordinaire' });
+  const a = analyserPrises(rows, { aujourdhui: J(199) }).prises.find(p => p.cle === 'alcool');
+  assert.equal(a.lecture, 'series');
+  assert.ok(a.plus_longue >= 39, `la plus longue série : ${a.plus_longue}`);
+});
