@@ -73,11 +73,22 @@ function couper(t) {
  * journée se raconterait à l'envers — le vide de 23h passerait avant le réveil.
  */
 export function heureDe(ts, zone = zoneCourante()) {
+  const d = new Date(ts);
+  /*
+   * UN INSTANT ILLISIBLE NE FAIT PAS TOMBER LA JOURNÉE.
+   *
+   * Le `catch` protégeait d'un fuseau invalide, et se rattrapait sur
+   * `toISOString()` — qui lève exactement de la même façon quand c'est
+   * l'INSTANT qui est mauvais. Un seul message dont la date ne se lisait pas
+   * rendait donc 500 sur toute la vue du jour, et l'onglet restait blanc :
+   * une ligne de travers emportait une journée entière.
+   */
+  if (Number.isNaN(d.getTime())) return null;
   try {
     return new Intl.DateTimeFormat('fr-FR', {
       hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone
-    }).format(new Date(ts));
-  } catch { return new Date(ts).toISOString().slice(11, 16); }
+    }).format(d);
+  } catch { return d.toISOString().slice(11, 16); }
 }
 
 /**
@@ -194,6 +205,15 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
   const moments = [];
   for (const m of msgs) {
     const t = Date.parse(m.ts);
+    // Un message sans instant lisible garde son texte : il rejoint le moment en
+    // cours, ou en ouvre un à l'heure du précédent. On perd son heure, pas sa
+    // phrase — et surtout pas les autres.
+    if (Number.isNaN(t)) {
+      const d0 = moments[moments.length - 1];
+      if (d0) { d0.textes.push(m.text); d0.ids.push(m.id); }
+      else moments.push({ debut: NaN, fin: NaN, textes: [m.text], ids: [m.id] });
+      continue;
+    }
     const dernier = moments[moments.length - 1];
     if (dernier && t - dernier.fin <= TROU_MOMENT) {
       dernier.textes.push(m.text);
@@ -232,7 +252,7 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
     });
     return {
       heure: heureDe(mo.debut, zone),
-      ts: new Date(mo.debut).toISOString(),
+      ts: Number.isNaN(mo.debut) ? null : new Date(mo.debut).toISOString(),
       scene, force,
       sens: force > 0 ? (SENS[scene] ?? null) : null,
       charge,

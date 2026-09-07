@@ -639,7 +639,30 @@ export function rebuildEntryText(date, userId = OWNER) {
 
 /* ---------- messages ---------- */
 
+/*
+ * UNE SEULE FORME D'INSTANT DANS LA COLONNE.
+ *
+ * `ts` était écrit tel quel : la plupart des appelants passent une chaîne ISO,
+ * certains un nombre de millisecondes. Les deux entrent, et tout ce qui relit
+ * fait `Date.parse(m.ts)` — qui rend NaN sur « 1767... ». Un seul message posé
+ * avec un nombre rendait donc la journée illisible plus tard, très loin de
+ * l'endroit où il avait été écrit.
+ *
+ * Ce qui ne se lit pas du tout est gardé tel quel plutôt que remplacé par
+ * l'heure d'aujourd'hui : inventer un instant serait pire que ne pas en avoir,
+ * et les lecteurs savent maintenant s'en passer.
+ */
+export function normaliserTs(ts) {
+  if (ts == null) return new Date().toISOString();
+  if (ts instanceof Date) return Number.isNaN(ts.getTime()) ? String(ts) : ts.toISOString();
+  if (typeof ts === 'number') return Number.isFinite(ts) ? new Date(ts).toISOString() : String(ts);
+  const s = String(ts);
+  if (/^\d{10,}$/.test(s)) { const d = new Date(Number(s)); if (!Number.isNaN(d.getTime())) return d.toISOString(); }
+  return s;
+}
+
 export function addMessage({ ts, date, source = 'web', role, text, reflexion = null, userId = OWNER }) {
+  ts = normaliserTs(ts);
   const info = db.prepare(
     'INSERT INTO messages(user_id, ts, date, source, role, text, reflexion) VALUES(?,?,?,?,?,?,?)'
   ).run(userId, ts, date, source, role, text, reflexion || null);
