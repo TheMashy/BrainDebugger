@@ -240,3 +240,66 @@ test('le coucher qui ferme la journée peut être après minuit', async () => {
   assert.equal(j?.coucher?.heure, '03:18', 'la journée du 13 se ferme à 3 h du matin le 14');
   assert.equal(j?.coucher?.source, 'mesure');
 });
+
+/* ==================================================================
+ * LE 7 SEPTEMBRE : « levé 00:00 (mesure) · couché 19:47 (estime) » chez
+ * quelqu'un couché à 05:26 et levé à 16:16 — un jour encore en cours.
+ *
+ * 00:00 était `plage.de`, le bord où le fichier civil s'ouvre ; 19:47 était
+ * `plage.a`, l'heure du dernier envoi. Ni l'un ni l'autre n'est une borne, et
+ * aucun ne doit passer pour une mesure. Une journée en cours montre « — » aux
+ * deux bouts tant que rien n'est mesuré ou dit.
+ * ================================================================== */
+
+test('une journée en cours n’a ni lever au bord de minuit ni coucher « maintenant »', async () => {
+  const U = 'en-cours-vide';
+  const { poserActiviteJour } = await import('../server/db.js');
+  poserActiviteJour(U, AUJ, { date: AUJ, plage: { de: '00:00', a: '19:47' }, trous: [], poste: { reveil: '00:00', source: 'clavier' } });
+  const j = dansLaZone('UTC', () => api.posteDuJour(AUJ, U));
+  assert.equal(j?.lever?.heure ?? null, null, '00:00 est le bord du fichier civil, pas un lever');
+  assert.equal(j?.lever?.source ?? null, null);
+  assert.equal(j?.coucher?.heure ?? null, null, 'plage.a d’une journée en cours, c’est « maintenant »');
+  assert.equal(j?.sommeil_h ?? null, null);
+});
+
+test('la même journée en cours, une fois la nuit dans le clavier : levé 16:16, pas encore couché', async () => {
+  const U = 'en-cours-nuit';
+  const { poserActiviteJour } = await import('../server/db.js');
+  poserActiviteJour(U, veille, { date: veille, plage: { de: '00:00', a: '23:59' }, trous: [] });
+  poserActiviteJour(U, AUJ, { date: AUJ, plage: { de: '00:00', a: '19:47' }, trous: [{ de: '05:26', a: '16:16', minutes: 650 }] });
+  const j = dansLaZone('UTC', () => api.posteDuJour(AUJ, U));
+  assert.equal(j?.lever?.heure, '16:16'); assert.equal(j?.lever?.source, 'mesure');
+  assert.equal(j?.coucher?.heure ?? null, null);
+  assert.equal(j?.sommeil_h, 10.8); assert.equal(j?.dormi_de, '05:26');
+});
+
+test('un jour clos : le lever à 16:15 est une mesure, le coucher vient de la nuit du lendemain', async () => {
+  const U = 'clos-complet';
+  const { poserActiviteJour } = await import('../server/db.js');
+  poserActiviteJour(U, '2026-06-09', { date: '2026-06-09', plage: { de: '00:00', a: '23:59' }, trous: [] });
+  poserActiviteJour(U, '2026-06-10', { date: '2026-06-10', plage: { de: '00:00', a: '23:59' }, trous: [{ de: '05:26', a: '16:15', minutes: 649 }] });
+  poserActiviteJour(U, '2026-06-11', { date: '2026-06-11', plage: { de: '00:00', a: '22:00' }, trous: [{ de: '05:40', a: '16:30', minutes: 650 }] });
+  const j = dansLaZone('UTC', () => api.posteDuJour('2026-06-10', U));
+  assert.equal(j?.lever?.heure, '16:15'); assert.equal(j?.lever?.source, 'mesure');
+  assert.equal(j?.coucher?.heure, '05:40'); assert.equal(j?.coucher?.source, 'mesure');
+  assert.equal(j?.sommeil_h, 10.8);
+});
+
+test('un jour clos sans lendemain : plage.a redevient une estimation de coucher', async () => {
+  const U = 'clos-sans-demain';
+  const { poserActiviteJour } = await import('../server/db.js');
+  poserActiviteJour(U, '2026-06-09', { date: '2026-06-09', plage: { de: '00:00', a: '23:59' }, trous: [] });
+  poserActiviteJour(U, '2026-06-10', { date: '2026-06-10', plage: { de: '00:00', a: '22:10' }, trous: [{ de: '05:26', a: '16:15', minutes: 649 }] });
+  const j = dansLaZone('UTC', () => api.posteDuJour('2026-06-10', U));
+  assert.equal(j?.lever?.heure, '16:15');
+  assert.equal(j?.coucher?.heure, '22:10'); assert.equal(j?.coucher?.source, 'estime');
+});
+
+test('un vieux digest clos sans nuit : pas de lever, et un coucher seulement estimé', async () => {
+  const U = 'clos-vieux';
+  const { poserActiviteJour } = await import('../server/db.js');
+  poserActiviteJour(U, '2026-06-12', { date: '2026-06-12', plage: { de: '00:00', a: '19:47' }, trous: [], poste: { reveil: '00:00', source: 'clavier' } });
+  const j = dansLaZone('UTC', () => api.posteDuJour('2026-06-12', U));
+  assert.equal(j?.lever?.heure ?? null, null);
+  assert.equal(j?.coucher?.heure, '19:47'); assert.equal(j?.coucher?.source, 'estime');
+});

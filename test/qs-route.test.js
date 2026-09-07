@@ -260,3 +260,41 @@ test('une mesure ordinaire ne déplace aucun message', async () => {
   assert.equal(messagesForDate('2026-09-10', OWNER).length, avant,
     'rien ne bouge sans borne');
 });
+
+/*
+ * LES MESURES D'UN DIGEST SONT UN TOUT.
+ *
+ * Machi Tool renvoie la même journée plusieurs fois, et chaque version
+ * remplace la précédente — le digest brut, oui, mais ses mesures dérivées
+ * restaient : un `poste_reveil = 00:00` posé le matin survivait au digest
+ * du soir qui ne le portait plus, et la journée vécue basculait à minuit
+ * sur une borne fantôme.
+ */
+test('un digest renvoyé efface les mesures machitool que sa nouvelle version ne porte plus', async () => {
+  const D = '2026-05-04';
+  assert.equal((await pousser({ date: D, plage: { de: '00:00', a: '19:47' }, poste: { reveil: '00:00', source: 'clavier' } })).status, 200);
+  assert.equal(mesuresDuJour(D).find(m => m.cle === 'poste_reveil')?.texte, '00:00');
+
+  assert.equal((await pousser({ date: D, plage: { de: '00:00', a: '19:47' }, trous: [{ de: '05:26', a: '16:15', minutes: 649 }],
+                                poste: { coucher: '05:26', reveil: '16:15', sommeil_h: 10.8, source: 'clavier' } })).status, 200);
+  const m = mesuresDuJour(D);
+  assert.equal(m.find(x => x.cle === 'poste_reveil')?.texte, '16:15');
+  assert.equal(m.find(x => x.cle === 'poste_coucher')?.texte, '05:26');
+
+  // Puis une version sans `poste` du tout : rien ne doit rester.
+  assert.equal((await pousser({ date: D, plage: { de: '00:00', a: '19:47' } })).status, 200);
+  const apres = mesuresDuJour(D).filter(x => x.source === 'machitool').map(x => x.cle);
+  assert.ok(!apres.some(c => c.startsWith('poste_')), `mesures fantômes : ${apres.join(', ')}`);
+  assert.ok(apres.includes('plage_a'), 'les mesures de la nouvelle version, elles, sont bien là');
+});
+
+test('{jours:[veille, jour]} range les deux, et la veille est remplacée entière', async () => {
+  const r = await pousser({ jours: [{ date: '2026-05-02', bascules: 5 }, { date: '2026-05-04', bascules: 7 }] });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.equal(j.jours_recus, 2);
+  const veille = activiteJours(OWNER).find(x => x.date === '2026-05-02');
+  const d = typeof veille.digest === 'string' ? JSON.parse(veille.digest) : veille.digest;
+  assert.equal(d.bascules, 5, 'la copie finale de la veille remplace celle qui était figée');
+  assert.equal(d.applications, undefined);
+});
