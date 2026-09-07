@@ -1578,6 +1578,21 @@ const CUM_KEY = 'cumDeltaRef';
  */
 const FENETRES = [['7j', 7, '7 j'], ['30j', 30, '30 j'], ['365j', 365, '1 an'], ['tout', null, 'tout']];
 let CUMWIN = 'tout';
+/*
+ * QUELLE COURBE ON REGARDE.
+ *
+ * L'onglet empilait quatre graphes : la grille, les nuits, l'écart quotidien,
+ * le cumul. Or trois d'entre eux lisent la MÊME fenêtre — et deux lisent
+ * carrément la même série, à deux intégrations près : l'écart d'un jour, et
+ * la somme de ces écarts. Empilés, on descend devant trois courbes pour
+ * arriver à celle qu'on venait voir, et on n'en compare aucune : elles ne
+ * sont jamais toutes les deux sous les yeux.
+ *
+ * Ce sont des ALTERNATIVES, pas une suite. Un sélecteur le dit, et rend à
+ * chacune toute la largeur. La grille reste au-dessus : elle est l'année
+ * elle-même, pas une lecture de l'année.
+ */
+let COURBE = 'jour';       // jour | cumul | nuits
 
 /** Le libellé humain de la fenêtre courante. */
 function libFenetre() {
@@ -1690,33 +1705,37 @@ async function renderYear(year) {
           </div>` : ''}
         </div>
         <div class="gridwrap">${gridMarkup(grid, bascules)}</div>
-        <div class="legend">
-          <span>pire</span>
+        ${/* La légende disait quatre fois la même chose : « pire », la rampe,
+              « meilleur », puis « écart à la référence, ±4 ». La rampe montre
+              déjà le sens ; la phrase qui la nomme suffit, et passe au survol. */''}
+        <div class="legend" title="Écart à la référence, ±${SATURATION} : le rouge est en dessous, le bleu au-dessus.">
           ${Array.from({ length: 17 }, (_, i) => `<i style="background:${deltaColor(-SATURATION + (i / 16) * 2 * SATURATION)}"></i>`).join('')}
-          <span>meilleur</span>
-          <span style="margin-left:12px">écart à la référence, ±${SATURATION}</span>
-          ${bascules.size ? `<span style="margin-left:12px" class="legbascule"><i class="cellbascule"></i> changement de niveau (${bascules.size})</span>` : ''}
+          <span>écart à la référence</span>
+          ${bascules.size ? `<span style="margin-left:12px" class="legbascule"><i class="cellbascule"></i> ${bascules.size} changement${bascules.size > 1 ? 's' : ''} de niveau</span>` : ''}
           <span style="margin-left:auto" class="mono">${grid.count} jours · moyenne ${grid.avg ?? '—'}</span>
         </div>
       </div>
 
-      ${nuitsCarte(NUITS?.nuits ?? [], DOM)}
-
+      ${/*
+         * UNE SEULE COURBE À LA FOIS, ET UN SÉLECTEUR QUI DIT QUE CE SONT DES
+         * ALTERNATIVES. Voir « Ce qu'on regarde » plus haut.
+         */''}
       <div class="card">
-        <div class="cardhead" style="margin-bottom:4px">
-          <h2>Écart quotidien</h2>
-          <span class="faint mono" style="font-size:11.5px">${libFenetre()}</span>
+        <div class="cardhead cumhead" style="margin-bottom:6px">
+          <div class="centerpick">
+            <button data-courbe="jour" aria-pressed="${COURBE === 'jour'}">jour à jour</button>
+            <button data-courbe="cumul" aria-pressed="${COURBE === 'cumul'}">cumulé</button>
+            ${NUITS?.nuits?.length ? `<button data-courbe="nuits" aria-pressed="${COURBE === 'nuits'}">nuits</button>` : ''}
+          </div>
+          <span class="faint mono" style="font-size:11.5px;margin-left:auto">${libFenetre()}</span>
         </div>
-        ${dailyChart(cumX, cumX.map((_, i) => SERIES.contrastFixed[CUM0 + i]),
-                     { height: 240, events: SERIES.events, domaine: DOM })}
-      </div>
+        ${COURBE === 'jour' ? dailyChart(cumX, cumX.map((_, i) => SERIES.contrastFixed[CUM0 + i]),
+                     { height: 240, events: SERIES.events, domaine: DOM }) : ''}
 
-      <div class="card">
-        ${/* Une seule rangee de commandes. Il y en avait trois empilees :
-              la fenetre, le cadre, puis le mode et l'etalon -- soixante pixels
-              de hauteur avant d'atteindre la courbe qu'on est venu voir. */''}
+        ${COURBE === 'nuits' ? nuitsCorps(NUITS?.nuits ?? [], DOM) : ''}
+
+        ${COURBE !== 'cumul' ? '' : `
         <div class="cardhead cumhead">
-          <h2>Cumul</h2>
           ${/* « vie » n'a de sens que sur tout : une fenetre de sept jours n'a
                 pas d'avant-journal a montrer. */''}
           ${CUMWIN === 'tout' && FRISE?.etendue?.journal && FRISE.etendue.debut < FRISE.etendue.journal.debut
@@ -1732,7 +1751,7 @@ async function renderYear(year) {
                 title="Écart à la médiane glissante des 365 jours précédents, cumulé sur la fenêtre. Ta moyenne réelle : ${SERIES.mean}. Médiane : ${SERIES.globalMedian}.">
             ${drift > 0 ? '+' : ''}${drift.toFixed(2)} <span class="faint">par jour</span>
           </span>
-        </div>
+        </div>`}
         ${lineChart(cumX, cumY, { height: 250, events: SERIES.events, colore: true, domaine: DOM })}
 
         ${/* La frise se pose sous la courbe et partage EXACTEMENT son axe : les
@@ -1747,7 +1766,7 @@ async function renderYear(year) {
             mg: CADRE.PL, md: CADRE.PR,
             domaine: (CUMWIN === 'tout' && FRISE_CADRE === 'vie') ? FRISE.etendue : DOM
           }) : '';
-          return svg ? `<div class="frisewrap" id="frisewrap">${svg}
+          return svg && COURBE === 'cumul' ? `<div class="frisewrap" id="frisewrap">${svg}
             <div class="frisetip" id="frisetip" hidden></div></div>` : '';
         })()}
       </div>
@@ -1771,36 +1790,55 @@ async function renderYear(year) {
              un formulaire toujours deplie. Ce qui se fait souvent reste a
              l'ecran, ce qui se fait une fois par mois passe derriere un
              bouton. */''}
-      <div class="card">
-        <div class="cardhead">
-          <h2 title="Des notes prises ailleurs, rangées depuis la conversation. Elles ne comptent jamais comme des journées écrites.">Notes rangées</h2>
-          <span class="faint mono" style="font-size:11.5px">${CARNET?.compte?.total ?? 0}</span>
-          <button class="ajoutbtn" data-ajout="note" aria-expanded="${NOTE_OUVERT}"
-                  style="margin-left:auto">${NOTE_OUVERT ? 'fermer' : '+ une note'}</button>
+      ${/*
+         * LES DEUX LISTES SE REPLIENT, ET DISENT LEUR COMPTE.
+         *
+         * On vient dans Année pour REGARDER son année. Les notes rangées et les
+         * repères sont un carnet : on y écrit une fois par mois, on les relit
+         * rarement, et dépliés ils occupaient la moitié de la page sous les
+         * graphes. Le compte reste sur la ligne du repli — c'est ce qu'on vient
+         * vérifier neuf fois sur dix (« il y en a combien ? »), et ça ne coûte
+         * plus un écran de défilement.
+         *
+         * Ouverts, ils sont EXACTEMENT ce qu'ils étaient : mêmes formulaires,
+         * mêmes identifiants, mêmes gestes.
+         */''}
+      <details class="rgroupe" data-pli="carnet" ${CARNET_PLI || NOTE_OUVERT ? 'open' : ''}>
+        <summary>
+          <span class="rgico">${ico('crayon', 15)}</span>
+          <span class="rgtitre" title="Des notes prises ailleurs, rangées depuis la conversation. Elles ne comptent jamais comme des journées écrites.">Notes rangées</span>
+          <span class="rgetat faint">${CARNET?.compte?.total ?? 0}</span>
+        </summary>
+        <div class="rgcorps">
+          <button class="ajoutbtn" data-ajout="note" aria-expanded="${NOTE_OUVERT}">${NOTE_OUVERT ? 'fermer' : '+ une note'}</button>
+          ${NOTE_OUVERT ? noteFormMarkup() : ''}
+          ${CARNET?.notes?.length
+            ? `<div class="cnliste">${CARNET.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>`
+            : `<p class="sub" style="margin:8px 0 0">Rien de rangé. Colle-les au compagnon dans <b>Parler</b>, ou écris-en une ici.</p>`}
         </div>
-        ${NOTE_OUVERT ? noteFormMarkup() : ''}
-        ${CARNET?.notes?.length
-          ? `<div class="cnliste">${CARNET.notes.slice().reverse().map(carnetItemMarkup).join('')}</div>`
-          : `<p class="sub" style="margin:0">Rien de rangé. Colle-les au compagnon dans <b>Parler</b>, ou écris-en une ici.</p>`}
-      </div>
+      </details>
 
-      <div class="card" id="reperescard">
-        <div class="cardhead">
-          <h2>Repères</h2>
-          <span class="faint mono" style="font-size:11.5px">${SERIES.events.length}</span>
-          <button class="ajoutbtn" data-ajout="repere" aria-expanded="${REP_OUVERT}"
-                  style="margin-left:auto">${REP_OUVERT ? 'fermer' : '+ un repère'}</button>
-          <button class="repdatebtn" id="naissbtn" aria-expanded="false"
-                  title="Donne une origine à la frise. Aucun âge n'est calculé."
-                  style="font-size:12.5px;padding:7px 11px">
-            <span class="fl">naissance</span>${S.settings.naissance ? fmtDay(S.settings.naissance) : '—'}
-          </button>
+      <details class="rgroupe" id="reperescard" data-pli="reperes" ${REPERES_PLI || REP_OUVERT || EV ? 'open' : ''}>
+        <summary>
+          <span class="rgico">${ico('epingle', 15)}</span>
+          <span class="rgtitre">Repères</span>
+          <span class="rgetat faint">${SERIES.events.length}${S.settings.naissance ? ` · naissance ${fmtDay(S.settings.naissance)}` : ''}</span>
+        </summary>
+        <div class="rgcorps">
+          <div class="cardhead" style="margin-bottom:8px">
+            <button class="ajoutbtn" data-ajout="repere" aria-expanded="${REP_OUVERT}">${REP_OUVERT ? 'fermer' : '+ un repère'}</button>
+            <button class="repdatebtn" id="naissbtn" aria-expanded="false"
+                    title="Donne une origine à la frise. Aucun âge n'est calculé."
+                    style="font-size:12.5px;padding:7px 11px;margin-left:auto">
+              <span class="fl">naissance</span>${S.settings.naissance ? fmtDay(S.settings.naissance) : '—'}
+            </button>
+          </div>
+          ${REP_OUVERT || EV ? composeurMarkup() : ''}
+          ${SERIES.events.length
+            ? `<div class="frise">${friseMarkup(SERIES.events)}</div>`
+            : `<p class="sub" style="margin:0">Aucun repère. Le compagnon en pose aussi de lui-même.</p>`}
         </div>
-        ${REP_OUVERT || EV ? composeurMarkup() : ''}
-        ${SERIES.events.length
-          ? `<div class="frise">${friseMarkup(SERIES.events)}</div>`
-          : `<p class="sub" style="margin:0">Aucun repère. Le compagnon en pose aussi de lui-même.</p>`}
-      </div>
+      </details>
     </div>`;
 
   $('#view').onclick = async e => {
@@ -1815,14 +1853,16 @@ async function renderYear(year) {
     if (cell) return ouvrirJour(cell.dataset.date);
     const cad = e.target.closest('[data-cadre]');
     if (cad) { FRISE_CADRE = cad.dataset.cadre; return renderYear(year); }
+    const cb = e.target.closest('[data-courbe]');
+    if (cb) { COURBE = cb.dataset.courbe; return renderYear(year); }
     // Une note s'ouvre sur place : le repli est l'état par défaut, et ouvrir
     // une note ne doit pas coûter un changement de page.
     // Les deux boutons d'ajout. Ouvrir l'un ferme l'autre : deux formulaires
     // dépliés en même temps, c'est ce qu'on venait de retirer.
     const aj = e.target.closest('[data-ajout]');
     if (aj) {
-      if (aj.dataset.ajout === 'note') { NOTE_OUVERT = !NOTE_OUVERT; REP_OUVERT = false; }
-      else { REP_OUVERT = !REP_OUVERT; NOTE_OUVERT = false; if (!REP_OUVERT) EV = null; }
+      if (aj.dataset.ajout === 'note') { NOTE_OUVERT = !NOTE_OUVERT; REP_OUVERT = false; CARNET_PLI = true; }
+      else { REP_OUVERT = !REP_OUVERT; NOTE_OUVERT = false; REPERES_PLI = true; if (!REP_OUVERT) EV = null; }
       await renderYear(year);
       ($('#cntxt') ?? $('#evlabel'))?.focus();
       return;
@@ -1844,6 +1884,18 @@ async function renderYear(year) {
     const gto = e.target.closest('.cndate[data-goto]');
     if (gto) return ouvrirJour(gto.dataset.goto);
   };
+
+  /*
+   * `toggle` NE REMONTE PAS : on l'écoute à la capture, sur la vue. Sans ça,
+   * ouvrir un repli puis retirer une note le refermerait — le re-rendu relit un
+   * état que personne n'avait enregistré.
+   */
+  $('#view').addEventListener('toggle', e => {
+    const d = e.target.closest?.('[data-pli]');
+    if (!d) return;
+    if (d.dataset.pli === 'carnet') CARNET_PLI = d.open;
+    else REPERES_PLI = d.open;
+  }, true);
 
   wireFrise();
   wireReperes(year);
@@ -2074,6 +2126,15 @@ let EV = null;
  * detour, et un detour se range derriere un bouton.
  */
 let NOTE_OUVERT = false, REP_OUVERT = false;
+/*
+ * LE REPLI A SON PROPRE ÉTAT, SÉPARÉ DU FORMULAIRE.
+ *
+ * `NOTE_OUVERT` dit « le formulaire d'ajout est déplié », pas « la liste est
+ * ouverte ». Piloter l'attribut `open` avec lui aurait refermé la liste au
+ * premier re-rendu venu — retirer une note, par exemple, la faisait disparaître
+ * sous les yeux de celui qui venait de la retirer. Deux états, deux variables.
+ */
+let CARNET_PLI = false, REPERES_PLI = false;
 
 /** Le formulaire d'une note rangee : le texte, et une date facultative. */
 function noteFormMarkup() {
@@ -2270,10 +2331,17 @@ function wireFrise() {
  * justes, alors on montre ce qui ne l'est peut-être pas.
  * ================================================================== */
 const dureeTxt = h => h == null ? '—' : `${Math.floor(h)} h ${String(Math.round((h - Math.floor(h)) * 60)).padStart(2, '0')}`;
-function nuitsCarte(nuits, dom) {
+/**
+ * LES NUITS, SANS LEUR CARTE.
+ *
+ * Le graphe vit maintenant dans le panneau commun de l'onglet Année, aux
+ * côtés des deux lectures de la note : elles regardent toutes la même
+ * fenêtre, elles se choisissent au lieu de s'empiler. La fonction rend donc
+ * le CORPS ; le cadre est celui du panneau.
+ */
+function nuitsCorps(nuits, dom) {
   const dans = nuits.filter(n => n.date >= dom.debut && n.date <= dom.fin);
-  if (!dans.length) return `<div class="card"><div class="cardhead" style="margin-bottom:6px"><h2>Nuits</h2></div>
-    <p class="faint" style="margin:0;max-width:62ch">Aucune nuit connue sur cette fenêtre : elles viennent de Machi Tool (la dernière touche du soir, la première du matin) ou de ce que tu dis au compagnon (« je me couche », « je me lève »).</p></div>`;
+  if (!dans.length) return `<p class="faint" style="margin:0;max-width:62ch">Aucune nuit connue sur cette fenêtre : elles viennent de Machi Tool (la dernière touche du soir, la première du matin) ou de ce que tu dis au compagnon (« je me couche », « je me lève »).</p>`;
   const W = 980, H = 240, L = 44, T = 14, B = 26, R = 12;
   const debut = Date.parse(dom.debut + 'T00:00:00Z'), fin = Date.parse(dom.fin + 'T00:00:00Z'), nj = Math.max(1, Math.round((fin - debut) / 864e5) + 1);
   const X = d => L + ((Date.parse(d + 'T00:00:00Z') - debut) / 864e5 + 0.5) / nj * (W - L - R);
@@ -2311,11 +2379,8 @@ function nuitsCarte(nuits, dom) {
         mS = mediane(dans.map(dureeDeLaNuit));
   const soucis = dans.filter(n => n.souci);
   const resume = `<span class="mono">${dans.length} nuit${dans.length > 1 ? 's' : ''}</span>${mC != null ? ` · couché vers <span class="mono">${enHHMM(mC)}</span>` : ''}${mL != null ? ` · levé vers <span class="mono">${enHHMM(mL)}</span>` : ''}${mS != null ? ` · <span class="mono">${dureeTxt(mS)}</span> de sommeil (médianes)` : ''}`;
-  return `<div class="card nuitscard">
-    <div class="cardhead" style="margin-bottom:4px">
-      <h2>Nuits</h2>
-      <span class="faint" style="font-size:11.5px">${resume}</span>
-    </div>
+  return `<div class="nuitscard">
+    <p class="faint" style="font-size:11.5px;margin:0 0 4px">${resume}</p>
     <svg viewBox="0 0 ${W} ${H}" class="nuitsvg" role="img" aria-label="Les nuits : du coucher au lever, une barre par nuit">
       ${axe}${barres}${axeX}
     </svg>
