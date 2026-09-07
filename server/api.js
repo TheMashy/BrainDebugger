@@ -659,7 +659,46 @@ export function posteDuJour(date, userId = OWNER) {
   // `poste.reveil` pour donner `sommeil_h`. Le coucher qui FERME le jour vécu D
   // (soir de D) est la dernière extinction avant le réveil de D+1 : il vit donc
   // dans le digest de D+1. Le lever, lui, reste celui de D.
-  const posteFin = activiteDuJour(addDays(date, 1), userId)?.digest?.poste ?? {};
+  const digDemain = activiteDuJour(addDays(date, 1), userId)?.digest ?? null;
+  const posteFin = digDemain?.poste ?? {};
+  /*
+   * LA NUIT QUI FERME D, lue dans le clavier : le silence qui commence le soir
+   * de D (ou après minuit) et se termine au réveil de D+1. Son `coucher` est
+   * exactement l'heure où la journée vécue D s'est arrêtée — y compris quand
+   * elle s'arrête à 3 h du matin.
+   */
+  const nuitFin = nuitDuJour(digDemain, dig);
+  /*
+   * 23:59 N'EST PAS UNE HEURE DE COUCHER, C'EST UNE FIN DE JOURNÉE CIVILE.
+   *
+   * `plage.a` est la dernière touche relevée DANS le fichier du jour, et ce
+   * fichier s'arrête à minuit. Quelqu'un encore debout à minuit y laisse donc
+   * 23:59 — ce qui veut dire « la journée n'était pas finie », l'exact contraire
+   * d'un coucher. Affiché tel quel, ça collait le coucher au bord du jour civil
+   * pendant que le lever, lui, était à 15:34 : les deux bornes ne racontaient
+   * plus la même journée vécue.
+   */
+  const auBordDeMinuit = h => (enMinutes(h) ?? 0) >= 23 * 60 + 55;
+  /*
+   * ET LE COUCHER NE PEUT PAS ÊTRE AVANT LA DERNIÈRE CHOSE ÉCRITE.
+   *
+   * Les messages sont déjà rangés sur les journées vécues : celui de 03:18
+   * appartient à la journée ouverte à 15:34 la veille. Un coucher proposé à
+   * 23:59 est donc réfuté par une phrase écrite trois heures plus tard — la
+   * personne était manifestement debout. On mesure tout depuis le lever, dans
+   * le sens du temps, pour que « 03:18 » compte comme APRÈS « 23:59 ».
+   */
+  const depuisLever = (h, lever) => {
+    const a = enMinutes(lever), b = enMinutes(h);
+    if (a == null || b == null) return null;
+    return (((b - a) % 1440) + 1440) % 1440;
+  };
+  const dernierEcrit = () => {
+    const m = messagesForDate(date, userId)
+      .filter(x => x.role === 'user' && x.text?.trim() && x.ts)
+      .sort((a, b) => (a.ts < b.ts ? -1 : 1)).at(-1);
+    return m ? heureLocale(m.ts) : null;
+  };
   /*
    * LE COUCHER PAR LE SILENCE, EN DERNIER RECOURS.
    *
@@ -701,11 +740,14 @@ export function posteDuJour(date, userId = OWNER) {
      * activité relevée) reste le tout dernier filet.
      */
     if (posteFin.coucher) return { heure: posteFin.coucher, source: 'mesure' };
+    // Le silence du clavier qui ferme D : il traverse minuit sans se faire
+    // couper, là où `plage.a` s'arrête au bord du fichier du jour.
+    if (nuitFin?.coucher) return { heure: nuitFin.coucher, source: 'mesure' };
     const dit = ditCoucherFermant();
     if (dit) return { heure: dit, source: 'dit' };
     const est = estimeCoucherParSilence();
     if (est) return { heure: est, source: 'estime' };
-    if (plage.a) return { heure: plage.a, source: 'estime' };
+    if (plage.a && !auBordDeMinuit(plage.a)) return { heure: plage.a, source: 'estime' };
     return { heure: null, source: null };
   };
   const tp = dig?.temps_par_contexte_s ?? {};
@@ -721,7 +763,19 @@ export function posteDuJour(date, userId = OWNER) {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
     top_app: top(apps), top_web: top(webs)
   } : null;
-  const lever = borne('lever'), coucher = borne('coucher');
+  const lever = borne('lever');
+  let coucher = borne('coucher');
+  /*
+   * LE COUCHER FERME LA JOURNÉE QUE LE LEVER A OUVERTE — ou il n'est pas là.
+   *
+   * Une journée en cours n'a pas encore de coucher, et c'est une réponse :
+   * « — » se lit tout de suite, « couché 23:59 » se croit.
+   */
+  if (lever.heure && coucher.heure) {
+    const fin = depuisLever(coucher.heure, lever.heure);
+    const ecrit = depuisLever(dernierEcrit(), lever.heure);
+    if (ecrit != null && fin != null && fin < ecrit) coucher = { heure: null, source: null };
+  }
   const sommeil_h = nuit?.sommeil_h ?? poste.sommeil_h ?? null;
   if (!lever.heure && !coucher.heure && sommeil_h == null && !ecran) return null;
   // `dormi_de` : l'heure de coucher de la nuit QU'ON A DORMIE (celle qui va avec

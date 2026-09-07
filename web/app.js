@@ -4528,20 +4528,31 @@ function posteMarkup(p, synchro) {
     ? `<span class="jpost" title="levé">${ico('soleil', 13)}${heure(p.lever.heure)}</span>`
     : '';
 
-  // Le sommeil, en un épisode — SEULEMENT si on a dormi (durée connue) :
-  // couché HH:MM, puis la durée. Sinon, si on connaît quand même une heure de
-  // COUCHER (dite, ou l'extinction du poste), on la montre seule : « je n'ai
-  // aucun temps de coucher » ne doit pas rester vrai dès qu'on sait l'heure.
+  /*
+   * LE SOLEIL ET LA LUNE SONT LES DEUX BOUTS DE LA MÊME JOURNÉE VÉCUE.
+   *
+   * La lune montrait `dormi_de` : l'heure à laquelle on s'était endormi AVANT
+   * cette journée — le coucher de la veille. À côté d'un lever de 15:34
+   * s'affichait donc « couché 23:59 », deux bornes prises dans deux journées
+   * différentes, présentées comme une paire. On lisait « je me suis couché à
+   * 23:59 et levé à 15:34 », ce qui n'est arrivé ni l'un ni l'autre.
+   *
+   * La lune, c'est le coucher qui FERME la journée ouverte par ce lever —
+   * 03:18 s'il faut passer minuit pour l'atteindre. Tant qu'on ne s'est pas
+   * recouché, il n'y en a pas, et l'absence est une réponse juste : une
+   * journée en cours n'a pas encore de fin.
+   */
   const aDormi = p.sommeil_h != null;
-  const heureCoucher = p.dormi_de || p.coucher?.heure || null;
+  const heureCoucher = p.coucher?.heure || null;
   const sommeil = heureCoucher
-    ? `<span class="jpost${aDormi ? ' lu' : ''}" title="couché">${ico('lune', 13)}${heure(heureCoucher)}</span>`
+    ? `<span class="jpost" title="couché — la fin de cette journée">${ico('lune', 13)}${heure(heureCoucher)}</span>`
     : '';
-  // LA DUREE SUR SA PROPRE LIGNE. « couché 04:17 · 12,1 h » se lisait comme une
-  // seule chose, et l'heure qu'on cherche le matin — combien de temps — se
-  // perdait derrière l'heure du coucher. Un lit, la durée, en dessous.
+  // LA DUREE SUR SA PROPRE LIGNE, et elle parle de la nuit qui a OUVERT la
+  // journée : c'est ce qu'on cherche le matin — combien de temps j'ai dormi.
   const dormi = aDormi
-    ? `<div class="jpdormi"><span class="jpost lu" title="temps de sommeil (du coucher au lever)">${
+    ? `<div class="jpdormi"><span class="jpost lu" title="${esc(p.dormi_de
+        ? `temps de sommeil — la nuit avant ce lever, endormi vers ${p.dormi_de}`
+        : 'temps de sommeil — la nuit avant ce lever')}">${
         ico('lit', 13)}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span></div>`
     : '';
 

@@ -184,3 +184,59 @@ test('un coucher DIT du soir reste bien le coucher du jour même', () => {
   assert.equal(j?.coucher?.heure, '23:30', 'un « je vais me coucher » du soir ferme ce jour-là');
   assert.equal(j?.coucher?.source, 'dit');
 });
+
+/* ==================================================================
+ * LES DEUX BOUTS D'UNE JOURNÉE VÉCUE SONT SUR LA MÊME JOURNÉE VÉCUE.
+ *
+ * L'écran montrait « levé 15:34 · couché 23:59 » un jour où la personne a
+ * écrit à 03:18 du matin. Deux défauts empilés : 23:59 n'est pas une heure de
+ * coucher mais le bord du fichier du jour civil, et la lune montrait de toute
+ * façon le coucher de la VEILLE, pas celui qui ferme la journée affichée.
+ * ================================================================== */
+
+test('23:59 n’est pas un coucher, c’est la fin du fichier du jour', async () => {
+  const U = 'minuit-bord';
+  const { poserActiviteJour } = await import('../server/db.js');
+  // Encore devant l'écran quand le fichier du jour se referme : plage.a = 23:59.
+  poserActiviteJour(U, '2026-07-10', { date: '2026-07-10', plage: { de: '15:34', a: '23:59' } });
+  const j = api.posteDuJour('2026-07-10', U);
+  assert.equal(j?.lever?.heure, '15:34');
+  assert.equal(j?.coucher?.heure ?? null, null,
+    'un coucher au bord de minuit est une journée coupée, pas un endormissement');
+});
+
+test('une heure de fin ordinaire, elle, reste un coucher', async () => {
+  const U = 'fin-normale';
+  const { poserActiviteJour } = await import('../server/db.js');
+  poserActiviteJour(U, '2026-07-11', { date: '2026-07-11', plage: { de: '09:10', a: '22:40' } });
+  assert.equal(api.posteDuJour('2026-07-11', U)?.coucher?.heure, '22:40');
+});
+
+test('LA RÉGRESSION : un coucher réfuté par une phrase écrite plus tard tombe', async () => {
+  const U = 'ecrit-apres';
+  const { poserActiviteJour, addMessage } = await import('../server/db.js');
+  poserActiviteJour(U, '2026-07-12', { date: '2026-07-12', plage: { de: '15:34', a: '23:59' } });
+  poserMesure({ date: '2026-07-12', source: 'dit', cle: 'coucher_dit', texte: '23:30', userId: U });
+  // Rangé sur la journée vécue du 12 : c'est bien le 12 qui est encore éveillé.
+  dansLaZone('UTC', () => {
+    addMessage({ ts: '2026-07-13T03:18:00.000Z', date: '2026-07-12', role: 'user',
+                 text: 'hey non j’ai fait de la musique depuis', userId: U });
+  });
+  const j = dansLaZone('UTC', () => api.posteDuJour('2026-07-12', U));
+  assert.equal(j?.coucher?.heure ?? null, null,
+    'on ne se couche pas à 23:30 pour écrire à 03:18 — le coucher proposé est réfuté');
+});
+
+test('le coucher qui ferme la journée peut être après minuit', async () => {
+  const U = 'ferme-apres-minuit';
+  const { poserActiviteJour } = await import('../server/db.js');
+  // Le 13 : levé 15:00, encore là à 23:59. Le 14 : première touche à 03:18,
+  // puis plus rien jusqu'à 14:00 — le silence de 03:18 à 14:00 est la nuit.
+  poserActiviteJour(U, '2026-07-13', { date: '2026-07-13', plage: { de: '15:00', a: '23:59' } });
+  poserActiviteJour(U, '2026-07-14', { date: '2026-07-14', plage: { de: '00:05', a: '22:00' },
+                                       trous: [{ de: '03:18', a: '14:00', minutes: 642 }] });
+  const j = api.posteDuJour('2026-07-13', U);
+  assert.equal(j?.lever?.heure, '15:00');
+  assert.equal(j?.coucher?.heure, '03:18', 'la journée du 13 se ferme à 3 h du matin le 14');
+  assert.equal(j?.coucher?.source, 'mesure');
+});
