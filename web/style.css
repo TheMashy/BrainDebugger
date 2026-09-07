@@ -3444,12 +3444,18 @@ details.jpecol .jpetop { margin-top: 5px; }
  * c'est la frontière entre ce que la personne a dit et ce que la machine a
  * déduit — et le produit ne note personne à sa place.
  */
+/*
+ * LA PASTILLE D'HUMEUR : UNE COULEUR, PAS UN CHIFFRE.
+ *
+ * Une barre courte plutôt qu'un rond : posées les unes sous les autres, les
+ * barres forment une colonne qu'on lit comme un dégradé — la journée se voit
+ * d'un coup d'œil, sans qu'aucun nombre ne soit avancé.
+ */
 .jest {
-  flex: none; font: 500 11.5px/1 var(--mono); border-radius: 999px;
-  padding: 3px 7px; white-space: nowrap; letter-spacing: .01em;
+  flex: none; width: 22px; height: 8px; border-radius: 999px; align-self: center;
 }
-.jest.lu { color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); }
-.jest.mesure { color: #0c100e; background: var(--c); border: 1px solid var(--c); }
+.jest.lu { border: 1.5px solid var(--c); }
+.jest.mesure { background: var(--c); border: 1.5px solid var(--c); }
 
 /*
  * L'ESTIMATION PREND UNE QUATRIEME COLONNE, elle ne flotte pas.

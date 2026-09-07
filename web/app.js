@@ -6,7 +6,7 @@ import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
          NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
-import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
+import { deltaColor, noteColor, noteScaleRGB, noteScaleColor, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
 import { poserLesNuits, graduations, enHeures, enHHMM, medianeHoraire, mediane, dureeDeLaNuit } from './nuits-axe.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { ico, ICO_VUE, ICO_ARCHETYPE, ICO_FAMILLE } from './icones.js';
@@ -4259,11 +4259,28 @@ const TEINTE_SCENE = {
 function estimeMarkup(e) {
   if (!e) return '';
   const mesure = e.dApres === 'releve';
+  /*
+   * UNE COULEUR, PAS UN CHIFFRE.
+   *
+   * « ≈8,5 » sur une phrase du soir est un verdict déguisé en mesure : c'est
+   * une estimation lue dans des mots, et l'écrire à la décimale près lui donne
+   * une précision qu'elle n'a pas. Pire, ça se lit comme une note — celle que
+   * ce produit ne pose jamais à la place de la personne.
+   *
+   * Reste ce que l'estimation SAIT vraiment : une position sur une échelle,
+   * du rouge au vert. On la voit d'un coup d'œil, elle se compare d'une ligne
+   * à l'autre, et personne ne peut la citer comme un chiffre.
+   *
+   * La règle du produit tient : ce qui est RELEVÉ à la main est plein, ce qui
+   * est LU dans les mots est un contour. Le nombre exact reste au survol, pour
+   * qui va le chercher.
+   */
   const v = String(e.valeur).replace('.', ',');
   return `<span class="jest ${mesure ? 'mesure' : 'lu'}"
-    style="--c:${noteColor(e.valeur, 6)}"
-    title="${mesure ? 'relevé à la main, à ce moment-là' : 'estimation lue dans tes mots — personne ne l’a posée'}"
-    >${mesure ? '' : '≈'}${v}</span>`;
+    style="--c:${noteScaleColor(e.valeur)}"
+    title="${mesure ? `relevé à la main à ce moment-là — ${v}/10`
+                    : `estimation lue dans tes mots, personne ne l’a posée — environ ${v}/10`}"
+    aria-label="${mesure ? 'relevé' : 'estimation'} ${v} sur 10"></span>`;
 }
 
 /**
@@ -4352,64 +4369,6 @@ function momentMarkup(m) {
     <span class="jcoeur">${esc(m.coeur)}</span>
     ${estimeMarkup(m.estime)}
   </li>`;
-}
-
-/**
- * CE QUI A BOUGÉ DANS LA JOURNÉE.
- *
- * Deux couches, et il ne faut pas les confondre. Les RELEVÉS sont posés à la
- * main, sur dix, à une heure connue : c'est une mesure, elle se dessine PLEINE.
- * La charge des moments est déduite de mots : c'est une lecture, elle se dessine
- * en trait. « Ce qui est rempli est mesuré, ce qui est contouré est déclaré » —
- * la règle du produit vaut jusqu'ici.
- */
-function volatiliteMarkup(v) {
-  /*
-   * CHAQUE POINT EST UNE HUMEUR QUE L'IA A ÉVALUÉE, sur dix, à un moment. C'est
-   * la même valeur que la pastille ≈ du fil à gauche : la courbe colle donc à
-   * l'humeur de la journée au lieu de tracer une charge abstraite. Un point
-   * PLEIN est une note relevée à la main ; un point CONTOURÉ est lu dans les
-   * mots — « ce qui est rempli est mesuré, ce qui est contouré est déclaré ».
-   */
-  const hum = v?.humeurs ?? [];
-  if (hum.length < 2) return '';
-  const W = 200, H = 46, PB = 6;
-  const xs = n => n <= 1 ? [W / 2] : Array.from({ length: n }, (_, i) => 2 + (i / (n - 1)) * (W - 4));
-  const y = val => PB + (1 - val / 10) * (H - PB * 2);
-  const px = xs(hum.length);
-
-  const ligne = `<path d="${hum.map((h, i) => `${i ? 'L' : 'M'}${px[i].toFixed(1)} ${y(h.valeur).toFixed(1)}`).join('')}"
-       fill="none" stroke="var(--line-soft)" stroke-width="1.2" stroke-linejoin="round"/>`;
-  const points = hum.map((h, i) => {
-    const c = noteColor(h.valeur, 6);
-    const mesure = h.dApres === 'releve';
-    const vtxt = String(h.valeur).replace('.', ',');
-    return `<circle cx="${px[i].toFixed(1)}" cy="${y(h.valeur).toFixed(1)}" r="3"
-       fill="${mesure ? c : 'none'}" stroke="${c}" stroke-width="${mesure ? 0 : 1.5}"
-       ><title>${esc(h.heure)} · ${mesure ? '' : '≈'}${vtxt}/10</title></circle>`;
-  }).join('');
-
-  // L'amplitude vient des mêmes points que la courbe, pas des seuls relevés :
-  // « 3 → 8 » doit se lire directement sur ce qu'on voit tracé.
-  const vals = hum.map(h => h.valeur);
-  const bas = Math.min(...vals), haut = Math.max(...vals);
-  const fmt = n => String(n).replace('.', ',');
-  const surMesure = hum.some(h => h.dApres === 'releve');
-  return `<div class="jvol">
-    <div class="k faint">Ce qui a bougé</div>
-    ${/* MINIMALISTE, ET LE CADRE EST PARTI AVEC. Il ne reste que la médiane
-          pointillée, la ligne et les points — c'est tout ce qui porte
-          l'information. */''}
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="jvsvg" aria-hidden="true">
-      <line x1="0" y1="${(H / 2).toFixed(1)}" x2="${W}" y2="${(H / 2).toFixed(1)}"
-            stroke="var(--line-soft)" stroke-dasharray="2 4"/>
-      ${ligne}${points}
-    </svg>
-    <div class="jvpied">
-      <span class="jvchiffre mono">${fmt(bas)} <span class="faint">→</span> ${fmt(haut)}</span>
-      <span class="faint">${surMesure ? 'relevé à la main' : 'lu dans tes mots'}</span>
-    </div>
-  </div>`;
 }
 
 /** De quoi on a parlé, en icônes — les mêmes que sur la frise. */
@@ -4724,8 +4683,16 @@ function journeeMarkup(m) {
     : `<p class="jvide">${m.note !== null ? 'Notée, sans texte.' : 'Rien d’écrit ce jour-là.'}</p>`);
   // Minimaliste : le poste (lever, sommeil, synchro, écran) et de quoi on a
   // parlé. Le détail chiffré des mesures ne s'entasse plus ici.
-  const cote = `${volatiliteMarkup(j.volatilite)}${posteMarkup(m.poste, m.synchro)}`
-             + `${thematiquesMarkup(j.thematiques)}`;
+  /*
+   * LA COURBE « CE QUI A BOUGÉ » EST PARTIE.
+   *
+   * Elle traçait exactement les mêmes valeurs que les pastilles de la colonne
+   * de gauche — la même journée, dessinée deux fois, à deux endroits, dans deux
+   * langages. Sur une journée de quatre moments, une courbe de quatre points ne
+   * montre rien que la colonne ne montre déjà mieux : celle-ci a les heures et
+   * les phrases à côté.
+   */
+  const cote = `${posteMarkup(m.poste, m.synchro)}${thematiquesMarkup(j.thematiques)}`;
 
   return `<div class="jgrille">
     <div class="jcol jfil">
@@ -4738,7 +4705,7 @@ function journeeMarkup(m) {
           d'habitude eux-mêmes : sans lui, son texte flottait plus bas que les
           deux autres colonnes et la rangée de titres était bancale. */''}
     <div class="jcol jcote">
-      ${cote || `<div class="k faint">Ce qui a bougé</div>
+      ${cote || `<div class="k faint">Ce qui a été mesuré</div>
                  <p class="jvide">Rien de mesuré, rien de relevé.</p>`}
     </div>
     <div class="jcol jecrit">
