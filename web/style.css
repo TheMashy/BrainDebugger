@@ -1115,6 +1115,23 @@ input[type=date] { color-scheme: dark; }
 .gaugepanel .nums b { color: var(--ink); font-family: var(--mono); font-size: 15px; }
 
 /* Courbe de consommation de jetons : des barres, par heure ou par jour. */
+/*
+ * LE PROFIL D'UN ÉCHANGE : quatre chiffres, leur flèche, rien d'autre.
+ * Ils se lisent d'une ligne, sans légende — l'explication est au survol.
+ */
+.uprofil { margin: 14px 0 2px; }
+.uchifs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 6px; }
+.uchif { display: flex; flex-direction: column; gap: 1px; cursor: help; }
+.uchif b { font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.1; }
+.uchif .uunit { font-size: 10.5px; font-weight: 400; color: var(--ink-faint); margin-left: 1px; }
+.uchif .ulib { font-size: 10.5px; color: var(--ink-faint); }
+.uev { font: 500 10px/1 var(--mono); }
+.uev.bon { color: var(--accent); }
+.uev.moins { color: var(--warn); }
+.uev.plat { color: var(--ink-faint); }
+.usub { margin: 6px 0 0; font-size: 11px; }
+@media (max-width: 420px) { .uchifs { grid-template-columns: repeat(2, 1fr); } }
+
 .usagebloc { margin: 14px 0 4px; }
 .usagetete { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .usagetog { display: inline-flex; gap: 4px; }

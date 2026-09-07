@@ -12,7 +12,7 @@ import {
   mesuresEntre, poserMesure,
   redaterMessages, rebuildEntryText, tousMessagesUtilisateur
 } from './db.js';
-import { usageFor, record as recordUsage, serieUsage } from './usage.js';
+import { usageFor, record as recordUsage, serieUsage, profilUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
@@ -1974,6 +1974,12 @@ export const routes = {
    * ou par jour (30 derniers). De quoi voir d'un coup où ça a coûté, sans ouvrir
    * une facture — l'enveloppe reste une jauge, pas un compte.
    */
+  /*
+   * LE PROFIL D'UN ÉCHANGE, CETTE SEMAINE ET LA PRÉCÉDENTE. C'est ce qui dit
+   * si une optimisation a servi : le total du mois, lui, monte avec l'usage.
+   */
+  'GET /api/usage/profil': ({ userId }) => profilUsage(userId),
+
   'GET /api/usage/serie': ({ query, userId }) =>
     serieUsage(userId, query.grain === 'heure' ? 'heure' : 'jour'),
 

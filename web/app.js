@@ -176,6 +176,11 @@ function drawGaugePanel() {
       <br>Tu peux la retirer dans Réglages, section « Modèle ».</p>` : ''}
     ${/* La consommation dans le temps : une courbe rapide, par heure ou par jour.
           Pliée dans le panneau des jetons, là où on vient déjà voir l'enveloppe. */''}
+    ${/* CE QU'UN ÉCHANGE COÛTE. Le total du mois monte avec l'usage : il ne
+          répond pas à « est-ce que ça s'améliore ? ». Le prix d'UN échange,
+          comparé à la semaine d'avant, y répond. */''}
+    <div id="usageProfil" class="uprofil"></div>
+
     <div class="usagebloc">
       <div class="usagetete">
         <span class="k faint">Consommation de jetons</span>
@@ -197,6 +202,64 @@ function drawGaugePanel() {
     chargerGrapheUsage(b.dataset.grain);
   });
   chargerGrapheUsage('jour');
+  chargerProfilUsage();
+}
+
+/**
+ * TROIS CHIFFRES, ET LEUR FLÈCHE.
+ *
+ * « 14,8 M ce mois-ci » ne dit pas si le site s'optimise : ce total monte avec
+ * l'usage. Ce qui le dit, c'est le prix d'UN échange, comparé à la semaine
+ * d'avant — et la part du prompt relue du cache, qui est la cause quand ce
+ * prix bouge.
+ *
+ * Pas de solde de crédits : l'API d'Anthropic n'en expose aucun. Ce qui reste,
+ * c'est l'enveloppe du mois — déjà en haut du panneau — et ces trois-là, qui
+ * sont mesurés ici, sur les appels réellement partis.
+ */
+const fmtEuroTok = n => n == null ? '—' : fmtTok(Math.round(n));
+
+/** La flèche d'évolution : ce qui BAISSE est bon pour un coût, mauvais pour le cache. */
+function evolution(avant, apres, { baisserEstBon = true } = {}) {
+  if (avant == null || apres == null || !avant) return '';
+  const p = Math.round(100 * (apres - avant) / avant);
+  if (Math.abs(p) < 5) return `<span class="uev plat" title="stable depuis la semaine d’avant">=</span>`;
+  const bon = baisserEstBon ? p < 0 : p > 0;
+  return `<span class="uev ${bon ? 'bon' : 'moins'}" title="${
+    Math.abs(p)} % ${p < 0 ? 'de moins' : 'de plus'} que la semaine d’avant">${
+    p < 0 ? '↓' : '↑'}${Math.abs(p)} %</span>`;
+}
+
+async function chargerProfilUsage() {
+  const hote = $('#usageProfil');
+  if (!hote) return;
+  let d;
+  try { d = await api('/api/usage/profil'); } catch { hote.innerHTML = ''; return; }
+  const c = d?.chat?.semaine, av = d?.chat?.avant;
+  if (!c?.echanges) { hote.innerHTML = ''; return; }
+
+  const carte = d?.carte?.semaine;
+  const chiffre = (val, unite, libelle, ev, titre) => `<div class="uchif" title="${esc(titre)}">
+    <b class="mono">${val}<span class="uunit">${unite}</span></b>${ev}
+    <span class="ulib">${libelle}</span></div>`;
+
+  hote.innerHTML = `
+    <div class="k faint">Par échange, ces 7 jours</div>
+    <div class="uchifs">
+      ${chiffre(fmtEuroTok(c.par_echange), '', 'jetons', evolution(av?.par_echange, c.par_echange),
+        'Jetons au tarif plein pour un échange, médiane. Un jeton relu du cache y compte pour un dixième — c’est ce qu’il coûte vraiment.')}
+      ${chiffre((c.cout_par_echange ?? 0).toFixed(3).replace('.', ','), ' $', 'l’échange',
+        evolution(av?.cout_par_echange, c.cout_par_echange),
+        'Ce que coûte un échange, médiane sur les sept derniers jours.')}
+      ${chiffre(c.part_cache ?? '—', ' %', 'relu du cache',
+        evolution(av?.part_cache, c.part_cache, { baisserEstBon: false }),
+        'La part du prompt relue du cache, à un dixième du prix. C’est ce chiffre qui dit si la mise en cache prend : plus il est haut, moins un échange coûte.')}
+      ${chiffre(c.appels_par_echange ?? '—', '', 'appels', evolution(av?.appels_par_echange, c.appels_par_echange),
+        'Combien d’appels à l’API pour une réponse. Chacun renvoie tout le prompt : le compagnon qui pose un repère puis marque un motif en fait trois.')}
+    </div>
+    <p class="sub usub">${c.echanges} échange${c.echanges > 1 ? 's' : ''} au compagnon${
+      carte?.echanges ? ` · ${carte.echanges} relecture${carte.echanges > 1 ? 's' : ''} de la carte` : ''
+    } · médianes, comparées aux 7 jours d’avant</p>`;
 }
 
 /**
