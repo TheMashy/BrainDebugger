@@ -4187,3 +4187,9 @@ details.jpecol .jpetop { margin-top: 5px; }
 .rgcorps .card, .rgcorps .qscard { background: none; border: 0; padding: 0; margin: 0; }
 .rgcorps .row { display: grid; gap: 14px; }
 .rprive { margin-bottom: 10px; max-width: 780px; }
+
+/* Les trois lectures de « Ma carte », repliées sous la toile. Elles reprennent
+   le repli des Réglages : un seul geste à apprendre pour tout le site. */
+.pcarte { margin-top: 8px; }
+.pcarte .rgcorps { padding: 12px 15px 16px; }
+.pcarte .rgcorps > .fonct, .pcarte .rgcorps > .surv, .pcarte .rgcorps > .schemas { margin: 0; }

@@ -3587,7 +3587,7 @@ function monterCarte(carte, pistes = []) {
 const SCH_FONCTION = { eviter: 'pour éviter', soulager: 'pour soulager', controler: 'pour garder la main', tenir: 'pour tenir', se_punir: 'pour se punir', fuir: 'pour fuir', se_rapprocher: 'pour se rapprocher' };
 const SCH_MAILLONS = [['declencheur', 'ce qui ouvre'], ['reaction', 'ce qui monte'], ['comportement', 'ce que tu fais'], ['effet', 'sur le moment'], ['cout', 'ensuite']];
 const SCH_FORCE = { 1: 'se rejoue parfois', 2: 'se rejoue souvent', 3: 'se rejoue très souvent' };
-function schemasMarkup(schemas) {
+function schemasMarkup(schemas, { nu = false } = {}) {
   if (!schemas?.length) return '';
   const motifsConnus = new Map((S.motifs?.liste ?? []).map(m => [String(m.nom).toLowerCase(), m]));
   const cartes = schemas.map((sc, i) => {
@@ -3609,8 +3609,8 @@ function schemasMarkup(schemas) {
     </article>`;
   }).join('');
   return `<section class="schemas">
-    <div class="lechead"><div class="fonctete"><div class="k faint">Tes schémas</div>
-      <span class="lecmeta faint">des boucles qui se rejouent, lues dans ce que tu as écrit · chaque maillon vient de tes mots, et se vérifie sur ses journées</span></div></div>
+    ${nu ? '' : `<div class="lechead"><div class="fonctete"><div class="k faint">Tes schémas</div>
+      <span class="lecmeta faint">des boucles qui se rejouent, lues dans ce que tu as écrit · chaque maillon vient de tes mots, et se vérifie sur ses journées</span></div></div>`}
     <div class="schgrille">${cartes}</div>
   </section>`;
 }
@@ -3628,10 +3628,10 @@ function schemasMarkup(schemas) {
  * parmi eux. Des comptes, jamais des causes.
  * ================================================================== */
 const SURV_GENRE = { blessure: 'une blessure écrite', surdose: 'une surdose écrite', suicide: 'le suicide évoqué', moyen: 'un moyen à portée', en_main: 'un moyen dans la main', substance: 'un excès', dereel: 'le réel qui se décolle' };
-function surveillesMarkup(C, schemas) {
+function surveillesMarkup(C, schemas, { nu = false } = {}) {
   if (!C) return '';
   if (!C.n) return '';
-  const tete = `<div class="lechead"><div class="fonctete"><div class="k faint"
+  const tete = nu ? '' : `<div class="lechead"><div class="fonctete"><div class="k faint"
       title="Des comptes contre les autres jours de la même période, jamais des causes. « net » veut dire que le hasard n’explique pas l’écart (test exact de Fisher à 5 %) ; sans « net », c’est un compte à regarder, pas une conclusion.">Les jours à surveiller, ce qui revient autour</div>
     <span class="lecmeta faint">${C.rythme ? esc(C.rythme) : `${C.n} ${C.n > 1 ? 'jours' : 'jour'} sur la période`}</span></div></div>`;
   if (C.manque) return `<section class="surv">${tete}<p class="sub" style="max-width:62ch">${esc(C.manque)}</p></section>`;
@@ -3835,14 +3835,14 @@ function jaugesMarkup(jauges, manques) {
   }).join('')}</div>`;
 }
 
-function fonctionnementsMarkup(F) {
+function fonctionnementsMarkup(F, { nu = false } = {}) {
   if (!F) return '';
   const p = F.periode;
-  const tete = `<div class="fonctete">
+  const tete = nu ? '' : `<div class="fonctete">
     <div class="k faint">Comment ça marche chez toi</div>
     <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} ${p.notes > 1 ? 'journées notées' : 'journée notée'} · ${p.nuits} ${p.nuits > 1 ? 'nuits' : 'nuit'} · ${p.textes} ${p.textes > 1 ? 'journées écrites' : 'journée écrite'}</span>
   </div>`;
-  if (!F.assez) return `<section class="fonct"><div class="lechead">${tete}</div>
+  if (!F.assez) return `<section class="fonct">${tete ? `<div class="lechead">${tete}</div>` : ''}
     <p class="sub" style="max-width:62ch">Pas encore de quoi compter. ${F.manques.map(esc).join(' ')}</p></section>`;
   const parType = new Map();
   for (const it of F.items) { if (!parType.has(it.type)) parType.set(it.type, []); parType.get(it.type).push(it); }
@@ -3869,7 +3869,25 @@ function fonctionnementsMarkup(F) {
   const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${
     (F.items.length ? [] : ['Pas de bascule nette, pas de lien confirmé au comptage, pas de forme de semaine ; un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la veille sans non plus en repartir, des mots absolus qui ne suivent pas la note.']).concat(F.manques ?? []).map(x => `<li>${esc(x)}</li>`).join('')
   }${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
-  return `<section class="fonct"><div class="lechead">${tete}</div>${rien}${fonctGraphe(F)}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
+  return `<section class="fonct">${tete ? `<div class="lechead">${tete}</div>` : ''}${rien}${fonctGraphe(F)}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
+}
+
+/**
+ * UN REPLI DE « MA CARTE », qui dit son contenu sur sa ligne.
+ *
+ * Rien du tout quand il n'y a rien dedans : un repli vide promet une réponse
+ * qu'il n'a pas, et l'ouvrir pour trouver le vide est pire que ne rien voir.
+ */
+function pliCarte({ dessin, titre, etat, corps }) {
+  if (!corps) return '';
+  return `<details class="rgroupe pcarte">
+    <summary>
+      <span class="rgico">${ico(dessin, 15)}</span>
+      <span class="rgtitre">${titre}</span>
+      <span class="rgetat faint">${etat ? esc(etat) : ''}</span>
+    </summary>
+    <div class="rgcorps">${corps}</div>
+  </details>`;
 }
 
 async function renderLecture() {
@@ -4002,9 +4020,40 @@ async function renderLecture() {
         : `L’application a changé de façon de lire : cette lecture est celle d’avant, sans schémas. La relecture complète part toute seule à l’ouverture ; sinon, « relire tout ».`}</p>` : ''}
     ${L.lecture ? '<div class="k faint dequoi">De quoi tu parles</div>' : ''}
     ${corps}
-    ${schemasMarkup(L.lecture?.schemas)}
-    ${fonctionnementsMarkup(FONCT)}
-    ${surveillesMarkup(FONCT?.surveilles, L.lecture?.schemas)}
+    ${/*
+       * QUATRE SECTIONS EMPILÉES DEVIENNENT LA TOILE, PUIS TROIS REPLIS.
+       *
+       * La toile et ses groupes sont « Ma carte » : ce qu'on vient voir, et ce
+       * qui doit être là en arrivant. Les trois autres sont des LECTURES de ce
+       * même journal, chacune longue — des boucles en cinq maillons, des
+       * comptes avec leurs barres, des jours avec leurs cartes. Empilées, il
+       * fallait descendre quatre écrans pour savoir qu'elles existaient, et le
+       * plus souvent pour lire « pas encore assez ».
+       *
+       * Repliées, chacune dit sur sa ligne CE QU'ELLE CONTIENT : « 4 boucles »,
+       * « rien ne se détache encore », « 11 jours sur 180 ». C'est déjà la
+       * réponse à la question qu'on se pose neuf fois sur dix, et ça se lit
+       * sans un clic. Ouvrir, c'est demander le détail — ce qui est un autre
+       * geste, et qui mérite toute la page.
+       */''}
+    ${pliCarte({ dessin: 'refaire', titre: 'Tes schémas',
+      etat: L.lecture?.schemas?.length
+        ? `${L.lecture.schemas.length} boucle${L.lecture.schemas.length > 1 ? 's' : ''} qui se rejouent`
+        : null,
+      corps: schemasMarkup(L.lecture?.schemas, { nu: true }) })}
+
+    ${pliCarte({ dessin: 'suivi', titre: 'Comment ça marche chez toi',
+      etat: !FONCT ? null
+        : !FONCT.assez ? 'pas encore de quoi compter'
+        : FONCT.items.length ? `${FONCT.items.length} chose${FONCT.items.length > 1 ? 's' : ''} comptée${FONCT.items.length > 1 ? 's' : ''}`
+        : 'rien ne se détache encore',
+      corps: fonctionnementsMarkup(FONCT, { nu: true }) })}
+
+    ${pliCarte({ dessin: 'alerte', titre: 'Les jours à surveiller',
+      etat: FONCT?.surveilles?.n
+        ? `${FONCT.surveilles.n} jour${FONCT.surveilles.n > 1 ? 's' : ''}${FONCT.surveilles.rythme ? ` · ${FONCT.surveilles.rythme}` : ''}`
+        : null,
+      corps: surveillesMarkup(FONCT?.surveilles, L.lecture?.schemas, { nu: true }) })}
   </div>${tissageMarkup()}`;
 
   wireLecture();
