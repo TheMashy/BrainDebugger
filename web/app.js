@@ -3603,10 +3603,18 @@ function monterCarte(carte, pistes = []) {
     if (!L || !H) return;
     cv.width = L * dpr; cv.height = H * dpr;
     RELA_DISPO = disposer(RELA, L, H);
-    // Plus de marge en haut dès qu'il y a des îlots : leur nom se pose
-    // AU-DESSUS de l'enveloppe, et le cadrage ne réserve de la place que pour
-    // les nœuds — le titre du plus haut sortait par le bord.
-    cadrer(RELA_DISPO.pts, L, H, 62, RELA.ilots?.length ? 96 : 38);
+    /*
+     * LA MARGE DU HAUT COMPTE CE QUI EST DESSINÉ AU-DESSUS DU NŒUD, PAS LE NŒUD.
+     *
+     * Avec des îlots, c'est le titre du groupe qui dépasse — d'où 96. Sans
+     * îlots, la marge était de 38, et le nom du nœud le plus haut sortait
+     * quand même : au-dessus d'un nœud il y a son anneau de journées (jusqu'à
+     * 36 px quand il en porte beaucoup) PUIS son nom (11 px de plus). Un nœud
+     * posé à 38 du bord avait donc son nom hors de la toile — on voyait un
+     * rond sans nom en haut d'une carte, ce qui ressemble à un bug de données
+     * et n'en est pas un.
+     */
+    cadrer(RELA_DISPO.pts, L, H, 62, RELA.ilots?.length ? 96 : 66);
     RELA_VUE = vueNeutre();
     peindre();
   };

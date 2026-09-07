@@ -146,7 +146,11 @@ export const SIGNES = [
   { id: 'manque', dit: 'l’envie revient toute seule',
     re: /\b(?:en manque|le manque|j en ai envie|envie de (?:boire|fumer|prendre|sniffer|me defoncer)|je pense qu a (?:ca|boire|fumer)|obsede par|il me faut|je tiens plus|j y pense tout le temps|craving)\b/ },
   { id: 'plus_que_prevu', dit: 'plus que ce que tu voulais',
-    re: /\b(?:plus que prevu|je voulais (?:juste|juste en prendre|m arreter)|j ai pas su m arreter|j ai fini par|encore une fois|comme d habitude j ai|je devais (?:en )?(?:prendre|boire) (?:qu )?un)\b/ },
+    /* « encore une fois » et « j'ai fini par » y étaient et s'allumaient sur
+       tout — « encore une fois j'ai oublié mes clés » n'est pas une perte de
+       contrôle. Ce qui compte, c'est l'écart entre ce qu'on avait prévu et ce
+       qu'on a fait ; il faut donc que la phrase dise les deux. */
+    re: /\b(?:plus que prevu|je voulais (?:juste|juste en prendre|m arreter)|j ai pas su m arreter|j ai fini par (?:en |y )?(?:reprendre|boire|fumer|craquer|ceder|remettre)|comme d habitude j ai|je devais (?:en )?(?:prendre|boire) (?:qu )?un)\b/ },
   { id: 'cache', dit: 'tu l’as caché',
     re: /\b(?:en cachette|personne (?:le )?sait|j ai menti|je (?:l )?ai cache|sans (?:le )?dire a|tout seul dans ma chambre|avant de (?:rentrer|sortir) j ai)\b/ }
 ];
@@ -353,7 +357,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null } = {}
       compare: avants.length >= SEUILS_PRISES.min_compare,
       depuis: fin && v.jours.at(-1) ? jours(v.jours.at(-1), fin) : null,
       series: seriesSans(v.jours, ecrits, fin),
-      signes: signesRetenus(v.jours, signesParJour, ecrits),
+      signes: signesRetenus(v.jours, signesParJour, ecrits, f.cle),
       avant_ca: ceQuiVientAvant(v.jours, carte, suite),
       apres_ca: leLendemain(v.jours, suite, noteDe, seuilBas)
     });
@@ -407,7 +411,7 @@ function medianeMoins(noteDe, ecart = 1) {
  * journée écrite juste avant ou juste après. Au-delà, on rattacherait à
  * l'alcool une phrase écrite trois semaines plus tôt sur autre chose.
  */
-function signesRetenus(joursPrise, signesParJour, ecrits) {
+function signesRetenus(joursPrise, signesParJour, ecrits, cle) {
   const idx = new Map(ecrits.map((d, i) => [d, i]));
   const proches = new Set();
   for (const d of joursPrise) {
@@ -416,8 +420,23 @@ function signesRetenus(joursPrise, signesParJour, ecrits) {
   }
   const out = [];
   for (const d of [...proches].sort())
-    for (const s of signesParJour.get(d) ?? [])
-      if (!out.some(o => o.id === s.id)) out.push({ ...s, quand: d });
+    for (const s of signesParJour.get(d) ?? []) {
+      if (out.some(o => o.id === s.id)) continue;
+      /*
+       * UNE PHRASE QUI NOMME UNE AUTRE FAMILLE NE PARLE PAS DE CELLE-CI.
+       *
+       * Les signes sont volontairement aveugles à la famille — « j'ai craqué »
+       * ne dit pas de quoi. Mais un jour où l'on a écrit l'alcool ET le
+       * cannabis leur donnait les mêmes signes, et la carte du cannabis citait
+       * « trois verres de vin, encore une fois ». Une preuve qui parle
+       * visiblement d'autre chose ruine la confiance qu'on a dans toutes les
+       * autres. Une phrase muette sur la famille reste partagée : c'est
+       * l'honnêteté du cas, pas une approximation.
+       */
+      const dedans = [...luDuTexte(s.phrase).prises.keys()];
+      if (dedans.length && !dedans.includes(cle)) continue;
+      out.push({ ...s, quand: d });
+    }
   return out;
 }
 

@@ -260,3 +260,34 @@ test('la lecture gardée par texte ne confond pas deux textes', () => {
   // et l'inverse : rechanger le texte fait revenir la détection
   assert.equal(analyserPrises([...avec, ...fond], { aujourdhui: J(40) }).prises[0].n, 3);
 });
+
+test('un signe qui nomme une autre famille ne lui est pas attribué', () => {
+  /* Vu à l'écran : la carte du cannabis citait « trois verres de vin ». Les
+     signes sont volontairement aveugles à la famille — « j'ai craqué » ne dit
+     pas de quoi — mais une preuve qui parle visiblement d'autre chose ruine la
+     confiance qu'on a dans toutes les autres. */
+  const rows = [];
+  for (let i = 0; i < 60; i++) rows.push({ date: J(i), note: 6, text: 'journée ordinaire' });
+  for (const i of [10, 20, 30]) {
+    rows[i] = { date: J(i), note: 4,
+      text: "j'ai fumé un joint. j'ai bu trois verres de vin, je voulais juste en prendre un." };
+  }
+  const r = analyserPrises(rows, { aujourdhui: J(59) });
+  const alcool = r.prises.find(p => p.cle === 'alcool');
+  const cannabis = r.prises.find(p => p.cle === 'cannabis');
+  assert.ok(alcool.signes.some(s => /verres de vin/.test(s.phrase)),
+    'la phrase revient bien à l’alcool, qu’elle nomme');
+  assert.ok(!cannabis.signes.some(s => /verres de vin/.test(s.phrase)),
+    `le cannabis cite une phrase d’alcool : ${JSON.stringify(cannabis.signes)}`);
+});
+
+test('un signe muet sur la famille reste partagé', () => {
+  const rows = [];
+  for (let i = 0; i < 60; i++) rows.push({ date: J(i), note: 6, text: 'journée ordinaire' });
+  for (const i of [10, 20, 30]) rows[i] = { date: J(i), note: 4,
+    text: "j'ai fumé un joint et j'ai bu quatre bières. j'ai craqué, je n'ai pas tenu." };
+  const r = analyserPrises(rows, { aujourdhui: J(59) });
+  for (const cle of ['alcool', 'cannabis'])
+    assert.ok(r.prises.find(p => p.cle === cle).signes.some(s => s.id === 'craque'),
+      `« j'ai craqué » ne nomme rien : il vaut pour ${cle} aussi`);
+});
