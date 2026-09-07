@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nuitDuJour } from '../server/nuits.js';
+import { nuitDuJour, ecartsAuRythme } from '../server/nuits.js';
 
 const dig = (o = {}) => ({ date: '2026-09-05', plage: { de: '08:02', a: '23:41' }, trous: [], ...o });
 const veille = (o = {}) => ({ date: '2026-09-04', plage: { de: '07:50', a: '23:30' }, trous: [], ...o });
@@ -47,9 +47,45 @@ test('un silence de vingt heures n’est pas une nuit : un week-end sans ordinat
   assert.equal(n, null);
 });
 
-test('ce qui ne colle pas se dit, en une phrase', () => {
+test('une nuit seule ne se juge que sur ce qui est faux en soi', () => {
+  /*
+   * « Un lever à 02:10 » n'est pas une incohérence, c'est un horaire. Ces
+   * règles-là marquaient presque toutes les nuits de quelqu'un qui dort le
+   * jour — une alerte qui se déclenche toujours n'alerte plus, elle reproche.
+   * L'écart au rythme se juge sur SON rythme, et plus bas.
+   */
   const n = nuitDuJour(dig({ plage: { de: '02:10', a: '23:00' }, trous: [] }), veille({ plage: { de: '08:00', a: '22:00' } }));
-  assert.equal(n.lever, '02:10'); assert.match(n.souci, /un lever à 02:10/);
+  assert.equal(n.lever, '02:10');
+  assert.equal(n.souci, null, `souci « ${n.souci} » sur un horaire qui n'a rien d'incohérent`);
+});
+
+test('deux sources qui se contredisent, ça se dit', () => {
+  const n = nuitDuJour(dig({ plage: { de: '07:30', a: '23:00' }, trous: [],
+                             poste: { coucher: '23:30', reveil: '07:30', sommeil_h: 3 } }),
+                       veille({ plage: { de: '08:00', a: '23:10' } }));
+  assert.match(n.souci, /le poste dit 3 h, le clavier/);
+});
+
+test('l’écart au rythme se mesure sur le rythme de la personne', () => {
+  const nuit = (date, coucher, lever) => ({ date, coucher, lever, sommeil_h: 9, source: 'activite', souci: null });
+  // Quelqu'un qui se couche vers 5 h et se lève vers 16 h. Rien d'anormal.
+  const liste = [];
+  for (let i = 1; i <= 10; i++) liste.push(nuit(`2026-09-${String(i).padStart(2, '0')}`, '05:20', '16:10'));
+  // Puis une nuit qui, POUR LUI, sort du lot.
+  liste.push(nuit('2026-09-11', '22:30', '07:00'));
+  ecartsAuRythme(liste);
+  assert.equal(liste[0].souci, null, 'son horaire habituel n’est pas un souci');
+  assert.match(liste.at(-1).souci, /couché à 22:30, loin de ton 05:20 habituel/);
+  assert.match(liste.at(-1).souci, /levé à 07:00, loin de ton 16:10 habituel/);
+});
+
+test('sous sept nuits connues, on ne prétend pas connaître son rythme', () => {
+  const liste = [
+    { date: '2026-09-01', coucher: '05:20', lever: '16:10', sommeil_h: 9, souci: null },
+    { date: '2026-09-02', coucher: '23:00', lever: '07:00', sommeil_h: 8, souci: null }
+  ];
+  ecartsAuRythme(liste);
+  assert.ok(liste.every(n => n.souci === null), 'une médiane sur deux nuits n’est pas un rythme');
 });
 
 test('sans digest du jour, pas de nuit', () => {

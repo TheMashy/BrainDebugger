@@ -131,18 +131,79 @@ export function nuitDuJour(dig, digVeille = null) {
   return souci(r, poste);
 }
 
-/** Ce qui ne colle pas, dit en une phrase. */
+/**
+ * CE QUI NE COLLE PAS, DIT EN UNE PHRASE — ET SEULEMENT CE QUI EST FAUX EN SOI.
+ *
+ * Ces règles disaient « un coucher à 06:10, en pleine journée » et « un lever
+ * à 15:30 » : deux normes déguisées en vérifications. Pour quelqu'un dont le
+ * coucher médian est 5 h 26 et le lever 16 h 15, elles marquaient PRESQUE
+ * TOUTES ses nuits — et une alerte qui se déclenche toujours n'alerte plus,
+ * elle reproche. Ce n'est pas le rôle de cette application.
+ *
+ * Ne restent donc ici que les incohérences qui ne dépendent d'aucune
+ * habitude : deux sources qui se contredisent, une durée qui n'est pas une
+ * nuit. L'écart au rythme de la personne se juge ailleurs, sur SON rythme à
+ * elle, et une fois toutes les nuits connues (voir `ecartsAuRythme`).
+ */
 function souci(r, poste) {
-  const c = enMinutes(r.coucher), l = enMinutes(r.lever);
   const soucis = [];
   if (r.sommeil_h != null && poste?.sommeil_h != null && Math.abs(poste.sommeil_h - r.sommeil_h) > 0.5)
     soucis.push(`le poste dit ${String(poste.sommeil_h).replace('.', ',')} h, le clavier ${String(r.sommeil_h).replace('.', ',')} h`);
-  if (c != null && c > 6 * 60 && c < 19 * 60) soucis.push(`un coucher à ${r.coucher}, en pleine journée`);
-  if (l != null && (l < 3 * 60 || l > 14 * 60)) soucis.push(`un lever à ${r.lever}`);
   if (r.sommeil_h != null && r.sommeil_h < 3) soucis.push(`${String(r.sommeil_h).replace('.', ',')} h seulement : une coupure plutôt qu'une nuit ?`);
   if (r.sommeil_h != null && r.sommeil_h > 13) soucis.push(`${String(r.sommeil_h).replace('.', ',')} h : l'ordinateur est peut-être resté fermé plus longtemps que toi`);
   r.souci = soucis.length ? soucis.join(' · ') : null;
   return r;
+}
+
+/** L'écart d'heure à heure, dans le sens du temps : 23:00 → 07:00 vaut 8 h. */
+const versLAvant = (de, a) => (((a - de) % 1440) + 1440) % 1440;
+
+/** La médiane d'un tableau d'heures-minutes, sur le cercle (voir web/nuits-axe.js). */
+function medianeHoraire(minutes) {
+  const h = minutes.filter(x => x != null).sort((a, b) => a - b);
+  if (!h.length) return null;
+  let trou = -1, apres = h[0];
+  for (let i = 0; i < h.length; i++) {
+    const g = versLAvant(h[i], h[(i + 1) % h.length]);
+    if (g > trou) { trou = g; apres = h[(i + 1) % h.length]; }
+  }
+  const rel = h.map(x => versLAvant(apres, x)).sort((a, b) => a - b);
+  const m = rel.length % 2 ? rel[(rel.length - 1) / 2] : (rel[rel.length / 2 - 1] + rel[rel.length / 2]) / 2;
+  return (apres + m) % 1440;
+}
+
+/** L'écart au rythme habituel, dans un sens ou dans l'autre. */
+const ecartCirculaire = (a, b) => Math.min(versLAvant(a, b), versLAvant(b, a));
+
+/*
+ * L'ÉCART AU RYTHME SE JUGE SUR LE RYTHME DE LA PERSONNE.
+ *
+ * Une nuit « anormale » n'est pas une nuit qui s'écarte d'un horaire de bureau :
+ * c'est une nuit qui s'écarte de ses autres nuits à elle. On compare donc au
+ * coucher et au lever médians de la fenêtre, et on ne dit quelque chose qu'au
+ * delà de cinq heures d'écart — le décalage qu'on remarque soi-même.
+ *
+ * En dessous de sept nuits connues, on ne dit rien : une médiane sur trois
+ * nuits n'est pas un rythme, et se tromper ici coûte plus que se taire.
+ */
+const ECART_H = 5, MIN_POUR_RYTHME = 7;
+
+export function ecartsAuRythme(liste, { ecartH = ECART_H, minPourRythme = MIN_POUR_RYTHME } = {}) {
+  const couchers = liste.map(n => enMinutes(n.coucher)).filter(x => x != null);
+  const levers = liste.map(n => enMinutes(n.lever)).filter(x => x != null);
+  const mC = couchers.length >= minPourRythme ? medianeHoraire(couchers) : null;
+  const mL = levers.length >= minPourRythme ? medianeHoraire(levers) : null;
+  const seuil = ecartH * 60;
+  for (const n of liste) {
+    const dits = [];
+    const c = enMinutes(n.coucher), l = enMinutes(n.lever);
+    if (mC != null && c != null && ecartCirculaire(c, mC) > seuil)
+      dits.push(`couché à ${n.coucher}, loin de ton ${hhmm(mC)} habituel`);
+    if (mL != null && l != null && ecartCirculaire(l, mL) > seuil)
+      dits.push(`levé à ${n.lever}, loin de ton ${hhmm(mL)} habituel`);
+    if (dits.length) n.souci = n.souci ? `${n.souci} · ${dits.join(' · ')}` : dits.join(' · ');
+  }
+  return liste;
 }
 
 /**
@@ -171,7 +232,17 @@ export function nuits(userId = OWNER, { jours = 90, jusquA = null } = {}) {
       const duree = l - (c >= 12 * 60 ? c - 1440 : c);
       if (duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60) r.sommeil_h = Math.round(duree / 6) / 10;
     }
+    /*
+     * LE SOUCI SE RECALCULE APRÈS CE QUI A ÉTÉ DIT.
+     *
+     * Il était posé sur les heures DÉRIVÉES, puis « je me suis levé à 15:30 »
+     * remplaçait le lever sans toucher au souci : l'infobulle affichait
+     * « levé 15:30 ⚠ un lever à 00:58 » — un reproche sur une heure qui
+     * n'était plus là. Ce qu'on montre et ce qu'on commente doivent être la
+     * même chose.
+     */
+    if (ditLever || ditCoucher) souci(r, n ? undefined : null);
     out.push({ date: d, ...r });
   }
-  return out;
+  return ecartsAuRythme(out);
 }
