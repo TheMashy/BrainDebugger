@@ -7,7 +7,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pairesDuLien, joursDe, teinteNote, COUCHES, SYMBOLES, symbole, bandeCouches } from '../web/bande.js';
+import { pairesDuLien, joursDe, teinteNote, COUCHES, SYMBOLES, symbole, bandeCouches, bandeLiee, trousDe } from '../web/bande.js';
 
 const jour = i => new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10);
 
@@ -132,4 +132,27 @@ test('deux couches ne marquent jamais la même rangée', () => {
     assert.ok(a2 <= b1 || b2 <= a1,
       `« ${ids[i] } » (${a1}–${a2}) et « ${ids[k]} » (${b1}–${b2}) se superposent`);
   }
+});
+
+/* L'axe est ordinal ; sans marque, deux carrés collés peuvent être à deux mois
+   l'un de l'autre, et un arc « après » relie alors deux jours qui paraissent
+   voisins. Le trou doit se voir. */
+test('les silences de plus de deux semaines sont dessinés', () => {
+  const dates = [...Array.from({ length: 12 }, (_, i) => jour(i)),
+                 ...Array.from({ length: 12 }, (_, i) => jour(i + 70))];
+  assert.deepEqual(trousDe(dates).map(t => [t.i, t.jours]), [[12, 59]]);
+  const fonct = { series: { dates, note: dates.map(() => 5) }, items: [], surveilles: { jours: [] } };
+  const carte = { noeuds: [{ nom: 'la boule', jours: dates.filter((_, i) => i % 3 === 0) }], liens: [] };
+  for (const svg of [bandeLiee(carte, fonct), bandeCouches(carte, fonct, [])])
+    assert.match(svg, /class="btrou"[\s\S]*?59 jours sans rien écrire/,
+      'le trou n’est pas marqué — la bande laisserait croire que ces deux jours se suivent');
+});
+
+test('sans trou, rien n’est dessiné et rien n’est annoncé', () => {
+  const dates = Array.from({ length: 30 }, (_, i) => jour(i * 2));
+  assert.deepEqual(trousDe(dates), []);
+  const fonct = { series: { dates, note: dates.map(() => 5) }, items: [], surveilles: { jours: [] } };
+  const svg = bandeLiee({ noeuds: [{ nom: 'x', jours: [dates[0]] }] }, fonct);
+  assert.ok(!svg.includes('btrou'));
+  assert.ok(!svg.includes('jours sans rien écrire'));
 });

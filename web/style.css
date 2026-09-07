@@ -4289,3 +4289,7 @@ details.jpecol .jpetop { margin-top: 5px; }
   border-radius: 6px; background: none; color: var(--ink-faint); cursor: pointer;
   display: inline-flex; align-items: center; }
 .plien:hover { color: var(--ink); border-color: var(--accent); }
+/* Les silences de la bande : ce qui n'a pas été écrit se voit, sans se
+   confondre avec une journée. */
+.btrou path { stroke: var(--ink-faint); opacity: .8; }
+.btrou rect { pointer-events: all; }

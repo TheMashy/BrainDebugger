@@ -57,6 +57,8 @@ export const SEUILS_PRISES = {
   min_jours: 3,        // en dessous, c'est une soirée, pas une prise
   fenetre: 30,         // la fenêtre récente, en JOURS ÉCRITS (pas civils)
   min_serie: 7,        // une semaine : en dessous, ce n'est pas une série, c'est l'écart entre deux fois
+  min_compare: 10,     // en dessous, la fenêtre d'avant ne se compare à rien
+  trou_max: 21,        // trois semaines sans écrire au milieu d'une série : on ne sait plus
   serie_creuse: 2,     // le plancher : en dessous de deux entrées, aucune série ne tient
   p: 0.05,
   min_avant: 3         // trois fois au moins pour qu'un déclencheur compte
@@ -220,7 +222,15 @@ export function seriesSans(joursPrise, ecrits, aujourdhui) {
   const out = [];
   const poser = (de, a) => {
     if (!de || !a || jours(de, a) < 0) return;
-    const dedans = dates.filter(d => d >= de && d <= a).length;
+    const dedans = dates.filter(d => d >= de && d <= a);
+    /* LE TROU. Une série de cent vingt jours dont soixante sans une ligne n'est
+       pas une série de cent vingt jours : c'est ce qu'on a écrit avant, ce qu'on
+       a écrit après, et deux mois sans nouvelles. La densité moyenne ne le voit
+       pas — elle se laisse remplir par les deux bouts. Il faut mesurer le plus
+       grand silence. */
+    let trou = 0, prec = de;
+    for (const x of dedans) { trou = Math.max(trou, jours(prec, x)); prec = x; }
+    trou = Math.max(trou, jours(prec, a));
     /* `maigre` : une série qu'on n'a presque pas écrite ne prouve rien. Le seuil
        suit la longueur — il faut à peu près une entrée par semaine pour qu'une
        série tienne — parce que c'est justement sur les longues qu'on se raconte
@@ -228,8 +238,9 @@ export function seriesSans(joursPrise, ecrits, aujourdhui) {
        sans et trente-sept sans nouvelles. On les montre quand même (les cacher
        serait mentir dans l'autre sens), mais elles ne deviennent pas un record. */
     const n = jours(de, a) + 1;
-    out.push({ de, a, jours: n, ecrites: dedans,
-               maigre: dedans < Math.max(SEUILS_PRISES.serie_creuse, Math.round(n / 7)),
+    out.push({ de, a, jours: n, ecrites: dedans.length, trou,
+               maigre: dedans.length < Math.max(SEUILS_PRISES.serie_creuse, Math.round(n / 7))
+                       || trou > SEUILS_PRISES.trou_max,
                encours: false });
   };
   if (!bornes.length) { poser(dates[0], aujourdhui ?? dates.at(-1)); }
@@ -293,8 +304,18 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null } = {}
       jours: v.jours, n: v.jours.length,
       preuve: v.preuves.get(v.jours.at(-1)) ?? null,
       recent: recents.filter(d => set.has(d)).length,
+      recent_sur: recents.length,
       avant: avants.filter(d => set.has(d)).length,
-      compare: avants.length >= SEUILS_PRISES.fenetre,
+      /* LES DEUX FENÊTRES N'ONT PAS À FAIRE LA MÊME TAILLE.
+         Elles se comptaient en journées écrites, et il en fallait trente de
+         chaque côté : quelqu'un qui écrit un jour sur douze — c'est-à-dire le
+         cas normal ici — n'atteignait jamais soixante, et la comparaison ne
+         s'affichait donc JAMAIS pour lui. Or c'est exactement à lui qu'elle
+         sert. On compare maintenant dès dix journées, et comme les deux
+         fenêtres peuvent différer, on rend leur taille : la vue dit « 12 sur
+         30 » contre « 5 sur 28 » plutôt qu'un chiffre nu. */
+      avant_sur: avants.length,
+      compare: avants.length >= SEUILS_PRISES.min_compare,
       depuis: fin && v.jours.at(-1) ? jours(v.jours.at(-1), fin) : null,
       series: seriesSans(v.jours, ecrits, fin),
       signes: signesRetenus(v.jours, signesParJour, ecrits),
@@ -309,8 +330,9 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null } = {}
   /* L'ordre : ce qui a des signes d'abord, puis ce qui monte, puis le
      nombre. Le tabac, constant et sans signe, ne doit pas occuper la
      première ligne pendant que les stimulants doublent en silence. */
-  prises.sort((a, b) => (b.signes.length - a.signes.length)
-    || ((b.recent - b.avant) - (a.recent - a.avant)) || (b.n - a.n));
+  const pente = p => !p.compare ? 0
+    : p.recent / Math.max(1, p.recent_sur) - p.avant / Math.max(1, p.avant_sur);
+  prises.sort((a, b) => (b.signes.length - a.signes.length) || (pente(b) - pente(a)) || (b.n - a.n));
 
   return {
     assez: ecrits.length >= 2 * SEUILS_PRISES.min_jours,

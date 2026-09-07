@@ -73,6 +73,38 @@ function cadre(dates, largeur, marge = 8) {
   return { n, pas, X: i => marge + i * pas + pas / 2, marge, largeur };
 }
 
+/**
+ * LES SILENCES, MARQUÉS.
+ *
+ * L'axe de la bande est ORDINAL : un carré par journée écrite, tous de la même
+ * largeur. Ça se lit très bien, et ça ment dès qu'on cesse d'écrire — deux
+ * carrés collés peuvent être à deux mois l'un de l'autre, et un arc « après »
+ * relie alors deux jours qui paraissent voisins. Les mois posés aux deux bouts
+ * achèvent de faire croire à un axe de temps.
+ *
+ * Passer à un axe calendaire serait honnête et illisible : un journal ouvert un
+ * jour sur douze deviendrait une bande vide avec des grumeaux. On garde donc
+ * l'ordinal, et on DESSINE les trous — un trait hachuré entre deux carrés
+ * quand plus de deux semaines les séparent, et ce qu'il vaut dans son titre.
+ */
+export const TROU_MIN = 14;
+export function trousDe(dates, seuil = TROU_MIN) {
+  const out = [];
+  for (let i = 1; i < dates.length; i++) {
+    const n = Math.round((Date.parse(dates[i] + 'T00:00:00Z') - Date.parse(dates[i - 1] + 'T00:00:00Z')) / 864e5);
+    if (n > seuil) out.push({ i, jours: n });
+  }
+  return out;
+}
+function trousMarkup(dates, X, pas, y, h, seuil = TROU_MIN) {
+  return trousDe(dates, seuil).map(t => {
+    const x = X(t.i) - pas / 2;
+    return `<g class="btrou"><title>${t.jours} jours sans rien écrire</title>
+      <rect x="${(x - 1.6).toFixed(1)}" y="${y}" width="3.2" height="${h}" fill="none"/>
+      <path d="M${x.toFixed(1)} ${y}V${y + h}" stroke-width="2.4" stroke-dasharray="2 2.5"/></g>`;
+  }).join('');
+}
+
 /* La rampe des notes du produit : 0 rouge → 5 jaune → 8 vert → 10 bleu. */
 const STOPS = [[0, [165, 18, 24]], [2, [206, 62, 32]], [3.5, [223, 122, 36]], [5, [212, 200, 62]],
                [6.5, [150, 199, 66]], [8, [46, 163, 88]], [9, [44, 143, 140]], [10, [55, 128, 200]]];
@@ -129,11 +161,12 @@ export function bandeLiee(carte, fonct, { max = 6, largeur = 760 } = {}) {
   return `<figure class="bande">
     <svg viewBox="0 0 ${largeur} ${H}" class="bsvg" role="img"
          aria-label="Les jours du journal, et au-dessus les jours de chaque chose de la carte">
-      ${pistes}${jours}
+      ${pistes}${jours}${trousMarkup(dates, X, pas, Y_JOURS - 3, H_JOURS + 6)}
       <text x="8" y="${Y_JOURS + H_JOURS + 15}" class="bax">${esc(mois(dates[0]))}</text>
       <text x="${largeur - 8}" y="${Y_JOURS + H_JOURS + 15}" text-anchor="end" class="bax">${esc(mois(dates.at(-1)))}</text>
     </svg>
-    <figcaption class="bleg">${symbole('jours', 12)}<span>la carte dit <b>quoi va avec quoi</b> — la bande dit <b>quand</b></span></figcaption>
+    <figcaption class="bleg">${symbole('jours', 12)}<span>la carte dit <b>quoi va avec quoi</b> — la bande dit <b>quand</b>${
+      trousDe(dates).length ? ` · les pointillés sont les <b>jours sans rien écrire</b>` : ''}</span></figcaption>
   </figure>`;
 }
 
@@ -181,11 +214,14 @@ export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 86
   const couches = [];                           // {id, marques, sym, texte, couleur}
 
   /* — tes jours — */
+  const trous = trousDe(dates);
   couches.push({ id: 'jours', sym: 'jours', couleur: 'var(--muted)',
-    texte: `${dates.length} jours écrits — la couleur, c’est ta note`,
+    texte: `${dates.length} jours écrits — la couleur, c’est ta note`
+      + (trous.length ? ` · ${trous.length} silence${trous.length > 1 ? 's' : ''} de plus de deux semaines` : ''),
     marques: dates.map((d, i) => `<rect x="${(X(i) - pas * .42).toFixed(1)}" y="${Y}"
       width="${Math.max(1, pas * .84).toFixed(1)}" height="${HB}" rx="1.4"
-      fill="${teinteNote(notes[i])}" opacity=".88"/>`).join('') });
+      fill="${teinteNote(notes[i])}" opacity=".88"/>`).join('')
+      + trousMarkup(dates, X, pas, Y - 3, HB + 6) });
 
   /* — ce qui revient : le nœud le plus fourni, en points au-dessus — */
   const noeuds = (carte?.noeuds ?? []).map(n => ({ nom: n.nom, jours: joursDe(n) }))

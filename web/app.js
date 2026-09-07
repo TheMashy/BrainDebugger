@@ -3243,7 +3243,8 @@ function seriesMarkup(series) {
     const h = Math.max(3, Math.round(s.jours / haut * 34));
     const cl = ['pbar', s.encours ? 'encours' : '', s.maigre ? 'maigre' : ''].filter(Boolean).join(' ');
     const dit = `${s.jours} jour${s.jours > 1 ? 's' : ''} sans, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
-      + (s.maigre ? ` — journal ouvert ${s.ecrites} fois seulement` : '');
+      + (s.trou > 21 ? ` — mais ${s.trou} jours sans rien écrire au milieu`
+         : s.maigre ? ` — journal ouvert ${s.ecrites} fois seulement` : '');
     return `<span class="${cl}" style="height:${h}px" title="${esc(dit)}"><i></i></span>`;
   }).join('');
   const record = Math.max(...series.filter(s => !s.maigre).map(s => s.jours), 0);
@@ -3257,8 +3258,12 @@ function seriesMarkup(series) {
 function priseMarkup(p) {
   const avant = p.avant_ca?.[0];
   const cout = p.apres_ca?.tient ? p.apres_ca : null;
-  const tendance = !p.compare ? null : p.recent === p.avant ? 'pareil'
-    : p.recent > p.avant ? 'monte' : 'baisse';
+  /* On compare des TAUX, pas des comptes : les deux fenêtres n'ont pas
+     forcément la même taille pour qui écrit un jour sur douze, et « 5 » contre
+     « 6 » ne veut rien dire tant qu'on ne sait pas sur combien. */
+  const taux = (k, sur) => p[k] / Math.max(1, p[sur]);
+  const ecart = p.compare ? taux('recent', 'recent_sur') - taux('avant', 'avant_sur') : 0;
+  const tendance = !p.compare ? null : Math.abs(ecart) < 0.02 ? 'pareil' : ecart > 0 ? 'monte' : 'baisse';
 
   return `<article class="prise">
     <header>
@@ -3279,9 +3284,11 @@ function priseMarkup(p) {
     ${seriesMarkup(p.series)}
 
     <p class="pfen">
-      <span class="pf"><b>${p.recent}</b> <span class="faint">sur tes ${p.fenetre ?? 30} dernières journées</span></span>
-      ${p.compare ? `<span class="pf faint">avant&nbsp;: ${p.avant}</span>
-        <span class="ptend ${tendance}">${tendance === 'monte' ? '↗' : tendance === 'baisse' ? '↘' : '='}</span>` : ''}
+      <span class="pf"><b>${p.recent}</b> <span class="faint">sur tes ${p.recent_sur ?? p.fenetre ?? 30} dernières journées</span></span>
+      ${p.compare ? `<span class="pf faint">avant&nbsp;: ${p.avant} sur ${p.avant_sur}</span>
+        <span class="ptend ${tendance}" title="${tendance === 'monte' ? 'plus souvent qu’avant'
+          : tendance === 'baisse' ? 'moins souvent qu’avant' : 'autant qu’avant'}"
+          >${tendance === 'monte' ? '↗' : tendance === 'baisse' ? '↘' : '='}</span>` : ''}
     </p>
 
     ${p.signes?.length ? `<ul class="psignes">${p.signes.map(g => `<li>

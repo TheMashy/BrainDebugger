@@ -184,3 +184,35 @@ test('le témoin ne se voit rien inventer', () => {
   const r = analyserPrises(rows, { aujourdhui: J(199) });
   assert.deepEqual(r.prises, [], JSON.stringify(r.prises.map(p => p.cle)));
 });
+
+test('une série coupée par un long silence ne devient pas un record', () => {
+  /* Le cas trouvé sur dossier : 124 jours « sans », dont soixante où le journal
+     n'a pas été ouvert une seule fois. La densité moyenne ne le voyait pas —
+     elle se laissait remplir par les deux bouts. */
+  const ecrits = [];
+  for (let i = 0; i < 20; i++) ecrits.push(J(i));          // un mois écrit
+  for (let i = 90; i < 120; i++) ecrits.push(J(i));        // puis, après deux mois de rien
+  const rows = ecrits.map(d => ({ date: d, note: 6,
+    text: [J(0), J(1), J(2), J(118), J(119)].includes(d) ? "j'ai bu quatre bières" : 'journée ordinaire' }));
+  const a = analyserPrises(rows, { aujourdhui: J(119) }).prises.find(p => p.cle === 'alcool');
+  const longue = a.series.reduce((m, s) => s.jours > m.jours ? s : m, a.series[0]);
+  assert.ok(longue.trou >= 60, `le silence devrait être mesuré, trou = ${longue.trou}`);
+  assert.equal(longue.maigre, true, 'une série traversée par deux mois de silence est marquée');
+  assert.ok(a.plus_longue < longue.jours, 'et elle ne peut pas devenir le record');
+});
+
+test('la comparaison s’affiche pour qui écrit peu', () => {
+  /* Le vrai cas d'usage : un journal ouvert un jour sur douze. Il fallait
+     soixante journées écrites pour comparer deux fenêtres de trente ; ce
+     lecteur-là n'y arrivait jamais, et la seule ligne qui dit le SENS ne
+     s'affichait donc jamais pour lui. */
+  const rows = [];
+  for (let i = 0; i < 480; i += 12)
+    rows.push({ date: J(i), note: 6, text: i >= 300 ? "j'ai bu quatre bières" : 'journée ordinaire' });
+  const r = analyserPrises(rows, { aujourdhui: J(468) });
+  const a = r.prises.find(p => p.cle === 'alcool');
+  assert.ok(a, 'l’alcool ressort');
+  assert.equal(a.compare, true, `40 journées écrites : la comparaison doit s’afficher (avant_sur = ${a.avant_sur})`);
+  assert.ok(a.avant_sur > 0 && a.recent_sur > 0, 'les deux tailles sont rendues, pour que la vue dise « sur combien »');
+  assert.ok(a.recent / a.recent_sur > a.avant / a.avant_sur, 'et la montée se voit');
+});
