@@ -8,6 +8,7 @@ import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
 import { deltaColor, noteColor, noteScaleRGB, noteScaleColor, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
 import { poserLesNuits, graduations, enHeures, enHHMM, medianeHoraire, mediane, dureeDeLaNuit } from './nuits-axe.js';
+import { bandeLiee, bandeCouches, COUCHES, symbole, joursDe } from './bande.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { ico, ICO_VUE, ICO_ARCHETYPE, ICO_FAMILLE } from './icones.js';
 import { friseMarkup as friseSVG } from './frise.js';
@@ -2805,6 +2806,15 @@ let FONCT = null;
 let FONCT_AN = null;
 /* Les nuits (coucher, lever, durée), sur deux ans : la vue Année les dessine dans sa fenêtre. */
 let NUITS = null;
+/*
+ * LA BANDE, SOUS LA CARTE.
+ *
+ * `BANDE_VISE` : la chose survolée, par son indice de nœud — c'est le fil qui
+ * relie les deux moitiés, et il vaut dans les deux sens (un rond de la carte
+ * allume ses jours, ses jours rallument son rond).
+ * `BANDE_MODE` : null = la bande liée ; sinon la couche isolée du mode lecture.
+ */
+let BANDE_VISE = null, BANDE_MODE = null, BANDE_LECTURE = false;
 let LECTURE_EN_COURS = false;
 /*
  * LA DERNIERE ERREUR DE LECTURE, GARDEE A L'ECRAN.
@@ -3165,6 +3175,81 @@ function mecaGroupes(lecture) {
     </div>`);
   }
   return bloc.join('');
+}
+
+/**
+ * LA BANDE SOUS LA CARTE — et le mode lecture qui la remplace.
+ *
+ * La carte montre ce qui est relié, sans jamais dire QUAND. Un rond n'est
+ * pourtant rien d'autre qu'une liste de jours : c'est ce que le modèle rend, et
+ * c'est sur ces dates que le serveur compte les flèches. La bande le montre tel
+ * quel, et le survol relie les deux moitiés — sans elle, « la boule » et le
+ * journal juste à côté n'avaient aucune passerelle.
+ */
+function bandeMarkup(lecture) {
+  if (!FONCT?.series?.dates?.length) return '';
+  const corps = BANDE_LECTURE
+    ? bandeCouches(lecture?.carte, FONCT, lecture?.schemas, BANDE_MODE)
+    : bandeLiee(lecture?.carte, FONCT);
+  if (!corps) return '';
+  // Une couche qui n'a rien à marquer n'a pas de bouton : sinon on clique sur
+  // « ce qui se répète » et la bande se vide sans dire pourquoi.
+  const tenues = new Set([...corps.matchAll(/data-couche="([a-z]+)"/g)].map(m => m[1]));
+  const couches = BANDE_LECTURE ? `<div class="bcch">
+      ${COUCHES.filter(c => tenues.has(c.id)).map(c => `<button data-couche="${c.id}" aria-pressed="${BANDE_MODE === c.id}"
+        >${symbole(c.sym, 13)}${esc(c.nom)}</button>`).join('')}
+      <button data-couche="" aria-pressed="${!BANDE_MODE}">tout voir</button>
+    </div>` : '';
+  const dit = BANDE_LECTURE
+    ? (COUCHES.find(c => c.id === BANDE_MODE)?.dit
+       ?? 'Chaque couche marque des jours <b>déjà écrits</b> — aucune n’ajoute de fait.')
+    : '';
+  return `<section class="bandewrap${BANDE_LECTURE ? ' lecture' : ''}">
+    <div class="btete">
+      <span class="k faint">${BANDE_LECTURE ? 'Comment ça se lit' : 'Quand'}</span>
+      <button class="bmode" data-bande-mode aria-pressed="${BANDE_LECTURE}"
+        title="${BANDE_LECTURE ? 'Revenir à la bande simple' : 'Voir ce qui se lit sur ces jours'}"
+        >${BANDE_LECTURE ? 'fermer' : 'comment ça se lit'}</button>
+    </div>
+    ${couches}${corps}
+    ${dit ? `<p class="bdit">${dit}</p>` : ''}
+  </section>`;
+}
+
+/**
+ * LE SURVOL, DANS LES DEUX SENS.
+ *
+ * Survoler une piste de la bande allume le rond correspondant sur la toile, et
+ * survoler un rond allume ses jours. C'est ce qui fait que les deux moitiés
+ * sont une seule vue et pas deux dessins côte à côte — et c'est aussi la seule
+ * façon, sur une bande de deux cents jours, de savoir à quoi appartient une
+ * rangée de points.
+ *
+ * La toile est un CANVAS : elle ne porte pas d'élément par nœud. On lui passe
+ * donc l'indice visé par `RELA_SURVOL`, qu'elle sait déjà dessiner en clair —
+ * le même chemin que le survol de la souris sur le dessin lui-même.
+ */
+function brancherBande() {
+  const b = $('.bandewrap'); if (!b) return;
+  const viser = i => {
+    if (BANDE_VISE === i) return;
+    BANDE_VISE = i;
+    for (const g of b.querySelectorAll('.bjn'))
+      g.classList.toggle('vif', i != null && g.dataset.noeud === String(i));
+    b.classList.toggle('vise', i != null);
+    // La toile s'allume au même endroit : un seul geste, deux dessins.
+    RELA_SURVOL = i ?? -1;
+    RELA_PEINDRE?.();
+  };
+  b.addEventListener('pointerover', e => {
+    const g = e.target.closest('.bjn');
+    if (g) viser(Number(g.dataset.noeud));
+  });
+  b.addEventListener('pointerleave', () => viser(null));
+  b.addEventListener('focusin', e => {
+    const g = e.target.closest('.bjn');
+    if (g) viser(Number(g.dataset.noeud));
+  });
 }
 
 /** La carte de la lecture affichée, pour rapprocher un motif d'un nœud. */
@@ -3936,7 +4021,7 @@ async function renderLecture() {
      */
     corps = `
       <div class="lectgrille">
-        <div class="lectcarte">${carteMarkup(L.lecture.carte)}</div>
+        <div class="lectcarte">${carteMarkup(L.lecture.carte)}${bandeMarkup(L.lecture)}</div>
         <div class="lectmeca">${mecaGroupes(L.lecture)}</div>
         <aside class="lectdit">
           ${/* Le nœud ouvert prend la place de la synthèse : c'est une réponse à
@@ -4133,7 +4218,12 @@ function wireIlots() {
 }
 
 function wireLecture() {
+  brancherBande();
   $('#view').onclick = async e => {
+    const bm = e.target.closest('[data-bande-mode]');
+    if (bm) { BANDE_LECTURE = !BANDE_LECTURE; BANDE_MODE = null; return renderLecture(); }
+    const bc = e.target.closest('[data-couche]');
+    if (bc) { BANDE_MODE = bc.dataset.couche || null; return renderLecture(); }
     // Une journée citée par un fonctionnement s'ouvre : la preuve est à un clic.
     const fj = e.target.closest('[data-fonct-jour]');
     if (fj) return renderMirror(fj.dataset.fonctJour);

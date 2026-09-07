@@ -4193,3 +4193,48 @@ details.jpecol .jpetop { margin-top: 5px; }
 .pcarte { margin-top: 8px; }
 .pcarte .rgcorps { padding: 12px 15px 16px; }
 .pcarte .rgcorps > .fonct, .pcarte .rgcorps > .surv, .pcarte .rgcorps > .schemas { margin: 0; }
+
+/* ==================================================================
+   LA BANDE DES JOURS, sous la carte.
+   La carte dit quoi va avec quoi ; la bande dit quand. Le survol relie
+   les deux — sans lui, ce sont deux dessins posés l'un sous l'autre.
+   ================================================================== */
+.bandewrap { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.btete { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.bmode {
+  margin-left: auto; background: none; border: 1px solid var(--line); border-radius: 999px;
+  font: 500 11px/1 var(--sans); color: var(--ink-faint); padding: 5px 11px; cursor: pointer;
+  transition: color .2s, border-color .2s;
+}
+.bmode:hover, .bmode[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); }
+.bsvg { width: 100%; height: auto; display: block; color: var(--ink-faint); }
+.bax { font: 10.5px var(--mono); fill: currentColor; }
+
+/* Les pistes : une par chose, au-dessus des jours. */
+.bjn circle { fill: var(--ink-faint); opacity: .55; transition: fill .2s, opacity .2s, r .2s; }
+.bjn { cursor: pointer; }
+.bjn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bandewrap.vise .bjn circle { opacity: .14; }
+.bandewrap.vise .bjn.vif circle { opacity: 1; fill: var(--accent); r: 3.1; }
+.bjj { transition: opacity .2s; }
+.bandewrap.vise .bjj { opacity: .34 !important; }
+.bleg { display: flex; align-items: center; gap: 7px; margin: 4px 0 0;
+  font-size: 11px; color: var(--ink-faint); }
+.bleg b { color: var(--ink-dim); font-weight: 500; }
+.bande { margin: 0; }
+
+/* Le mode lecture : une couche à la fois. */
+.bcch { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.bcch button {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  font: 500 11px/1 var(--sans); color: var(--ink-faint); padding: 6px 11px; cursor: pointer;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.bcch button:hover { color: var(--ink); }
+.bcch button[aria-pressed="true"] { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+.bcch svg { flex: none; }
+.bco { transition: opacity .35s; }
+.bco.eteint { opacity: .18; }
+.bdit { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-dim); max-width: 70ch; }
+.bdit b { color: var(--ink); font-weight: 500; }
