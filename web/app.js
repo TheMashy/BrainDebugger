@@ -52,7 +52,7 @@ const enTetes = (json = false) => ({
 });
 
 async function api(path, body) {
-  if (body !== undefined) FONCT = FONCT_AN = NUITS = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
+  if (body !== undefined) FONCT = FONCT_AN = NUITS = PRISES = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
   const res = await fetch(path, body
     ? { method: 'POST', headers: enTetes(true), body: JSON.stringify(body) }
     : { headers: enTetes() });
@@ -2801,6 +2801,7 @@ let MIR_THEME = null;          // le theme deplie
 let LECTURE = null;
 /* Les fonctionnements : calculés sans modèle, invalidés dès qu'on écrit ou qu'une mesure arrive. */
 let FONCT = null;
+let PRISES = null;
 /* La même carte, sur un peu plus d'un an, pour la grille de l'Année : les bascules
    n'ont de sens que posées sur les jours qu'elles datent. */
 let FONCT_AN = null;
@@ -3189,7 +3190,7 @@ function mecaGroupes(lecture) {
 function bandeMarkup(lecture) {
   if (!FONCT?.series?.dates?.length) return '';
   const corps = BANDE_LECTURE
-    ? bandeCouches(lecture?.carte, FONCT, lecture?.schemas, BANDE_MODE)
+    ? bandeCouches(lecture?.carte, FONCT, lecture?.schemas, BANDE_MODE, { prises: PRISES })
     : bandeLiee(lecture?.carte, FONCT);
   if (!corps) return '';
   // Une couche qui n'a rien à marquer n'a pas de bouton : sinon on clique sur
@@ -3214,6 +3215,92 @@ function bandeMarkup(lecture) {
     ${couches}${corps}
     ${dit ? `<p class="bdit">${dit}</p>` : ''}
   </section>`;
+}
+
+/* =====================================================================
+ * CE QUI A DE LA PRISE.
+ *
+ * L'ordre de la carte n'est pas décoratif. On montre d'abord CE QUI VIENT
+ * AVANT, parce que c'est la seule ligne sur laquelle on peut agir un jour à
+ * l'avance ; puis les séries, TOUTES, parce qu'un compteur remis à zéro
+ * transforme un soir en échec total et que l'échec total est ce qui fait
+ * enchaîner ; puis les deux fenêtres, qui disent le sens ; puis les phrases
+ * qu'on a écrites soi-même. Le nombre de jours arrive dernier : c'est celui
+ * qu'on regarde quand on n'a rien d'autre, et il n'apprend rien.
+ * ===================================================================== */
+
+const ICO_PRISE = { alcool: 'verre', cannabis: 'feuille', stimulants: 'eclair',
+                    calmants: 'gelule', tabac: 'clope', argent: 'de' };
+const ICO_SIGNE = { arreter: 'pause', craque: 'casse', manque: 'refaire',
+                    plus_que_prevu: 'plus', cache: 'oeilbarre' };
+
+/** Les séries sans, en barres sur une base commune : la plus longue donne l'échelle. */
+function seriesMarkup(series) {
+  if (!series?.length) return '';
+  const vues = series.slice(-14);
+  const haut = Math.max(...vues.map(s => s.jours), 1);
+  const barres = vues.map(s => {
+    const h = Math.max(3, Math.round(s.jours / haut * 34));
+    const cl = ['pbar', s.encours ? 'encours' : '', s.maigre ? 'maigre' : ''].filter(Boolean).join(' ');
+    const dit = `${s.jours} jour${s.jours > 1 ? 's' : ''} sans, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
+      + (s.maigre ? ` — journal ouvert ${s.ecrites} fois seulement` : '');
+    return `<span class="${cl}" style="height:${h}px" title="${esc(dit)}"><i></i></span>`;
+  }).join('');
+  const record = Math.max(...series.filter(s => !s.maigre).map(s => s.jours), 0);
+  return `<div class="pseries">
+    <div class="pbarres">${barres}</div>
+    <span class="psleg faint">${vues.length < series.length ? 'tes dernières séries sans' : 'tes séries sans'},
+      de la plus ancienne à maintenant${record ? ` · la plus longue&nbsp;: <b>${record} j</b>` : ''}</span>
+  </div>`;
+}
+
+function priseMarkup(p) {
+  const avant = p.avant_ca?.[0];
+  const cout = p.apres_ca?.tient ? p.apres_ca : null;
+  const tendance = !p.compare ? null : p.recent === p.avant ? 'pareil'
+    : p.recent > p.avant ? 'monte' : 'baisse';
+
+  return `<article class="prise">
+    <header>
+      <span class="pico">${ico(ICO_PRISE[p.cle] ?? 'point', 16)}</span>
+      <b>${esc(p.nom)}</b>
+      ${/* Le seul geste offert : reposer ces jours-là sur la bande, au milieu des
+            cycles et des bascules. C'est là qu'on voit après quoi ça tombe —
+            un tableau de chiffres ne l'a jamais montré à personne. */''}
+      <button class="plien" data-voir-bande title="Voir ces jours sur la bande">${ico('bande', 13)}</button>
+      <span class="pdepuis faint">${p.depuis === 0 ? 'aujourd’hui'
+        : p.depuis === 1 ? 'hier'
+        : `il y a ${p.depuis} jours`}</span>
+    </header>
+
+    ${avant ? `<p class="pavant">${ico('fleche', 13)}
+      <span>ça revient après <b>${esc(avant.nom)}</b> — ${avant.apres} fois sur ${avant.sur}</span></p>` : ''}
+
+    ${seriesMarkup(p.series)}
+
+    <p class="pfen">
+      <span class="pf"><b>${p.recent}</b> <span class="faint">sur tes ${p.fenetre ?? 30} dernières journées</span></span>
+      ${p.compare ? `<span class="pf faint">avant&nbsp;: ${p.avant}</span>
+        <span class="ptend ${tendance}">${tendance === 'monte' ? '↗' : tendance === 'baisse' ? '↘' : '='}</span>` : ''}
+    </p>
+
+    ${p.signes?.length ? `<ul class="psignes">${p.signes.map(g => `<li>
+      ${ico(ICO_SIGNE[g.id] ?? 'point', 13)}<span class="psdit">${esc(g.dit)}</span>
+      <q>${esc(g.phrase)}</q></li>`).join('')}</ul>` : ''}
+
+    ${cout ? `<p class="pcout faint">Le lendemain, ta note est basse ${cout.bas} fois sur ${cout.sur}
+      — ${Math.round(cout.hors_bas / cout.hors * 100)}&nbsp;% les autres jours.</p>` : ''}
+  </article>`;
+}
+
+function prisesMarkup(P) {
+  if (!P) return '';
+  if (!P.assez) return `<p class="pvide faint">Pas encore assez de journées écrites pour compter quoi que ce soit.</p>`;
+  if (!P.prises.length) return `<p class="pvide faint">Rien ne revient assez souvent dans ton journal pour être compté ici.
+    ${P.ecartees.length ? `Vu une ou deux fois&nbsp;: ${P.ecartees.map(e => esc(e.nom)).join(', ')} — trop peu pour dire quoi que ce soit.` : ''}</p>`;
+  return `<div class="prises">${P.prises.map(p => priseMarkup({ ...p, fenetre: P.fenetre })).join('')}
+    <p class="pnote faint">Ce tableau compte des jours écrits et te rend tes phrases. Il ne dit pas ce que tu es.</p>
+  </div>`;
 }
 
 /**
@@ -3981,8 +4068,11 @@ async function renderLecture() {
   MIRROR_DATE = null;
   // La lecture (par modèle) et les fonctionnements (comptés ici) partent ensemble :
   // le second n'a pas à attendre le premier, il n'en dépend pas.
-  const [l, f] = await Promise.all([LECTURE ?? api('/api/lecture'), FONCT ?? api('/api/fonctionnements').catch(() => null)]);
-  LECTURE = l; FONCT = f;
+  const [l, f, p] = await Promise.all([
+    LECTURE ?? api('/api/lecture'),
+    FONCT ?? api('/api/fonctionnements').catch(() => null),
+    PRISES ?? api('/api/prises').catch(() => null)]);
+  LECTURE = l; FONCT = f; PRISES = p;
   const L = LECTURE;
 
   /*
@@ -4134,6 +4224,17 @@ async function renderLecture() {
         : 'rien ne se détache encore',
       corps: fonctionnementsMarkup(FONCT, { nu: true }) })}
 
+    ${/* Sous les schémas, pas au-dessus : ce qui a de la prise se lit à la
+          lumière de ce qui tourne, et ouvrir la carte sur un tableau de
+          consommations en ferait le sujet de la page. */''}
+    ${pliCarte({ dessin: 'verre', titre: 'Ce qui a de la prise',
+      etat: !PRISES ? null
+        : !PRISES.assez ? 'pas encore de quoi compter'
+        : PRISES.prises.length
+          ? `${PRISES.prises.length} chose${PRISES.prises.length > 1 ? 's' : ''} suivie${PRISES.prises.length > 1 ? 's' : ''}`
+          : 'rien ne revient assez souvent',
+      corps: prisesMarkup(PRISES) })}
+
     ${pliCarte({ dessin: 'alerte', titre: 'Les jours à surveiller',
       etat: FONCT?.surveilles?.n
         ? `${FONCT.surveilles.n} jour${FONCT.surveilles.n > 1 ? 's' : ''}${FONCT.surveilles.rythme ? ` · ${FONCT.surveilles.rythme}` : ''}`
@@ -4224,6 +4325,16 @@ function wireLecture() {
     if (bm) { BANDE_LECTURE = !BANDE_LECTURE; BANDE_MODE = null; return renderLecture(); }
     const bc = e.target.closest('[data-couche]');
     if (bc) { BANDE_MODE = bc.dataset.couche || null; return renderLecture(); }
+    /* « Voir ces jours sur la bande » : on ouvre le mode lecture sur la couche
+       des prises et on remonte jusqu'à elle. Sans le défilement le clic
+       paraîtrait sans effet — la bande est en haut de l'onglet, le tableau
+       tout en bas. */
+    if (e.target.closest('[data-voir-bande]')) {
+      BANDE_LECTURE = true; BANDE_MODE = 'prise';
+      await renderLecture();
+      $('.bandewrap')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     // Une journée citée par un fonctionnement s'ouvre : la preuve est à un clic.
     const fj = e.target.closest('[data-fonct-jour]');
     if (fj) return renderMirror(fj.dataset.fonctJour);
@@ -4306,7 +4417,7 @@ function wireLecture() {
         toast(r.messages
           ? `${r.messages} passage${r.messages > 1 ? 's' : ''} rangé${r.messages > 1 ? 's' : ''} sur ${r.jours} journée${r.jours > 1 ? 's' : ''}.`
           : 'Tout était déjà à sa place.');
-        LECTURE = FONCT = FONCT_AN = NUITS = null;
+        LECTURE = FONCT = FONCT_AN = NUITS = PRISES = null;
         return renderLecture();
       } catch (err) {
         toast('Le rangement n’a pas abouti.');

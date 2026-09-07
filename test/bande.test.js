@@ -105,3 +105,31 @@ test('isoler une couche éteint les autres, sans en retirer aucune', () => {
   assert.match(svg, /class="bco eteint" data-couche="jours"/);
   assert.equal((svg.match(/data-couche=/g) ?? []).length, 6, 'rien ne disparaît, tout se tait');
 });
+
+/* Deux couches qui marquent la même bande de pixels se lisent comme une seule.
+   C'est arrivé en ajoutant « ce qui a de la prise » : ses jours tombaient
+   exactement sur la rangée des cycles, et rien à l'écran ne le disait. */
+test('deux couches ne marquent jamais la même rangée', () => {
+  const { carte, fonct, schemas } = bancCouches();
+  const dates = fonct.series.dates;
+  const prises = { prises: [{ nom: 'l’alcool', jours: dates.filter((_, i) => i % 5 === 0) }] };
+  const svg = bandeCouches(carte, fonct, schemas, null, { prises });
+  const bandes = new Map();
+  for (const g of svg.match(/<g class="bco[^"]*" data-couche="[a-z]+">[\s\S]*?(?=<g class="bco|$)/g) ?? []) {
+    const id = /data-couche="([a-z]+)"/.exec(g)[1];
+    // On ne mesure que les MARQUES : l'étiquette porte son pictogramme, qui a
+    // ses propres rectangles dans sa boîte de 16 — les compter ferait dire au
+    // test que « tes jours » va de 5 à 108.
+    const marques = g.split('<g transform="translate')[0];
+    const y = [...marques.matchAll(/<rect[^>]*\by="([\d.]+)"[^>]*\bheight="([\d.]+)"/g)]
+      .map(m => [Number(m[1]), Number(m[1]) + Number(m[2])]);
+    if (y.length) bandes.set(id, [Math.min(...y.map(v => v[0])), Math.max(...y.map(v => v[1]))]);
+  }
+  const ids = [...bandes.keys()];
+  assert.ok(ids.includes('prise'), 'la couche des prises est dessinée');
+  for (let i = 0; i < ids.length; i++) for (let k = i + 1; k < ids.length; k++) {
+    const [a1, a2] = bandes.get(ids[i]), [b1, b2] = bandes.get(ids[k]);
+    assert.ok(a2 <= b1 || b2 <= a1,
+      `« ${ids[i] } » (${a1}–${a2}) et « ${ids[k]} » (${b1}–${b2}) se superposent`);
+  }
+});

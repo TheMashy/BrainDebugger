@@ -30,6 +30,7 @@ export const SYMBOLES = {
   apres:   '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="2.6" cy="8" r="1.7" fill="currentColor" stroke="none"/><path d="M5.6 8h7.2"/><path d="M10.6 5.4 13.2 8l-2.6 2.6"/></g>',
   repete:  '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8a5.2 5.2 0 1 1-2.1-4.2"/><path d="M8.1 2.2h3.4v3.3"/></g>',
   change:  '<g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1.4 11.6h5.1V4.9h8.1"/></g>',
+  prise:   '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 2.6h7.6l-3.8 5.9z"/><path d="M8 8.6v4.4M5.4 13.2h5.2"/></g>',
   surv:    '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2.4 15 13.6H1z"/><path d="M8 6.6v3.1" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".95" fill="currentColor" stroke="none"/></g>'
 };
 export const symbole = (nom, taille = 13) =>
@@ -156,6 +157,8 @@ export const COUCHES = [
     dit: 'Les jours où un cycle se rejoue. Un cycle n’est pas une histoire&nbsp;: c’est une forme qui revient, et on la voit revenir.' },
   { id: 'change',  nom: 'le jour où ça change', sym: 'change',
     dit: 'Le jour où ta note passe d’un niveau à l’autre. <b>La date n’est pas choisie</b>&nbsp;: c’est celle qui reste quand on compare les deux périodes.' },
+  { id: 'prise',   nom: 'ce qui a de la prise', sym: 'prise',
+    dit: 'Les jours où une consommation est écrite. Posés sur la bande, on voit les séries sans — et qu’un écart n’efface pas les semaines d’avant.' },
   { id: 'surv',    nom: 'à surveiller',         sym: 'surv',
     dit: 'Les jours marqués par la veille. Posés sur la bande, on voit tout de suite <b>s’ils se suivent</b>.' }
 ];
@@ -166,7 +169,7 @@ export const COUCHES = [
  * @param {object} schemas  les cycles lus par le modèle
  * @param {string|null} isole  la couche à montrer seule, ou null pour tout
  */
-export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 860 } = {}) {
+export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 860, prises = null } = {}) {
   const dates = fonct?.series?.dates ?? [];
   const notes = fonct?.series?.note ?? [];
   if (dates.length < 8) return '';
@@ -219,6 +222,19 @@ export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 86
     marques: cycle.jours.map(x =>
       `<rect x="${(x - 1.5).toFixed(1)}" y="${Y + HB + 5}" width="3" height="9" rx="1.5" fill="var(--m-prune, #a78bfa)"/>`).join('') });
 
+  /* — ce qui a de la prise : la plus fournie, sous les cycles —
+     Elle a sa place ICI et pas dans un écran à part : une consommation est une
+     chose datée comme les autres, et c'est en la voyant sur la même règle que
+     les bascules et les cycles qu'on voit après quoi elle tombe. */
+  const prise = (prises?.prises ?? [])[0];
+  if (prise) {
+    const xs = prise.jours.map(pos).filter(x => x != null);
+    if (xs.length) couches.push({ id: 'prise', sym: 'prise', couleur: 'var(--m-brique, #e07a5f)',
+      texte: `${prise.nom} — ${xs.length} jours écrits`,
+      marques: xs.map(x =>
+        `<rect x="${(x - 1.5).toFixed(1)}" y="${Y + HB + 31}" width="3" height="9" rx="1.5" fill="var(--m-brique, #e07a5f)"/>`).join('') });
+  }
+
   /* — le jour où ça change — */
   const basc = (fonct?.items ?? []).filter(i => i.type === 'bascule').map(i => ({ d: i.date, x: pos(i.date) }))
     .filter(b => b.x != null);
@@ -237,7 +253,7 @@ export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 86
 
   /* Les étiquettes ne se cherchent pas une place : elles descendent en pile,
      une ligne chacune, dans l'ordre des couches. Rien ne peut plus se croiser. */
-  const Y_PILE = Y + HB + 44, PAS_PILE = 19;
+  const Y_PILE = Y + HB + 52, PAS_PILE = 19;
   const vif = id => !isole || isole === id;
   const dessin = couches.map((c, k) =>
     `<g class="bco${vif(c.id) ? '' : ' eteint'}" data-couche="${c.id}">${c.marques}

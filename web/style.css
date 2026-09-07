@@ -4238,3 +4238,54 @@ details.jpecol .jpetop { margin-top: 5px; }
 .bco.eteint { opacity: .18; }
 .bdit { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-dim); max-width: 70ch; }
 .bdit b { color: var(--ink); font-weight: 500; }
+
+/* ---- Ce qui a de la prise -------------------------------------------- */
+/* Une carte par chose, et rien qui crie : ni rouge d'alerte, ni gras sur le
+   nombre de jours. Ce qui doit ressortir, c'est le déclencheur et les séries —
+   le reste se lit après, si on veut. */
+.prises { display: flex; flex-direction: column; gap: 12px; }
+.prise { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; }
+.prise header { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.prise header b { font-weight: 550; }
+.pico { display: inline-flex; color: var(--ink-dim); }
+.pdepuis { margin-left: auto; font: 11.5px var(--mono); }
+.pavant { display: flex; align-items: flex-start; gap: 7px; margin: 0 0 9px;
+  font-size: 13px; color: var(--ink); }
+.pavant svg { flex: none; margin-top: 2px; color: var(--accent); }
+.pavant b { font-weight: 550; }
+
+/* Les séries : des barres sur une base commune. Toutes, pas la dernière — une
+   rechute est une barre parmi des barres, et les semaines d'avant restent là. */
+.pseries { margin: 0 0 9px; }
+.pbarres { display: flex; align-items: flex-end; gap: 4px; height: 42px; }
+.pbar { display: block; width: 14px; border-radius: 3px 3px 0 0;
+  background: var(--accent); opacity: .5; transition: opacity .15s; }
+.pbar:hover { opacity: .85; }
+.pbar.encours { opacity: 1; }
+/* Une série qu'on n'a presque pas écrite : le contour y est, le plein non.
+   On la voit, on ne peut pas s'en vanter. */
+.pbar.maigre { background: none; border: 1px dashed var(--ink-faint);
+  border-bottom: none; opacity: .85; }
+.pbar i { display: none; }
+.psleg { display: block; margin-top: 5px; font-size: 11.5px; }
+.psleg b { color: var(--ink-dim); font-weight: 500; }
+
+.pfen { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; font-size: 12.5px; }
+.pfen b { font-weight: 550; font-size: 15px; }
+.ptend { font: 13px var(--mono); color: var(--ink-faint); }
+.ptend.monte { color: var(--warn); }
+.ptend.baisse { color: var(--ok, var(--accent)); }
+
+.psignes { list-style: none; margin: 0 0 6px; padding: 0;
+  display: flex; flex-direction: column; gap: 5px; }
+.psignes li { display: flex; align-items: baseline; gap: 7px; font-size: 12.5px; }
+.psignes svg { flex: none; color: var(--ink-dim); align-self: center; }
+.psdit { color: var(--ink-dim); white-space: nowrap; }
+.psignes q { color: var(--ink-faint); font-style: italic;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcout { margin: 0; font-size: 12px; }
+.pnote, .pvide { margin: 2px 0 0; font-size: 11.5px; }
+.plien { margin-left: 6px; padding: 2px 5px; border: 1px solid var(--line);
+  border-radius: 6px; background: none; color: var(--ink-faint); cursor: pointer;
+  display: inline-flex; align-items: center; }
+.plien:hover { color: var(--ink); border-color: var(--accent); }

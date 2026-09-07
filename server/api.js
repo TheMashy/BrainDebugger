@@ -50,6 +50,7 @@ import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenet
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
+import { prises } from './prises.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -2333,6 +2334,18 @@ export const routes = {
   'GET /api/fonctionnements': ({ query, userId }) => {
     const jours = Math.max(60, Math.min(730, parseInt(query.jours ?? '180', 10) || 180));
     return fonctionnements(userId, { jours });
+  },
+
+  /*
+   * CE QUI A DE LA PRISE.
+   *
+   * La carte de la lecture entre dans le calcul : c'est elle qui donne « ce qui
+   * vient avant ». Sans clé, sans lecture, la route répond quand même — les
+   * comptages, les séries et les signes ne demandent que le journal ; seul le
+   * déclencheur manque, et il manque en silence plutôt que de tout retenir.
+   */
+  'GET /api/prises': ({ userId }) => {
+    return prises(userId, { carte: getLecture(userId)?.contenu?.carte ?? null });
   },
 
   'GET /api/lecture': async ({ userId }) => {

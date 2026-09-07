@@ -43,7 +43,7 @@
 
 import { messagesForDate } from './db.js';
 
-const norm = s => String(s ?? '').toLowerCase()
+export const norm = s => String(s ?? '').toLowerCase()
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/['’`\-]/g, ' ').replace(/\s+/g, ' ');   // « j'en peux plus » doit trouver « j en peux plus », « week-end » « week end »
 
@@ -173,6 +173,23 @@ const SUBSTANCE_TIERS = /\b(?:il|elle|ils|elles|on|mon frere|ma soeur|mon pere|m
 const SUBSTANCE_NEGATION = /\b(?:ne|n) (?:me suis )?(?:ai|suis|avais|etais|bois|prends|touche|fume) (?:pas|plus|jamais|rien)\b|\bpas (?:bu|pris|touche|fume|sniffe)\b|\bjamais (?:bu|pris|touche|fume|sniffe)\b|\bplus (?:bu|pris|touche|fume) depuis\b|\bsans (?:boire|alcool|rien prendre|toucher)\b|\bsobre\b|\barrete de (?:boire|fumer|prendre)\b|\bj ai arrete\b|\bzero alcool\b|\bpas une goutte\b|\bpas un verre\b/;
 const SUBSTANCE_INTENTION = /\benvie de (?:boire|me bourrer|me defoncer|prendre|reprendre|replonger|me mettre une cuite|sniffer)\b|\bj aimerais (?:boire|prendre|reprendre|me defoncer)\b|\bje vais (?:boire|me bourrer|me defoncer|prendre|reprendre|replonger)\b|\bsi je (?:bois|prends|reprends)\b|\bpour (?:ne pas|pas) (?:boire|reprendre|replonger|craquer)\b/;
 
+/*
+ * LES GARDES DES SUBSTANCES, PARTAGÉES.
+ *
+ * `server/prises.js` compte les mêmes mots sur toute la durée du journal. S'il
+ * les recopiait, les deux écrans finiraient par ne plus dire la même chose du
+ * même jour — et c'est la copie qui aurait tort, parce que ces quatre filtres
+ * sont ce qui a été corrigé le plus souvent (« bourré de travail », « mon frère
+ * a bu », « j'ai arrêté », « j'ai envie de boire »). Un seul jeu, un seul
+ * endroit où le réparer.
+ */
+export const GARDES_SUBSTANCE = {
+  hyperbole: SUBSTANCE_HYPERBOLE,   // /g : à utiliser avec .replace, jamais avec .test
+  tiers: SUBSTANCE_TIERS,
+  negation: SUBSTANCE_NEGATION,
+  intention: SUBSTANCE_INTENTION
+};
+
 /* ---------------------------------------------------------------------
  * NIVEAU ROUGE : une blessure a eu lieu.
  * ------------------------------------------------------------------ */
@@ -277,7 +294,7 @@ const IMPARFAIT = /\bme (?:scarifiais|tailladais|taillais|mutilais|coupais|brula
 const INFINITIF_QUESTION = /\?\s*$/;
 
 const coupures = /\s*;\s*|\s*:\s*|,?\s+mais\s+(?=la\b|ce\b|hier\b|maintenant\b|depuis\b|je\b)|,?\s+et\s+(?=la\b|ce\b|hier\b|maintenant\b|depuis\b)|,\s+(?=la\b|et la\b|ce soir\b|hier\b|maintenant\b)/;
-const propositions = np => np.split(coupures).map(x => x.trim()).filter(Boolean);
+export const propositions = np => np.split(coupures).map(x => x.trim()).filter(Boolean);
 
 /** Une date « le 3 septembre » : récente si elle tombe dans les huit derniers jours (ou aujourd'hui), passée sinon. */
 function dateRecente(np, aujourdhui) {

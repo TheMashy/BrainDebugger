@@ -88,7 +88,26 @@ export const TRAITS = {
   code:     '<path d="M6.2 5.6 2.6 9l3.6 3.4M11.8 5.6 15.4 9l-3.6 3.4"/><path d="M10.3 3.7 7.7 14.3"/>',
   video:    '<rect x="1.9" y="4.2" width="10.2" height="9.6" rx="1.6"/><path d="M12.1 8.2l4-2.3v6.2l-4-2.3z"/>',
   jeu:      '<rect x="1.9" y="5.6" width="14.2" height="6.8" rx="2.6"/><path d="M5.7 8.2v2.4M4.5 9.4h2.4"/><circle cx="12" cy="9" r=".95" fill="currentColor" stroke="none"/><circle cx="14" cy="10.6" r=".95" fill="currentColor" stroke="none"/>',
-  musique:  '<path d="M6.6 13.2V4.5l7.6-1.7v8.7"/><ellipse cx="4.6" cy="13.4" rx="2" ry="1.7"/><ellipse cx="12.2" cy="11.5" rx="2" ry="1.7"/>'
+  musique:  '<path d="M6.6 13.2V4.5l7.6-1.7v8.7"/><ellipse cx="4.6" cy="13.4" rx="2" ry="1.7"/><ellipse cx="12.2" cy="11.5" rx="2" ry="1.7"/>',
+
+  /* ---- ce qui a de la prise ----
+     Chacune DESSINE la chose, jamais un jugement sur elle : un verre est un
+     verre. Une icône qui grimacerait (une tête de mort, un panneau) dirait à
+     la place de la personne ce qu'elle doit en penser, et c'est exactement ce
+     que ce tableau s'interdit. */
+  verre:    '<path d="M4.8 3.2h8.4l-4.2 6.6z"/><path d="M9 9.8v4.8M6.1 14.8h5.8"/>',
+  feuille:  '<path d="M9 15.4V8.2"/><path d="M9 8.4c0-3.3 2.3-5.8 5.9-6.1.3 3.6-2 6.5-5.9 6.1z"/><path d="M8.8 11c-3.3-.3-5.4-2.3-5.7-5.4 3.1.2 5.2 1.9 5.7 4.4z"/>',
+  eclair:   '<path d="M10.6 2.2 4.4 10.1h4L7.3 15.8 14 7.9h-4z"/>',
+  gelule:   '<rect x="2.4" y="6.4" width="13.2" height="5.2" rx="2.6" transform="rotate(-35 9 9)"/><path d="M7.2 10.8 10.8 7.2"/>',
+  clope:    '<rect x="1.8" y="10.6" width="11.6" height="3.2" rx="1.1"/><path d="M10.4 10.6v3.2"/><path d="M13.6 8.2c1.5-1 1.5-2.7 0-3.7M16 8.6c1.6-1.3 1.6-3.5 0-4.8"/>',
+  de:       '<rect x="2.6" y="2.6" width="12.8" height="12.8" rx="3.2"/><circle cx="6.4" cy="6.4" r=".95" fill="currentColor" stroke="none"/><circle cx="11.6" cy="6.4" r=".95" fill="currentColor" stroke="none"/><circle cx="6.4" cy="11.6" r=".95" fill="currentColor" stroke="none"/><circle cx="11.6" cy="11.6" r=".95" fill="currentColor" stroke="none"/>',
+  /* La bande des journées : trois jours côte à côte. Le même dessin que le
+     pictogramme « tes jours » de la bande — un seul signe pour une seule chose. */
+  bande:    '<rect x="1.8" y="5" width="3.6" height="8" rx="1.2"/><rect x="7.2" y="5" width="3.6" height="8" rx="1.2"/><rect x="12.6" y="5" width="3.6" height="8" rx="1.2"/>',
+  /* Une ligne qui casse : deux segments décalés, et le décalage EST le signe. */
+  casse:    '<path d="M2.2 11.8 7.2 6.8M10.8 11.2 15.8 6.2"/>',
+  /* Ce qu'on n'a montré à personne. */
+  oeilbarre:'<path d="M1.9 9s2.8-4.3 7.1-4.3S16.1 9 16.1 9s-2.8 4.3-7.1 4.3S1.9 9 1.9 9z"/><circle cx="9" cy="9" r="1.8"/><path d="M3.4 15.3 14.6 2.7"/>'
 };
 
 /*
