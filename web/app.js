@@ -3185,7 +3185,7 @@ function carteMarkup(carte) {
             lirait la flèche comme le verbe du modèle, alors qu'elle est ce
             que les journées ont confirmé. */''}
       ${carte.liens?.some(l => l.appui?.sens === 'de' || l.appui?.sens === 'vers')
-        ? `<span class="cartepoints">une pointe&nbsp;= compté : ceci un jour, cela le lendemain</span>` : ''}
+        ? `<span class="cartepoints">une pointe&nbsp;= compté : ceci, et cela la fois d’après</span>` : ''}
     </div>
   </div>`;
 }

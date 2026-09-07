@@ -646,13 +646,19 @@ export function pointeFleche(ctx, a, c, b, rCible, taille) {
   ctx.fill();
 }
 
-/** Ce que le compte ajoute au verbe, au survol : « 7/12 le lendemain, contre 3/40 ». */
+/**
+ * Ce que le compte ajoute au verbe, au survol : « 7/12 la fois d'après, contre 3/40 ».
+ *
+ * « La fois d'après », et pas « le lendemain » : sur un journal écrit un jour
+ * sur douze, c'est la journée écrite SUIVANTE qui est comptée (voir sens.js).
+ * Écrire « le lendemain » ferait lire au chiffre autre chose que ce qu'il dit.
+ */
 export function appuiTexte(l) {
   const ap = l?.appui;
   if (!ap?.sens) return '';
   if (ap.sens === 'deux') return ' · dans les deux sens';
   const x = ap.sens === 'de' ? ap.de : ap.vers;
-  return ` · ${x.apres}/${x.sur} le lendemain, contre ${x.hors}/${x.hors_sur}`;
+  return ` · ${x.apres}/${x.sur} la fois d’après, contre ${x.hors}/${x.hors_sur}`;
 }
 
 /** Pose la pointe si le sens est compte : vers `t` pour « de », vers `s` pour « vers ». */

@@ -30,7 +30,7 @@ test('le sens compté voyage avec le lien, et un lien sans compte reste sans poi
   const G = versGraphe({ noeuds: CARTE.noeuds, liens: [{ ...CARTE.liens[0], appui }, CARTE.liens[1]] });
   assert.deepEqual(G.liens[0].appui, appui);
   assert.equal(G.liens[1].appui, null);
-  assert.equal(appuiTexte(G.liens[0]), ' · 7/12 le lendemain, contre 3/40');
+  assert.equal(appuiTexte(G.liens[0]), ' · 7/12 la fois d’après, contre 3/40');
   assert.equal(appuiTexte(G.liens[1]), '');
   assert.equal(appuiTexte({ appui: { sens: 'deux' } }), ' · dans les deux sens');
 });
