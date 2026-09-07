@@ -240,3 +240,23 @@ test('un journal tenu garde la lecture « séries sans »', () => {
   assert.equal(a.lecture, 'series');
   assert.ok(a.plus_longue >= 39, `la plus longue série : ${a.plus_longue}`);
 });
+
+test('la lecture gardée par texte ne confond pas deux textes', () => {
+  /* La détection est mémorisée par texte, parce qu'elle est refaite à chaque
+     message envoyé. Une clé trop lâche (la date, la longueur seule) ferait
+     rendre la lecture d'hier pour le texte d'aujourd'hui — et ça ne se verrait
+     jamais, parce que les deux réponses ont exactement la même forme. */
+  const fond = Array.from({ length: 30 }, (_, i) => ({ date: J(i + 10), note: 6, text: 'journée ordinaire' }));
+  const avec = [{ date: J(0), note: 4, text: "j'ai bu quatre bières" },
+                { date: J(1), note: 4, text: "j'ai bu quatre bières" },
+                { date: J(2), note: 4, text: "j'ai bu quatre bières" }];
+  assert.equal(analyserPrises([...avec, ...fond], { aujourdhui: J(40) }).prises[0].n, 3);
+
+  // mêmes dates, textes de MÊME LONGUEUR mais sans rien dedans
+  const sans = avec.map(e => ({ ...e, text: 'un texte de longueur egale ' }));
+  assert.deepEqual(analyserPrises([...sans, ...fond], { aujourdhui: J(40) }).prises, [],
+    'la lecture du texte précédent a été rendue pour un autre texte');
+
+  // et l'inverse : rechanger le texte fait revenir la détection
+  assert.equal(analyserPrises([...avec, ...fond], { aujourdhui: J(40) }).prises[0].n, 3);
+});

@@ -153,6 +153,39 @@ export const SIGNES = [
  * LA DÉTECTION, UN JOUR À LA FOIS.
  * ------------------------------------------------------------------ */
 
+/*
+ * LA LECTURE D'UN TEXTE SE GARDE, PARCE QU'ELLE EST REFAITE À CHAQUE MESSAGE.
+ *
+ * Le bloc du compagnon rappelle les comptages à chaque phrase envoyée, et
+ * chaque phrase envoyée vide le cache de la série — donc tout le journal était
+ * relu, six familles d'expressions par journée, à chaque message : 200 ms
+ * ajoutées au fil, pour un résultat qui ne change que d'une journée.
+ *
+ * Or la détection ne dépend QUE du texte. On garde donc sa lecture par texte,
+ * et une journée qu'on vient d'écrire est la seule à être relue. La clé porte
+ * la longueur en plus de l'empreinte : deux textes de longueurs différentes ne
+ * peuvent pas se confondre, et une collision demanderait deux textes de même
+ * longueur et de même empreinte.
+ */
+const MEMO = new Map();
+const MEMO_MAX = 4000;
+function empreinte(t) {
+  let h = 2166136261;
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `${t.length}:${(h >>> 0).toString(36)}`;
+}
+function luDuTexte(texte) {
+  const t = String(texte ?? '');
+  const cle = empreinte(t);
+  let v = MEMO.get(cle);
+  if (!v) {
+    v = { prises: prisesDuTexte(t), signes: signesDuTexte(t) };
+    if (MEMO.size >= MEMO_MAX) MEMO.delete(MEMO.keys().next().value);
+    MEMO.set(cle, v);
+  }
+  return v;
+}
+
 /**
  * Les familles vues dans un texte, chacune avec la proposition qui l'a fait
  * compter. Rien ne compte sur un mot seul : il faut un verbe de prise, ou un
@@ -275,13 +308,13 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null } = {}
   for (const e of rows) {
     const t = e.text;
     if (!String(t ?? '').trim()) continue;
-    for (const [cle, v] of prisesDuTexte(t)) {
+    const lu = luDuTexte(t);
+    for (const [cle, v] of lu.prises) {
       if (!vues.has(cle)) vues.set(cle, { jours: [], preuves: new Map() });
       const x = vues.get(cle);
       x.jours.push(e.date); x.preuves.set(e.date, v.phrase);
     }
-    const s = signesDuTexte(t);
-    if (s.length) signesParJour.set(e.date, s);
+    if (lu.signes.length) signesParJour.set(e.date, lu.signes);
   }
 
   const suite = suiteDe(ecrits, SEUILS_SENS.ecart_max);
