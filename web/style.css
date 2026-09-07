@@ -4153,3 +4153,37 @@ details.jpecol .jpetop { margin-top: 5px; }
 .survflous > summary::before { content: '› '; }
 .survflous[open] > summary::before { content: '⌄ '; }
 .survflous > summary:hover { color: var(--ink-dim); }
+
+/* ==================================================================
+   RÉGLAGES : cinq groupes repliés, chacun disant son état.
+   On ne vient pas « voir les réglages », on vient en changer UN — et il
+   fallait dérouler quatre écrans pour le trouver. L'état sur la ligne du
+   repli répond à « c'est réglé comment ? » sans rien ouvrir : un repli qui
+   cache son état ne fait que déplacer le problème.
+   ================================================================== */
+.reglages { display: grid; gap: 8px; max-width: 780px; }
+.rgroupe {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+  overflow: hidden;
+}
+.rgroupe > summary {
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center; gap: 10px; padding: 13px 15px; cursor: pointer; list-style: none;
+}
+.rgroupe > summary::-webkit-details-marker { display: none; }
+.rgroupe > summary:hover { background: var(--panel-2); }
+.rgico { display: flex; color: var(--ink-faint); }
+.rgroupe[open] .rgico { color: var(--accent); }
+.rgtitre { font-size: 14px; font-weight: 500; color: var(--ink); }
+/* L'état se lit, il ne se crie pas : c'est un repère, pas le titre. */
+.rgetat { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rgcorps { padding: 2px 15px 16px; border-top: 1px solid var(--line); }
+.rgcorps > h3 {
+  font: 600 10.5px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-faint); margin: 16px 0 8px;
+}
+.rgcorps > h3:first-child { margin-top: 14px; }
+/* Les cartes imbriquées perdent leur cadre : le groupe en est déjà un. */
+.rgcorps .card, .rgcorps .qscard { background: none; border: 0; padding: 0; margin: 0; }
+.rgcorps .row { display: grid; gap: 14px; }
+.rprive { margin-bottom: 10px; max-width: 780px; }

@@ -5171,16 +5171,53 @@ function qsMarkup(qs) {
 async function renderSettings() {
   const s = S.settings;
 
+  /*
+   * ==================================================================
+   *  DOUZE CARTES DÉPLIÉES DEVIENNENT CINQ GROUPES REPLIÉS.
+   *
+   * Cet onglet était un rouleau : douze sections ouvertes à la suite, sur
+   * quatre écrans de haut. Or on ne vient jamais dans les réglages « voir les
+   * réglages » — on vient en changer UN, et il faut d'abord dérouler tout le
+   * reste pour le trouver.
+   *
+   * Ils sont donc groupés par ce qu'on vient y faire, et repliés. Chaque
+   * groupe porte son ÉTAT COURANT sur sa ligne : « Machi · Claude Sonnet 5 »,
+   * « clé posée », « plancher 3 · tenue 2 jours ». C'est ce qui permet de
+   * répondre à « c'est réglé comment ? » sans rien ouvrir, et de savoir lequel
+   * ouvrir quand on veut changer quelque chose. Un repli qui cache son état ne
+   * fait que déplacer le problème.
+   *
+   * LE MODE PRIVÉ NE SE REPLIE PAS. On l'allume dans la seconde qui précède un
+   * partage d'écran ; un réglage d'urgence derrière deux clics n'est pas un
+   * réglage d'urgence. Il reste en haut, entier, avec son raccourci.
+   * ==================================================================
+   */
+  const MODELES = { 'claude-opus-5': 'Opus 5', 'claude-sonnet-5': 'Sonnet 5', 'claude-haiku-4-5': 'Haiku 4.5' };
+  const etatModele = s.chatBackend === 'anthropic'
+    ? `Claude ${MODELES[s.anthropicModelChat] ?? s.anthropicModelChat ?? ''}`.trim()
+    : s.chatBackend === 'ollama' ? 'Ollama, sur cette machine' : 'hors-ligne, relances scriptées';
+
+  const groupe = ({ dessin, titre, etat, corps }) => `<details class="rgroupe">
+    <summary>
+      <span class="rgico">${ico(dessin, 15)}</span>
+      <span class="rgtitre">${titre}</span>
+      <span class="rgetat faint">${etat}</span>
+    </summary>
+    <div class="rgcorps">${corps}</div>
+  </details>`;
+
   $('#view').innerHTML = `
-    ${/* « Ce qui revient » vit maintenant dans Ma carte, à côté de la carte et
-          de la synthèse — c'est là qu'on va pour savoir ce que le compagnon
-          comprend. Et les notes rangées se retrouvent dans Année, avec le reste
-          du journal. Ce qui restait ici obligeait à venir chercher une lecture
-          dans l'onglet des préférences. */''}
-    <div class="row">
-      <div class="card">
-        <h2>Le compagnon</h2>
-        <p class="sub">Change sa tête et son nom. Il n'a accès à aucune de tes statistiques.</p>
+    ${/* Le rideau, à portée de main : c'est le seul réglage qu'on cherche en
+          urgence, et le seul qui ne supporte pas d'être derrière un repli. */''}
+    <div class="card rprive">
+      ${pudMarkup()}
+      <p class="sub" style="margin:6px 0 0;font-size:12px">Éteint les <b>mots</b>, garde les <b>formes</b> — un rideau, pas une gomme.</p>
+    </div>
+
+    <div class="reglages">
+      ${groupe({ dessin: 'parler', titre: 'Le compagnon', etat: `${esc(s.petName)} · ${esc(etatModele)}`, corps: `
+        <h3>Son nom, sa tête</h3>
+                <p class="sub">Change sa tête et son nom. Il n'a accès à aucune de tes statistiques.</p>
         <label class="field"><span>Nom</span>
           <input type="text" id="petName" value="${esc(s.petName)}"></label>
         <label class="field"><span>Apparence</span></label>
@@ -5191,11 +5228,8 @@ async function renderSettings() {
         </div>
         <label class="field" style="margin-top:14px"><span>Ou charge ton PNG</span>
           <input type="file" id="petFile" accept="image/png,image/jpeg,image/webp,image/gif"></label>
-      </div>
-
-      <div class="card">
-        <h2>La voix</h2>
-        <p class="sub">Un blip par syllabe. Pas de synthèse vocale.</p>
+        <h3>Sa voix</h3>
+                <p class="sub">Un blip par syllabe. Pas de synthèse vocale.</p>
         <label class="field"><span>
           <input type="checkbox" id="blipEnabled" ${s.blipEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
           Le compagnon fait du bruit quand il parle</span></label>
@@ -5210,24 +5244,19 @@ async function renderSettings() {
             <input type="range" id="blipVolume" min="0" max="1" step=".05" value="${s.blipVolume}"></label>
         </div>
         <p class="sub" style="margin:0;font-size:12px">Clique un timbre pour l'écouter.</p>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Le modèle</h2>
-      <p class="sub">Par défaut, aucun modèle : les relances sont scriptées et rien ne quitte cette machine.</p>
+        <h3>Le modèle</h3>
+              <p class="sub">Par défaut, aucun modèle : les relances sont scriptées et rien ne quitte cette machine.</p>
       <label class="field"><span>Backend</span>
         <select id="chatBackend">
           <option value="scripted" ${s.chatBackend === 'scripted' ? 'selected' : ''}>Aucun modèle — relances scriptées (hors-ligne)</option>
           <option value="anthropic" ${s.chatBackend === 'anthropic' ? 'selected' : ''}>Claude (API Anthropic)</option>
           <option value="ollama" ${s.chatBackend === 'ollama' ? 'selected' : ''}>Ollama local</option>
         </select></label>
-      <div id="backendCfg"></div>
-    </div>
+      <div id="backendCfg"></div>` })}
 
-    <div class="card">
-      <h2>La passerelle</h2>
-      <p class="sub">
+      ${groupe({ dessin: 'antenne', titre: 'Ce qui te mesure', etat: s.passerelleCle ? 'une clé posée' : 'aucune clé — rien ne peut interroger le site', corps: `
+        <h3>La passerelle</h3>
+              <p class="sub">
         Une application qui tourne sur ta machine — une guirlande, une lampe, un widget — peut venir
         demander au site ce qu'il a en attente. Elle lit une couleur, une note sur dix, un titre de
         repère. <b>Jamais le journal</b> : pas une phrase écrite, pas un message, pas une lecture.
@@ -5251,16 +5280,22 @@ async function renderSettings() {
           La retirer coupe l'accès tout de suite, sans toucher à ta session.
         </p>
       </div>
-    </div>
+        <div class="card qscard" id="qscard"><p class="faint" style="font-size:12.5px;margin:0">Quantified self…</p></div>
+        <h3>L'heure</h3>
+                <p class="sub">
+          « Aujourd'hui » est ta journée à toi, pas celle du serveur. Ton navigateur annonce
+          ton fuseau à chaque requête ; voici ce que le serveur en fait.
+        </p>
+        <div class="fuseau" id="fuseau"><span>vérification…</span></div>
+        <p class="sub" style="margin:0;font-size:12.5px">
+          Si les deux heures ne concordent pas, une note posée après minuit tombe sur la veille.
+          Rien à régler à la main : c'est détecté tout seul, et ça suit tes voyages
+          comme le changement d'heure.
+        </p>` })}
 
-    ${/* Juste sous la passerelle, parce que c'est le MEME tuyau dans l'autre
-          sens et la même clé. Les séparer ferait chercher la clé deux fois. */''}
-    <div class="card qscard" id="qscard"><p class="faint" style="font-size:12.5px;margin:0">Quantified self…</p></div>
-
-    <div class="row">
-      <div class="card">
-        <h2>Le plancher</h2>
-        <p class="sub">Sous ce seuil, aucune statistique n'est affichée. Uniquement tes entrées passées, brutes.</p>
+      ${groupe({ dessin: 'suivi', titre: 'Comment tes notes se lisent', etat: `plancher ${s.floorMode === 'relative' ? 'référence − 3' : s.floor} · tenue ${s.sustain} jour${s.sustain > 1 ? 's' : ''}`, corps: `
+        <h3>Le plancher</h3>
+                <p class="sub">Sous ce seuil, aucune statistique n'est affichée. Uniquement tes entrées passées, brutes.</p>
         <label class="field"><span>Mode</span>
           <select id="floorMode">
             <option value="fixed" ${s.floorMode === 'fixed' ? 'selected' : ''}>Seuil fixe</option>
@@ -5268,28 +5303,30 @@ async function renderSettings() {
           </select></label>
         <label class="field"><span>Seuil fixe</span>
           <input type="number" id="floor" min="0" max="10" step="1" value="${s.floor}"></label>
-      </div>
-
-      <div class="card">
-        <h2>Le retour à la référence</h2>
-        <p class="sub">Combien de jours consécutifs au-dessus de la référence comptent comme une vraie remontée.</p>
+        <h3>Le retour à la référence</h3>
+                <p class="sub">Combien de jours consécutifs au-dessus de la référence comptent comme une vraie remontée.</p>
         <label class="field"><span>Tenue exigée <b class="mono" id="sv">${s.sustain}</b> jour${s.sustain > 1 ? 's' : ''}</span>
-          <input type="range" id="sustain" min="1" max="5" step="1" value="${s.sustain}"></label>
-      </div>
+          <input type="range" id="sustain" min="1" max="5" step="1" value="${s.sustain}"></label>` })}
 
-      <div class="card">
-        <h2>Importer un historique</h2>
-        <p class="sub">L'export d'une grille annuelle depuis un tableur : une ligne par mois,
+      ${groupe({ dessin: 'ranger', titre: 'Tes données', etat: `${S.stats.days} journées notées · ${S.stats.textDays} avec du texte`, corps: `
+        <h3>Ce qu'il y a</h3>
+                <p class="sub">${S.stats.days} journées notées · ${S.stats.textDays} avec du texte · ${esc(S.stats.firstDate)} → ${esc(S.stats.lastDate)}</p>
+        <p class="sub" style="font-size:12.5px">
+          Tout est dans un fichier SQLite sur ce disque. Aucun compte, aucun serveur, aucune synchro.
+        </p>
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn" id="export">${ico('sortir')}Exporter en JSON</button>
+          <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">${ico('partir')}Se déconnecter</button></form>
+        </div>
+        <h3>Importer un historique</h3>
+                <p class="sub">L'export d'une grille annuelle depuis un tableur : une ligne par mois,
           les notes en colonnes 1 à 31. Les repères d'étalonnage présents dans la feuille sont
           récupérés au passage.</p>
         <label class="field"><span>Fichier CSV</span>
           <input type="file" id="csvFile" accept=".csv,text/csv,text/plain"></label>
         <div id="importReport"></div>
-      </div>
-
-      <div class="card">
-        <h2>Coller des notes déjà écrites</h2>
-        <p class="sub">Les notes du tableur donnent les chiffres ; celles-ci donnent les mots.</p>
+        <h3>Coller des notes déjà écrites</h3>
+                <p class="sub">Les notes du tableur donnent les chiffres ; celles-ci donnent les mots.</p>
         <p class="sub" style="font-size:12.5px">
           Chaque journée commence par une date sur sa propre ligne, puis le texte en dessous.
           <span class="mono">2024-03-12</span>, <span class="mono">12/03/2024</span> ou
@@ -5303,34 +5340,22 @@ async function renderSettings() {
           <button class="btn" id="scanNotes">${ico('loupe')}Analyser</button>
           <span class="sub" style="margin:0">Rien n'est écrit avant que tu aies vu le résultat.</span>
         </div>
-        <div id="notesReport"></div>
-      </div>
+        <div id="notesReport"></div>` })}
 
-      ${/* L'heure est un REGLAGE INVISIBLE : personne ne pense a la verifier, et
-             quand elle est fausse le symptome se lit des mois plus tard, sous la
-             forme d'un trou dans la grille. On la montre donc telle que le
-             SERVEUR la voit, a cote de l'horloge du navigateur. */''}
-      <div class="card">
-        <h2>L'heure</h2>
-        <p class="sub">
-          « Aujourd'hui » est ta journée à toi, pas celle du serveur. Ton navigateur annonce
-          ton fuseau à chaque requête ; voici ce que le serveur en fait.
-        </p>
-        <div class="fuseau" id="fuseau"><span>vérification…</span></div>
-        <p class="sub" style="margin:0;font-size:12.5px">
-          Si les deux heures ne concordent pas, une note posée après minuit tombe sur la veille.
-          Rien à régler à la main : c'est détecté tout seul, et ça suit tes voyages
-          comme le changement d'heure.
-        </p>
-      </div>
+      ${groupe({ dessin: 'corbeille', titre: 'Effacer', etat: 'sans retour', corps: `<div class="danger">        <p class="sub">Sans retour. Exporte d'abord si tu hésites — c'est le bouton juste au-dessus.</p>
+        <div class="wipepick" id="wipePick">
+          <button data-portee="notes" aria-pressed="false">
+            <b>Les notes</b><span>les chiffres partent, le texte reste</span></button>
+          <button data-portee="texte" aria-pressed="false">
+            <b>Le texte</b><span>les mots partent, la courbe reste</span></button>
+          <button data-portee="tout" aria-pressed="false">
+            <b>Tout</b><span>journées, texte, repères, jalons</span></button>
+        </div>
+        <div id="wipeConfirm"></div></div>` })}
 
-      ${/* Le mode pudique est un reglage de VUE, pas de donnees : rien n'est
-             efface, rien n'est chiffre, rien ne quitte l'ecran autrement. Il
-             tient donc juste au-dessus de « Tes donnees », la ou on vient
-             quand on se demande qui voit quoi. */''}
-      <div class="card">
-        <h2>Montrer l'écran</h2>
-        <p class="sub">
+      ${/* Le texte long du mode privé : le bouton est en haut, l'explication
+            ici, pour qui veut savoir ce qu'il éteint exactement. */''}
+      ${groupe({ dessin: 'oeil', titre: "Montrer l'écran", etat: s.pudique ? 'mode privé actif' : 'mode privé éteint', corps: `        <p class="sub">
           Partager son écran, c'est montrer à quelqu'un d'autre un journal écrit pour soi.
           Le mode privé éteint les <b>mots</b> et garde les <b>formes</b> : tes messages,
           tes journées, tes notes rangées, les noms des mécanismes et des repères deviennent
@@ -5342,34 +5367,7 @@ async function renderSettings() {
           Ça ne change rien à ce qui est enregistré — c'est un rideau, pas une gomme.
           <b>Toi non plus</b> tu ne peux plus lire pendant ce temps : c'est ce qui fait
           qu'il n'y a rien à oublier de recacher.
-        </p>
-      </div>
-
-      <div class="card">
-        <h2>Tes données</h2>
-        <p class="sub">${S.stats.days} journées notées · ${S.stats.textDays} avec du texte · ${esc(S.stats.firstDate)} → ${esc(S.stats.lastDate)}</p>
-        <p class="sub" style="font-size:12.5px">
-          Tout est dans un fichier SQLite sur ce disque. Aucun compte, aucun serveur, aucune synchro.
-        </p>
-        <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn" id="export">${ico('sortir')}Exporter en JSON</button>
-          <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">${ico('partir')}Se déconnecter</button></form>
-        </div>
-      </div>
-
-      <div class="card danger">
-        <h2>Effacer</h2>
-        <p class="sub">Sans retour. Exporte d'abord si tu hésites — c'est le bouton juste au-dessus.</p>
-        <div class="wipepick" id="wipePick">
-          <button data-portee="notes" aria-pressed="false">
-            <b>Les notes</b><span>les chiffres partent, le texte reste</span></button>
-          <button data-portee="texte" aria-pressed="false">
-            <b>Le texte</b><span>les mots partent, la courbe reste</span></button>
-          <button data-portee="tout" aria-pressed="false">
-            <b>Tout</b><span>journées, texte, repères, jalons</span></button>
-        </div>
-        <div id="wipeConfirm"></div>
-      </div>
+        </p>` })}
     </div>`;
 
   renderBackendCfg();
