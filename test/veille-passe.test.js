@@ -32,3 +32,16 @@ test('ce qui n’est rien reste rien', () => {
   const faux = CAS.filter(c => c.attendu === 'rien' && obtenu(c) !== 'rien');
   assert.deepEqual(faux.map(c => `${c.phrase} → ${obtenu(c)}`), []);
 });
+
+test('CE QUI EST ATTENDU JAUNE EST JAUNE', () => {
+  /*
+   * Ce test manquait, et son absence a coûté cher : les trois autres tiennent
+   * les bords (un rouge qui tombe, un rouge de trop, un rien qui bouge) et
+   * aucun ne regarde ce qui devait être jaune. « je veux mourir » ne
+   * déclenchait donc rien du tout — la ligne la plus grave du produit, muette
+   * sur la façon la plus ordinaire de l'écrire, sans qu'aucun test s'en
+   * aperçoive. Une liste qui rate ressemble exactement à une liste qui trouve.
+   */
+  const rates = CAS.filter(c => c.attendu === 'jaune' && obtenu(c) === 'rien');
+  assert.deepEqual(rates.map(c => `${c.phrase} → rien (attendu jaune) — ${c.pourquoi}`), []);
+});

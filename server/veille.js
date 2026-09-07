@@ -59,7 +59,28 @@ const SUICIDE = [
   'suicide', 'suicidaire', 'suicider', 'me tuer', 'me foutre en l air',
   'en finir', 'plus envie de vivre', 'envie de mourir', 'envie de crever',
   'autolyse', 'ideation', 'ideations', 'tentative de suicide',
-  'passage a l acte', 'me pendre', 'me jeter'
+  'passage a l acte', 'me pendre', 'me jeter',
+  /*
+   * LE VOULOIR, PAS SEULEMENT L'ENVIE.
+   *
+   * « envie de mourir » y était, « je veux mourir » non — et c'est l'une des
+   * façons les plus ordinaires de l'écrire en français. Un balayage de phrases
+   * banales l'a sorti : la ligne la plus grave du produit ne se déclenchait pas
+   * sur « je veux mourir, je n'en peux plus ». Rien ne le signalait, parce
+   * qu'une liste qui rate ressemble exactement à une liste qui trouve.
+   *
+   * « je ne veux pas mourir » ne contient pas « veux mourir » (il y a « pas »
+   * au milieu), et « je veux mourir de rire » est effacé par HYPERBOLE avant
+   * d'arriver ici.
+   */
+  'veux mourir', 'voudrais mourir', 'aimerais mourir',
+  'veux crever', 'voudrais crever', 'aimerais crever',
+  'veux etre mort', 'voudrais etre mort', 'aimerais etre mort',
+  'veux plus vivre', 'veux plus etre la', 'veux disparaitre',
+  'envie de disparaitre', 'me supprimer',
+  'mettre fin a mes jours', 'mettre fin a ma vie',
+  'aimerais ne pas me reveiller', 'voudrais ne pas me reveiller',
+  'envie de ne pas me reveiller'
 ];
 /* « TS » est une abréviation et pas un mot : elle ne se cherche qu'entourée de
    frontières, sans quoi « ts » attrape la moitié du dictionnaire. */
@@ -83,6 +104,7 @@ const HYPERBOLE = /\b(?:va|vont|veut|veulent|voudrait|voudraient|pourrait|pourra
  * ------------------------------------------------------------------ */
 const MOYEN = ['couteau', 'cutter', 'lame', 'rasoir', 'ciseaux', 'corde',
                'boite de cachets', 'boite de medicaments', 'plaquette', 'flingue', 'arme'];
+const EN_MAIN_IMPARFAIT = /\bje (?:jouais|m amusais|tenais|serrais|touchais|posais|passais)\b|\bj avais\b[^,;.]{0,20}\b(?:dans la main|dans les mains|sur moi)\b/;
 const A_PORTEE = ['a cote', 'a portee', 'devant moi', 'sur la table',
                   'sous mon lit', 'dans ma poche', 'je le garde', 'je la garde',
                   'je regarde la'];
@@ -149,7 +171,13 @@ const SURDOSE = new RegExp([
   '\\boverdose\\b', '\\bsurdose\\b', '\\bsurdosage\\b', '\\bod\\b', '\\bintoxication (?:medicamenteuse|volontaire)\\b',
   '\\btrop de (?:cachets|comprimes|medicaments|medocs|gelules|pilules|xanax|lexomil|valium|doliprane|paracetamol|dafalgan|codeine|tramadol)\\b',
   '\\b(?:toute|tout) (?:la|ma|une|le|mon) (?:boite|plaquette|tube|flacon|stock|reserve)\\b', '\\b(?:la|ma) (?:boite|plaquette) (?:entiere|complete)\\b',
-  '\\btous mes (?:cachets|comprimes|medicaments|medocs)\\b', '\\btout mon (?:xanax|lexomil|valium|traitement|stock)\\b',
+  '\\btous mes (?:cachets|comprimes|medicaments|medocs)\\b',
+  /* « j'ai avalé une boîte de cachets » n'avait ni « toute » ni chiffre : la
+     tentative racontée sans le mot passait entière à travers. « avalé » et
+     « gobé » ne se disent pas d'une boîte qu'on achète ; « pris » si, donc il
+     lui faut le contenu. */
+  '\\b(?:avale|avalee|gobe|ingere) (?:une|la|ma|toute une) (?:boite|plaquette)\\b',
+  `\\bpris (?:une|la|ma|toute une) (?:boite|plaquette) (?:de|d) ${UNITE_MEDOC}\\b`, '\\btout mon (?:xanax|lexomil|valium|traitement|stock)\\b',
   `\\b(?:avale|pris|gobe|ingere) ${NB_CACHETS} ${UNITE_MEDOC}\\b`,
   '\\b(?:double|triple|quadruple) (?:ma|la) dose\\b', `\\b${NB_CACHETS} fois (?:ma|la) dose\\b`, '\\bdose (?:doublee|triplee)\\b',
   '\\blavage d estomac\\b', '\\bcoma ethylique\\b', '\\bcoma\\b.{0,30}\\b(?:alcool|cachets|medicaments)\\b',
@@ -157,7 +185,7 @@ const SURDOSE = new RegExp([
   '\\bmelang\\w* .{0,25}\\b(?:cachets|comprimes|medicaments|medocs|xanax|lexomil|valium|codeine|tramadol|benzo)\\b.{0,25}\\b(?:alcool|vodka|whisky|rhum|gin|biere|vin)\\b',
 ].join('|'));
 /* L'alcool en excès : ce n'est pas « bu », c'est « trop bu ». */
-const ALCOOL_EXCES = /\b(?:trop|beaucoup trop|bien trop|enormement) bu\b|\bbu (?:trop|toute la (?:soiree|nuit|journee|bouteille)|jusqu a (?:vomir|tomber|plus savoir|l oubli|pas savoir))\b|\bbourre(?:e|es)?\b|\bivre(?: morte?)?\b|\b(?:une |grosse |la )?cuite\b|\bblack ?out\b|\btrou noir\b|\bgueule de bois\b|\b(?:fini|vide|descendu|siffle) (?:la|une|toute la) bouteille\b|\bune bouteille (?:entiere|de (?:vodka|whisky|rhum|gin|vin))\b|\bbinge\b|\bdefonce(?:e|es)?\b|\btorche(?:e|es)?\b|\bcomplet(?:ement)? raide\b|\bvomi .{0,20}\balcool\b|\b(?:six|sept|huit|dix|\d+) (?:verres|bieres|shots|pintes)\b/;
+const ALCOOL_EXCES = /\b(?:trop|beaucoup trop|bien trop|enormement) bu\b|\bbu (?:trop|toute la (?:soiree|nuit|journee|bouteille)|jusqu a (?:vomir|tomber|plus savoir|l oubli|pas savoir))\b|\bbourre(?:e|es)?\b|\bivre(?: morte?)?\b|\b(?:une |grosse |la )?cuite\b|\bblack ?out\b|\btrou noir\b|\bgueule de bois\b|\b(?:fini|vide|descendu|siffle) (?:la|une|toute la) bouteille\b(?! (?:de|d) (?:vinaigre|shampoing|lessive|gel|huile|sirop|jus|lait|eau|soda|liquide|savon))|\bune bouteille (?:entiere|de (?:vodka|whisky|rhum|gin|vin))\b|\bbinge\b|\bdefonce(?:e|es)?\b|\btorche(?:e|es)?\b|\bcomplet(?:ement)? raide\b|\bvomi .{0,20}\balcool\b|\b(?:six|sept|huit|dix|\d+) (?:verres|bieres|shots|pintes)\b/;
 /* Les drogues : un mot ne suffit pas, il faut la prise (« j'ai pris », « sniffé », « sous »). */
 const DROGUE = /\b(?:coke|cocaine|cc|md|mdma|ecsta|ecstasy|taz|ket|ketamine|lsd|acide|buvard|champi|champis|champignons|speed|amphet|amphetamines|meth|crack|heroine|hero|opium|opiaces|poppers|protoxyde|proto|ballons|gaz hilarant|gbl|ghb|3 ?mmc|4 ?mmc|cathinones|chems|drogue|drogues|dope)\b/;
 const PRISE = /\b(?:j ai|je me suis|on a|je) (?:pris|repris|sniffe|snife|gobe|tape|fume|consomme|avale|shoote|injecte|fait)\b|\bune trace\b|\bun rail\b|\bdes traces\b|\bdes rails\b|\bun ballon\b|\bdes ballons\b|\bje (?:prends|sniffe|gobe|tape|consomme)\b|\bsous (?:coke|cocaine|md|mdma|ecsta|ket|ketamine|lsd|acide|speed|meth|crack|hero|heroine|ghb|drogue)\b|\bme (?:suis )?drogu\w*\b|\bje me drogue\b|\bj ai (?:re)?plonge\b/;
@@ -201,6 +229,18 @@ const BLESSURE_CERTAINE = [
   'me suis taillade', 'me suis mutile', 'me suis mutilee',
   'me taillade', 'me mutile'
 ];
+
+/*
+ * LE PASSÉ COMPOSÉ AVEC LA PARTIE DU CORPS.
+ *
+ * La liste au-dessus avait « me suis tailladé » et l'imparfait « je me
+ * taillais », pas « je me suis taillé les bras » — la tournure la plus
+ * courante. On ne pouvait pas l'ajouter à la liste telle quelle : « je me suis
+ * taillé de la fête » veut dire qu'on est parti. C'est la partie du corps qui
+ * tranche, et elle exclut du même coup l'accident de cuisine — « je me suis
+ * coupé le doigt » reste un doigt, et reste possible, pas certain.
+ */
+const BLESSURE_CERTAINE_RE = /\bme suis (?:taille|taillee|coupe|coupee|entaille|entaillee|brule|brulee|scarifie|scarifiee|lacere|laceree) (?:les? |la |le |mes |mon |ma )?(?:bras|avant bras|jambes?|cuisses?|poignets?|ventre|peau|mollets?|chevilles?|hanches?|epaules?)\b|\bje me (?:taille|coupe|entaille|brule) les (?:bras|cuisses|jambes|poignets)\b/;
 
 /**
  * Ce qui peut être un accident. Ne compte qu'accompagné d'un contexte de crise
@@ -273,7 +313,7 @@ const RECIT_PASSE = new RegExp([
   `\\bl (?:an|annee|ete|hiver|automne|printemps) (?:derniere|dernier|passee|passe|d avant)\\b`, `\\b(?:la semaine|le mois|le week ?end) (?:derniere|dernier|passee|passe|d avant)\\b`,
   `\\bannees? (?:passees?|precedentes?|d avant)\\b`, `\\bquand j (?:etais|avais)\\b`, `\\bquand (?:il|elle) (?:etait|avait)\\b`, `\\ba l epoque\\b`, `\\bautrefois\\b`, `\\bplus jeune\\b`,
   `\\betant (?:petit|petite|jeune|ado|adolescent|adolescente|enfant)\\b`, `\\b(?:mon|ma|d|de l) (?:adolescence|enfance)\\b`, `\\bado,`, `^ado\\b`, `\\ba ${NOMBRE} ans\\b`, `\\bau (?:lycee|college)\\b`,
-  `\\b(?:la|une) fois ou\\b`, `\\b(?:la|une) nuit ou\\b`, `\\ble jour ou\\b`, `\\b(?:la|une|cette) periode ou\\b`, `\\b(?:ca|cela) remonte (?:a|au)\\b`, `\\bremonte a\\b`,
+  `\\bla derniere fois que\\b`, `\\b(?:la|une) fois ou\\b`, `\\b(?:la|une) nuit ou\\b`, `\\ble jour ou\\b`, `\\b(?:la|une|cette) periode ou\\b`, `\\b(?:ca|cela) remonte (?:a|au)\\b`, `\\bremonte a\\b`,
   `\\ble lendemain de\\b`, `\\bla veille de\\b`, `\\bj avais (?:arrete|recommence|commence|deja)\\b`, `\\bm etais (?:deja )?\\b`, `\\bdeja\\b.*\\b(?:scarifi|taillad|mutil|coup)`,
   `\\bdepuis (?:ma|mes|sa|ses) (?:scarification|scarifications|ts|tentative|hospitalisation)\\b`,
 ].join('|'));
@@ -288,6 +328,10 @@ const REPRISE = /\brecommenc|\brepris\b|\brefait\b|\ba nouveau\b|\bde nouveau\b|
 const TIERS = /\b(?:il|elle|on|quelqu un|qui|l heroine|le heros|le personnage|sa collegue|son ami|son amie|mon frere|ma soeur|ma mere|mon pere|un ami|une amie|ma psy|mon psy|le psy|la psy|mon (?:ancien|ancienne) )\b[^,;.]{0,40}?\b(?:s est|se |s etait|s etaient|qu il|qu elle)\b/;
 const NEGATION = /\b(?:ne|n) (?:me |m )?(?:suis|ai|avais|etais) (?:pas|plus|jamais)\b|\bjamais (?:eu|fait|ose)\b|\bpremiere fois depuis\b/;
 const CONDITIONNEL = /\b(?:scarifierais|taillerais|tailladerais|mutilerais|couperais|brulerais|ferais du mal|si j avais)\b/;
+/* « je me serais bien tailladé hier soir mais j'ai tenu » : aucune liste ne le
+   reconnaissait, donc RIEN. C'est pourtant l'envie nommée ET tenue — le jaune
+   existe exactement pour ça, et le silence était la pire des trois réponses. */
+const CONDITIONNEL_PASSE = /\bme serais (?:bien |presque )?(?:taillade|tailladee|taille|taillee|scarifie|scarifiee|coupe|coupee|mutile|mutilee|brule|brulee|fait du mal)\b|\bj aurais (?:pu|bien) me (?:taillader|tailler|scarifier|couper|mutiler|faire du mal)\b/;
 const TELLING = /\b(?:re)?pens(?:e|er|ais|ait) a\b|\bparl(?:e|er|ais|ait) de\b|\bon a parle\b|\ben therapie\b|\bma psy\b|\bmon psy\b|\bon est revenus? sur\b|\bje t explique\b|\bpour que tu comprennes\b|\bje te raconte\b|\bun article sur\b|\bun livre sur\b|\bdans le (?:bouquin|livre|film|roman)\b|\bdisait que\b|\bm a dit que\b|\bm a demande si\b|\bm a raconte\b/;
 const NOM_BLESSURE = /\b(?:scarifications?|automutilations?|mutilations?|entailles?|tentatives?(?: de suicide)?|ts)\b/;
 const IMPARFAIT = /\bme (?:scarifiais|tailladais|taillais|mutilais|coupais|brulais|faisais du mal|faisais mal)\b|\bje me faisais des entailles\b/;
@@ -337,7 +381,7 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
   const phrases = String(texte).split(/(?<=[.!?…])\s+|\n+/).filter(p => p.trim());
   const ctx = norm(contexteDuJour) + ' ' + t;
   const enCrise = !!dedans(ctx, CONTEXTE_CRISE);
-  const texteNommeUneBlessure = !!(dedans(t, BLESSURE_CERTAINE) || dedans(t, BLESSURE_POSSIBLE) || IMPARFAIT.test(t) || NOM_BLESSURE.test(t));
+  const texteNommeUneBlessure = !!(dedans(t, BLESSURE_CERTAINE) || BLESSURE_CERTAINE_RE.test(t) || dedans(t, BLESSURE_POSSIBLE) || IMPARFAIT.test(t) || NOM_BLESSURE.test(t));
 
   const motifs = [];
   const poser = (genre, niveau, mot, p) => {
@@ -351,12 +395,13 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
     const np = norm(p);
     const phraseAuPasse = estPasse(np, aujourdhui) && !estRecent(np, aujourdhui);
     for (const prop of propositions(np)) {
-      const certaine = dedans(prop, BLESSURE_CERTAINE);
+      const certaine = dedans(prop, BLESSURE_CERTAINE) ?? BLESSURE_CERTAINE_RE.exec(prop)?.[0] ?? null;
       const possible = certaine ? null : dedans(prop, BLESSURE_POSSIBLE);
       const imparfait = IMPARFAIT.test(prop);
       const recent = estRecent(prop, aujourdhui), passe = estPasse(prop, aujourdhui) || suivanteAuPasse(i);
       /* LA REPRISE : « et là j'ai recommencé » est une blessure d'aujourd'hui dès que le texte en a nommé une. */
       if (recent && REPRISE.test(prop) && texteNommeUneBlessure) { poser('blessure', 'rouge', 'recommence', p); continue; }
+      if (CONDITIONNEL_PASSE.test(prop)) { poser('evoque_passe', 'jaune', CONDITIONNEL_PASSE.exec(prop)[0], p); continue; }
       if (certaine || possible || imparfait) {
         const mot = certaine ?? possible ?? 'imparfait';
         const pasUnActe = NEGATION.test(prop) || CONDITIONNEL.test(prop) || TIERS.test(prop)
@@ -413,7 +458,13 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
     if (objet) {
       // Un tiers qui tient un couteau, une négation, un souvenir : pas un geste.
       const pasLui = TIERS.test(np) || NEGATION.test(np) || estPasse(np, aujourdhui);
-      if (dedans(np, EN_MAIN) && !pasLui) poser('en_main', 'rouge', objet, p);
+      /* L'IMPARFAIT EST LUI-MÊME LA MARQUE DU PASSÉ. « ado je jouais avec un
+         couteau quand j'allais mal » ne déclenchait rien : EN_MAIN ne connaît
+         que le présent (« je joue avec »). L'ajouter au présent en ferait un
+         rouge sur un souvenir d'adolescence ; il lui faut donc sa propre
+         branche, et elle est jaune par construction. */
+      if (EN_MAIN_IMPARFAIT.test(np)) poser('evoque_passe', 'jaune', objet, p);
+      else if (dedans(np, EN_MAIN) && !pasLui) poser('en_main', 'rouge', objet, p);
       else if (dedans(np, A_PORTEE)) poser('moyen', 'jaune', objet, p);
     }
 

@@ -82,7 +82,7 @@ const V_BOIRE = /\b(?:bu|boire|bois|boit|sifle|siffle|descendu|vide|fini|enchain
    le mot « verre » aussi. C'est le faux positif le plus bête et le plus
    fréquent, et aucun réglage de seuil ne le rattrape — il faut nommer ce qui
    n'en est pas. */
-const SANS_ALCOOL = /\b(?:d eau|de l eau|de flotte|de la flotte|de jus|de lait|de the|de tisane|de cafe|de coca|de soda|de sirop|d orange|de citronnade|de limonade|de menthe|de grenadine|de kefir|de kombucha|de bouillon|de smoothie)\b|\bbu (?:un |une |mon |ma |mes |des |du |de la |de l |l )?(?:cafe|the|jus|lait|eau|flotte|soda|coca|smoothie|infusion|tisane|chocolat|bouillon)\b|\bde shampoing\b|\bde lessive\b|\bd huile\b|\bde vinaigre\b|\bde gel douche\b|\bsans alcool\b/;
+const SANS_ALCOOL = /\b(?:d eau|de l eau|de flotte|de la flotte|de jus|de lait|de the|de tisane|de cafe|de coca|de soda|de sirop|d orange|de citronnade|de limonade|de menthe|de grenadine|de kefir|de kombucha|de bouillon|de smoothie)\b|\bbu (?:un |une |deux |trois |quatre |cinq |six |plusieurs |quelques |\d+ |mon |ma |mes |des |du |de la |de l |l )?(?:cafes?|the|jus|lait|eau|flotte|sodas?|coca|smoothies?|infusions?|tisanes?|chocolat|bouillon)\b|\bde shampoing\b|\bde lessive\b|\bd huile\b|\bde vinaigre\b|\bde gel douche\b|\bsans alcool\b/;
 const V_FUMER = /\b(?:fume|fumer|fumais|tire|roule|grille|taffe|clope)\b/;
 const V_PRENDRE = /\b(?:pris|reprends|repris|prends|sniffe|snife|gobe|tape|consomme|avale|shoote|injecte|dose|sous)\b/;
 
@@ -123,7 +123,9 @@ export const FAMILLES = [
 
   { cle: 'argent', nom: 'les paris', sym: 'de',
     mots: /\b(?:paris|parie|parier|betclic|winamax|unibet|pmu|casino|poker|machine a sous|jeux? d argent|grattage|grattages|bookmaker|mise|mises|cote|cotes)\b/,
-    verbe: /\b(?:parie|mise|joue|rejoue|remis|perdu|gagne|depose|rechargé|recharge)\b/,
+    verbe: /\b(?:parie|mise|joue|rejoue|remis|perdu|gagne|depose|recharge)\b/,
+    /* Un poker entre amis avec des jetons virtuels n'est pas un pari. */
+    sauf: /\b(?:gratuit|gratuite|virtuel|virtuels|virtuelle|pour rire|pour du beurre|sans argent|sans miser|fictif|demo)\b/,
     franc: /\b(?:betclic|winamax|unibet|pmu)\b|\bmachine a sous\b|\bjeux? d argent\b/ }
 ];
 
