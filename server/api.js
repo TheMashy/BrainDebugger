@@ -9,7 +9,7 @@ import {
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
   toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, versionMachiTool, joursEcrits,
-  mesuresEntre, poserMesure,
+  mesuresEntre, poserMesure, normaliserTs,
   redaterMessages, rebuildEntryText, tousMessagesUtilisateur
 } from './db.js';
 import { usageFor, record as recordUsage, serieUsage, profilUsage } from './usage.js';
@@ -541,10 +541,63 @@ export function bornesDuJournal(userId = OWNER) {
 }
 
 /**
+ * RELIRE LE PASSÉ AVEC L'EXTRACTEUR D'AUJOURD'HUI.
+ *
+ * `noterBornesDites` ne tourne qu'À L'ÉCRITURE : « je viens de me lever » pose
+ * une mesure au moment où la phrase arrive, et jamais après. Tout ce qui a été
+ * écrit AVANT que cet extracteur existe — ou avant qu'il apprenne une tournure
+ * de plus — n'a donc jamais été lu. Le journal contient la phrase, l'appli sait
+ * la comprendre, et pourtant la mesure n'existe pas : c'est le trou le moins
+ * visible, parce que rien ne le signale.
+ *
+ * On repasse donc sur tous les messages de la personne. L'heure de repli n'est
+ * pas « maintenant » mais l'INSTANT DU MESSAGE : « je viens de me lever »,
+ * écrit il y a trois ans à 15:12, dit un lever à 15:12 ce jour-là, pas un lever
+ * aujourd'hui. C'est toute la différence entre relire et réécrire.
+ *
+ * IDEMPOTENT, ET DANS LE BON SENS : on ne pose que ce qui manque. Une borne
+ * déjà dite ce jour-là — par la personne, par le compagnon, par un passage
+ * précédent — n'est jamais écrasée ; on ne va pas contredire ce qui a été
+ * enregistré à chaud avec une relecture faite après coup. Un seul message par
+ * jour et par genre suffit : le PREMIER dans le temps gagne, comme à l'époque.
+ *
+ * @returns {number} combien de bornes ont été retrouvées.
+ */
+export function relireLesBornesDites(userId = OWNER) {
+  // `toutesMesures` ne rendrait rien ici : elle filtre sur `valeur IS NOT NULL`,
+  // et une borne dite vit dans `texte` (« 15:12 »), pas dans `valeur`.
+  const deja = new Set();
+  for (const m of mesuresEntre('0001-01-01', '9999-12-31', userId))
+    if (m.source === SOURCE_DIT) deja.add(`${m.date}|${m.cle}`);
+  let poses = 0;
+  // `tousMessagesUtilisateur` rend du plus récent au plus ancien : on remonte le
+  // temps à l'endroit pour que le premier message d'une journée l'emporte.
+  for (const msg of tousMessagesUtilisateur(userId).slice().reverse()) {
+    const b = bornesDitesDans(msg.text);
+    if (!b) continue;
+    const quand = normaliserTs(msg.ts) ?? Date.parse(`${msg.date}T12:00:00`);
+    const heure = b.heure ?? heureLocale(quand);
+    const date = jourLocal(quand);
+    if (!heure || !date) continue;
+    const cle = b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER;
+    if (deja.has(`${date}|${cle}`)) continue;
+    poserMesure({ date, source: SOURCE_DIT, cle, texte: heure, userId });
+    deja.add(`${date}|${cle}`);
+    poses++;
+  }
+  return poses;
+}
+
+/**
  * RANGER TOUT LE JOURNAL. Rend ce qui a bougé, et sur combien de jours.
- * @returns {{jours: number, messages: number, sans_coupure: number}}
+ * @returns {{jours: number, messages: number, sans_coupure: number, bornes_retrouvees: number}}
  */
 export function rangerToutLeJournal(userId = OWNER) {
+  // D'ABORD RELIRE, ENSUITE RANGER. Une borne retrouvée dans un vieux message
+  // est une coupure de plus, et donc une soirée de plus remise à sa place :
+  // ranger avant de relire ferait le travail sur des bornes qu'on est justement
+  // en train de retrouver.
+  const bornesRetrouvees = relireLesBornesDites(userId);
   const { bornes, med } = bornesDuJournal(userId);
   const dates = joursEcrits(userId);
   let messages = 0, jours = 0, sansCoupure = 0;
@@ -554,8 +607,8 @@ export function rangerToutLeJournal(userId = OWNER) {
     const bouges = recalerLaNuit(d, userId, { bornes, med });
     if (bouges) { messages += bouges; jours++; }
   }
-  if (messages) invalidate(userId);
-  return { jours, messages, sans_coupure: sansCoupure };
+  if (messages || bornesRetrouvees) invalidate(userId);
+  return { jours, messages, sans_coupure: sansCoupure, bornes_retrouvees: bornesRetrouvees };
 }
 
 /* ==================================================================

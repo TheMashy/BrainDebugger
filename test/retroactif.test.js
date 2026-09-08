@@ -124,3 +124,63 @@ test('ce qui ne peut pas être rétroactif se dit', () => {
   assert.equal(p.mesure_depuis, addDays(FIN, -2), 'la date de la première mesure doit être rendue');
   assert.ok(p.de < p.mesure_depuis, 'et elle est bien postérieure au début de la fenêtre : c’est ça qu’il faut dire');
 });
+
+/* ---------------- relire le passé avec l'extracteur d'aujourd'hui ---------------- */
+
+const { relireLesBornesDites, rangerToutLeJournal } = await import('../server/api.js');
+const { addMessage, mesuresDuJour, poserMesure } = await import('../server/db.js');
+const { SOURCE_DIT, CLE_LEVER, CLE_COUCHER } = await import('../server/jour-vecu.js');
+
+test('« je viens de me lever », écrit il y a trois ans, est enfin lu', () => {
+  /*
+   * `noterBornesDites` ne tourne qu'à l'écriture. Tout ce qui a été écrit avant
+   * que cet extracteur existe n'a jamais été lu : le journal contient la
+   * phrase, l'application sait la comprendre, et la mesure n'existe pas. Rien
+   * ne signale ce trou-là.
+   */
+  const U = 'vieilles-bornes';
+  upsertUser({ id: U, username: U });
+  const jour = j => `2023-04-${String(j).padStart(2, '0')}`;
+  addMessage({ ts: `${jour(3)}T15:12:00.000Z`, date: jour(3), role: 'user',
+               text: 'je viens de me lever, il est tard', userId: U });
+  addMessage({ ts: `${jour(4)}T23:40:00.000Z`, date: jour(4), role: 'user',
+               text: 'je vais me coucher à 23:40, journée finie', userId: U });
+  addMessage({ ts: `${jour(5)}T10:00:00.000Z`, date: jour(5), role: 'user',
+               text: 'rien de spécial aujourd’hui', userId: U });
+
+  assert.deepEqual(mesuresDuJour(jour(3), U), [], 'rien n’a été posé à l’écriture, c’est le point de départ');
+  assert.equal(relireLesBornesDites(U), 2, 'les deux bornes du passé doivent être retrouvées');
+
+  const lever = mesuresDuJour(jour(3), U).find(m => m.cle === CLE_LEVER);
+  assert.ok(lever, 'le lever de 2023 n’a pas été posé');
+  assert.equal(lever.source, SOURCE_DIT);
+  assert.match(lever.texte, /^1[45]:\d\d$/, `l'heure vient du message, pas d'aujourd'hui : ${lever.texte}`);
+  assert.ok(mesuresDuJour(jour(4), U).some(m => m.cle === CLE_COUCHER && m.texte === '23:40'));
+  assert.deepEqual(mesuresDuJour(jour(5), U), [], 'une journée sans borne dite reste vide');
+});
+
+test('la relecture est idempotente et n’écrase jamais ce qui a été dit à chaud', () => {
+  const U = 'vieilles-bornes';
+  assert.equal(relireLesBornesDites(U), 0, 'un second passage ne repose rien');
+  // Une borne enregistrée à chaud gagne : on ne contredit pas le moment vécu
+  // avec une relecture faite après coup.
+  const V = 'a-chaud';
+  upsertUser({ id: V, username: V });
+  const d = '2023-06-10';
+  addMessage({ ts: `${d}T09:00:00.000Z`, date: d, role: 'user', text: 'je viens de me lever', userId: V });
+  poserMesure({ date: d, source: SOURCE_DIT, cle: CLE_LEVER, texte: '07:30', userId: V });
+  assert.equal(relireLesBornesDites(V), 0);
+  assert.equal(mesuresDuJour(d, V).find(m => m.cle === CLE_LEVER).texte, '07:30');
+});
+
+test('« ranger tout le journal » relit d’abord, range ensuite', () => {
+  const U = 'ranger-relit';
+  upsertUser({ id: U, username: U });
+  const d = '2023-08-20';
+  addMessage({ ts: `${d}T22:10:00.000Z`, date: d, role: 'user', text: 'soirée tranquille', userId: U });
+  addMessage({ ts: `${addDays(d, 1)}T04:30:00.000Z`, date: addDays(d, 1), role: 'user',
+               text: 'je vais me coucher à 04:30', userId: U });
+  const r = rangerToutLeJournal(U);
+  assert.equal(r.bornes_retrouvees, 1, 'la borne du passé doit être retrouvée par le bouton');
+  assert.ok('messages' in r && 'jours' in r);
+});

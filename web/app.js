@@ -8094,9 +8094,20 @@ async function rangerLesNuits(bouton) {
   if (bouton) bouton.disabled = true;
   try {
     const r = await api('/api/nuits/ranger', {});
-    toast(r.messages
-      ? `${r.messages} passage${r.messages > 1 ? 's' : ''} rangé${r.messages > 1 ? 's' : ''} sur ${r.jours} journée${r.jours > 1 ? 's' : ''}.`
-      : 'Tout était déjà à sa place.');
+    /*
+     * CE QUE LE BOUTON A RETROUVÉ SE DIT AUSSI.
+     *
+     * Le rangement commence par relire les vieux messages avec l'extracteur
+     * d'aujourd'hui : « je viens de me lever », écrit il y a trois ans, n'avait
+     * jamais été lu parce que l'extracteur n'existait pas encore. Ces bornes
+     * retrouvées sont ce qui rend le rangement possible ; les taire ferait
+     * croire que les journées se sont déplacées toutes seules.
+     */
+    const bornes = r.bornes_retrouvees
+      ? `${r.bornes_retrouvees} heure${r.bornes_retrouvees > 1 ? 's' : ''} de lever ou de coucher retrouvée${r.bornes_retrouvees > 1 ? 's' : ''} dans ce que tu avais déjà écrit` : '';
+    const bouges = r.messages
+      ? `${r.messages} passage${r.messages > 1 ? 's' : ''} rangé${r.messages > 1 ? 's' : ''} sur ${r.jours} journée${r.jours > 1 ? 's' : ''}` : '';
+    toast([bornes, bouges].filter(Boolean).join(' · ') || 'Tout était déjà à sa place.');
     // Tout ce qui se compte par journée est à recompter : les messages ont changé de jour.
     LECTURE = FONCT = FONCT_AN = NUITS = PRISES = null;
     if (view === 'mirror' && !MIRROR_DATE) await renderLecture();
