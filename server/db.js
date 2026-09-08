@@ -229,8 +229,14 @@ CREATE TABLE IF NOT EXISTS releves (
   message_id INTEGER NOT NULL,
   date       TEXT NOT NULL,          -- 'YYYY-MM-DD', le jour du message
   ts         TEXT NOT NULL,          -- ISO 8601, l'instant du releve
-  valeur     INTEGER NOT NULL,       -- 0..10, DECLARE par le compagnon
-  quoi       TEXT NOT NULL           -- a quoi il l'a vu, dans ses mots
+  valeur     INTEGER NOT NULL,       -- 0..10
+  quoi       TEXT NOT NULL,          -- a quoi il l'a vu, dans ses mots
+  -- QUI A POSE CE CHIFFRE. 'modele' : le compagnon a estime ou quelqu'un
+  -- SEMBLE etre, dans ses mots. 'toi' : la personne a repondu elle-meme, en
+  -- touchant l'echelle sous la question. Les deux vivent dans la meme table
+  -- parce qu'ils mesurent la meme chose au meme instant -- mais ils n'ont pas
+  -- ete poses par le meme juge, et ce produit ne confond jamais les deux.
+  source     TEXT NOT NULL DEFAULT 'modele'
 );
 CREATE INDEX IF NOT EXISTS idx_releves_jour ON releves(user_id, date);
 
@@ -367,6 +373,26 @@ CREATE TABLE IF NOT EXISTS settings (
   PRIMARY KEY (user_id, key)
 );
 `);
+
+/*
+ * LA COLONNE AJOUTEE APRES COUP.
+ *
+ * `CREATE TABLE IF NOT EXISTS` ne touche pas une table qui existe deja : une
+ * base creee avant cette colonne ne l'aurait jamais, et le premier releve pose
+ * par la personne echouerait -- sur une base qui a des annees de journal.
+ * SQLite n'a pas de « ADD COLUMN IF NOT EXISTS » : on regarde, puis on ajoute.
+ */
+for (const [table, colonne, decl] of [
+  ['releves', 'source', "TEXT NOT NULL DEFAULT 'modele'"],
+]) {
+  try {
+    const a = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (a.length && !a.some(c => c.name === colonne))
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${colonne} ${decl}`);
+  } catch (e) {
+    console.log(`  colonne ${table}.${colonne} non ajoutée :`, e.message);
+  }
+}
 
 const _m = migrate(db);
 if (_m.migrated) console.log('  base migrée vers le mode multi-utilisateurs');
@@ -1303,18 +1329,32 @@ export function deleteMotif(id, userId = OWNER) {
 
 /* ---------- releves ---------- */
 
-export function addReleve({ messageId, date, valeur, quoi, userId = OWNER,
+export function addReleve({ messageId, date, valeur, quoi, source = 'modele', userId = OWNER,
                             quand = new Date().toISOString() }) {
-  const v = Math.max(0, Math.min(10, Math.round(Number(valeur))));
-  if (!Number.isFinite(v)) return null;
+  const n = Number(valeur);
+  // `Math.round(NaN)` vaut NaN, mais `Math.max(0, NaN)` vaut NaN et
+  // `Math.min(10, NaN)` aussi : le test arrivait donc APRES les bornes et ne
+  // rattrapait rien. On regarde le nombre d'abord.
+  if (!Number.isFinite(n)) return null;
+  const v = Math.max(0, Math.min(10, Math.round(n)));
   const info = db.prepare(
-    'INSERT INTO releves(user_id, message_id, date, ts, valeur, quoi) VALUES(?,?,?,?,?,?)'
-  ).run(userId, messageId, date, quand, v, String(quoi).trim());
-  return { id: Number(info.lastInsertRowid), date, ts: quand, valeur: v, quoi };
+    'INSERT INTO releves(user_id, message_id, date, ts, valeur, quoi, source) VALUES(?,?,?,?,?,?,?)'
+  ).run(userId, messageId, date, quand, v, String(quoi).trim(), source === 'toi' ? 'toi' : 'modele');
+  return { id: Number(info.lastInsertRowid), date, ts: quand, valeur: v, quoi, source };
 }
 
+/** Les relevés que la PERSONNE a posés elle-même sur ces messages. */
+export const relevesDeToi = (ids, userId = OWNER) => {
+  const l = (ids ?? []).map(Number).filter(Number.isFinite);
+  if (!l.length) return [];
+  return db.prepare(
+    `SELECT id, message_id, ts, valeur, quoi FROM releves
+      WHERE user_id = ? AND source = 'toi' AND message_id IN (${l.map(() => '?').join(',')})`
+  ).all(userId, ...l);
+};
+
 export const relevesDuJour = (date, userId = OWNER) =>
-  db.prepare('SELECT id, message_id, ts, valeur, quoi FROM releves WHERE user_id = ? AND date = ? ORDER BY ts ASC')
+  db.prepare('SELECT id, message_id, ts, valeur, quoi, source FROM releves WHERE user_id = ? AND date = ? ORDER BY ts ASC')
     .all(userId, date);
 
 /**

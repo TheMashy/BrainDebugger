@@ -4300,3 +4300,27 @@ details.jpecol .jpetop { margin-top: 5px; }
    confondre avec une journée. */
 .btrou path { stroke: var(--ink-faint); opacity: .8; }
 .btrou rect { pointer-events: all; }
+
+/* ---- L'échelle sous la question -------------------------------------- */
+/* Onze crans de couleur, aucun chiffre : voir « 7 » avant de répondre
+   déplacerait la réponse vers 7. Le nombre n'arrive qu'après le choix. */
+.ress { display: flex; align-items: center; gap: 9px; margin-top: 9px; flex-wrap: wrap; }
+.rdit { font-size: 11.5px; }
+.rcrans { display: flex; gap: 2px; }
+.rcran {
+  width: 17px; height: 15px; padding: 0; border: none; border-radius: 3px;
+  background: var(--c); opacity: .34; cursor: pointer;
+  transition: opacity .12s, transform .12s;
+}
+.rcran:hover, .rcran:focus-visible { opacity: 1; transform: scaleY(1.35); outline: none; }
+/* Le survol allume aussi tout ce qui précède : on lit une position sur une
+   échelle, pas un bouton isolé. */
+.rcrans:hover .rcran { opacity: .8; }
+.rcrans .rcran:hover ~ .rcran { opacity: .28; }
+.ress.fait {
+  display: inline-flex; gap: 1px; align-items: baseline; margin-top: 8px;
+  padding: 2px 8px; border-radius: 999px; font: 12.5px var(--mono);
+  color: var(--bg); background: var(--c);
+}
+.ress.fait small { opacity: .7; }
+@media (prefers-reduced-motion: reduce) { .rcran { transition: none; } }

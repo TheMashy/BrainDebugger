@@ -10,6 +10,7 @@ import { deltaColor, noteColor, noteScaleRGB, noteScaleColor, lineChart, dailyCh
 import { poserLesNuits, graduations, enHeures, enHHMM, medianeHoraire, mediane, dureeDeLaNuit } from './nuits-axe.js';
 import { bandeLiee, bandeCouches, COUCHES, symbole, joursDe } from './bande.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
+import { proposerLechelle } from './ressenti.js';
 import { ico, ICO_VUE, ICO_ARCHETYPE, ICO_FAMILLE } from './icones.js';
 import { friseMarkup as friseSVG } from './frise.js';
 import { calMarkup, calClic, moisDe } from './calendrier.js';
@@ -789,6 +790,9 @@ const sansMarqueur = t => String(t ?? '').replace(MARQUEUR, '');
  * gestes.
  */
 let FRAIS = new Set();
+/* Les messages du compagnon auxquels tu as déjà répondu par l'échelle. Rempli
+   par le rendu du fil, pour ne pas redemander deux fois la même chose. */
+let RESSENTIS = new Map();
 
 function drawThread() {
   const th = $('#thread');
@@ -801,6 +805,9 @@ function drawThread() {
   let last = null;
   let dernierTs = 0;
   const parMsg = S.motifs?.parMessage ?? {};
+  /* La dernière prise de parole du compagnon : c'est la seule sous laquelle
+     l'échelle a un sens, puisque c'est l'instant présent qu'elle relève. */
+  const dernierDuCompagnon = [...S.messages].reverse().find(x => x.role === 'assistant');
   th.innerHTML = S.messages.map((m, i) => {
     const day = m.date ?? m.ts.slice(0, 10);
     const sep = day !== last
@@ -866,7 +873,7 @@ function drawThread() {
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }${reflexionMarkup(m)}<span class="tx">${esc(
         m.role === 'pet' ? sansMarqueur(m.text) : m.text
-      )}</span>${marque}${rembobMarkup(m)}</div>`;
+      )}</span>${marque}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
@@ -876,6 +883,56 @@ function drawThread() {
   majFil(th);
   bindGestes(th);
   syncPetSay();
+}
+
+/* =====================================================================
+ * L'ÉCHELLE SOUS LA QUESTION.
+ *
+ * Il demande « comment tu te sens, là ? » — et la seule réponse possible était
+ * une phrase. Une phrase ne se compare pas à celle d'hier, et surtout pas à
+ * celle d'il y a deux heures : ce qui se mesure ici, c'est l'ÉCART d'un moment
+ * à l'autre, ce qu'aucune note de fin de journée ne dit.
+ *
+ * AUCUN CHIFFRE N'EST PROPOSÉ. Onze cases numérotées feraient exactement ce
+ * qu'on veut éviter : voir « 7 » avant de répondre déplace la réponse vers 7.
+ * Ce sont donc onze crans de couleur, la même rampe que partout ailleurs dans
+ * le produit, et le nombre n'apparaît qu'APRÈS avoir choisi — pour qu'on
+ * puisse se relire, pas pour qu'on se cale dessus.
+ *
+ * Elle se referme dès qu'on a répondu : une échelle qui reste ouverte devient
+ * un formulaire, et un formulaire dans une conversation, on cesse de l'ouvrir.
+ * ===================================================================== */
+function echelleMarkup(m, dernier) {
+  const deja = RESSENTIS.get(Number(m.id));
+  if (deja != null) {
+    return `<span class="ress fait" style="--c:${noteScaleColor(deja)}"
+      title="tu as répondu ${String(deja).replace('.', ',')}/10">${deja}<small>/10</small></span>`;
+  }
+  if (!proposerLechelle(m, { dernier: Number(dernier?.id) === Number(m.id),
+                             repondus: new Set(RESSENTIS.keys()) })) return '';
+  const crans = Array.from({ length: 11 }, (_, v) =>
+    `<button class="rcran" data-ressenti="${m.id}" data-valeur="${v}"
+       style="--c:${noteScaleColor(v)}" aria-label="${v} sur 10"></button>`).join('');
+  return `<div class="ress" role="group" aria-label="Où tu en es, maintenant">
+    <span class="rdit faint">si tu veux, pose-le&nbsp;:</span>
+    <span class="rcrans">${crans}</span>
+  </div>`;
+}
+
+async function poserRessenti(id, valeur) {
+  // On l'affiche AVANT la réponse du serveur : le geste doit se voir tout de
+  // suite. Si ça échoue, on retire — mieux vaut une échelle qui revient qu'un
+  // chiffre affiché que personne n'a enregistré.
+  RESSENTIS.set(Number(id), Number(valeur));
+  drawThread();
+  try {
+    const r = await api('/api/releve', { messageId: Number(id), valeur: Number(valeur) });
+    if (r?.erreur) throw new Error(r.erreur);
+  } catch (e) {
+    RESSENTIS.delete(Number(id));
+    drawThread();
+    toast?.(`Ce ressenti n'a pas été enregistré — ${e.message}`);
+  }
 }
 
 /*
@@ -1104,6 +1161,10 @@ function bindGestes(th) {
      * Atterrir sur une liste de huit lignes en ayant clique sur l'une d'elles
      * fait recommencer le geste.
      */
+    // L'échelle sous la question : le cran touché pose le relevé.
+    const cran = e.target.closest('[data-ressenti]');
+    if (cran) return poserRessenti(cran.dataset.ressenti, cran.dataset.valeur);
+
     const m = e.target.closest('[data-motif]');
     if (m) {
       MIR_THEME = m.dataset.motif ? `motif:${m.dataset.motif}` : null;
@@ -1307,6 +1368,7 @@ async function send() {
 
       if (ev === 'user') {
         S.messages = data.messages;
+        RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
         drawThread();
         /*
          * LA BULLE EXISTE AVANT LA PREMIERE LETTRE.
@@ -1379,6 +1441,7 @@ async function send() {
         if (data.usage) { S.usage = data.usage; syncGauge(); }
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
+        RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
         if (data.motifs) S.motifs = data.motifs;
         // La journée que le serveur a retenue pour ce message. Elle peut avoir
         // changé depuis l'ouverture de la page : « aujourd'hui » commence au

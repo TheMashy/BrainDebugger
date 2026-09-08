@@ -5,7 +5,7 @@ import {
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
-  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, amplitude, amplitudes, TEINTES,
+  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, relevesDeToi, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
   toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, versionMachiTool, joursEcrits,
@@ -51,6 +51,7 @@ import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenet
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
 import { prises } from './prises.js';
+import { proposerLechelle } from '../web/ressenti.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -1236,8 +1237,14 @@ export const routes = {
     };
   },
 
-  'GET /api/messages': ({ query, userId }) =>
-    query.date ? { messages: messagesForDate(query.date, userId) } : { messages: recentMessages(80, userId) },
+  /* `ressentis` voyage avec le fil : sans lui, l'échelle réapparaîtrait sous
+     une question déjà répondue à chaque rechargement de la page, et le même
+     instant se relèverait deux fois. */
+  'GET /api/messages': ({ query, userId }) => {
+    const messages = query.date ? messagesForDate(query.date, userId) : recentMessages(80, userId);
+    return { messages, ressentis: relevesDeToi(messages.map(m => m.id), userId)
+      .map(r => ({ message_id: r.message_id, valeur: r.valeur })) };
+  },
 
   'POST /api/note': ({ body, userId }) => {
     const date = body.date ?? today();
@@ -2406,6 +2413,38 @@ export const routes = {
    * déclencheur manque, et il manque en silence plutôt que de tout retenir.
    */
   'GET /api/prises': ({ userId }) => prisesDe(userId),
+
+  /*
+   * TU RÉPONDS TOI-MÊME À LA QUESTION QU'IL VIENT DE POSER.
+   *
+   * Le compagnon estimait déjà où quelqu'un SEMBLE être (`relever_humeur`).
+   * Ceci est l'autre moitié : ce que la personne dit d'elle, en un geste,
+   * quand il demande « où tu en es ». Le relevé garde sa source, parce que les
+   * deux n'ont pas été posés par le même juge — et c'est ce qui permet, plus
+   * tard, de ne jamais présenter l'un pour l'autre.
+   *
+   * On refuse un relevé qui n'est pas une réponse à une vraie question : sans
+   * ce garde-fou, n'importe quel appel poserait un chiffre sur n'importe quel
+   * message, et l'amplitude de la journée compterait des points qui ne veulent
+   * rien dire.
+   */
+  'POST /api/releve': ({ body, userId }) => {
+    const id = Number(body?.messageId);
+    const v = Number(body?.valeur);
+    if (!Number.isFinite(id) || !Number.isFinite(v)) return { erreur: 'il manque le message ou la valeur' };
+    const fil = recentMessages(80, userId);
+    const m = fil.find(x => Number(x.id) === id);
+    if (!m) return { erreur: 'ce message n’est plus dans le fil' };
+    const dernierDuCompagnon = [...fil].reverse().find(x => x.role === 'assistant');
+    const repondus = new Set(relevesDeToi(fil.map(x => x.id), userId).map(r => Number(r.message_id)));
+    if (!proposerLechelle(m, { dernier: Number(dernierDuCompagnon?.id) === id, repondus }))
+      return { erreur: 'ce message ne demande pas où tu en es' };
+    const r = addReleve({ messageId: id, date: jourVecu(userId), valeur: v,
+                          quoi: String(m.text).trim().slice(0, 160), source: 'toi', userId });
+    if (!r) return { erreur: 'valeur illisible' };
+    invalidate(userId);
+    return { ok: true, releve: r };
+  },
 
   'GET /api/lecture': async ({ userId }) => {
     /*
