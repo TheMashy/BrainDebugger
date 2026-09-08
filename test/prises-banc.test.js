@@ -113,12 +113,12 @@ test('LE TÉMOIN NE SE VOIT RIEN INVENTER', () => {
 });
 
 test('rien de ce qui est rendu ne qualifie la personne, sur aucun dossier', () => {
-  const interdit = /addict|alcooliqu|alcoolo|toxico|dépendan|dependan|drogué|accro|malade|trouble/i;
+  const interdit = /addict|alcooliqu|alcoolo|toxico|dépendan|dependan|drogué|accro|malade|trouble|craqu|cach|habitude|suivi|surveill/i;
   for (const fam of ['alcool', 'cannabis', 'stimulants']) {
     const d = avecDependance(1, { famille: fam });
     const r = lire(d);
     const texte = JSON.stringify(r.prises.map(p => ({
-      nom: p.nom, signes: p.signes.map(s => s.dit), avant: p.avant_ca.map(a => a.nom) })));
+      nom: p.nom, signes: p.signes.map(s => s.dit), avant: p.avant_ca.map(a => a.nom) })).concat(r.ecartees.map(e => e.pourquoi)));
     assert.ok(!interdit.test(texte), `${fam} : ${texte}`);
   }
 });

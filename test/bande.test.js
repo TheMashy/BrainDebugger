@@ -7,7 +7,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pairesDuLien, joursDe, teinteNote, COUCHES, SYMBOLES, symbole, bandeCouches, bandeLiee, trousDe } from '../web/bande.js';
+import { pairesDuLien, joursDe, teinteNote, COUCHES, SYMBOLES, symbole, bandeCouches, bandeLiee, trousDe, MAX_FAMILLES } from '../web/bande.js';
 
 const jour = i => new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10);
 
@@ -155,4 +155,71 @@ test('sans trou, rien n’est dessiné et rien n’est annoncé', () => {
   const svg = bandeLiee({ noeuds: [{ nom: 'x', jours: [dates[0]] }] }, fonct);
   assert.ok(!svg.includes('btrou'));
   assert.ok(!svg.includes('jours sans rien écrire'));
+});
+
+/* ------------------------------------------------------------------
+ * CE QUE TU CONSOMMES : toutes les familles, et des mots qui n'ont qu'un sens.
+ *
+ * La couche ne dessinait que `prises[0]` : dès que l'alcool passait devant au
+ * tri, le cannabis n'apparaissait pas sur la bande, même compté — et
+ * l'étiquette disait « l'alcool — 4 jours écrits » avec les mots de la couche
+ * « tes jours », qui veulent dire autre chose quatre lignes plus haut.
+ * ------------------------------------------------------------------ */
+const bancPrises = () => {
+  const { carte, fonct, schemas } = bancCouches();
+  const dates = fonct.series.dates;
+  const prises = { prises: [
+    { cle: 'alcool', nom: 'l’alcool', n: 8, jours: dates.filter((_, i) => i % 5 === 0) },
+    { cle: 'cannabis', nom: 'le cannabis', n: 6, dont_fume: 4, jours: dates.filter((_, i) => i % 7 === 1) } ] };
+  return { carte, fonct, schemas, dates, prises };
+};
+
+test('chaque famille comptée est dessinée, sur sa propre rangée', () => {
+  const { carte, fonct, schemas, prises } = bancPrises();
+  const svg = bandeCouches(carte, fonct, schemas, null, { prises });
+  const couche = svg.match(/<g class="bco" data-couche="prise">[\s\S]*?(?=<g class="bco|$)/)[0];
+  const fams = [...couche.matchAll(/data-famille="([a-z]+)"/g)].map(m => m[1]);
+  assert.deepEqual(fams, ['alcool', 'cannabis'], 'les deux familles sont là, pas seulement la première');
+  const y = new Set([...couche.split('<g transform="translate')[0].matchAll(/<rect[^>]*\by="([\d.]+)"/g)].map(m => m[1]));
+  assert.equal(y.size, 2, 'une rangée par famille — sur la même, deux choses se lisent comme une');
+  assert.match(couche, /alcool : 8 jours où tu l’écris · cannabis : 6 jours/);
+  assert.match(couche, /dont 4 écrits juste « fumé »/, 'la fusion de « fumé » est dite, pas tue');
+});
+
+test('les rangées de plus poussent la pile des étiquettes, rien ne se chevauche', () => {
+  const { carte, fonct, schemas, prises, dates } = bancPrises();
+  prises.prises.push({ cle: 'tabac', nom: 'la cigarette', n: 3, jours: dates.slice(0, 3) });
+  const svg = bandeCouches(carte, fonct, schemas, null, { prises });
+  const couche = svg.match(/<g class="bco" data-couche="prise">[\s\S]*?(?=<g class="bco|$)/)[0];
+  const bas = Math.max(...[...couche.split('<g transform="translate')[0].matchAll(/<rect[^>]*\by="([\d.]+)"[^>]*\bheight="([\d.]+)"/g)]
+    .map(m => Number(m[1]) + Number(m[2])));
+  const premiere = Math.min(...[...svg.matchAll(/translate\([\d.]+ ([\d.]+)\)/g)].map(m => Number(m[1])));
+  assert.ok(premiere - 10 >= bas, `la première étiquette (${premiere}) mord sur la dernière rangée (${bas})`);
+  const y = [...svg.matchAll(/translate\([\d.]+ ([\d.]+)\)/g)].map(m => Number(m[1]));
+  assert.equal(new Set(y).size, y.length);
+  assert.ok(MAX_FAMILLES >= 3);
+});
+
+test('un jour compté hors de la bande est dit, pas tu', () => {
+  const { carte, fonct, schemas, dates } = bancPrises();
+  const prises = { prises: [{ cle: 'alcool', nom: 'l’alcool', n: 5, jours: [...dates.slice(0, 4), '2019-01-01'] }] };
+  const svg = bandeCouches(carte, fonct, schemas, null, { prises });
+  assert.match(svg, /alcool : 5 jours où tu l’écris \(1 hors de la bande\)/);
+});
+
+test('les mots des étiquettes n’ont qu’un sens, et ne qualifient personne', () => {
+  const { carte, fonct, schemas, prises } = bancPrises();
+  const svg = bandeCouches(carte, fonct, schemas, null, { prises });
+  const textes = [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(m => m[1]);
+  const prise = textes.find(t => /alcool/.test(t));
+  assert.ok(prise && !/jours écrits/.test(prise), '« jours écrits » veut dire « jours où tu as écrit », et rien d’autre');
+  assert.ok(textes.some(t => /^\d+ jours écrits/.test(t)), 'la couche « tes jours » garde l’expression');
+  assert.ok(textes.some(t => /jours signalés par la veille$/.test(t)), 'la veille signale, elle ne surveille pas');
+  const interdit = /addict|alcoolo|toxico|dépendan|drogué|accro|craqu|cach|habitude|suivi|surveill|de la prise/i;
+  for (const t of textes) assert.ok(!interdit.test(t), t);
+  for (const c of COUCHES) {
+    assert.ok(!interdit.test(c.nom), c.nom);
+    assert.ok(!interdit.test(c.dit), c.dit);
+  }
+  assert.equal(COUCHES.find(c => c.id === 'prise').nom, 'ce que tu consommes');
 });

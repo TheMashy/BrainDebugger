@@ -16,7 +16,15 @@
  *                   jours, survoler des jours allume son rond.
  *   `bandeCouches` — le mode lecture : les mêmes jours, avec par-dessus ce qui
  *                   vient après quoi, ce qui se répète, le jour où ça change,
- *                   et les jours à surveiller. Chaque couche s'isole.
+ *                   ce que la personne consomme et les jours signalés par la
+ *                   veille. Chaque couche s'isole.
+ *
+ * LES MOTS DES ÉTIQUETTES SONT SIMPLES ET N'ONT QU'UN SENS. « jours écrits »
+ * veut dire « jours où tu as écrit », et rien d'autre — il servait aussi pour
+ * « jours où l'alcool est écrit », quatre lignes plus bas sur le même dessin.
+ * « ce qui a de la prise » était un jeu de mots (emprise / dose) là où le
+ * champ des repères dit « consommation » ; « à surveiller » disait ce qu'on
+ * fait DE la personne, pas ce qui est compté. On dit ce qu'on compte.
  *
  * Aucune des deux n'ajoute un fait. Elles marquent des jours déjà écrits.
  * =====================================================================
@@ -190,10 +198,10 @@ export const COUCHES = [
     dit: 'Les jours où un cycle se rejoue. Un cycle n’est pas une histoire&nbsp;: c’est une forme qui revient, et on la voit revenir.' },
   { id: 'change',  nom: 'le jour où ça change', sym: 'change',
     dit: 'Le jour où ta note passe d’un niveau à l’autre. <b>La date n’est pas choisie</b>&nbsp;: c’est celle qui reste quand on compare les deux périodes.' },
-  { id: 'prise',   nom: 'ce qui a de la prise', sym: 'prise',
-    dit: 'Les jours où une consommation est écrite. Posés sur la bande, on voit les séries sans — et qu’un écart n’efface pas les semaines d’avant.' },
-  { id: 'surv',    nom: 'à surveiller',         sym: 'surv',
-    dit: 'Les jours marqués par la veille. Posés sur la bande, on voit tout de suite <b>s’ils se suivent</b>.' }
+  { id: 'prise',   nom: 'ce que tu consommes',  sym: 'prise',
+    dit: 'Les jours où tu écris avoir bu, fumé ou pris quelque chose — une rangée par chose. Posés sur la bande, on voit les jours sans entre deux, <b>et qu’un jour avec n’efface pas ceux d’avant</b>.' },
+  { id: 'surv',    nom: 'signalés par la veille', sym: 'surv',
+    dit: 'Les jours que la veille a marqués. Posés sur la bande, on voit tout de suite <b>s’ils se suivent</b>.' }
 ];
 
 /**
@@ -258,18 +266,23 @@ export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 86
     marques: cycle.jours.map(x =>
       `<rect x="${(x - 1.5).toFixed(1)}" y="${Y + HB + 5}" width="3" height="9" rx="1.5" fill="var(--m-prune, #a78bfa)"/>`).join('') });
 
-  /* — ce qui a de la prise : la plus fournie, sous les cycles —
-     Elle a sa place ICI et pas dans un écran à part : une consommation est une
-     chose datée comme les autres, et c'est en la voyant sur la même règle que
-     les bascules et les cycles qu'on voit après quoi elle tombe. */
-  const prise = (prises?.prises ?? [])[0];
-  if (prise) {
-    const xs = prise.jours.map(pos).filter(x => x != null);
-    if (xs.length) couches.push({ id: 'prise', sym: 'prise', couleur: 'var(--m-brique, #e07a5f)',
-      texte: `${prise.nom} — ${xs.length} jours écrits`,
-      marques: xs.map(x =>
-        `<rect x="${(x - 1.5).toFixed(1)}" y="${Y + HB + 31}" width="3" height="9" rx="1.5" fill="var(--m-brique, #e07a5f)"/>`).join('') });
-  }
+  /* — ce que tu consommes : TOUTES les familles, une rangée chacune, sous les
+     cycles. Elle a sa place ICI et pas dans un écran à part : une consommation
+     est une chose datée comme les autres, et c'est en la voyant sur la même
+     règle que les bascules et les cycles qu'on voit après quoi elle tombe.
+     On ne dessinait que la première : l'ordre met devant ce qui a des signes,
+     puis ce qui monte, et dès que l'alcool passait devant, le cannabis
+     n'apparaissait pas — même compté. La personne lisait « l'alcool » là où
+     elle avait écrit les deux. */
+  const familles = (prises?.prises ?? [])
+    .map(p => ({ ...p, xs: (p.jours ?? []).map(pos).filter(x => x != null) }))
+    .filter(p => p.xs.length).slice(0, MAX_FAMILLES);
+  const H_FAM = 11;                               // une rangée par famille
+  const extra = Math.max(0, familles.length - 1) * H_FAM;
+  if (familles.length) couches.push({ id: 'prise', sym: 'prise', couleur: 'var(--m-brique, #e07a5f)',
+    texte: familles.map((p, k) => etiqPrise(p, k === 0)).join(' · '),
+    marques: familles.map((p, k) => `<g class="bfam" data-famille="${esc(p.cle ?? '')}"><title>${esc(titrePrise(p))}</title>${
+      p.xs.map(x => `<rect x="${(x - 1.5).toFixed(1)}" y="${Y + HB + 31 + k * H_FAM}" width="3" height="9" rx="1.5" fill="var(--m-brique, #e07a5f)"${k ? ` opacity="${(1 - k * .18).toFixed(2)}"` : ''}/>`).join('')}</g>`).join('') });
 
   /* — le jour où ça change — */
   const basc = (fonct?.items ?? []).filter(i => i.type === 'bascule').map(i => ({ d: i.date, x: pos(i.date) }))
@@ -280,16 +293,16 @@ export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 86
       `<line x1="${b.x.toFixed(1)}" y1="6" x2="${b.x.toFixed(1)}" y2="${Y + HB + 18}"
         stroke="currentColor" stroke-width="1.3" stroke-dasharray="3 3" opacity=".7"/>`).join('') });
 
-  /* — à surveiller — */
+  /* — signalés par la veille — */
   const surv = (fonct?.surveilles?.jours ?? []).map(j => pos(j.date)).filter(x => x != null);
   if (surv.length) couches.push({ id: 'surv', sym: 'surv', couleur: 'var(--danger)',
-    texte: `${surv.length} jours à surveiller`,
+    texte: `${surv.length} jour${surv.length > 1 ? 's' : ''} signalé${surv.length > 1 ? 's' : ''} par la veille`,
     marques: surv.map(x =>
       `<rect x="${(x - 1.6).toFixed(1)}" y="${Y + HB + 18}" width="3.2" height="10" rx="1.6" fill="var(--danger)"/>`).join('') });
 
   /* Les étiquettes ne se cherchent pas une place : elles descendent en pile,
      une ligne chacune, dans l'ordre des couches. Rien ne peut plus se croiser. */
-  const Y_PILE = Y + HB + 52, PAS_PILE = 19;
+  const Y_PILE = Y + HB + 52 + extra, PAS_PILE = 19;
   const vif = id => !isole || isole === id;
   const dessin = couches.map((c, k) =>
     `<g class="bco${vif(c.id) ? '' : ' eteint'}" data-couche="${c.id}">${c.marques}
@@ -298,6 +311,30 @@ export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 86
   const H = Y_PILE + couches.length * PAS_PILE + 4;
   return `<svg viewBox="0 0 ${largeur} ${H}" class="bsvg bcouches" role="img"
     aria-label="Les jours du journal, et les couches qui s’y lisent">${dessin}</svg>`;
+}
+
+/* Quatre rangées de consommations au plus : au-delà, la pile des étiquettes
+   descend et la bande ne se lit plus, elle se compte. */
+export const MAX_FAMILLES = 4;
+
+/* Le nom d'une famille sans son article — « l'alcool » devient « alcool » —
+   pour que l'étiquette se lise « alcool : 4 jours où tu l'écris ». */
+const nomNu = nom => String(nom ?? '').replace(/^(?:l[’']|le |la |les )/, '');
+
+/* L'ÉTIQUETTE D'UNE FAMILLE. « l'alcool — 4 jours écrits » comptait les jours
+   posés sur l'axe, avec les mots de la couche « tes jours » ; on rend le compte
+   du moteur, et ce qu'il veut dire. Les jours hors de la bande (un repère plus
+   ancien que le premier jour écrit) sont dits, pas tus. */
+function etiqPrise(p, premiere) {
+  const n = p.n ?? p.xs.length;
+  const hors = n - p.xs.length;
+  return `${nomNu(p.nom)} : ${n} jour${n > 1 ? 's' : ''}${premiere ? ' où tu l’écris' : ''}${hors > 0 ? ` (${hors} hors de la bande)` : ''}`;
+}
+function titrePrise(p) {
+  const n = p.n ?? p.xs.length;
+  return `${nomNu(p.nom)} : ${n} jour${n > 1 ? 's' : ''} où tu l’écris`
+    + (p.dont_fume ? ` — dont ${p.dont_fume} écrit${p.dont_fume > 1 ? 's' : ''} juste « fumé »` : '')
+    + (p.dont_reperes ? ` — dont ${p.dont_reperes} de tes repères` : '');
 }
 
 /* Une étiquette : son symbole, puis sa phrase. Le même symbole que sur le

@@ -36,9 +36,46 @@ test('chaque famille se reconnaît sur la façon dont on l’écrit vraiment', (
     ["j'ai pris trois xanax pour tenir", 'calmants'],
     ["j'ai fumé un paquet de clopes", 'tabac'],
     ["j'ai remis cinquante balles sur betclic", 'argent'],
+    /* Les tournures que le dossier d'une personne employait, et que le
+       moteur manquait : douze sur vingt et une. La reprise nommée d'abord —
+       c'est le jour qui compte le plus, et « repris » n'existait que chez les
+       stimulants. */
+    ["reprise de la weed", 'cannabis'],
+    ["j'ai repris la weed", 'cannabis'],
+    ["j'ai rechuté sur la weed", 'cannabis'],
+    ["j'ai repris la clope", 'tabac'],
+    ["j'ai replongé dans le vin", 'alcool'],
+    ["je suis retombée dans la coke", 'stimulants'],
+    ["j'ai fumé un pét", 'cannabis'],
+    ["de la beuh ce soir", 'cannabis'],
+    ["j'ai fumé un joint", 'cannabis'],
+    ["j'ai tiré sur le joint", 'cannabis'],
+    ["je me suis fumé un joint", 'cannabis'],
+    ["j'ai fait un bang", 'cannabis'],
+    ["j'ai vapé de la weed", 'cannabis'],
+    ["quelques lattes sur le joint", 'cannabis'],
+    ["j'ai pris de la md", 'stimulants'],
+    ["j'ai bu", 'alcool'],
+    ["un verre avec des potes", 'alcool'],
+    ["quelques bières", 'alcool'],
+    ["j'ai picolé", 'alcool'],
+    ["j'ai fumé une clope", 'tabac'],
+    ["j'ai vapoté toute la journée", 'tabac'],
+    /* Le verbe de fumée sans objet : ni cannabis ni tabac tant que le texte
+       ne dit pas quoi. C'est le dossier entier qui tranche, plus bas. */
+    ["j'ai refumé", 'fume'],
+    ["j'ai fumé hier soir", 'fume'],
+    ["on a fumé avec des potes", 'fume'],
+    ["quelques lattes", 'fume'],
+    ["j'ai fumé, comme tous les soirs en ce moment.", 'fume'],
   ];
   for (const [t, attendu] of vrais)
     assert.ok(cles(t).includes(attendu), `« ${t} » → ${cles(t)} (attendu ${attendu})`);
+});
+
+test('« fumé un joint » est un joint, pas aussi « fumé, sans dire quoi »', () => {
+  assert.deepEqual(cles("j'ai fumé un joint"), ['cannabis']);
+  assert.deepEqual(cles("j'ai fumé une clope"), ['tabac']);
 });
 
 /* --------------------------- les pièges --------------------------- */
@@ -65,9 +102,71 @@ test('rien de ce qui ressemble à une prise et n’en est pas ne compte', () => 
     "le chien a fait un pet",
     "j'ai bu un chocolat chaud",
     "j'ai fini le livre",
+    /* Les pièges qu'appellent la fumée nue et la reprise : sans eux, la
+       prochaine correction de vocabulaire casserait une garde sans que
+       personne le voie. */
+    "j'ai fumé une côte de bœuf",                   // la cuisine
+    "j'ai mangé du saumon fumé",
+    "j'ai fumé au barbecue un magret",
+    "j'ai fumé de rage",                            // la colère
+    "j'ai roulé deux heures pour rentrer",          // les verbes de fumée, sans rien à fumer
+    "j'ai tiré la chasse",
+    "j'ai grillé un feu rouge",
+    "j'ai pris un latte au café",
+    "ça a fait un bang énorme",
+    "j'ai repris le sport",                         // la reprise de tout le reste
+    "j'ai repris le boulot lundi",
+    "reprise du travail demain",
+    "reprise des cours, une journée longue",
+    "j'ai repris confiance",
+    "j'ai repris mon traitement",
+    "je suis retombé sur mes pieds",
+    "je suis retombé sur une vieille bouteille de vin",
+    "j'ai craqué et j'ai pleuré",
+    "j'ai craqué pour cette robe",
+    "j'ai remis le couvert au boulot",
+    "mon pote a refumé",                            // ce n'est pas la personne
+    "mon frère a fumé",
+    "j'ai vu mon pote qui a fumé",
+    "la reprise de la weed de mon frère",           // le possessif APRÈS le nom
+    "je veux arrêter la picole",                    // le nom de la picole n'est pas le verbe
+    "j'ai arrêté la picole",
+    "ma vape est cassée",                           // l'objet, pas le geste
+    "j'ai envie de fumer",                          // l'intention
+    "je vais fumer ce soir",
+    "je fume pas",
   ];
   for (const t of pieges)
     assert.deepEqual(cles(t), [], `« ${t} » ne devrait rien déclencher, a donné ${cles(t)}`);
+});
+
+test('le possessif après le nom est un tiers, sauf si la personne s’y met', () => {
+  assert.deepEqual(cles("la reprise de la weed de mon frère"), []);
+  assert.ok(!signesDuTexte("la reprise de la weed de mon frère").some(s => s.id === 'craque'),
+    'la reprise de son frère n’est pas la sienne');
+  assert.deepEqual(cles("j'ai fumé la weed de mon frère"), ['cannabis']);
+});
+
+test('la reprise nue est un signe, pas un jour — et bornée', () => {
+  for (const t of ["j'ai repris", "je suis retombé dedans", "j'ai refumé", "j'ai replongé, après tout ce temps.",
+                   "reprise de la weed", "j'ai repris la clope"]) {
+    assert.ok(signesDuTexte(t).some(s => s.id === 'craque'), `« ${t} » devrait allumer la reprise`);
+  }
+  /* « j'ai repris le sport » devenait « tu as craqué après avoir tenu » dès
+     qu'il tombait à côté d'un jour d'alcool. */
+  for (const t of ["j'ai repris le sport", "j'ai repris le boulot", "j'ai repris confiance", "j'ai repris mon traitement",
+                   "reprise du travail", "je suis retombé sur mes pieds", "j'ai craqué et j'ai pleuré", "j'ai craqué pour cette robe"]) {
+    assert.ok(!signesDuTexte(t).some(s => s.id === 'craque'), `« ${t} » ne parle pas d’une reprise`);
+  }
+  assert.deepEqual(cles("j'ai repris"), [], 'sans nom, ce n’est pas un jour d’une famille');
+});
+
+test('les mots lus sont rendus, pour que la vue dise « md » plutôt que « les stimulants »', () => {
+  assert.deepEqual(prisesDuTexte("j'ai pris de la md samedi").get('stimulants').lus, ['md']);
+  const fond = Array.from({ length: 30 }, (_, i) => ({ date: J(i + 10), note: 6, text: 'journée ordinaire' }));
+  const avec = [0, 1, 2].map(i => ({ date: J(i), note: 4, text: i ? "j'ai pris de la md" : "j'ai tapé de la coke et de la md" }));
+  const r = analyserPrises([...avec, ...fond], { aujourdhui: J(40) });
+  assert.deepEqual(r.prises[0].lus, ['md', 'coke']);
 });
 
 test('l’envie n’est pas la prise', () => {
@@ -84,9 +183,17 @@ test('la preuve rendue est la phrase écrite, pas un verdict', () => {
 });
 
 test('aucune famille, aucun signe ne qualifie la personne', () => {
-  const interdit = /addict|alcoolo|alcooliqu|toxico|dépendan|drogué|malade|accro/i;
+  /* « craqué » et « caché » sont des verdicts sur l'acte ; « habitude »,
+     « suivi », « surveillé » disent ce qu'on fait de la personne. Ils passaient
+     sous le radar du premier regex, qui ne bloquait que les étiquettes
+     cliniques. */
+  const interdit = /addict|alcoolo|alcooliqu|toxico|dépendan|drogué|malade|accro|craqu|cach|habitude|suivi|surveill/i;
   for (const f of FAMILLES) assert.ok(!interdit.test(f.nom), f.nom);
   for (const s of SIGNES) assert.ok(!interdit.test(s.dit), s.dit);
+  const deux = [0, 1].map(i => ({ date: J(i), note: 5, text: "j'ai bu trois bières" }));
+  const fond = Array.from({ length: 20 }, (_, i) => ({ date: J(i + 5), note: 6, text: 'rien' }));
+  for (const e of analyserPrises([...deux, ...fond], { aujourdhui: J(24) }).ecartees)
+    assert.ok(!interdit.test(e.pourquoi), e.pourquoi);
 });
 
 /* --------------------------- les séries --------------------------- */
@@ -146,7 +253,145 @@ test('trois jours suffisent pour exister, deux ne suffisent pas', () => {
   const r = analyserPrises([...deux, ...fond], { aujourdhui: J(24) });
   assert.deepEqual(r.prises, []);
   assert.equal(r.ecartees[0]?.cle, 'alcool');
-  assert.match(r.ecartees[0].pourquoi, /2 fois/);
+  assert.match(r.ecartees[0].pourquoi, /écrit 2 jours — il en faut 3/);
+});
+
+/* --------------------------- la fumée nue et la reprise --------------------------- */
+
+/** Le dossier de la personne : quatre soirs d'alcool nommés, le cannabis
+    écrit comme on l'écrit vraiment — « j'ai fumé », sans le nom — un seul
+    « pét », et « j'ai repris. » tout seul, loin de tout. */
+function dossierFumee({ pet = true, clope = false } = {}) {
+  const rows = [];
+  for (let i = 0; i < 60; i += 2) rows.push({ date: J(i), note: 6, text: 'journée ordinaire.' });
+  const dire = (i, t, note = 4) => { const r = rows.find(r => r.date === J(i)); r.text = t; r.note = note; };
+  dire(4, "j'ai bu quatre bières."); dire(14, "j'ai encore bu."); dire(24, "un verre avec des potes."); dire(40, "j'ai bu.");
+  dire(8, "j'ai fumé hier soir."); dire(18, "j'ai refumé, c'est reparti."); dire(28, "on a fumé avec des potes.");
+  if (pet) dire(30, "j'ai fumé un pét.");
+  if (clope) dire(36, "j'ai fumé une clope.");
+  dire(50, "j'ai repris.");
+  return rows;
+}
+
+test('« j’ai fumé » va au cannabis quand le dossier ne nomme que lui', () => {
+  /* Avant : cannabis « vu 1 fois » (la seule ligne avec « pét »), écarté, et
+     quatre soirs écrits perdus. */
+  const r = analyserPrises(dossierFumee(), { aujourdhui: J(58) });
+  const c = r.prises.find(p => p.cle === 'cannabis');
+  assert.ok(c, `le cannabis devrait ressortir : ${JSON.stringify(r.prises.map(p => [p.cle, p.n]))}`);
+  assert.ok(c.n >= 3 && c.n === 4, `4 jours attendus, ${c.n}`);
+  assert.equal(c.dont_fume, 3, 'et le compte des jours versés est rendu, pour que la vue le dise');
+  assert.ok(!r.prises.some(p => p.cle === 'fume') && !r.ecartees.some(e => e.cle === 'fume'),
+    'la fumée nue ne reste pas une famille à part quand elle a été versée');
+});
+
+test('quand le dossier nomme le cannabis ET le tabac, « fumé » reste « sans dire quoi »', () => {
+  const r = analyserPrises(dossierFumee({ clope: true }), { aujourdhui: J(58) });
+  const nue = r.prises.find(p => p.cle === 'fume');
+  assert.ok(nue, `on ne devine pas : ${JSON.stringify(r.prises.map(p => [p.cle, p.n]))}`);
+  assert.equal(nue.n, 3);
+  assert.match(nue.nom, /sans dire quoi/);
+  assert.equal(r.ecartees.find(e => e.cle === 'cannabis')?.n, 1, 'le « pét » seul reste en dessous du seuil');
+});
+
+test('quand rien n’est nommé, « fumé » compte sous son propre nom', () => {
+  const r = analyserPrises(dossierFumee({ pet: false }), { aujourdhui: J(58) });
+  assert.ok(r.prises.some(p => p.cle === 'fume' && p.n === 3));
+  assert.ok(!r.prises.some(p => p.cle === 'cannabis') && !r.prises.some(p => p.cle === 'tabac'));
+});
+
+test('un repère « reprise de la weed » est lu : un jour de cannabis, et la reprise', () => {
+  /* La seule mention explicite du cannabis de la personne était un repère,
+     dans une table que le moteur n'ouvrait pas. */
+  const rows = dossierFumee({ pet: false });
+  const sans = analyserPrises(rows, { aujourdhui: J(58) });
+  assert.ok(!sans.prises.some(p => p.cle === 'cannabis'), 'sans le repère, rien ne nomme le cannabis');
+  const r = analyserPrises(rows, { aujourdhui: J(58),
+    reperes: [{ date: J(20), label: 'reprise de la weed', theme: 'conso', ouvert: 1 },
+              { date: J(2), label: 'arrêt de l’alcool', theme: 'conso' },
+              { date: J(10), label: 'déménagement', theme: 'maison' }] });
+  const c = r.prises.find(p => p.cle === 'cannabis');
+  assert.ok(c, `le repère devrait faire exister le cannabis : ${JSON.stringify(r.prises.map(p => [p.cle, p.n]))}`);
+  assert.equal(c.n, 4, 'trois jours « fumé » versés, plus le repère à sa date');
+  assert.equal(c.dont_fume, 3);
+  assert.equal(c.dont_reperes, 1);
+  assert.ok(c.jours.includes(J(20)));
+  assert.equal(c.preuve, "on a fumé avec des potes.", 'la preuve reste la dernière phrase écrite');
+  assert.ok(c.signes.some(s => s.id === 'craque' && s.phrase === 'reprise de la weed' && s.quand === J(20)),
+    `le libellé du repère est la phrase du signe : ${JSON.stringify(c.signes)}`);
+  const a = r.prises.find(p => p.cle === 'alcool');
+  assert.ok(!a.jours.includes(J(2)), 'un repère qui dit l’arrêt n’est pas un jour d’alcool');
+});
+
+test('un repère hors des journées écrites compte pour la famille, sans casser les séries', () => {
+  const rows = dossierFumee();
+  const r = analyserPrises(rows, { aujourdhui: J(58),
+    reperes: [{ date: J(3), label: 'j’ai fumé un joint', theme: 'conso' }] });
+  const c = r.prises.find(p => p.cle === 'cannabis');
+  assert.ok(c.jours.includes(J(3)));
+  assert.equal(c.n, 5);
+  assert.ok(c.series.every(s => s.jours > 0));
+});
+
+test('un objectif « arrêter la cigarette » est le signe « vouloir arrêter », rattaché au tabac', () => {
+  const rows = [];
+  for (let i = 0; i < 60; i++) rows.push({ date: J(i), note: 6, text: 'journée ordinaire' });
+  for (const i of [40, 45, 50]) rows[i] = { date: J(i), note: 5, text: "j'ai fumé un paquet de clopes" };
+  const r = analyserPrises(rows, { aujourdhui: J(59),
+    objectifs: [{ quoi: 'arrêter la cigarette', genre: 'conso', cree_le: J(2) + 'T10:00:00.000Z', depuis: J(2), tenu: 1, reprises: 0 }] });
+  const t = r.prises.find(p => p.cle === 'tabac');
+  const s = t.signes.find(s => s.id === 'arreter');
+  assert.ok(s, `l’objectif, posé loin des jours comptés, nomme la cigarette : ${JSON.stringify(t.signes)}`);
+  assert.equal(s.phrase, 'arrêter la cigarette');
+  assert.equal(s.quand, J(2));
+  assert.equal(s.rattache, 'nomme', 'et on dit pourquoi il est là');
+});
+
+test('le signe rendu est le plus récent, pas le premier', () => {
+  const rows = [];
+  for (let i = 0; i < 60; i++) rows.push({ date: J(i), note: 6, text: 'journée ordinaire' });
+  for (const i of [10, 20, 30]) rows[i] = { date: J(i), note: 4, text: "j'ai bu quatre bières. j'ai replongé." };
+  rows[31] = { date: J(31), note: 4, text: "j'ai repris la bière." };
+  const a = analyserPrises(rows, { aujourdhui: J(59) }).prises.find(p => p.cle === 'alcool');
+  const c = a.signes.filter(s => s.id === 'craque');
+  assert.equal(c.length, 1, 'un seul par signe');
+  assert.equal(c[0].quand, J(31));
+});
+
+test('« j’ai repris. » tout seul va à la famille la plus récente, et le dit', () => {
+  const r = analyserPrises(dossierFumee(), { aujourdhui: J(58) });
+  const a = r.prises.find(p => p.cle === 'alcool');
+  const s = a.signes.find(s => s.id === 'craque');
+  assert.ok(s, `l’alcool (dernier jour J40) est la famille la plus récente avant J50 : ${JSON.stringify(a.signes)}`);
+  assert.equal(s.quand, J(50));
+  assert.equal(s.rattache, 'recent');
+  assert.ok(!a.jours.includes(J(50)), 'ce n’est pas un jour de plus — on ne sait pas de quoi');
+  const c = r.prises.find(p => p.cle === 'cannabis');
+  assert.ok(!c.signes.some(s => s.quand === J(50)), 'et il ne va qu’à une seule famille');
+});
+
+test('« la plus récente » se juge au dernier jour AVANT la phrase, pas au dernier jour tout court', () => {
+  /* Alcool jusqu'à J40, cannabis J30-J34 puis de nouveau J56 : à J50, la
+     famille la plus récente est l'alcool. Trier sur le dernier jour tout court
+     aurait donné le cannabis. */
+  const rows = [];
+  for (let i = 0; i < 60; i++) rows.push({ date: J(i), note: 6, text: 'journée ordinaire' });
+  for (const i of [4, 14, 24, 40]) rows[i] = { date: J(i), note: 4, text: "j'ai bu quatre bières." };
+  for (const i of [30, 32, 34, 56]) rows[i] = { date: J(i), note: 4, text: "j'ai fumé un joint." };
+  rows[50] = { date: J(50), note: 4, text: "j'ai repris." };
+  const r = analyserPrises(rows, { aujourdhui: J(59) });
+  assert.ok(r.prises.find(p => p.cle === 'alcool').signes.some(s => s.id === 'craque' && s.quand === J(50)));
+  assert.ok(!r.prises.find(p => p.cle === 'cannabis').signes.some(s => s.quand === J(50)));
+});
+
+test('la reprise nommée va à la famille nommée, même si une autre est plus récente', () => {
+  const rows = dossierFumee();
+  rows.find(r => r.date === J(50)).text = "j'ai repris la weed.";
+  const r = analyserPrises(rows, { aujourdhui: J(58) });
+  const c = r.prises.find(p => p.cle === 'cannabis');
+  assert.ok(c.jours.includes(J(50)), 'nommée, c’est un jour de cannabis');
+  assert.ok(c.signes.some(s => s.id === 'craque' && s.quand === J(50)));
+  assert.ok(!r.prises.find(p => p.cle === 'alcool').signes.some(s => s.quand === J(50)));
 });
 
 test('une montée récente se lit dans les deux fenêtres, pas dans un verdict', () => {

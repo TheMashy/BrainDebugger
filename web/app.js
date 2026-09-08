@@ -3231,7 +3231,11 @@ function bandeMarkup(lecture) {
 
 const ICO_PRISE = { alcool: 'verre', cannabis: 'feuille', stimulants: 'eclair',
                     calmants: 'gelule', tabac: 'clope', argent: 'de' };
-const ICO_SIGNE = { arreter: 'pause', craque: 'casse', manque: 'refaire',
+/* `craque` avait un trait brisé — l'image de l'échec, exactement ce que ce
+   tableau refuse de dire d'un écart (voir l'argument Marlatt en tête de
+   server/prises.js). La boucle qui revient dit le même fait sans le verdict.
+   Elle est partagée avec `manque` : les deux disent « c'est revenu ». */
+const ICO_SIGNE = { arreter: 'pause', craque: 'refaire', manque: 'refaire',
                     plus_que_prevu: 'plus', cache: 'oeilbarre' };
 
 /** Les séries sans, en barres sur une base commune : la plus longue donne l'échelle. */
@@ -3254,18 +3258,18 @@ function seriesMarkup(p) {
     const dit = sans
       ? `${s.jours} jour${s.jours > 1 ? 's' : ''} sans, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
         + (s.trou > 21 ? ` — mais ${s.trou} jours sans rien écrire au milieu`
-           : s.maigre ? ` — journal ouvert ${s.ecrites} fois seulement` : '')
+           : s.maigre ? ` — écrit ${s.ecrites} fois seulement dedans` : '')
       : `${s.jours} jours entre deux fois, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
-        + ` — journal ouvert ${s.ecrites} fois dedans`;
+        + ` — écrit ${s.ecrites} fois dedans`;
     return `<span class="${cl}" style="height:${h}px" title="${esc(dit)}"><i></i></span>`;
   }).join('');
   const record = sans ? p.plus_longue : p.plus_long_ecart;
   return `<div class="pseries">
     <div class="pbarres">${barres}</div>
     <span class="psleg faint">${sans
-      ? `${vues.length < series.length ? 'tes dernières séries sans' : 'tes séries sans'}, de la plus ancienne à maintenant`
-      : 'ce qui s’écoule entre deux fois'}${
-      record ? ` · le plus long&nbsp;: <b>${record} j</b>` : ''}</span>
+      ? `${vues.length < series.length ? 'les 14 dernières' : 'jours d’affilée sans'}, du plus ancien à maintenant`
+      : 'jours entre deux fois'}${
+      record ? ` · le plus long&nbsp;: <b>${record} jours</b>` : ''}</span>
   </div>`;
 }
 
@@ -3287,19 +3291,19 @@ function priseMarkup(p) {
             cycles et des bascules. C'est là qu'on voit après quoi ça tombe —
             un tableau de chiffres ne l'a jamais montré à personne. */''}
       <button class="plien" data-voir-bande title="Voir ces jours sur la bande">${ico('bande', 13)}</button>
-      <span class="pdepuis faint">${p.depuis === 0 ? 'aujourd’hui'
+      <span class="pdepuis faint">dernière fois&nbsp;: ${p.depuis === 0 ? 'aujourd’hui'
         : p.depuis === 1 ? 'hier'
         : `il y a ${p.depuis} jours`}</span>
     </header>
 
     ${avant ? `<p class="pavant">${ico('fleche', 13)}
-      <span>ça revient après <b>${esc(avant.nom)}</b> — ${avant.apres} fois sur ${avant.sur}</span></p>` : ''}
+      <span>après « <b>${esc(avant.nom)}</b> », c’est écrit le jour d’après&nbsp;: ${avant.apres} fois sur ${avant.sur}</span></p>` : ''}
 
     ${seriesMarkup(p)}
 
     <p class="pfen">
-      <span class="pf"><b>${p.recent}</b> <span class="faint">sur tes ${p.recent_sur ?? p.fenetre ?? 30} dernières journées</span></span>
-      ${p.compare ? `<span class="pf faint">avant&nbsp;: ${p.avant} sur ${p.avant_sur}</span>
+      <span class="pf"><b>${p.recent}</b> <span class="faint">des ${p.recent_sur ?? p.fenetre ?? 30} dernières journées écrites</span></span>
+      ${p.compare ? `<span class="pf faint">les ${p.avant_sur} d’avant&nbsp;: ${p.avant}</span>
         <span class="ptend ${tendance}" title="${tendance === 'monte' ? 'plus souvent qu’avant'
           : tendance === 'baisse' ? 'moins souvent qu’avant' : 'autant qu’avant'}"
           >${tendance === 'monte' ? '↗' : tendance === 'baisse' ? '↘' : '='}</span>` : ''}
@@ -3309,16 +3313,16 @@ function priseMarkup(p) {
       ${ico(ICO_SIGNE[g.id] ?? 'point', 13)}<span class="psdit">${esc(g.dit)}</span>
       <q>${esc(g.phrase)}</q></li>`).join('')}</ul>` : ''}
 
-    ${cout ? `<p class="pcout faint">Le lendemain, ta note est basse ${cout.bas} fois sur ${cout.sur}
-      — ${Math.round(cout.hors_bas / cout.hors * 100)}&nbsp;% les autres jours.</p>` : ''}
+    ${cout ? `<p class="pcout faint">Le jour écrit d’après, ta note est basse ${cout.bas} fois sur ${cout.sur}
+      (${Math.round(cout.hors_bas / cout.hors * 100)}&nbsp;% après les autres jours).</p>` : ''}
   </article>`;
 }
 
 function prisesMarkup(P) {
   if (!P) return '';
   if (!P.assez) return `<p class="pvide faint">Pas encore assez de journées écrites pour compter quoi que ce soit.</p>`;
-  if (!P.prises.length) return `<p class="pvide faint">Rien ne revient assez souvent dans ton journal pour être compté ici.
-    ${P.ecartees.length ? `Vu une ou deux fois&nbsp;: ${P.ecartees.map(e => esc(e.nom)).join(', ')} — trop peu pour dire quoi que ce soit.` : ''}</p>`;
+  if (!P.prises.length) return `<p class="pvide faint">Rien n’est écrit 3 jours ou plus.
+    ${P.ecartees.length ? `Écrit 1 ou 2 jours&nbsp;: ${P.ecartees.map(e => esc(e.nom)).join(', ')} — il en faut 3 pour compter.` : ''}</p>`;
   return `<div class="prises">${P.prises.map(p => priseMarkup({ ...p, fenetre: P.fenetre })).join('')}
     <p class="pnote faint">Ce tableau compte des jours écrits et te rend tes phrases. Il ne dit pas ce que tu es.</p>
   </div>`;
@@ -4186,26 +4190,18 @@ async function renderLecture() {
         ? `<span class="lecmeta faint" title="${L.enLot
              ? 'Partie en tâche de fond, à moitié prix. Elle arrive dans l’heure.' : ''}">
              <span class="spin petit"></span> il relit${L.enLot ? ' — en fond' : ''}</span>`
-        : `<button class="btn ghost" data-lire title="Refait la lecture sur les journées les plus denses, tout de suite.">${ico('refaire')}relire</button>`) : ''}
-      ${/* UNE ACTION VISIBLE, LE RESTE SOUS UN REPLI.
-             Il y en avait trois côte à côte — relire, relire tout, retisser —
-             et trois boutons, c'est trois décisions avant de pouvoir lire.
-             « relire » est la seule qu'on prend souvent ; les autres servent de
-             temps en temps, et se rangent derrière un bouton discret. */''}
-      ${L.lecture && !LECTURE_EN_COURS && !L.enLot ? `
-      <details class="lecplus">
-        <summary aria-label="D’autres façons de refaire la carte" title="D’autres façons de refaire la carte">${ico('plus', 13)}</summary>
-        <div class="lecplusmenu">
-          <button class="btn ghost" data-lire-tout>${ico('oeil', 13)}relire tout le journal
-            <span class="lecplusdit">chaque journée écrite, en fond — c’est long, et c’est une vraie lecture</span></button>
-          ${L.retissage > 0
-            ? `<span class="lecplusfait">retisser — dans ${enClair(L.retissage)}<span class="lecplusdit">deux fois par jour, pas plus</span></span>`
-            : `<button class="btn ghost" id="retisser">${ico('carte', 13)}retisser la toile
-                <span class="lecplusdit">la même lecture, regardée se refaire</span></button>`}
-          <button class="btn ghost" data-ranger-nuits>${ico('lune', 13)}ranger sur les journées vécues
-            <span class="lecplusdit">chaque soirée rejoint la journée qu’elle terminait, d’après tes nuits</span></button>
-        </div>
-      </details>` : ''}
+        : `<button class="btn ghost" data-lire title="${L.refonte
+             ? 'L’application a changé de façon de lire : il relira tout ton journal, en fond, dans l’heure.'
+             : 'Refait la lecture sur les journées les plus denses. Tu la regardes se faire — deux minutes.'}">${ico('refaire')}relire</button>`) : ''}
+      ${/* UNE SEULE ACTION, ET RIEN D'AUTRE À DÉCIDER.
+             Il y avait « relire », et derrière un « + » trois entrées de plus :
+             relire tout, retisser, ranger sur les journées vécues. Quatre
+             portes pour un seul travail — relire et retisser étaient le MÊME
+             appel au même prix, l'un muet et l'autre montré ; relire tout ne
+             servait qu'à la refonte, qui part toute seule ; ranger n'est pas
+             une lecture et tourne déjà seul. Un repli qui cache trois choix,
+             c'est trois choix qu'on doit comprendre avant d'oser l'ouvrir.
+             Ce qui reste utile à la main, mais rare, vit dans Réglages. */''}
     </div>
     ${/* Une relecture qui échoue par-dessus une lecture existante ne peut pas
           prendre l'écran — l'ancienne vaut mieux que rien — mais elle ne peut
@@ -4221,7 +4217,7 @@ async function renderLecture() {
           schémas sans savoir qu'ils arrivent. */''}
     ${L.refonte ? `<p class="sub lecrefonte">${(LECTURE_EN_COURS || L.enLot)
         ? `L’application a changé de façon de lire : il relit <b>tout</b> ton journal (${L.ecrites} journées écrites), en fond. Les schémas se régénèrent, ça peut prendre jusqu’à une heure. En attendant, ceci est la lecture d’avant.`
-        : `L’application a changé de façon de lire : cette lecture est celle d’avant, sans schémas. La relecture complète part toute seule à l’ouverture ; sinon, « relire tout ».`}</p>` : ''}
+        : `L’application a changé de façon de lire : cette lecture est celle d’avant, sans schémas. La relecture complète part toute seule à l’ouverture ; sinon, « relire » la fait partir en fond.`}</p>` : ''}
     ${L.lecture ? '<div class="k faint dequoi">De quoi tu parles</div>' : ''}
     ${corps}
     ${/*
@@ -4256,12 +4252,20 @@ async function renderLecture() {
     ${/* Sous les schémas, pas au-dessus : ce qui a de la prise se lit à la
           lumière de ce qui tourne, et ouvrir la carte sur un tableau de
           consommations en ferait le sujet de la page. */''}
-    ${pliCarte({ dessin: 'verre', titre: 'Ce qui a de la prise',
+    ${pliCarte({ dessin: 'verre', titre: 'Ce que tu consommes',
       etat: !PRISES ? null
         : !PRISES.assez ? 'pas encore de quoi compter'
         : PRISES.prises.length
-          ? `${PRISES.prises.length} chose${PRISES.prises.length > 1 ? 's' : ''} suivie${PRISES.prises.length > 1 ? 's' : ''}`
-          : 'rien ne revient assez souvent',
+          /* ON NOMME — SAUF EN PUDIQUE. « 2 choses suivies » disait
+             « surveillées » sans dire quoi : le repli fermé devenait une
+             inquiétude sans objet, et il fallait l'ouvrir pour savoir de quoi
+             on s'inquiétait. Mais ces noms-là se lisent par-dessus une épaule ;
+             le mode pudique existe exactement pour ce moment, et il rend alors
+             le compte nu. */
+          ? (S.settings?.pudique
+              ? `${PRISES.prises.length} chose${PRISES.prises.length > 1 ? 's' : ''}`
+              : PRISES.prises.map(x => x.nom.replace(/^(?:l[’']|le |la |les )/, '')).join(', '))
+          : 'rien d’écrit 3 jours',
       corps: prisesMarkup(PRISES) })}
 
     ${pliCarte({ dessin: 'alerte', titre: 'Les jours à surveiller',
@@ -4291,6 +4295,26 @@ async function renderLecture() {
   // est ouvert. On ne relance donc jamais tout seul apres un echec -- le bouton
   // « Réessayer » est la pour ca, et lui sait qu'on l'a demande.
   if (!LECTURE_EN_COURS && !LECTURE_ERR && L.possible && L.cle && L.arelire) lancerLecture({ fond: true });
+}
+
+/**
+ * LE CLIC « RELIRE ». Une seule règle, et elle tient en deux lignes :
+ *
+ * - Un clic attend une réponse, et deux minutes de rien, c'est deux minutes où
+ *   l'on croit que c'est cassé. Il passe donc par le tissage : la même lecture
+ *   que « relire » d'avant, même corpus, même prix, mais MONTRÉE — les
+ *   journées s'allument, la toile se pose. « retisser » n'était rien d'autre
+ *   que ça, et n'avait pas à être un deuxième bouton.
+ *
+ * - Sauf quand la façon de lire a changé. Le serveur relit alors TOUT le
+ *   journal, dix fois plus de texte, et le faire en direct sur un clic
+ *   coûterait dix fois le prix d'un « relire » ordinaire, sans que rien à
+ *   l'écran ne l'ait dit. Ce clic-là part en fond, en lot, à moitié prix —
+ *   exactement ce que la relance automatique aurait fait à l'ouverture.
+ */
+async function relire() {
+  if (LECTURE?.refonte) return lancerLecture({ fond: true });
+  return retisser();
 }
 
 /**
@@ -4434,26 +4458,7 @@ function wireLecture() {
       } catch (err) { return toast(err.message); }
     }
 
-    if (e.target.closest('[data-lire-tout]')) return lancerLecture({ fond: true, complet: true });
-    /* RANGER LES SOIRÉES. Une journée finit au coucher, pas à minuit : ce
-       bouton relit les nuits de tout le journal et remet chaque soirée sur la
-       journée qu'elle terminait. */
-    if (e.target.closest('[data-ranger-nuits]')) {
-      const b = e.target.closest('[data-ranger-nuits]');
-      b.disabled = true;
-      try {
-        const r = await api('/api/nuits/ranger', {});
-        toast(r.messages
-          ? `${r.messages} passage${r.messages > 1 ? 's' : ''} rangé${r.messages > 1 ? 's' : ''} sur ${r.jours} journée${r.jours > 1 ? 's' : ''}.`
-          : 'Tout était déjà à sa place.');
-        LECTURE = FONCT = FONCT_AN = NUITS = PRISES = null;
-        return renderLecture();
-      } catch (err) {
-        toast('Le rangement n’a pas abouti.');
-      } finally { b.disabled = false; }
-    }
-    if (e.target.closest('[data-lire]')) return lancerLecture();
-    if (e.target.closest('#retisser')) return retisser();
+    if (e.target.closest('[data-lire]')) return relire();
     if (e.target.closest('#tsfin')) return fermerTissage();
     if (e.target.closest('[data-aller-reglages]')) { view = 'settings'; syncNav(); return renderSettings(); }
     const j = e.target.closest('[data-jour]');
@@ -5952,11 +5957,40 @@ async function renderBackendCfg() {
              style="width:auto;margin-right:7px">
       La lecture de fond part en tâche de fond</span></label>
     <p class="sub" style="margin:0;font-size:12px">
-      Elle tourne toute seule une fois par semaine, l'écran garde la lecture précédente affichée, et
-      personne ne la regarde apparaître. En tâche de fond elle rend <b>dans l'heure</b> au lieu de deux
-      minutes, et coûte <b>moitié moins</b>.
-      <br>« relire » reste immédiat quoi qu'il arrive : quand tu cliques, tu attends une réponse.
+      Elle part toute seule quand sept journées ou notes de plus ont été écrites depuis la dernière
+      lecture ; l'écran garde la lecture précédente affichée, et personne ne la regarde apparaître.
+      En tâche de fond elle rend <b>dans l'heure</b> au lieu de deux minutes, et coûte <b>moitié moins</b>.
+      <br>« relire » reste immédiat : quand tu cliques, tu la regardes se faire.
+      Décochée, la lecture complète ci-dessous part aussi en direct, au plein tarif.
     </p>
+    ${/* CE QUI SORT DU MENU DE MA CARTE. Rare, à la main, avec sa raison d'être
+          écrite à côté : on ne propose pas un bouton sans dire quand s'en servir,
+          ni ce qu'il coûte. */''}
+    <div class="field" style="margin-top:14px">
+      <span>Relire tout le journal</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn" data-lire-tout>${ico('oeil')}Relire tout, en fond</button>
+        <span class="sub" style="margin:0;font-size:12px">chaque journée écrite, pas l'échantillon — jusqu'à un dollar environ, rendu dans l'heure.</span>
+      </div>
+      <p class="sub" style="margin:6px 0 0;font-size:12px">
+        Quand s'en servir : quand la carte semble à côté de ce que tu as écrit depuis longtemps,
+        ou après une lecture de fond qui n'a pas abouti. Quand l'application change de façon de
+        lire, cette relecture part toute seule — tu n'as rien à faire.
+      </p>
+    </div>
+    <div class="field" style="margin-top:14px">
+      <span>Ranger les soirées sur les journées vécues</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn" data-ranger-nuits>${ico('lune')}Ranger tout le journal</button>
+        <span class="sub" style="margin:0;font-size:12px">gratuit, sans modèle, sans risque à refaire.</span>
+      </div>
+      <p class="sub" style="margin:6px 0 0;font-size:12px">
+        Une journée finit au coucher, pas à minuit : chaque soirée rejoint la journée qu'elle
+        terminait, d'après tes nuits. Ça se fait seul au fil des jours ; ce bouton ne sert
+        qu'une fois, pour l'historique ancien, si des soirées d'il y a des mois sont restées
+        sur le lendemain.
+      </p>
+    </div>
     <label class="field" style="margin-top:14px"><span>
       <input type="checkbox" id="sansEnveloppe" ${s.sansEnveloppe ? 'checked' : ''}
              style="width:auto;margin-right:7px">
@@ -6103,6 +6137,17 @@ async function renderBackendCfg() {
   };
   peindreQS();
 
+  $('[data-lire-tout]')?.addEventListener('click', async e => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      await lancerLecture({ fond: true, complet: true });
+      if (LECTURE_ERR) return;                 // lancerLecture l'a déjà dit
+      toast(LECTURE?.enLot ? 'Il relit tout ton journal, en fond. La carte arrive dans l’heure.'
+                           : 'Tout le journal a été relu.');
+    } finally { b.disabled = false; }
+  });
+  $('[data-ranger-nuits]')?.addEventListener('click', e => rangerLesNuits(e.currentTarget));
   $('#lectureEnLot')?.addEventListener('change', async e => {
     await saveSettings({ lectureEnLot: e.target.checked });
     toast(e.target.checked ? 'La lecture de fond partira en tâche de fond' : 'La lecture de fond sera immédiate');
@@ -7935,8 +7980,37 @@ function accrocherLueurs(t) {
   }
 }
 
+/**
+ * RANGER LES SOIRÉES SUR LES JOURNÉES VÉCUES. Une journée finit au coucher,
+ * pas à minuit : on relit les nuits de tout le journal et chaque soirée
+ * rejoint la journée qu'elle terminait. Aucun modèle, aucun jeton, idempotent.
+ *
+ * Ce n'est pas une lecture — ça déplace des messages — et ça tourne déjà seul
+ * à chaque borne dite et sur les derniers mois au démarrage. Le bouton ne
+ * sert qu'au rattrapage de l'historique ancien, une fois ; il vit dans
+ * Réglages, pas dans l'en-tête de Ma carte.
+ */
+async function rangerLesNuits(bouton) {
+  if (bouton) bouton.disabled = true;
+  try {
+    const r = await api('/api/nuits/ranger', {});
+    toast(r.messages
+      ? `${r.messages} passage${r.messages > 1 ? 's' : ''} rangé${r.messages > 1 ? 's' : ''} sur ${r.jours} journée${r.jours > 1 ? 's' : ''}.`
+      : 'Tout était déjà à sa place.');
+    // Tout ce qui se compte par journée est à recompter : les messages ont changé de jour.
+    LECTURE = FONCT = FONCT_AN = NUITS = PRISES = null;
+    if (view === 'mirror' && !MIRROR_DATE) await renderLecture();
+  } catch (err) {
+    toast('Le rangement n’a pas abouti.');
+  } finally { if (bouton) bouton.disabled = false; }
+}
+
 async function retisser() {
   if (TISSAGE) return;
+  // La route en flux ne vérifie pas qu'un lot est en vol ; l'écran, si. Deux
+  // lectures payantes sur le même corpus pour le même résultat, c'est non.
+  if (LECTURE?.enLot) return toast('Une lecture est déjà partie, en fond. Elle arrive dans l’heure.');
+  LECTURE_ERR = null;   // on réessaie : l'écran ne doit pas garder l'échec d'avant par-dessus la nouvelle toile
   /*
    * ON NE PART PAS D'UNE PAGE NOIRE.
    *
