@@ -3425,6 +3425,28 @@ table.grid td.cell.abascule { cursor: pointer; }
 
 /* Écran, en léger : deux colonnes (appli / web), chacune son total et ses cinq
    plus regardés. Sobre — une liste courte, pas un tableau. */
+/* ------------------------------------------------------------------
+   LA RÉPARTITION DU TEMPS D'ÉCRAN, EN UNE BARRE.
+
+   Dix nombres en deux listes demandaient d'additionner de tête pour
+   savoir où était passée la journée. Une part se lit sans compter : un
+   segment large comme sa part, coloré par sa famille, et le nom au
+   survol. Compacte parce qu'elle est à côté du lever et du sommeil —
+   trois choses mesurées, trois lignes, pas un tableau.
+   ------------------------------------------------------------------ */
+.jrepart { display: flex; flex-direction: column; gap: 7px; }
+.jrbarre {
+  display: flex; height: 9px; border-radius: 5px; overflow: hidden;
+  background: var(--panel-2); gap: 1px;
+}
+.jrseg { display: block; min-width: 2px; cursor: help; transition: filter .12s; }
+.jrseg:hover { filter: brightness(1.35); }
+.jrpied { display: flex; flex-direction: column; gap: 5px; }
+.jrleg { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; list-style: none; }
+.jrleg li { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-dim); }
+.jrleg i { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+.jrnom { max-width: 13ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .jpecran { display: flex; flex-wrap: wrap; gap: 18px 26px; }
 .jpecol { min-width: 130px; }
 /* La colonne se replie : le total (la tête) reste, le détail se déplie au clic.

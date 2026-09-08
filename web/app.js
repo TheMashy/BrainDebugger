@@ -5044,16 +5044,34 @@ function phraseLien(l) {
  * par leur nom tombent dans « inconnu » : c'est honnête, et l'application locale
  * saura les nommer mieux avec le temps.
  */
-const ICO_CAT = { social: 'gens', jeu: 'jeu', outil: 'code', inconnu: 'point' };
-const NOM_CAT = { social: 'social', jeu: 'jeu', outil: 'outil', inconnu: 'inconnu' };
+const ICO_CAT = { social: 'gens', jeu: 'jeu', video: 'video', outil: 'code', inconnu: 'point' };
+const NOM_CAT = { social: 'social', jeu: 'jeu', video: 'vidéo', outil: 'outil', inconnu: 'inconnu' };
+/*
+ * LES SITES MANQUAIENT, ET C'ÉTAIT LE PLUS GROS SEGMENT QUI EN PÂTISSAIT.
+ *
+ * Ces listes ne contenaient que des exécutables : sur la barre de répartition,
+ * YouTube — vingt-huit pour cent de la journée — sortait en gris « inconnu »,
+ * juste à côté de « claude » et « machitool » proprement colorés. La couleur
+ * doit renseigner sur ce qui pèse, pas seulement sur ce qui se lance depuis le
+ * bureau.
+ *
+ * Et « vidéo » devient une famille à part entière. Elle était rangée sous
+ * « outil » (VLC) ou nulle part (YouTube, Netflix) — or trois heures de vidéo
+ * ne se lisent pas comme trois heures d'éditeur de code, et c'est précisément
+ * la distinction qu'on vient chercher.
+ */
 const CAT_APPS = {
   social: ['discord', 'slack', 'messenger', 'whatsapp', 'telegram', 'teams', 'signal',
-           'instagram', 'twitter', 'facebook', 'snapchat', 'reddit', 'tiktok', 'skype', 'zoom'],
+           'instagram', 'twitter', 'x.com', 'facebook', 'snapchat', 'reddit', 'tiktok',
+           'skype', 'zoom', 'mastodon', 'bluesky'],
   jeu:    ['steam', 'bodycam', 'epicgames', 'riotclient', 'league', 'valorant', 'minecraft',
-           'csgo', 'cs2', 'dota', 'osu', 'battle.net', 'origin', 'gog', 'game'],
+           'csgo', 'cs2', 'dota', 'osu', 'battle.net', 'origin', 'gog', 'game', 'itch.io'],
+  video:  ['youtube', 'netflix', 'twitch', 'vimeo', 'dailymotion', 'disney', 'prime video',
+           'arte', 'crunchyroll', 'vlc', 'mpc', 'plex'],
   outil:  ['code', 'devenv', 'pycharm', 'sublime', 'terminal', 'powershell', 'cmd', 'wt',
            'explorer', 'obs', 'photoshop', 'premiere', 'blender', 'machitool', 'claude',
-           'notion', 'excel', 'word', 'figma', 'vlc', 'mpc', 'lightshot']
+           'chatgpt', 'github', 'stackoverflow', 'notion', 'excel', 'word', 'figma',
+           'lightshot', 'fl64', 'fl studio', 'davinci', 'ableton']
 };
 function categorieApp(nom) {
   const n = String(nom || '').toLowerCase();
@@ -5099,32 +5117,100 @@ function posteMarkup(p, synchro) {
         ico('lit', 13)}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span></div>`
     : '';
 
-  // Le temps d'écran : appli / web. La colonne se REPLIE — on ne voit que le
-  // total (le gras) ; cliquer « appli » ou « web » déplie les cinq plus regardés,
-  // chacun précédé du signe de sa famille (social, jeu, outil, inconnu).
-  const colonne = (dessin, mot, min, top) => {
-    const tete = `<span class="jpetete">${ico(dessin, 12)}${heure(min + ' min')} <span class="faint">${mot}</span></span>`;
-    if (!top?.length) return `<div class="jpecol jpevide">${tete}</div>`;
-    const item = x => {
-      const c = categorieApp(x.nom);
-      return `<li><span class="jpecat" data-tip="${esc(NOM_CAT[c])}">${ico(ICO_CAT[c], 12)}</span>`
-           + `<span class="jpenom">${esc(x.nom)}</span><span class="mono faint">${x.min} min</span></li>`;
-    };
-    return `<details class="jpecol">
-      <summary>${tete}</summary>
-      <ol class="jpetop">${top.map(item).join('')}</ol>
-    </details>`;
+  /*
+   * LE TEMPS D'ÉCRAN EST UNE RÉPARTITION, PAS DEUX LISTES.
+   *
+   * On lisait « 142 min appli » puis cinq lignes, « 249 min web » puis cinq
+   * autres — dix nombres à additionner de tête pour savoir où était passée la
+   * journée. Or la question n'est jamais « combien de minutes claude » : c'est
+   * « sur quoi est passée ma journée », et une part se lit sans compter.
+   *
+   * UNE SEULE BARRE, sur TOUT le temps mesuré — applications et sites mêlés,
+   * parce que la frontière entre les deux n'intéresse personne : YouTube dans
+   * un navigateur et VLC en local sont la même heure de vidéo. Chaque segment
+   * est large comme sa part, et coloré par sa FAMILLE (social, jeu, outil,
+   * inconnu) : la couleur donne la forme de la journée d'un coup d'œil, le
+   * survol donne le nom, les minutes et la part.
+   *
+   * CE QUI N'EST PAS DANS LES PREMIERS N'EST PAS PERDU : le reste occupe son
+   * propre segment, gris, à sa vraie largeur. Sans lui, une barre pleine à 60 %
+   * de la journée se lirait comme la journée entière.
+   */
+  /* Quatre familles, quatre TEINTES FRANCHEMENT distinctes. Avec l'accent vert
+     du produit pour « social » et un vert d'eau pour « outil », la barre sortait
+     en quatre verts : lisible en pourcentages, illisible en un coup d'œil —
+     c'est-à-dire ratée, puisque le coup d'œil est tout ce qu'on lui demande. */
+  const TEINTE_CAT = { social: '#b79cf5', jeu: '#e0913f', video: '#e05a68',
+                       outil: '#3d8bd4', inconnu: '#6b7280' };
+  /* Les thèmes, eux, ne sont pas des familles : une roue à part, assez large
+     pour qu'aucune ne se confonde avec une voisine. */
+  const TEINTE_THEME = {
+    video: '#e05a68', jeu: '#e0913f', social: '#b79cf5', dev: '#3d8bd4', musique: '#43c1b0',
+    urbex: '#8a9a5b', conflit: '#8d5a4a', actu: '#c9b03e', creation: '#d46fb0',
+    achat: '#7f8fa6', argent: '#5c8a6a', rp: '#9b6fd4'
   };
-  /* UNE COLONNE A ZERO NE SE MONTRE PAS. « 0 min appli » n'est pas une mesure,
-     c'est l'absence de mesure — et affiché comme un chiffre, il se lit comme
-     une journée sans écran, ce qui est faux : c'est une journée que Machi Tool
-     n'a pas envoyée. Le badge de synchro juste en dessous dit déjà ce qui
-     manque, et il le dit justement. */
-  const colonnes = [
-    p.ecran?.app_min ? colonne('oeil', 'appli', p.ecran.app_min, p.ecran.top_app) : '',
-    p.ecran?.web_min ? colonne('globe', 'web', p.ecran.web_min, p.ecran.top_web) : ''
-  ].filter(Boolean).join('');
-  const ecran = colonnes ? `<div class="jpecran">${colonnes}</div>` : '';
+  const repartition = () => {
+    const total = (p.ecran?.app_min ?? 0) + (p.ecran?.web_min ?? 0);
+    if (!total) return '';
+    const parts = [...(p.ecran?.top_app ?? []), ...(p.ecran?.top_web ?? [])]
+      .filter(x => x?.min > 0).sort((a, b) => b.min - a.min);
+    const nommes = parts.reduce((n, x) => n + x.min, 0);
+    const reste = Math.max(0, total - nommes);
+    const tous = reste >= 1 ? [...parts, { nom: 'le reste', min: reste, reste: true }] : parts;
+    const pct = m => (100 * m / total);
+    const seg = x => {
+      const c = x.reste ? 'var(--line)' : TEINTE_CAT[categorieApp(x.nom)];
+      const part = Math.round(pct(x.min));
+      return `<span class="jrseg" style="width:${pct(x.min).toFixed(2)}%;background:${c}"
+        data-tip="${esc(`${x.nom} · ${x.min} min · ${part} %`)}"></span>`;
+    };
+    // La légende ne reprend que ce qui se voit : sous 4 %, un segment est un
+    // trait, et le nommer dans la liste ferait chercher à l'œil quelque chose
+    // d'invisible.
+    const lisibles = tous.filter(x => pct(x.min) >= 4).slice(0, 6);
+    return `<div class="jrepart">
+      <div class="jrbarre" role="img" aria-label="${esc(`répartition de ${total} minutes d’écran`)}">${tous.map(seg).join('')}</div>
+      <div class="jrpied">
+        <span class="jpetete">${ico('oeil', 12)}${heure(total + ' min')} <span class="faint">d’écran</span></span>
+        <ul class="jrleg">${lisibles.map(x => `<li>
+          <i style="background:${x.reste ? 'var(--line)' : TEINTE_CAT[categorieApp(x.nom)]}"></i>
+          <span class="jrnom">${esc(x.nom)}</span><span class="mono faint">${Math.round(pct(x.min))} %</span>
+        </li>`).join('')}</ul>
+      </div>
+    </div>`;
+  };
+  /*
+   * ET LA MÊME BARRE POUR LES SUJETS, quand Machi Tool les a classés.
+   *
+   * Elle répond à l'autre question : pas « sur quel site », mais « de quoi ça
+   * parlait ». Deux barres l'une sous l'autre, même grammaire — la largeur est
+   * la part, le survol donne les minutes. Ce qui n'a pas été classé n'apparaît
+   * pas : la barre des thèmes est plus courte que celle de l'écran, et ce vide
+   * est honnête. On le dit en toutes lettres plutôt que d'étirer les segments
+   * jusqu'au bord.
+   */
+  const barreThemes = () => {
+    const th = p.ecran?.themes ?? null;
+    if (!th?.length) return '';
+    const ecranTotal = (p.ecran?.app_min ?? 0) + (p.ecran?.web_min ?? 0);
+    const classe = th.reduce((n, x) => n + x.min, 0);
+    if (!ecranTotal || !classe) return '';
+    const pct = m => (100 * m / ecranTotal);
+    const seg = x => `<span class="jrseg" style="width:${pct(x.min).toFixed(2)}%;background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"
+        data-tip="${esc(`${x.nom} · ${x.min} min · ${Math.round(pct(x.min))} % de ton écran`)}"></span>`;
+    const reste = ecranTotal - classe;
+    return `<div class="jrepart jrthemes">
+      <div class="jrbarre">${th.map(seg).join('')}</div>
+      <div class="jrpied">
+        <ul class="jrleg">${th.filter(x => pct(x.min) >= 4).slice(0, 6).map(x => `<li>
+          <i style="background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"></i>
+          <span class="jrnom">${esc(x.nom)}</span><span class="mono faint">${Math.round(pct(x.min))} %</span>
+        </li>`).join('')}</ul>
+        ${reste >= 1 ? `<span class="faint jrreste">${Math.round(pct(reste))} % que rien ne classe</span>` : ''}
+      </div>
+    </div>`;
+  };
+  const ecran = repartition() + barreThemes();
 
   // L'état de la synchro : réutilise le badge (à jour / rien reçu depuis… /
   // Machi Tool ne répond pas), tenu à jour en direct via #qssyncbadge.

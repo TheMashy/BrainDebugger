@@ -127,3 +127,43 @@ test('les familles sortent les plus lourdes d’abord', () => {
   const { familles: f } = lireDigest(d);
   assert.deepEqual(f.map(x => x.nom), ['gros', 'petit']);
 });
+
+test('les thématiques traversent jusqu’à l’écran, et le non-classé se dit', async () => {
+  /*
+   * « 249 min web » ne dit rien : trois heures de documentaires et trois heures
+   * de doomscroll font le même chiffre. Machi Tool classe chaque instant par
+   * SUJET, sur le titre de l'onglet, EN LOCAL — seul le mot arrive ici, jamais
+   * le titre.
+   *
+   * Et le total des thèmes ne vaut PAS celui de l'écran : un instant que rien
+   * ne classe ne compte nulle part plutôt que d'être rangé de force. L'écart
+   * est une information, pas une erreur d'arrondi à masquer.
+   */
+  const U = 'themes-ecran';
+  const { upsertUser, poserActiviteJour } = await import('../server/db.js');
+  const { posteDuJour } = await import('../server/api.js');
+  upsertUser({ id: U, username: U });
+  poserActiviteJour(U, '2026-04-10', {
+    date: '2026-04-10', plage: { de: '09:00', a: '23:00' }, trous: [],
+    temps_par_contexte_s: { 'code': 3600, 'web:youtube': 5400 },
+    temps_par_theme_s: { 'video': 3600, 'dev': 1800 },
+  });
+  const p = posteDuJour('2026-04-10', U);
+  assert.equal(p.ecran.app_min + p.ecran.web_min, 150);
+  assert.deepEqual(p.ecran.themes, [{ nom: 'video', min: 60 }, { nom: 'dev', min: 30 }]);
+  const classe = p.ecran.themes.reduce((n, x) => n + x.min, 0);
+  assert.ok(classe < p.ecran.app_min + p.ecran.web_min,
+            'les thèmes ne doivent pas être étirés jusqu’au total de l’écran');
+});
+
+test('un digest sans thématiques ne fabrique pas de tableau vide', async () => {
+  const U = 'themes-absents';
+  const { upsertUser, poserActiviteJour } = await import('../server/db.js');
+  const { posteDuJour } = await import('../server/api.js');
+  upsertUser({ id: U, username: U });
+  poserActiviteJour(U, '2026-04-11', {
+    date: '2026-04-11', plage: { de: '09:00', a: '23:00' }, trous: [],
+    temps_par_contexte_s: { 'code': 3600 },
+  });
+  assert.equal(posteDuJour('2026-04-11', U).ecran.themes, null);
+});

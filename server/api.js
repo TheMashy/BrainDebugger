@@ -911,9 +911,28 @@ export function posteDuJour(date, userId = OWNER) {
   }
   const top = arr => arr.sort((a, b) => b[1] - a[1]).slice(0, 5)
                         .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }));
+  /*
+   * LES THÉMATIQUES : DE QUOI PARLAIT CE QU'ON REGARDAIT.
+   *
+   * « 249 min web » ne dit rien — trois heures de documentaires et trois heures
+   * de doomscroll font le même chiffre, et le site ne recevait que celui-là.
+   * Machi Tool classe désormais chaque instant par SUJET, sur le titre de
+   * l'onglet, EN LOCAL : seul le mot arrive ici, jamais le titre.
+   *
+   * Le total des thèmes ne vaut PAS le total de l'écran, et c'est voulu : un
+   * instant que rien ne classe ne compte nulle part plutôt que d'être rangé de
+   * force. L'écran doit donc le dire, pas les faire coïncider.
+   */
+  const th = dig?.temps_par_theme_s ?? {};
+  const themes = Object.entries(th)
+    .filter(([, v]) => typeof v === 'number' && v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }))
+    .filter(x => x.min > 0);
   const ecran = (appS || webS) ? {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
-    top_app: top(apps), top_web: top(webs)
+    top_app: top(apps), top_web: top(webs),
+    themes: themes.length ? themes : null
   } : null;
   const lever = borne('lever');
   let coucher = borne('coucher');
