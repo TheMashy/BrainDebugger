@@ -4690,12 +4690,40 @@ async function renderMirror(date, { garderCal = false } = {}) {
         <div class="dayhead">
           <div>
             <div class="k faint">${fmtDay(date)}${date === S.today ? " \u00b7 aujourd'hui" : ''}</div>
-            <button class="bignum${m.note !== null ? ' noted' : ''}" id="dayNote"
-                 aria-expanded="${DAY_NOTE_OUVERT}"
-                 title="${m.note !== null ? 'Changer cette note' : 'Noter cette journée'}"
-                 style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
-              ${m.note ?? '\u2014'}<span class="sl">/10</span>
-            </button>
+            ${/*
+               * TROIS FAITS, PAS UN RÉPÉTÉ TROIS FOIS.
+               *
+               * À gauche, ce que TES MOTS portaient : la scène que le moteur
+               * d'ambiance élit depuis toujours pour peindre le fond de
+               * « Parler ». Ce calcul existait et ne se voyait nulle part — un
+               * décor qui change sans qu'on sache pourquoi est une ambiance ;
+               * nommé, c'est une lecture, et une lecture se conteste. La note
+               * n'entre PAS dedans, sinon les deux pastilles diraient la même
+               * chose par construction, et c'est justement le jour où elles
+               * divergent qui mérite un regard.
+               *
+               * Au milieu, la note, colorée par son ÉCART à ta normale.
+               *
+               * À droite, la même note sur l'échelle ABSOLUE rouge → bleu.
+               * Ce n'est pas un doublon : le chiffre du milieu dit « par
+               * rapport à toi », celui de droite dit « dans l'absolu ». Un 6
+               * chez quelqu'un qui vit à 4 est vert au milieu et jaune à
+               * droite, et les deux sont vrais.
+               *
+               * Le mot de droite est le TIEN — le repère que tu as écrit pour
+               * cette note. Faute de repère, la pastille reste une couleur :
+               * inventer « bleu-vert » serait meubler.
+               */''}
+            <div class="daypast">
+              ${ambianceMarkup(m.journee?.ambiance)}
+              <button class="bignum${m.note !== null ? ' noted' : ''}" id="dayNote"
+                   aria-expanded="${DAY_NOTE_OUVERT}"
+                   title="${m.note !== null ? 'Changer cette note' : 'Noter cette journée'}"
+                   style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
+                ${m.note ?? '\u2014'}<span class="sl">/10</span>
+              </button>
+              ${positiviteMarkup(m.note)}
+            </div>
           </div>
           <button class="daydrop" data-erase="${date}" title="Effacer cette journée">${ico('corbeille', 12)}effacer</button>
         </div>
@@ -5258,6 +5286,40 @@ function sujetsMarkup(sujets) {
  * L'ordre est fixe et se lit de gauche à droite comme la journée elle-même :
  * ce qu'on a ressenti, ce dont on a parlé et ce qui a bougé, ce qu'on a écrit.
  */
+/**
+ * CE QUE TES MOTS PORTAIENT, CE JOUR-LÀ.
+ *
+ * `ambianceDuJour` rend `null` dès que la lecture n'est pas nette — moins de
+ * vingt-cinq mots, ou deux scènes au coude à coude. On n'affiche alors RIEN :
+ * pas une pastille grise « indéterminé », qui occuperait la place et le regard
+ * pour ne rien dire. Se taire est une réponse ; meubler n'en est pas une.
+ *
+ * La barre de force n'est pas un pourcentage de certitude, et le titre le dit :
+ * c'est la charge du lexique, la quantité de mots qui tirent dans ce sens-là.
+ */
+function ambianceMarkup(a) {
+  if (!a) return '<span class="dpast dpvide" aria-hidden="true"></span>';
+  const talonne = a.seconde_nom ? `, de peu devant « ${a.seconde_nom} »` : '';
+  const titre = `${a.nom} — ${a.image}${talonne}.\nLu dans tes mots (${a.mots} mots), pas dans ta note : les deux ont le droit de ne pas être d’accord.`;
+  return `<span class="dpast dpamb" data-tip="${esc(titre)}">
+    <span class="dpligne">${ico('eclair', 12)}<span class="dpnom">${esc(a.nom)}</span></span>
+    <span class="dpforce" aria-hidden="true"><i style="width:${Math.round(a.force * 100)}%"></i></span>
+  </span>`;
+}
+
+/** La note sur l'échelle absolue, du rouge au bleu — et ton mot pour elle. */
+function positiviteMarkup(note) {
+  if (note === null || note === undefined) return '<span class="dpast dpvide" aria-hidden="true"></span>';
+  const c = noteScaleColor(note);
+  const mot = S.anchors?.find(a => a.note === note)?.descr ?? null;
+  const titre = `${note}/10 sur l’échelle du produit, du rouge au bleu.`
+    + (mot ? `\nTon repère pour cette note : « ${mot} »` : '\nTu n’as pas encore écrit de repère pour cette note.');
+  return `<span class="dpast dppos" data-tip="${esc(titre)}">
+    <span class="dpligne"><i class="dppuce" style="background:${c};color:${c}"></i>
+      <span class="dpnom">${mot ? esc(mot) : 'positivité'}</span></span>
+  </span>`;
+}
+
 function journeeMarkup(m) {
   const j = m.journee ?? {};
   const moments = j.moments ?? [];

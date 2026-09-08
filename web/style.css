@@ -1818,6 +1818,65 @@ button.bignum:hover { opacity: .82; }
   font-size: 46px; font-weight: 400;
   text-shadow: 0 0 22px color-mix(in srgb, var(--halo) 45%, transparent);
 }
+
+/* ------------------------------------------------------------------
+   LES DEUX PASTILLES QUI ENCADRENT LA NOTE.
+
+   À gauche ce que les mots portaient, à droite la note sur l'échelle
+   absolue. Elles sont VOLONTAIREMENT discrètes : le chiffre reste le
+   centre de gravité de l'en-tête, et deux étiquettes aussi voyantes que
+   lui feraient trois titres qui se disputent le regard.
+
+   LES COLONNES SONT FIXES, ET C'EST LE POINT. En flex, le chiffre se
+   déplaçait d'un jour à l'autre selon la longueur des étiquettes — et
+   sautait franchement les jours où la pastille de gauche se tait. On
+   feuillette son journal une flèche à la fois : la seule chose qu'on
+   suit du regard ne doit pas bouger sous le curseur.
+
+   Une pastille qui n'a rien à dire ne dessine RIEN : pas de chip grise
+   « indéterminé », qui occuperait le regard pour ne rien porter. Sa
+   colonne, elle, reste là — c'est ce qui tient le chiffre en place.
+   ------------------------------------------------------------------ */
+.daypast {
+  display: grid; grid-template-columns: 8.6rem auto 8.6rem;
+  align-items: center; gap: 14px;
+}
+.dpast {
+  display: inline-flex; flex-direction: column; gap: 4px;
+  padding: 5px 9px; border-radius: 8px; min-width: 0;
+  background: var(--panel-2); border: 1px solid var(--line);
+  font-size: 11.5px; color: var(--ink-dim); line-height: 1.25;
+}
+.dpast:not(.dpvide) { cursor: help; }
+.dpvide { background: none; border: 0; padding: 0; }
+.dpligne { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.dpast svg { flex: none; opacity: .75; }
+.dpnom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* La force n'est pas une certitude : c'est la charge du lexique, combien
+   de mots tirent dans ce sens-là. Posée SOUS l'étiquette et sur toute sa
+   largeur, elle se lit comme un niveau ; posée à côté, elle se lisait
+   comme un tiret entre deux mots. */
+.dpforce { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.dpforce i { display: block; height: 100%; background: currentColor; opacity: .6; }
+.dppuce {
+  flex: none; width: 9px; height: 9px; border-radius: 50%;
+  box-shadow: 0 0 9px 0 currentColor;
+}
+/* La pastille de droite est ancrée à droite : la puce colorée se retrouve
+   au bord extérieur, du côté où l'œil sort de l'en-tête. */
+.dppos { justify-self: end; }
+.dppos .dpligne { flex-direction: row-reverse; }
+.dpamb { justify-self: start; }
+
+@media (max-width: 620px) {
+  /* Trop étroit pour trois colonnes : le chiffre passe seul sur sa ligne,
+     les deux pastilles se rangent dessous, dans le même ordre. */
+  .daypast { grid-template-columns: auto auto; gap: 8px 12px; }
+  .daypast .bignum { grid-column: 1 / -1; grid-row: 1; }
+  .dpamb { grid-row: 2; }
+  .dppos { grid-row: 2; justify-self: start; }
+}
+
 .statgrid.tight { display: contents; }
 .daydrop {
   background: none; border: 0; color: var(--ink-faint); justify-self: end;
