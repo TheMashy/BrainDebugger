@@ -5942,6 +5942,52 @@ async function renderBackendCfg() {
     de la recherche, il ne fait aucun appel réseau. Seul ce que tu écris dans le chat sort d'ici.
   </p>`;
 
+  /*
+   * CE QUI SORT DU MENU DE MA CARTE — POUR TOUS LES MODES, PAS SEULEMENT CELUI
+   * D'ANTHROPIC.
+   *
+   * Ces deux boutons vivaient dans la branche `anthropic`. Le backend par
+   * défaut est `scripted` : quelqu'un qui n'a jamais mis de clé — c'est-à-dire
+   * le cas normal à l'installation — n'avait donc AUCUN moyen d'atteindre
+   * « Ranger les soirées sur les journées vécues », qui est gratuit, ne fait
+   * appel à aucun modèle, et corrige précisément l'historique ancien. La même
+   * faute que le `return` documenté plus bas, sous une autre forme : une
+   * fonction utile enfermée dans une branche qui n'a rien à voir avec elle.
+   *
+   * Rare, à la main, avec sa raison d'être écrite à côté : on ne propose pas un
+   * bouton sans dire quand s'en servir, ni ce qu'il coûte. Le coût, lui, dépend
+   * bien du mode — c'est la seule chose qui reste conditionnelle ici.
+   */
+  const COUT_RELECTURE = s.chatBackend === 'anthropic'
+    ? "chaque journée écrite, pas l'échantillon — jusqu'à un dollar environ, rendu dans l'heure."
+    : "chaque journée écrite, pas l'échantillon — sur ton modèle à toi, sans rien envoyer chez Anthropic.";
+  const OUTILS_JOURNAL = `
+    <div class="field" style="margin-top:14px">
+      <span>Relire tout le journal</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn" data-lire-tout>${ico('oeil')}Relire tout, en fond</button>
+        <span class="sub" style="margin:0;font-size:12px">${COUT_RELECTURE}</span>
+      </div>
+      <p class="sub" style="margin:6px 0 0;font-size:12px">
+        Quand s'en servir : quand la carte semble à côté de ce que tu as écrit depuis longtemps,
+        ou après une lecture de fond qui n'a pas abouti. Quand l'application change de façon de
+        lire, cette relecture part toute seule — tu n'as rien à faire.
+      </p>
+    </div>
+    <div class="field" style="margin-top:14px">
+      <span>Ranger les soirées sur les journées vécues</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn" data-ranger-nuits>${ico('lune')}Ranger tout le journal</button>
+        <span class="sub" style="margin:0;font-size:12px">gratuit, sans modèle, sans risque à refaire.</span>
+      </div>
+      <p class="sub" style="margin:6px 0 0;font-size:12px">
+        Une journée finit au coucher, pas à minuit : chaque soirée rejoint la journée qu'elle
+        terminait, d'après tes nuits. Ça se fait seul au fil des jours ; ce bouton ne sert
+        qu'une fois, pour l'historique ancien, si des soirées d'il y a des mois sont restées
+        sur le lendemain.
+      </p>
+    </div>`;
+
   if (s.chatBackend === 'anthropic') {
     let info = { models: [], hasEnvKey: false };
     try { info = await api('/api/models'); } catch { /* ignoré */ }
@@ -6026,34 +6072,6 @@ async function renderBackendCfg() {
       <br>« relire » reste immédiat : quand tu cliques, tu la regardes se faire.
       Décochée, la lecture complète ci-dessous part aussi en direct, au plein tarif.
     </p>
-    ${/* CE QUI SORT DU MENU DE MA CARTE. Rare, à la main, avec sa raison d'être
-          écrite à côté : on ne propose pas un bouton sans dire quand s'en servir,
-          ni ce qu'il coûte. */''}
-    <div class="field" style="margin-top:14px">
-      <span>Relire tout le journal</span>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
-        <button class="btn" data-lire-tout>${ico('oeil')}Relire tout, en fond</button>
-        <span class="sub" style="margin:0;font-size:12px">chaque journée écrite, pas l'échantillon — jusqu'à un dollar environ, rendu dans l'heure.</span>
-      </div>
-      <p class="sub" style="margin:6px 0 0;font-size:12px">
-        Quand s'en servir : quand la carte semble à côté de ce que tu as écrit depuis longtemps,
-        ou après une lecture de fond qui n'a pas abouti. Quand l'application change de façon de
-        lire, cette relecture part toute seule — tu n'as rien à faire.
-      </p>
-    </div>
-    <div class="field" style="margin-top:14px">
-      <span>Ranger les soirées sur les journées vécues</span>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
-        <button class="btn" data-ranger-nuits>${ico('lune')}Ranger tout le journal</button>
-        <span class="sub" style="margin:0;font-size:12px">gratuit, sans modèle, sans risque à refaire.</span>
-      </div>
-      <p class="sub" style="margin:6px 0 0;font-size:12px">
-        Une journée finit au coucher, pas à minuit : chaque soirée rejoint la journée qu'elle
-        terminait, d'après tes nuits. Ça se fait seul au fil des jours ; ce bouton ne sert
-        qu'une fois, pour l'historique ancien, si des soirées d'il y a des mois sont restées
-        sur le lendemain.
-      </p>
-    </div>
     <label class="field" style="margin-top:14px"><span>
       <input type="checkbox" id="sansEnveloppe" ${s.sansEnveloppe ? 'checked' : ''}
              style="width:auto;margin-right:7px">
@@ -6078,6 +6096,7 @@ async function renderBackendCfg() {
     </div>
     <label class="field"><span>Clé API</span><input type="password" id="apiKey" value="${esc(s.apiKey)}"></label>`;
   } else { el.innerHTML = ''; }
+  el.innerHTML += OUTILS_JOURNAL;
 
   /*
    * PAS DE `return` ICI, ET C'EST UNE CORRECTION.

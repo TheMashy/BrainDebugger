@@ -536,3 +536,59 @@ test('un signe muet sur la famille reste partagé', () => {
     assert.ok(r.prises.find(p => p.cle === cle).signes.some(s => s.id === 'craque'),
       `« j'ai craqué » ne nomme rien : il vaut pour ${cle} aussi`);
 });
+
+/* -------- les mots français que `norm` fabrique en retirant les accents -------- */
+
+test('« Paris », « à côté », « mise en place » ne sont pas des jeux d’argent', () => {
+  /*
+   * LE PIÈGE DES ACCENTS. `norm` désaccentue avant de chercher : « paris »
+   * devenait la ville, « cote » devenait « à côté » et « la côte », « mise »
+   * devenait « mise en place ». Avec le verbe de reprise dans la même famille,
+   * « reprise du travail à Paris » sortait comme un jour de jeu d'argent — la
+   * phrase la plus banale d'un retour au travail, lue comme une rechute au
+   * casino, dans l'onglet qu'on ouvre justement pour savoir si on rechute.
+   */
+  for (const t of ['reprise du travail à Paris lundi',
+                   "j'ai repris le boulot à côté de chez moi",
+                   'on a mangé une côte de bœuf',
+                   'la mise en place a pris trois heures',
+                   'remise des diplômes, on a repris le train de Paris',
+                   "j'ai mal aux côtes depuis la chute"])
+    assert.deepEqual(cles(t), [], `« ${t} » ne parle pas de paris`);
+});
+
+test('et les vrais paris comptent toujours', () => {
+  for (const t of ["j'ai repris les paris",
+                   "j'ai parié 50 balles sur winamax",
+                   'je suis retombé dans les paris sportifs',
+                   "j'ai remis 200 balles au PMU",
+                   "j'ai joué au casino toute la nuit",
+                   "j'ai reperdu ma mise en une heure"])
+    assert.deepEqual(cles(t), ['argent'], `« ${t} » parle bien de paris`);
+});
+
+test('une reprise nue ne se colle pas à une prise vieille de cinq mois', () => {
+  /*
+   * « j'ai craqué au boulot » ne nomme rien. On le rattache à la famille la
+   * plus récente — mais PAS à n'importe quelle distance : sans borne, il allait
+   * se poser sur l'alcool cinq mois après le dernier verre, et la personne
+   * lisait sous « l'alcool » une rechute qui n'avait rien à voir, au moment
+   * précis où cinq mois d'abstinence sont ce qu'elle a de plus fragile.
+   * Rater un signe ne fait rien perdre ; en inventer un peut faire rechuter.
+   */
+  const rows = [];
+  for (let i = 0; i < 200; i++) rows.push({ date: J(i), note: 6, text: 'journée ordinaire' });
+  for (const i of [3, 6, 9]) rows[i] = { date: J(i), note: 4, text: "j'ai bu quatre bières ce soir" };
+  rows[160] = { date: J(160), note: 4, text: "j'ai craqué au boulot aujourd'hui, je n'ai pas tenu." };
+  const alcool = analyserPrises(rows, { aujourdhui: J(199) }).prises.find(p => p.cle === 'alcool');
+  assert.ok(alcool, 'la série d’alcool a disparu');
+  assert.ok(!alcool.signes.some(s => /au boulot/.test(s.phrase)),
+    `cinq mois plus tard, ce « j'ai craqué » est versé à l'alcool : ${JSON.stringify(alcool.signes)}`);
+
+  // À trois semaines — la borne d'un trou de série — il compte encore.
+  rows[160] = { date: J(160), note: 6, text: 'journée ordinaire' };
+  rows[20] = { date: J(20), note: 4, text: "j'ai craqué au boulot aujourd'hui, je n'ai pas tenu." };
+  const proche = analyserPrises(rows, { aujourdhui: J(199) }).prises.find(p => p.cle === 'alcool');
+  assert.ok(proche.signes.some(s => /au boulot/.test(s.phrase) && s.rattache === 'recent'),
+    'à onze jours du dernier verre, la reprise nue doit être rattachée');
+});

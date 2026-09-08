@@ -162,12 +162,28 @@ export const FAMILLES = [
     verbe: V_FUMER,
     franc: /\b(?:un|deux|trois|dix|quinze|vingt|\d+) (?:clopes|cigarettes)\b|\bun paquet\b|\bmanque de nicotine\b|\bj ai vapote\b/ },
 
+  /* LES PARIS, ET LE PIÈGE DES MOTS SANS ACCENTS.
+     `norm` retire les accents avant de chercher : « paris » vaut alors pour la
+     ville, « cote » pour « à côté » et « la côte », « mise » pour « mise en
+     place ». Cette famille comptait donc « reprise du travail à Paris » et
+     « j'ai repris le boulot à côté » comme des jours de jeu d'argent — et
+     comme le verbe de reprise (« j'ai repris ») suffisait, la phrase la plus
+     banale d'un retour au travail devenait une rechute au casino.
+
+     La règle qui en sort : un mot qui est un mot français courant une fois
+     désaccentué ne compte QU'AVEC son contexte de jeu attaché, ou pas du tout.
+     « les paris », « ma mise », oui ; « cote » a été retiré — aucune tournure
+     ne le sauve de « la côte », « les côtes », « à côté », et quelqu'un qui
+     parie écrit de toute façon « j'ai parié », « winamax », « le PMU ». Mieux
+     vaut manquer un jour que teindre en rouge un journal de convalescence. */
   { cle: 'argent', nom: 'les paris', sym: 'de',
-    mots: /\b(?:paris|parie|parier|betclic|winamax|unibet|pmu|casino|poker|machine a sous|jeux? d argent|grattage|grattages|bookmaker|mise|mises|cote|cotes)\b/,
+    mots: ou(/\b(?:parie|paries|parier|pariais|betclic|winamax|unibet|pmu|casino|poker|machine a sous|machines a sous|jeux? d argent|grattage|grattages|bookmaker|bookmakers)\b/,
+             /\b(?:les|des|mes|aux) paris\b|\bparis (?:sportifs|en ligne|hippiques)\b/,
+             /\b(?:ma mise|mes mises)\b|\bmise[s]? (?:sur|de \d)\b/),
     verbe: ou(/\b(?:parie|mise|joue|rejoue|remis|perdu|gagne|depose|recharge)\b/, V_REPRISE),
     /* Un poker entre amis avec des jetons virtuels n'est pas un pari. */
     sauf: /\b(?:gratuit|gratuite|virtuel|virtuels|virtuelle|pour rire|pour du beurre|sans argent|sans miser|fictif|demo)\b/,
-    franc: /\b(?:betclic|winamax|unibet|pmu)\b|\bmachine a sous\b|\bjeux? d argent\b/ },
+    franc: /\b(?:betclic|winamax|unibet|pmu)\b|\bmachines? a sous\b|\bjeux? d argent\b/ },
 
   /* FUMÉ, SANS DIRE QUOI. Pas de `mots` ni de `verbe` : la tournure entière
      est le fait (voir FUMEE_NUE). Une famille à part, pour ne pas deviner :
@@ -573,21 +589,38 @@ function fondreFumee(vues, declare) {
  * rien, et n'étaient rendus que s'ils tombaient à ±1 journée écrite d'un jour
  * déjà compté : écrits trois semaines après le dernier jour d'alcool, ils
  * disparaissaient — alors que c'est la phrase qu'on voudrait le moins perdre.
- * On les rattache à la famille la plus récente du journal (le dernier jour
- * compté avant la phrase ; à défaut, la première famille qui vient après), et
- * on le dit : `rattache: 'recent'`. Ce n'est pas un jour de plus — on ne sait
- * pas de quoi — c'est un signe, avec sa phrase et sa date.
+ * On les rattache donc à la famille la plus récente du journal, et on le dit :
+ * `rattache: 'recent'`. Ce n'est pas un jour de plus — on ne sait pas de quoi —
+ * c'est un signe, avec sa phrase et sa date.
+ *
+ * MAIS PAS À N'IMPORTE QUELLE DISTANCE. Sans borne, « j'ai craqué au boulot
+ * aujourd'hui » allait se coller à l'alcool cinq mois après le dernier verre,
+ * et la personne lisait, sous « l'alcool », une rechute qui n'avait rien à voir
+ * — au moment précis où cinq mois d'abstinence sont ce qu'elle a de plus
+ * fragile à protéger. C'est le coût asymétrique de cette fonction : rater un
+ * signe ne fait rien perdre, en inventer un peut faire rechuter.
+ *
+ * La borne est celle qui sert déjà à dire qu'une série s'est interrompue
+ * (`trou_max`, trois semaines) : au-delà, le lien n'est plus lisible, et la
+ * phrase reste dans le journal sans être versée à une famille. La même borne
+ * vaut pour le repli sur la famille qui vient APRÈS — une reprise annoncée
+ * quinze jours avant la première prise nommée est un signe ; six mois avant,
+ * une coïncidence.
  */
 function rattacherReprises(prises, signesParJour, ecrits) {
   if (!prises.length) return;
+  const { trou_max } = SEUILS_PRISES;
   const couverts = new Set(prises.flatMap(p => [...voisins(p.jours, ecrits)]));
   for (const d of [...signesParJour.keys()].sort()) {
     if (couverts.has(d)) continue;
     for (const s of signesParJour.get(d)) {
       if (s.id !== 'craque' || luDuTexte(s.phrase).prises.size || nomme(norm(s.phrase)).length) continue;
       const dernier = p => p.jours.filter(j => j <= d).at(-1) ?? null;
-      const avant = prises.filter(p => dernier(p)).sort((a, b) => dernier(b) < dernier(a) ? -1 : 1)[0];
-      const cible = avant ?? prises.slice().sort((a, b) => a.jours[0] < b.jours[0] ? -1 : 1)[0];
+      const avant = prises.filter(p => { const j = dernier(p); return j && jours(j, d) <= trou_max; })
+        .sort((a, b) => dernier(b) < dernier(a) ? -1 : 1)[0];
+      const apres = prises.filter(p => jours(d, p.jours[0]) >= 0 && jours(d, p.jours[0]) <= trou_max)
+        .sort((a, b) => a.jours[0] < b.jours[0] ? -1 : 1)[0];
+      const cible = avant ?? apres;
       if (!cible || cible.signes.some(o => o.id === 'craque')) continue;
       cible.signes.push({ ...s, quand: d, rattache: 'recent' });
     }

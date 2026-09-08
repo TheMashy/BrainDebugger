@@ -111,9 +111,14 @@ test('avec son rythme, la nuit courte l’emporte sur l’absence plus longue �
   const avec = nuitDuJour(d, debout('2026-09-06'), { rythme: RYTHME });
   assert.equal(avec.coucher, '05:30'); assert.equal(avec.lever, '10:00'); assert.equal(avec.sommeil_h, 4.5);
   assert.match(avec.souci, /un silence plus long, de 12:00 à 21:00 \(9 h\), pris pour une absence/);
-  // Sans rythme connu, la longueur est le seul indice : l'absence gagne, documenté.
+  // Sans rythme connu, c'est le PREMIER silence recevable : la même réponse
+  // que le rythme, obtenue autrement — la nuit qui ouvre le jour est son
+  // premier sommeil, pas son plus long silence. Et comme rien ne le prouve,
+  // elle sort marquée `incertain` : elle s'affiche, mais ne fait pas rythme.
   const sans = nuitDuJour(d, debout('2026-09-06'));
-  assert.equal(sans.coucher, '12:00'); assert.equal(sans.lever, '21:00'); assert.equal(sans.souci, null);
+  assert.equal(sans.coucher, '05:30'); assert.equal(sans.lever, '10:00');
+  assert.equal(sans.incertain, true);
+  assert.match(sans.souci, /un silence plus long, de 12:00 à 21:00 \(9 h\), pris pour une absence/);
 });
 
 test('une sieste ne concourt pas : moins de la moitié de la nuit', () => {
@@ -168,14 +173,15 @@ test('nuits() : dix nuits en base donnent un rythme, et la seconde passe s’en 
   assert.match(dernier.souci, /pris pour une absence/);
 });
 
-test('nuits() : six nuits ne font pas un rythme, la longueur tranche', () => {
+test('nuits() : six nuits ne font pas un rythme, le premier silence tranche', () => {
   const U = 'six-nuits';
   // Cinq nuits semées, plus celle du jour testé : six nuits complètes en tout.
   semerNuits(U, 5, AUJ);
   poserActiviteJour(U, AUJ, debout(AUJ, { trous: [{ de: '05:30', a: '10:00', minutes: 270 }, { de: '12:00', a: '21:00', minutes: 540 }] }));
   const out = nuits(U, { jours: 30 });
   assert.deepEqual(rythmeDe(out), { coucher: null, lever: null });
-  assert.equal(out.at(-1).lever, '21:00');
+  assert.equal(out.at(-1).lever, '10:00');
+  assert.equal(out.at(-1).incertain, true, 'devinée faute de rythme, elle ne fera pas rythme');
   assert.ok(out.every(n => !/loin de ton/.test(n.souci ?? '')), 'aucun écart au rythme sous sept nuits');
 });
 

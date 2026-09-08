@@ -71,3 +71,32 @@ test('le retissage refuse de partir pendant qu’un lot est en vol', () => {
   const corps = sansCommentaires(app.slice(i, i + 600));
   assert.match(corps, /LECTURE\?\.enLot\)\s*return/);
 });
+
+test('ces boutons-là ne sont pas enfermés dans le mode « Claude »', () => {
+  /*
+   * LA RÉGRESSION QUE LE TEST D'AU-DESSUS NE VOYAIT PAS. Il cherchait les deux
+   * portes quelque part dans renderSettings ; elles y étaient — dans la branche
+   * `chatBackend === 'anthropic'`. Or le backend par défaut est `scripted` :
+   * quelqu'un qui n'a jamais mis de clé, c'est-à-dire le cas normal à
+   * l'installation, ne les voyait ni l'une ni l'autre. « Ranger les soirées sur
+   * les journées vécues » est gratuit et n'appelle aucun modèle : le mode du
+   * compagnon n'a rien à dire sur sa disponibilité.
+   *
+   * On vérifie donc la POSITION, pas la présence : hors de la branche.
+   */
+  const i = app.indexOf('async function renderBackendCfg()');
+  assert.ok(i > 0, 'renderBackendCfg est introuvable');
+  const fin = app.indexOf('\n}\n', app.indexOf("$('#apiKey')", i));
+  const fonction = app.slice(i, fin > i ? fin : i + 20000);
+  const deb = fonction.indexOf("if (s.chatBackend === 'anthropic') {");
+  const finBranche = fonction.indexOf("} else if (s.chatBackend === 'ollama')", deb);
+  assert.ok(deb > 0 && finBranche > deb, 'la branche Anthropic est introuvable — repères déplacés ?');
+  const brancheAnthropic = fonction.slice(deb, finBranche);
+  for (const porte of ['data-lire-tout', 'data-ranger-nuits']) {
+    assert.equal(brancheAnthropic.includes(porte), false, `« ${porte} » est de nouveau réservé au mode Claude`);
+    assert.ok(fonction.includes(porte), `« ${porte} » a disparu de renderBackendCfg`);
+  }
+  // Et la sortie commune est bien posée après TOUTES les branches.
+  assert.match(fonction, /el\.innerHTML = '';\s*\}\s*\n\s*el\.innerHTML \+= OUTILS_JOURNAL;/,
+               'les outils du journal ne sont pas ajoutés après la chaîne de branches');
+});

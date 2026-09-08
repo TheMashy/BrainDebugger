@@ -39,7 +39,7 @@
  */
 import { allEntries, activiteEntre, mesuresEntre, messagesForDate, OWNER } from './db.js';
 import { veilleDuJour, niveauDuTexte } from './veille.js';
-import { nuitDuJour } from './nuits.js';
+import { nuitDuJour, rythmeUtilisateur } from './nuits.js';
 import { jourLocal } from './temps.js';
 import { addDays } from './stats.js';
 import { normaliserCle } from './mesures.js';
@@ -196,17 +196,29 @@ export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = 
   // Le digest de Machi Tool, par DATES : la nuit qui ouvre D (sommeil_h, lever) ; le coucher du SOIR de D est dans le digest de D+1.
   const digests = activiteEntre(addDays(debut, -1), addDays(fin, 1), userId).filter(j => j.digest);
   const digParDate = new Map(digests.map(j => [j.date, j.digest]));
+  const ry = rythmeUtilisateur(userId, { jusquA: fin });
   for (const j of digests) {
     const dig = j.digest;
     if (j.date <= fin && j.date >= debut) {
       const l = ligne(j.date);
       // La nuit lue dans le clavier (nuits.js) passe devant le poste apparié : un
       // ordinateur laissé allumé n'a ni extinction ni démarrage, et on y dort quand même.
-      const nuit = nuitDuJour(dig, digParDate.get(addDays(j.date, -1)) ?? null);
+      // AVEC LE RYTHME DE LA PERSONNE, comme partout ailleurs (api.js) : sans lui,
+      // cette table élisait le plus long silence — la journée au bureau chez qui
+      // laisse son poste allumé — et c'est cette table qui nourrit les liens.
+      // Deux moteurs qui ne choisissent pas la même nuit, c'est « Ma carte » et
+      // « Comment ça marche chez toi » qui se contredisent sur la même journée.
+      const nuit = nuitDuJour(dig, digParDate.get(addDays(j.date, -1)) ?? null, { rythme: ry });
+      // UN RÉVEIL SANS COUCHER N'EST PAS UN LEVER. Les vieux digests portent
+      // {reveil: '00:00'} : la première minute du fichier civil, prise pour un
+      // lever faute de mieux. Ce repli-là a été retiré de « Ma carte » ; il
+      // était resté ici, et le lever fantôme à 00:00 s'était déplacé dans la
+      // table — plus souvent qu'avant, puisqu'elle couvre toute la période.
+      const apparie = dig.poste?.coucher && dig.poste?.reveil ? dig.poste : null;
       if (fini(nuit?.sommeil_h)) l.sommeil_h = nuit.sommeil_h;
-      else if (fini(dig.poste?.sommeil_h)) l.sommeil_h = dig.poste.sommeil_h;
+      else if (fini(apparie?.sommeil_h)) l.sommeil_h = apparie.sommeil_h;
       if (nuit?.lever) l.lever = enHeures(nuit.lever);
-      else if (dig.poste?.reveil) l.lever = enHeures(dig.poste.reveil);
+      else if (apparie?.reveil) l.lever = enHeures(apparie.reveil);
       if (nuit?.coucher) { const h = coucherContinu(nuit.coucher); const v = addDays(j.date, -1); if (h != null && v >= debut && v <= fin) ligne(v).coucher = h; }
       const tp = dig.temps_par_contexte_s ?? {};
       let s = 0, vu = false; for (const v of Object.values(tp)) if (fini(v)) { s += v; vu = true; }
