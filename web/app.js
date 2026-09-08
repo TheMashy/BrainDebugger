@@ -4106,9 +4106,27 @@ function jaugesMarkup(jauges, manques) {
 function fonctionnementsMarkup(F, { nu = false } = {}) {
   if (!F) return '';
   const p = F.periode;
+  /*
+   * LA FENÊTRE SE DIT, SURTOUT QUAND ELLE S'OUVRE.
+   *
+   * Elle se compte en journées NOURRIES, pas en jours civils (voir
+   * `debutDeFenetre`) : sur un journal écrit un jour sur douze, elle remonte
+   * cinq ans en arrière pour rassembler de quoi compter. Sans un mot, l'en-tête
+   * annoncerait « janvier 2022 → aujourd'hui » sans qu'on sache pourquoi, et on
+   * croirait un réglage là où c'est ce qu'il a fallu.
+   *
+   * Et l'inverse compte autant : les nuits et le temps d'écran n'existent qu'à
+   * partir du jour où Machi Tool les a mesurés. « 3 nuits » sur cinq ans a
+   * l'air d'une panne ; c'est l'âge de la mesure, et rien ne le rendra
+   * rétroactif. On le dit à l'endroit exact où le chiffre se lit.
+   */
+  const pas = p.mesure_depuis && p.de < p.mesure_depuis
+    ? ` · les nuits et l’écran ne sont mesurés que depuis le ${fmtDay(p.mesure_depuis)}` : '';
+  const large = p.elargie
+    ? ` · remontée jusqu’à ta première journée pour rassembler ${p.nourries} journées avec quelque chose dedans` : '';
   const tete = nu ? '' : `<div class="fonctete">
     <div class="k faint">Comment ça marche chez toi</div>
-    <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} ${p.notes > 1 ? 'journées notées' : 'journée notée'} · ${p.nuits} ${p.nuits > 1 ? 'nuits' : 'nuit'} · ${p.textes} ${p.textes > 1 ? 'journées écrites' : 'journée écrite'}</span>
+    <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} ${p.notes > 1 ? 'journées notées' : 'journée notée'} · ${p.nuits} ${p.nuits > 1 ? 'nuits' : 'nuit'} · ${p.textes} ${p.textes > 1 ? 'journées écrites' : 'journée écrite'}${large}${pas}</span>
   </div>`;
   if (!F.assez) return `<section class="fonct">${tete ? `<div class="lechead">${tete}</div>` : ''}
     <p class="sub" style="max-width:62ch">Pas encore de quoi compter. ${F.manques.map(esc).join(' ')}</p></section>`;

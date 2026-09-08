@@ -137,9 +137,33 @@ export function teinteNote(v) {
  * Au-delà de six pistes on n'en montre plus : dix rangées de points au-dessus
  * d'une bande ne se lisent plus, elles se comptent.
  */
+/**
+ * L'AXE DE LA BANDE : LES JOURNÉES QUI PORTENT QUELQUE CHOSE, PAS LE CALENDRIER.
+ *
+ * Le commentaire de `trousDe` dit depuis toujours « un carré par journée
+ * écrite » — mais la bande recevait `series.dates`, c'est-à-dire TOUS les jours
+ * civils de la fenêtre, écrits ou non. Tant que la fenêtre valait six mois,
+ * l'écart ne se voyait pas. Depuis qu'elle s'ouvre jusqu'à la première journée
+ * du journal pour rassembler de quoi compter, il se voit beaucoup : sur un
+ * journal de cinq ans écrit un jour sur douze, mille sept cent cinq colonnes de
+ * moins d'un demi-pixel, dont quatre-vingt-douze pour cent de vide — une
+ * bouillie grise où les vingt-quatre jours d'alcool tenaient sur onze pixels.
+ *
+ * On ne garde donc que les journées nourries. Les silences ne disparaissent pas
+ * pour autant : `trousDe` les marque, et c'est même là leur seul endroit juste.
+ */
+function surLesJoursNourris(fonct) {
+  const s = fonct?.series ?? {};
+  const dates = s.dates ?? [];
+  const nourri = s.nourri ?? null;
+  if (!nourri || nourri.length !== dates.length) return { dates, notes: s.note ?? [] };
+  const gardes = [];
+  for (let i = 0; i < dates.length; i++) if (nourri[i]) gardes.push(i);
+  return { dates: gardes.map(i => dates[i]), notes: gardes.map(i => (s.note ?? [])[i]) };
+}
+
 export function bandeLiee(carte, fonct, { max = 6, largeur = 760 } = {}) {
-  const dates = fonct?.series?.dates ?? [];
-  const notes = fonct?.series?.note ?? [];
+  const { dates, notes } = surLesJoursNourris(fonct);
   if (dates.length < 8) return '';
   const noeuds = (carte?.noeuds ?? [])
     .map((n, i) => ({ i, nom: n.nom, genre: n.genre, jours: joursDe(n) }))
@@ -211,8 +235,7 @@ export const COUCHES = [
  * @param {string|null} isole  la couche à montrer seule, ou null pour tout
  */
 export function bandeCouches(carte, fonct, schemas, isole = null, { largeur = 860, prises = null } = {}) {
-  const dates = fonct?.series?.dates ?? [];
-  const notes = fonct?.series?.note ?? [];
+  const { dates, notes } = surLesJoursNourris(fonct);
   if (dates.length < 8) return '';
   const { pas, X } = cadre(dates, largeur);
   const idx = new Map(dates.map((d, i) => [d, i]));

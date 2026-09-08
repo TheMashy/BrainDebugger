@@ -48,7 +48,8 @@ import { normaliserCle } from './mesures.js';
 /* Les seuils, et d'où vient chacun                                     */
 /* ------------------------------------------------------------------ */
 export const SEUILS = {
-  jours_defaut: 180,
+  jours_defaut: 180,                            // en JOURNÉES NOURRIES, pas civiles — voir `debutDeFenetre`
+  jours_max: 2 * 1826,                          // dix ans : le garde-fou d'un journal à trois entrées très espacées
   min_notes: 30,                                // local : en dessous, une inertie ou un lien n'est qu'une anecdote
   min_nuits: 30,                                // local
   min_paires: 30,                               // local : lendemains notés (t−1, t) pour lire la note d'un jour à l'autre
@@ -179,10 +180,46 @@ const enHeures = hhmm => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm ?? '
 /** Un coucher lu « 01:30 » est 25,5 : après minuit, on continue de compter. */
 const coucherContinu = hhmm => { const h = enHeures(hhmm); return h == null ? null : h < 12 ? h + 24 : h; };
 
+/**
+ * LE DÉBUT DE LA FENÊTRE, COMPTÉ EN MATIÈRE ET NON EN CALENDRIER.
+ *
+ * « Les cent quatre-vingts derniers jours » n'est une fenêtre que pour qui
+ * écrit tous les jours. Sur un journal de cinq ans écrit un jour sur douze,
+ * mesuré : 180 jours civils contiennent 15 journées écrites sur 143 — la table
+ * n'atteignait aucun seuil, `assez` restait faux, et l'onglet « Comment ça
+ * marche chez toi » ne disait RIEN à quelqu'un qui a pourtant cinq ans de
+ * journal derrière lui. Il avait tout donné, et l'application lui répondait
+ * qu'il n'y avait pas de quoi compter.
+ *
+ * On recule donc jusqu'à trouver `jours` journées NOURRIES — une note, du
+ * texte, ou un digest de Machi Tool — sans jamais dépasser la première. Pour
+ * qui écrit chaque jour, cela ne change rien : cent quatre-vingts journées
+ * nourries occupent cent quatre-vingts jours civils, et la fenêtre reste la
+ * même. Pour qui écrit rarement, elle s'ouvre jusqu'à ce qu'il y ait de quoi
+ * dire quelque chose.
+ *
+ * Le plafond n'est pas là pour borner l'analyse mais pour borner la BOUCLE :
+ * trois entrées séparées de vingt ans feraient parcourir sept mille journées
+ * vides pour rien.
+ */
+function debutDeFenetre(userId, entrees, fin, jours) {
+  const plancher = addDays(fin, -(SEUILS.jours_max - 1));
+  const nourries = new Set();
+  for (const e of entrees) if (e.date <= fin && e.date >= plancher && (e.note != null || e.text?.trim())) nourries.add(e.date);
+  for (const j of activiteEntre(plancher, fin, userId)) if (j.digest) nourries.add(j.date);
+  const dates = [...nourries].sort();
+  if (!dates.length) return { debut: addDays(fin, -(jours - 1)), dedans: new Set() };
+  // La fenêtre couvre au moins `jours` jours civils : un journal dense n'a pas
+  // à rétrécir parce que trois de ses journées sont vides.
+  const parMatiere = dates.length > jours ? dates[dates.length - jours] : dates[0];
+  const debut = [parMatiere, addDays(fin, -(jours - 1))].sort()[0];
+  return { debut, dedans: new Set(dates.filter(d => d >= debut)) };
+}
+
 export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = null } = {}) {
   const entrees = allEntries(userId);
   const fin = jusquA ?? entrees.at(-1)?.date ?? jourLocal(Date.now());
-  const debut = addDays(fin, -(jours - 1));
+  const { debut, dedans } = debutDeFenetre(userId, entrees, fin, jours);
   const parDate = new Map();
   const ligne = d => { if (!parDate.has(d)) parDate.set(d, { date: d, note: null, sommeil_h: null, coucher: null, lever: null, ecran_min: null, absolus: null }); return parDate.get(d); };
   for (let d = debut; d <= fin; d = addDays(d, 1)) ligne(d);
@@ -195,6 +232,18 @@ export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = 
   }
   // Le digest de Machi Tool, par DATES : la nuit qui ouvre D (sommeil_h, lever) ; le coucher du SOIR de D est dans le digest de D+1.
   const digests = activiteEntre(addDays(debut, -1), addDays(fin, 1), userId).filter(j => j.digest);
+  /*
+   * CE QUI NE PEUT PAS ÊTRE RÉTROACTIF, ET QUI DOIT SE DIRE.
+   *
+   * Le texte, les notes, ce qui a de la prise : tout cela se relit, aussi loin
+   * que le journal remonte. Les nuits et le temps d'écran, non — ils n'existent
+   * qu'à partir du jour où Machi Tool a commencé à les mesurer. Ouvrir la
+   * fenêtre à cinq ans rend le trou VISIBLE : « 3 nuits sur 1705 » ressemble à
+   * une panne alors que c'est simplement l'âge de la mesure. On rend donc la
+   * date de la première, pour que l'écran puisse le dire au lieu de le laisser
+   * croire.
+   */
+  const mesureDepuis = digests[0]?.date ?? null;
   const digParDate = new Map(digests.map(j => [j.date, j.digest]));
   const ry = rythmeUtilisateur(userId, { jusquA: fin });
   for (const j of digests) {
@@ -247,7 +296,17 @@ export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = 
   }
   const lignes = [...parDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   for (const l of lignes) { const dow = (new Date(l.date + 'T12:00:00Z').getUTCDay() + 6) % 7; l.dow = dow; l.we = dow >= 5 ? 1 : 0; l.sortie = dow === 4 || dow === 5 ? 1 : 0; }
-  return { jours: lignes, variables: ['note', 'sommeil_h', 'coucher', 'lever', 'ecran_min', 'absolus', ...extras], de: debut, a: fin };
+  // Chaque ligne dit si elle porte quelque chose. La bande en a besoin : son axe
+  // est ORDINAL — un carré par journée — et sur une fenêtre ouverte à cinq ans,
+  // dessiner aussi les jours vides donnait mille sept cents colonnes d'un demi
+  // pixel, dont quatre-vingt-douze pour cent de vide.
+  for (const l of lignes) l.nourri = dedans.has(l.date);
+  return { jours: lignes, variables: ['note', 'sommeil_h', 'coucher', 'lever', 'ecran_min', 'absolus', ...extras],
+           de: debut, a: fin, nourries: dedans.size, mesure_depuis: mesureDepuis,
+           // La fenêtre a-t-elle dû reculer au-delà de ce qui était demandé ?
+           // C'est ce que l'écran a besoin de dire : « cinq ans » n'est pas un
+           // réglage, c'est ce qu'il a fallu pour trouver de quoi compter.
+           elargie: lignes.length > jours };
 }
 
 /* ------------------------------------------------------------------ */
@@ -453,7 +512,11 @@ export function analyserTable(T) {
   const assez = notes >= SEUILS.min_notes || nuits >= SEUILS.min_nuits || couchers >= SEUILS.min_nuits;
   const items = assez ? [...bascules(T), ...liens(T), ...rythme(T), ...regularite(T), ...inertie(T), ...mots(T)] : [];
   const manques = [];
-  if (notes < SEUILS.min_notes) manques.push(`${pl(notes, 'journée notée', 'journées notées')} sur ${T.jours.length} : il en faut ${SEUILS.min_notes} pour lire la note d’un jour à l’autre et les liens.`);
+  // « 15 sur 1710 » se lit comme un échec ; « 15 sur 143 journées où il y a
+  // quelque chose » dit la même chose sans compter les jours vides contre
+  // quelqu'un. Le dénominateur est la matière, pas le calendrier.
+  const dansQuoi = T.nourries ?? T.jours.length;
+  if (notes < SEUILS.min_notes) manques.push(`${pl(notes, 'journée notée', 'journées notées')} sur ${dansQuoi} : il en faut ${SEUILS.min_notes} pour lire la note d’un jour à l’autre et les liens.`);
   else { const { paires } = ar1(T.jours.map(j => j.note)); if (paires < SEUILS.min_paires) manques.push(`${pl(notes, 'journée notée', 'journées notées')} mais ${pl(paires, 'lendemain noté', 'lendemains notés')} : la note d’un jour à l’autre se lit sur deux jours de suite.`); }
   if (nuits < SEUILS.min_nuits) manques.push(nuits ? `${pl(nuits, 'nuit mesurée', 'nuits mesurées')} : il en faut ${SEUILS.min_nuits} pour les bascules et la régularité.` : 'Aucune nuit mesurée : rien n’est arrivé de Machi Tool, ni d’une montre par la passerelle.');
   if (textes < SEUILS.mots.min_jours) manques.push(textes ? `${pl(textes, 'journée écrite', 'journées écrites')} d’au moins ${SEUILS.mots.min_mots} mots : il en faut ${SEUILS.mots.min_jours} pour lire les mots absolus.` : `Aucune journée écrite d’au moins ${SEUILS.mots.min_mots} mots : il en faut ${SEUILS.mots.min_jours} pour lire les mots absolus.`);
@@ -478,9 +541,11 @@ export function analyserTable(T) {
   ].filter(j => j.a != null && j.a < j.faut);
 
   return {
-    periode: { de: T.de, a: T.a, jours: T.jours.length, notes, nuits, ecrans, textes },
+    periode: { de: T.de, a: T.a, jours: T.jours.length, nourries: T.nourries ?? null,
+               elargie: !!T.elargie, mesure_depuis: T.mesure_depuis ?? null,
+               notes, nuits, ecrans, textes },
     assez, items, manques, jauges, exclus: EXCLUS,
-    series: { dates: T.jours.map(j => j.date), note: T.jours.map(j => j.note), sommeil_h: T.jours.map(j => j.sommeil_h), coucher: T.jours.map(j => j.coucher), we: T.jours.map(j => j.we) },
+    series: { dates: T.jours.map(j => j.date), note: T.jours.map(j => j.note), sommeil_h: T.jours.map(j => j.sommeil_h), coucher: T.jours.map(j => j.coucher), we: T.jours.map(j => j.we), nourri: T.jours.map(j => !!j.nourri) },
   };
 }
 export function fonctionnements(userId = OWNER, opts = {}) {
