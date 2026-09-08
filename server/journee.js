@@ -577,59 +577,12 @@ export function volatiliteDuJour(date, userId = OWNER, { zone = zoneCourante() }
   };
 }
 
-/*
- * L'AMBIANCE D'UNE JOURNÉE — CE QUE LE FOND DE « PARLER » DIT DÉJÀ SANS LE DIRE.
- *
- * Le décor de l'application est peint par `readMood` depuis des années : les
- * mots qu'on écrit choisissent une scène, et la scène teint tout l'écran. Ça
- * marche, et personne ne sait ce que ça veut dire. Un fond qui change sans
- * qu'on sache pourquoi est une ambiance ; nommé, il devient une lecture — mais
- * une lecture qu'on peut contredire, et c'est précisément ce qui la rend
- * acceptable (voir le commentaire de `SENS`).
- *
- * TROIS DÉCISIONS, ET ELLES COMPTENT PLUS QUE LE CALCUL.
- *
- * 1. LA NOTE N'ENTRE PAS. `readMood` sait l'utiliser pour infléchir la scène,
- *    et c'est bon pour peindre un décor. Ici, non : la pastille se pose à côté
- *    de la note, et si la note l'alimentait, les deux diraient forcément la
- *    même chose. Deux lectures posées côte à côte ne valent que si elles
- *    peuvent se contredire — c'est le jour où elles divergent qui mérite un
- *    regard.
- *
- * 2. ON SE TAIT PLUTÔT QUE DE MEUBLER. Sous vingt-cinq mots, ou quand aucune
- *    scène ne devance nettement la suivante, `readMood` rend `force: 0` : on
- *    rend `null`, et l'écran n'affiche rien. Un chiffre constant présenté comme
- *    une lecture est pire que pas de chiffre — il a l'air de dire quelque
- *    chose (c'est déjà l'argument de `pencheDe`, quelques lignes plus haut).
- *
- * 3. LA SECONDE SCÈNE EST RENDUE quand elle talonne. `trancher` n'élit une
- *    scène qu'avec deux points d'avance ; à deux points exactement, dire « le
- *    vide, de peu devant l'éclipse » est plus honnête que « le vide », et donne
- *    à la personne de quoi trancher elle-même.
- */
-export function ambianceDuJour(date, userId = OWNER) {
-  const msgs = messagesForDate(date, userId).filter(m => m.role === 'user' && m.text?.trim());
-  // Le texte de la journée plutôt que les messages quand il n'y en a pas : un
-  // journal importé n'a pas de fil, et il a autant droit à sa lecture.
-  const texte = msgs.length ? msgs.map(m => m.text).join(' ') : (getEntry(date, userId)?.text ?? '');
-  if (!texte.trim()) return null;
-  const { scene, force, mots, scores } = readMood(texte, null);
-  if (!force || scene === DEFAUT) return null;
-  const classe = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-  const seconde = classe[1] && classe[0][1] - classe[1][1] <= 2 ? classe[1][0] : null;
-  const dit = s => String(SENS[s] ?? s).split(' — ');
-  const [nom, image] = dit(scene);
-  return { scene, nom, image, force: Math.round(force * 100) / 100, mots,
-           seconde, seconde_nom: seconde ? dit(seconde)[0] : null };
-}
-
 /** Tout ce que la journée ouverte a besoin de savoir sur elle-même. */
 export function journee(date, userId = OWNER, opts = {}) {
   return {
     moments: momentsDuJour(date, userId, opts),
     thematiques: thematiquesDuJour(date, userId),
     volatilite: volatiliteDuJour(date, userId, opts),
-    sujets: sujetsDuJour(date, userId, opts),
-    ambiance: ambianceDuJour(date, userId)
+    sujets: sujetsDuJour(date, userId, opts)
   };
 }

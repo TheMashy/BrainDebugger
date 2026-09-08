@@ -4690,40 +4690,12 @@ async function renderMirror(date, { garderCal = false } = {}) {
         <div class="dayhead">
           <div>
             <div class="k faint">${fmtDay(date)}${date === S.today ? " \u00b7 aujourd'hui" : ''}</div>
-            ${/*
-               * TROIS FAITS, PAS UN RÉPÉTÉ TROIS FOIS.
-               *
-               * À gauche, ce que TES MOTS portaient : la scène que le moteur
-               * d'ambiance élit depuis toujours pour peindre le fond de
-               * « Parler ». Ce calcul existait et ne se voyait nulle part — un
-               * décor qui change sans qu'on sache pourquoi est une ambiance ;
-               * nommé, c'est une lecture, et une lecture se conteste. La note
-               * n'entre PAS dedans, sinon les deux pastilles diraient la même
-               * chose par construction, et c'est justement le jour où elles
-               * divergent qui mérite un regard.
-               *
-               * Au milieu, la note, colorée par son ÉCART à ta normale.
-               *
-               * À droite, la même note sur l'échelle ABSOLUE rouge → bleu.
-               * Ce n'est pas un doublon : le chiffre du milieu dit « par
-               * rapport à toi », celui de droite dit « dans l'absolu ». Un 6
-               * chez quelqu'un qui vit à 4 est vert au milieu et jaune à
-               * droite, et les deux sont vrais.
-               *
-               * Le mot de droite est le TIEN — le repère que tu as écrit pour
-               * cette note. Faute de repère, la pastille reste une couleur :
-               * inventer « bleu-vert » serait meubler.
-               */''}
-            <div class="daypast">
-              ${ambianceMarkup(m.journee?.ambiance)}
-              <button class="bignum${m.note !== null ? ' noted' : ''}" id="dayNote"
-                   aria-expanded="${DAY_NOTE_OUVERT}"
-                   title="${m.note !== null ? 'Changer cette note' : 'Noter cette journée'}"
-                   style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
-                ${m.note ?? '\u2014'}<span class="sl">/10</span>
-              </button>
-              ${positiviteMarkup(m.note)}
-            </div>
+            <button class="bignum${m.note !== null ? ' noted' : ''}" id="dayNote"
+                 aria-expanded="${DAY_NOTE_OUVERT}"
+                 title="${m.note !== null ? 'Changer cette note' : 'Noter cette journée'}"
+                 style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
+              ${m.note ?? '\u2014'}<span class="sl">/10</span>
+            </button>
           </div>
           <button class="daydrop" data-erase="${date}" title="Effacer cette journée">${ico('corbeille', 12)}effacer</button>
         </div>
@@ -5287,37 +5259,80 @@ function sujetsMarkup(sujets) {
  * ce qu'on a ressenti, ce dont on a parlé et ce qui a bougé, ce qu'on a écrit.
  */
 /**
- * CE QUE TES MOTS PORTAIENT, CE JOUR-LÀ.
+ * CE QUI A BOUGÉ DANS LA JOURNÉE — SUR L'AXE DE LA JOURNÉE VÉCUE.
  *
- * `ambianceDuJour` rend `null` dès que la lecture n'est pas nette — moins de
- * vingt-cinq mots, ou deux scènes au coude à coude. On n'affiche alors RIEN :
- * pas une pastille grise « indéterminé », qui occuperait la place et le regard
- * pour ne rien dire. Se taire est une réponse ; meubler n'en est pas une.
+ * Elle avait été retirée parce qu'elle traçait les mêmes valeurs que les
+ * pastilles de la colonne de gauche, « la même journée dessinée deux fois ».
+ * L'argument tenait tant que son axe était l'INDEX des moments : quatre points
+ * régulièrement espacés ne disent rien que la liste ne dise mieux.
  *
- * La barre de force n'est pas un pourcentage de certitude, et le titre le dit :
- * c'est la charge du lexique, la quantité de mots qui tirent dans ce sens-là.
+ * Sur l'axe du TEMPS, ce n'est plus la même chose. Quatre messages à 19:45,
+ * 21:06, 00:16 et 06:09 ne sont pas quatre pas égaux : ils sont serrés en début
+ * de soirée puis très écartés, et c'est exactement ce que la volatilité veut
+ * montrer — à quel moment de la journée ça bascule, et sur combien de temps.
+ * La liste donne les heures une par une ; la courbe donne leur forme.
+ *
+ * L'axe va du LEVER au COUCHER — la journée vécue, pas la journée civile. Un
+ * point à 06:09 chez quelqu'un levé à 19:00 tombe donc aux quatre cinquièmes
+ * de sa journée, et non au petit matin d'une grille qui ne le concerne pas.
+ * Sans les deux bornes, on retombe sur le premier et le dernier moment, et
+ * l'axe ne prétend plus rien mesurer d'autre que lui-même.
+ *
+ * Ce qui est PLEIN est mesuré, ce qui est CONTOURÉ est déclaré : un point plein
+ * est un ressenti que la personne a posé elle-même, un point creux est lu dans
+ * ses mots. La règle du produit vaut jusqu'ici.
  */
-function ambianceMarkup(a) {
-  if (!a) return '<span class="dpast dpvide" aria-hidden="true"></span>';
-  const talonne = a.seconde_nom ? `, de peu devant « ${a.seconde_nom} »` : '';
-  const titre = `${a.nom} — ${a.image}${talonne}.\nLu dans tes mots (${a.mots} mots), pas dans ta note : les deux ont le droit de ne pas être d’accord.`;
-  return `<span class="dpast dpamb" data-tip="${esc(titre)}">
-    <span class="dpligne">${ico('eclair', 12)}<span class="dpnom">${esc(a.nom)}</span></span>
-    <span class="dpforce" aria-hidden="true"><i style="width:${Math.round(a.force * 100)}%"></i></span>
-  </span>`;
-}
+function volatiliteMarkup(v, poste) {
+  const hum = (v?.humeurs ?? []).filter(h => h.heure && Number.isFinite(h.valeur));
+  if (hum.length < 2) return '';
+  const W = 220, H = 42, PB = 5, PX = 4;
+  const min = h => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(h ?? '')); return m ? +m[1] * 60 + +m[2] : null; };
+  // Tout se mesure DEPUIS LE LEVER, dans le sens du temps : 06:09 après un
+  // lever à 19:00 vaut 11 h 09 de journée, pas « treize heures avant ».
+  const depuis = (h, l) => { const a = min(l), b = min(h); return a == null || b == null ? null : (((b - a) % 1440) + 1440) % 1440; };
+  const lever = poste?.lever?.heure ?? null;
+  const coucher = poste?.coucher?.heure ?? null;
+  const t0 = lever ?? hum[0].heure;
+  const ts = hum.map(h => depuis(h.heure, t0) ?? 0);
+  // La fin : le coucher s'il est connu, sinon le dernier moment. Jamais zéro —
+  // une journée d'un seul instant n'a pas d'axe.
+  const fin = Math.max(coucher ? depuis(coucher, t0) ?? 0 : 0, ...ts) || 1;
+  const x = t => PX + (t / fin) * (W - PX * 2);
+  const y = val => PB + (1 - val / 10) * (H - PB * 2);
+  const pts = hum.map((h, i) => ({ ...h, x: x(ts[i]), y: y(h.valeur) }));
 
-/** La note sur l'échelle absolue, du rouge au bleu — et ton mot pour elle. */
-function positiviteMarkup(note) {
-  if (note === null || note === undefined) return '<span class="dpast dpvide" aria-hidden="true"></span>';
-  const c = noteScaleColor(note);
-  const mot = S.anchors?.find(a => a.note === note)?.descr ?? null;
-  const titre = `${note}/10 sur l’échelle du produit, du rouge au bleu.`
-    + (mot ? `\nTon repère pour cette note : « ${mot} »` : '\nTu n’as pas encore écrit de repère pour cette note.');
-  return `<span class="dpast dppos" data-tip="${esc(titre)}">
-    <span class="dpligne"><i class="dppuce" style="background:${c};color:${c}"></i>
-      <span class="dpnom">${mot ? esc(mot) : 'positivité'}</span></span>
-  </span>`;
+  const ligne = `<path d="${pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('')}"
+       fill="none" stroke="var(--line-soft)" stroke-width="1.2" stroke-linejoin="round"/>`;
+  const points = pts.map(p => {
+    const c = noteColor(p.valeur, 6);
+    const mesure = p.dApres === 'releve';
+    const vtxt = String(p.valeur).replace('.', ',');
+    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3"
+       fill="${mesure ? c : 'none'}" stroke="${c}" stroke-width="${mesure ? 0 : 1.5}"
+       ><title>${esc(p.heure)} · ${mesure ? '' : '≈'}${vtxt}/10${mesure ? ' (relevé)' : ' (lu dans tes mots)'}</title></circle>`;
+  }).join('');
+
+  const vals = hum.map(h => h.valeur);
+  const bas = Math.min(...vals), haut = Math.max(...vals);
+  const fmt = n => String(n).replace('.', ',');
+  const surMesure = hum.some(h => h.dApres === 'releve');
+  // Les bouts de l'axe se disent, sinon « de gauche à droite » ne veut rien dire.
+  const bornes = lever && coucher ? `${esc(lever)} <span class="faint">→</span> ${esc(coucher)}`
+    : lever ? `depuis ${esc(lever)}`
+    : `${esc(hum[0].heure)} <span class="faint">→</span> ${esc(hum.at(-1).heure)}`;
+  return `<div class="jvol">
+    <div class="k faint">Ce qui a bougé</div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="jvsvg" aria-hidden="true">
+      <line x1="0" y1="${(H / 2).toFixed(1)}" x2="${W}" y2="${(H / 2).toFixed(1)}"
+            stroke="var(--line-soft)" stroke-dasharray="2 4"/>
+      ${ligne}${points}
+    </svg>
+    <div class="jvpied">
+      <span class="jvchiffre mono">${fmt(bas)} <span class="faint">→</span> ${fmt(haut)}</span>
+      <span class="faint">${bornes}</span>
+    </div>
+    <div class="jvpied"><span class="faint">${surMesure ? 'relevé à la main' : 'lu dans tes mots'}</span></div>
+  </div>`;
 }
 
 function journeeMarkup(m) {
@@ -5329,20 +5344,12 @@ function journeeMarkup(m) {
     : `<p class="jvide">${m.note !== null ? 'Notée, sans texte.' : 'Rien d’écrit ce jour-là.'}</p>`);
   // Minimaliste : le poste (lever, sommeil, synchro, écran) et de quoi on a
   // parlé. Le détail chiffré des mesures ne s'entasse plus ici.
-  /*
-   * LA COURBE « CE QUI A BOUGÉ » EST PARTIE.
-   *
-   * Elle traçait exactement les mêmes valeurs que les pastilles de la colonne
-   * de gauche — la même journée, dessinée deux fois, à deux endroits, dans deux
-   * langages. Sur une journée de quatre moments, une courbe de quatre points ne
-   * montre rien que la colonne ne montre déjà mieux : celle-ci a les heures et
-   * les phrases à côté.
-   */
   const cote = `${posteMarkup(m.poste, m.synchro)}${thematiquesMarkup(j.thematiques)}`;
 
   return `<div class="jgrille">
     <div class="jcol jfil">
       <div class="k faint">Humeurs de la journée</div>
+      ${volatiliteMarkup(j.volatilite, m.poste)}
       ${moments.length
         ? `<ol class="jmoments">${moments.map(momentMarkup).join('')}</ol>`
         : '<p class="jvide">Rien n’a été dit ce jour-là.</p>'}

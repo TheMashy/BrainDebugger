@@ -122,11 +122,9 @@ test('un seul relevé n’est pas une amplitude', () => {
   assert.ok(Array.isArray(v.charges));
 });
 
-test('la journée rendue au navigateur a ses cinq parties', () => {
+test('la journée rendue au navigateur a ses quatre parties', () => {
   const j = J.journee(JOUR, OWNER, { zone: 'UTC' });
-  // `ambiance` : ce que les mots de la journée portaient, tel que le moteur du
-  // décor le lit — nul quand la lecture n'est pas nette, et c'est un cas normal.
-  assert.deepEqual(Object.keys(j).sort(), ['ambiance', 'moments', 'sujets', 'thematiques', 'volatilite']);
+  assert.deepEqual(Object.keys(j).sort(), ['moments', 'sujets', 'thematiques', 'volatilite']);
   for (const m of j.moments) {
     // `ids` : les messages d'où le moment vient. C'est par eux que la colonne
     // de gauche désigne son passage à droite — jamais par l'heure affichée.

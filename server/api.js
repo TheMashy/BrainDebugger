@@ -793,8 +793,11 @@ export function posteDuJour(date, userId = OWNER) {
   };
   const dernierEcrit = () => {
     const m = messagesForDate(date, userId)
-      .filter(x => x.role === 'user' && x.text?.trim() && x.ts)
-      .sort((a, b) => (a.ts < b.ts ? -1 : 1)).at(-1);
+      // Comparaison de CHAÎNES ISO : elle est juste, l'ordre lexicographique
+      // d'un ISO 8601 est son ordre chronologique — mais seulement à fuseau
+      // constant. On trie sur l'instant, comme partout ailleurs.
+      .filter(x => x.role === 'user' && x.text?.trim() && Number.isFinite(Date.parse(x.ts)))
+      .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts)).at(-1);
     return m ? heureLocale(m.ts) : null;
   };
   /*
@@ -809,18 +812,53 @@ export function posteDuJour(date, userId = OWNER) {
    */
   const estimeCoucherParSilence = () => {
     const SEUIL = 6.5 * 3600 * 1000;
+    /*
+     * `ts` EST UNE CHAÎNE ISO, PAS UN NOMBRE — et c'est ce qui cassait tout.
+     *
+     * `messagesForDate` rend le `ts` tel qu'il est stocké : « 2026-09-07T03:18…».
+     * Soustraire deux chaînes donne NaN, et `NaN < SEUIL` est FAUX : la garde
+     * qui devait passer au message suivant tant que le silence est trop court
+     * ne passait jamais. La fonction rendait donc le PREMIER message du soir de
+     * D — c'est-à-dire, chez quelqu'un qui se lève l'après-midi, son lever
+     * lui-même. « Couché 15:34, levé 15:34 » : réfuté deux lignes plus bas par
+     * la phrase de 03:18, et le coucher disparaissait de l'écran.
+     *
+     * D'où l'absence de la lune à côté du soleil, tous les jours où Machi Tool
+     * n'avait pas encore envoyé le trou du lendemain. Le tri souffrait du même
+     * mal — un comparateur qui rend NaN ne trie rien.
+     */
+    const instant = m => Date.parse(m.ts);
     const users = [...messagesForDate(date, userId), ...messagesForDate(addDays(date, 1), userId)]
-      .filter(m => m.role === 'user' && m.text?.trim() && m.ts)
-      .sort((a, b) => a.ts - b.ts);
+      .filter(m => m.role === 'user' && m.text?.trim() && Number.isFinite(instant(m)))
+      .sort((a, b) => instant(a) - instant(b));
+    /*
+     * LE PLUS LONG SILENCE, PAS LE PREMIER ASSEZ LONG.
+     *
+     * En rendant le premier écart de plus de six heures et demie, on prenait
+     * une soirée sans écrire pour un endormissement : « 18:37 puis plus rien
+     * jusqu'à 03:18 » donnait couché 18:37, alors que la phrase de 03:18 prouve
+     * qu'on était debout. La réfutation d'en dessous rattrapait le coup en
+     * effaçant le coucher — le résultat juste, obtenu de la mauvaise façon :
+     * l'écran n'affichait plus rien du tout là où la bonne réponse (03:18) était
+     * dans les données.
+     *
+     * Le sommeil qui ferme la journée est le plus long silence de la fenêtre,
+     * pas le premier qui dépasse un seuil. Le seuil ne sert plus qu'à dire
+     * « c'est une nuit, pas une pause ». La réfutation reste : sur une journée
+     * où le plus long silence est une absence de l'après-midi, elle efface, et
+     * ne rien dire vaut mieux que se tromper d'heure.
+     */
+    let choisi = null, plusLong = SEUIL;
     for (let i = 0; i < users.length - 1; i++) {
-      if (users[i + 1].ts - users[i].ts < SEUIL) continue;
+      const creux = instant(users[i + 1]) - instant(users[i]);
+      if (creux < plusLong) continue;
       const jourMsg = jourLocal(users[i].ts);
       const min = enMinutes(heureLocale(users[i].ts)) ?? 0;
       const soirD = jourMsg === date && min >= MIDI;
       const matinDemain = jourMsg === addDays(date, 1) && min < MIDI;
-      if (soirD || matinDemain) return heureLocale(users[i].ts);
+      if (soirD || matinDemain) { choisi = heureLocale(users[i].ts); plusLong = creux; }
     }
-    return null;
+    return choisi;
   };
   /*
    * 00:00 N'EST PAS UN LEVER NON PLUS, C'EST LE BORD OÙ LE FICHIER S'OUVRE.
