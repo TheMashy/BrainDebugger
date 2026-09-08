@@ -1060,9 +1060,40 @@ export function getLecture(userId = OWNER) {
   catch { return null; }        // un JSON casse vaut une lecture absente
 }
 
+/** Ce qu'une lecture porte vraiment : des nœuds, des thèmes, des schémas. */
+export const lectureVide = c =>
+  !(c?.carte?.noeuds?.length) && !(c?.themes?.length) && !(c?.schemas?.length);
+
+/**
+ * UNE LECTURE QUI NE DIT RIEN N'EN REMPLACE PAS UNE QUI DIT QUELQUE CHOSE.
+ *
+ * L'écriture était inconditionnelle, aux trois endroits qui appellent : le
+ * bouton « relire », la relecture de fond, et le relevé du lot. Une réponse
+ * maigre du modèle — un appel d'outil sans carte, une lecture interrompue,
+ * un refus — écrasait donc silencieusement des mois de travail, et l'écran
+ * annonçait « 0 choses, 0 liens » au-dessus d'un bouton « voir ma carte » qui
+ * ouvrait le vide. Rien ne disait qu'il s'était passé quelque chose : le
+ * tissage allait jusqu'à 100 %, et la carte n'était plus là.
+ *
+ * Le coût des deux erreurs n'est pas comparable. Garder une carte d'hier
+ * quelques minutes de trop ne coûte rien — on relance. Perdre celle qui
+ * existait, sans avoir été prévenu, coûte tout ce qu'elle contenait : c'est
+ * la seule chose du produit qui ne se recalcule pas à partir du journal, elle
+ * a été payée, et sa continuité (les nœuds « repris », les renommages) meurt
+ * avec elle.
+ *
+ * On refuse donc, et on le DIT — `refusee` remonte jusqu'à l'appelant, qui a
+ * de quoi expliquer au lieu d'afficher un zéro. Une première lecture, elle,
+ * passe : il n'y a rien à protéger, et une carte vide vaut mieux qu'un écran
+ * qui prétend qu'aucune lecture n'a eu lieu.
+ */
 export function setLecture({ contenu, jusqu_au, jours, modele, userId = OWNER,
                              quand = new Date().toISOString() }) {
   const horizon = CLE_LECTURE;
+  if (lectureVide(contenu)) {
+    const avant = getLecture(userId);
+    if (avant && !lectureVide(avant.contenu)) return { ...avant, refusee: true };
+  }
   db.prepare(`
     INSERT INTO lectures(user_id, horizon, fait_le, jusqu_au, jours, modele, contenu)
     VALUES(?,?,?,?,?,?,?)

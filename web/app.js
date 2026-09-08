@@ -8365,7 +8365,18 @@ async function retisser() {
           TISSAGE.sim.pas(1);                    // un tour, pour que les centres existent
           TISSAGE.debutToile = TISSAGE.image;
           accrocherLueurs(TISSAGE);
-          tissageDit(`${G.noeuds.length} choses, ${G.liens.length} liens`);
+          /*
+           * « 0 CHOSES, 0 LIENS » N'EST PAS UN RÉSULTAT, C'EST UN ÉCHEC MUET.
+           *
+           * Affiché tel quel au-dessus d'un bouton « voir ma carte » qui ouvre
+           * le vide, il se lit comme une panne — et il l'était : le serveur
+           * refuse désormais qu'une lecture vide écrase la précédente (voir
+           * `setLecture`), mais une PREMIÈRE lecture peut légitimement ne rien
+           * rendre. Alors on le dit, au lieu de montrer un zéro.
+           */
+          tissageDit(G.noeuds.length
+            ? `${G.noeuds.length} choses, ${G.liens.length} liens`
+            : 'Il n’a rien trouvé à relier cette fois — relance quand tu auras écrit un peu plus.');
         };
         poser();
       } else if (ev === 'fini') {

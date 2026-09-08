@@ -1209,11 +1209,15 @@ async function releverLecture(userId) {
 
     recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'carte');
     const ecrites = rows.filter(x => x.text && x.text.trim());
-    setLecture({
+    const pose = setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
     });
-    setSettings({ lectureLot: null, lectureLotErreur: null }, userId);
+    // Le lot est fini quoi qu'il arrive — on ne le relèvera pas deux fois — mais
+    // s'il n'a rien rendu, ça se dit là où l'écran va le lire.
+    setSettings({ lectureLot: null,
+                  lectureLotErreur: pose?.refusee
+                    ? "La lecture de fond n'a rien rendu — ta carte précédente est gardée." : null }, userId);
     return r;
   } catch (err) {
     /*
@@ -2694,6 +2698,7 @@ export const routes = {
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
       jours: corpus.jours, modele: r.modele, userId
     });
+    if (l?.refusee) return { error: "Le modèle n'a rien rendu cette fois — ta carte précédente est gardée telle quelle. Réessaie." };
     return { ancienne: false,
              lecture: decorerCarte(l.contenu, series(userId).byDate, textesParJour(userId)),
              fait_le: l.fait_le, jours: l.jours,
@@ -3073,6 +3078,16 @@ export async function retisser(body, send, userId = OWNER) {
     contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
     jours: corpus.jours, modele: r.modele, userId
   });
+  /*
+   * UNE LECTURE VIDE NE REMPLACE PAS CELLE D'AVANT (voir `setLecture`), et
+   * l'écran doit l'apprendre autrement que par un « 0 choses, 0 liens ». On
+   * envoie une erreur plutôt que la toile : ta carte est toujours là, c'est la
+   * relecture qui n'a rien rendu.
+   */
+  if (l?.refusee) {
+    send('erreur', { error: "Le modèle n'a rien rendu cette fois — ta carte précédente est gardée telle quelle. Réessaie." });
+    return;
+  }
   // LE TOUR EST CONSOMME ICI, et pas avant : un retissage qui echoue sur une
   // coupure de reseau ne doit pas couter les douze heures.
   setSettings({ dernierRetissage: new Date().toISOString() }, userId);
