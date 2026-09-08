@@ -1855,27 +1855,39 @@ button.bignum:hover { opacity: .82; }
 .jcol .k { letter-spacing: .1em; text-transform: uppercase; font-size: 10.5px; }
 
 /* --- le fil des moments --- */
+/* La colonne des moments perd son plafond pour la même raison que celle du
+   texte : cliquer un moment doit pouvoir désigner sa phrase, et un moment caché
+   sous un défilement interne n'est cliquable par personne. Les deux colonnes
+   grandissent maintenant ensemble, ce qui les garde en face l'une de l'autre. */
 .jmoments {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-direction: column; gap: 2px;
-  max-height: 34vh; overflow-y: auto; overscroll-behavior: contain;
 }
 .jmoment {
-  display: grid; grid-template-columns: auto 9px minmax(0, 1fr);
+  display: grid; grid-template-columns: auto 46px minmax(0, 1fr);
   align-items: baseline; gap: 10px;
   padding: 5px 7px 5px 2px; border-radius: 6px;
   transition: background .12s;
 }
 .jmoment:hover { background: var(--surface); }
 .jheure { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
-/* Le point porte la scène de ce moment-là. Il est CONTOURÉ quand rien ne
-   ressort et rempli quand quelque chose ressort : la force se lit dans
-   l'encre, pas dans un chiffre à côté. */
-.jpoint {
-  width: 7px; height: 7px; border-radius: 50%; align-self: center;
-  background: hsl(var(--s, 224) 45% 58% / var(--f, .3));
-  box-shadow: 0 0 0 1px hsl(var(--s, 224) 45% 58% / .45);
+/* LA MARQUE D'UN MOMENT : ses sujets, et le signe s'il y a à surveiller.
+   Largeur FIXE, contenu poussé à droite : chaque ligne est sa propre grille, et
+   sans largeur fixe la colonne des phrases se décalait d'une ligne à l'autre
+   selon le nombre d'icônes — on lisait un escalier. Poussée à droite, la marque
+   touche la phrase qu'elle qualifie. */
+.jmarque {
+  display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px;
+  align-self: center; min-height: 14px;
 }
+.jmico { display: inline-flex; color: var(--ink-faint); cursor: help; }
+.jmico:hover { color: var(--ink-dim); }
+/* Le même signe que sur le ruban des mois et sur la grille de l'Année : un
+   dessin, un sens. Ambre pour ce qui a été évoqué, rouge pour ce qui a été
+   fait — la couleur vient du niveau, jamais de la note du jour. */
+.jmalerte { display: inline-flex; color: var(--vc, var(--warn)); cursor: help; line-height: 0; }
+.jmoment.aveille.jaune { --vc: var(--warn); }
+.jmoment.aveille.rouge { --vc: var(--danger); }
 .jcoeur {
   font-size: 13.5px; line-height: 1.5; color: var(--ink-dim);
   overflow: hidden; text-overflow: ellipsis;
@@ -1888,7 +1900,18 @@ button.bignum:hover { opacity: .82; }
 /* Ni fond ni bordure : la courbe se pose dans la colonne, elle n'y est pas
    encadrée. Un petit graphe en boîte au milieu d'une page de texte se lit comme
    un objet rapporté ; sans cadre, il se lit comme une ligne de la page. */
-.jvsvg { width: 100%; height: 46px; display: block; }
+/* LE CADRE BORNE LA COURBE. Elle prenait toute la colonne (~490 px) et quatre
+   points sur 490 × 46 font un trait, pas une courbe. `height: auto` sur un
+   viewBox non étiré remplace `preserveAspectRatio="none"` : c'était lui qui
+   sortait les points en ovales de 13,4 × 6,6 px. */
+.jvcadre { width: 100%; max-width: 300px; display: flex; flex-direction: column; gap: 4px; }
+.jvsvg { width: 100%; height: auto; display: block; }
+/* Le lever et le coucher à leurs deux bouts, et non côte à côte dans une
+   légende : c'est ce qui fait lire l'axe comme du temps. */
+.jvbornes {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
 .jvpied { display: flex; align-items: baseline; gap: 9px; font-size: 11px; color: var(--ink-faint); }
 .jvchiffre { font-size: 13px; color: var(--ink-dim); }
 
@@ -1902,13 +1925,14 @@ button.bignum:hover { opacity: .82; }
 .jticone { display: inline-flex; color: var(--ink-faint); }
 .jtn { font-size: 10.5px; color: var(--ink-faint); }
 
-.jecrit .dayText { max-height: 34vh; }
+/* Le texte d'un seul tenant (journal importé) n'a plus de plafond non plus :
+   le couper à 34vh cachait la fin de la journée derrière un défilement qu'on
+   ne voit pas. Une règle vide se relit comme un oubli — celle-ci est partie. */
 
 /* Sous 1080 px les trois colonnes font des lignes de six mots : elles se
    remettent l'une sous l'autre, dans le même ordre de lecture. */
 @media (max-width: 1080px) {
   .jgrille { grid-template-columns: 1fr; gap: 24px; }
-  .jmoments, .jecrit .dayText { max-height: none; }
 }
 
 /* ---------- le fond ----------
@@ -3540,16 +3564,20 @@ details.jpecol .jpetop { margin-top: 5px; }
  * d'un moment à l'autre — c'est cet alignement qui fait qu'on lit une colonne
  * de chiffres au lieu de six chiffres éparpillés.
  */
-.jmoment { grid-template-columns: auto 9px minmax(0, 1fr) auto; }
+.jmoment { grid-template-columns: auto 46px minmax(0, 1fr) auto; }
 
 /* Les sujets : une colonne d'icônes, le texte, l'estimation à droite. */
-/* Le même plafond que le texte nu qu'il remplace : la journée ouverte doit
-   tenir sur l'écran, et c'est la colonne du texte qui déborde en premier. Sans
-   ce cap, un soir bavard poussait toute la page sous le pli. */
-.jsujets {
-  display: flex; flex-direction: column; gap: 16px;
-  max-height: 34vh; overflow-y: auto; overscroll-behavior: contain;
-}
+/* PLUS DE PLAFOND — ET C'EST UN RETOUR EN ARRIÈRE ASSUMÉ.
+   Il y en avait un (34vh, défilement interne) pour que « la journée ouverte
+   tienne sur l'écran ». Le prix était invisible et lourd : une boîte qui défile
+   DANS une page qui défile déjà, sans autre signal qu'une barre grise de trois
+   pixels. Sur une journée vécue de 19:00 à 07:47, elle montrait jusqu'à 21:33 et
+   cachait 47 % du reste — assez pour qu'on lise le dernier message visible comme
+   le dernier message de la journée, et qu'on croie l'application cassée.
+   Une journée bavarde fait maintenant une page longue. C'est ce qu'elle est :
+   un journal se déroule, et rien de ce qu'on a écrit ne mérite d'être coupé
+   par une hauteur de fenêtre. */
+.jsujets { display: flex; flex-direction: column; gap: 16px; }
 .jsujet {
   display: grid; grid-template-columns: auto 1fr; gap: 12px;
   align-items: start;
@@ -3626,6 +3654,12 @@ details.jpecol .jpetop { margin-top: 5px; }
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
 }
+/* LE RESTE DU MOMENT, EN RETRAIT. Un moment tient jusqu'à vingt-cinq minutes de
+   silence : il porte souvent cinq ou dix messages, et les allumer tous au même
+   niveau repeignait la colonne entière — une colonne entièrement verte ne
+   désigne plus rien. Assez marqué pour qu'on voie jusqu'où va le moment, assez
+   pâle pour ne pas se confondre avec la phrase désignée. */
+.jsphr.autour { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 
 /* LES PUCES : une valeur, ce qu'elle est, son écart à la normale.
    Pas de courbe, pas de bornes — ce sont d'autres questions, et elles sont

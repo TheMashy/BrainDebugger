@@ -62,6 +62,45 @@ test('trois messages d’affilée font UN moment, pas trois', () => {
   assert.equal(mo[0].messages, 3);
 });
 
+test('cliquer une humeur ne doit pas allumer toute la conversation', () => {
+  /*
+   * LE DÉFAUT : un moment tient jusqu'à vingt-cinq minutes de silence, donc
+   * souvent toute la soirée. Sa ligne ne montre qu'UNE phrase, mais il portait
+   * la liste de TOUS ses messages — et cliquer dessus repeignait la colonne de
+   * droite en entier, ce qui ne désigne plus rien. Le moment doit dire de quels
+   * messages vient la phrase qu'il affiche, et eux seuls.
+   */
+  const matin = J.momentsDuJour(JOUR, OWNER, { zone: 'UTC' })[0];
+  assert.equal(matin.messages, 3, 'ce test veut un moment fait de plusieurs messages');
+  assert.ok(matin.coeurIds.length >= 1, 'un moment sans phrase désignée n’allume rien');
+  assert.ok(matin.coeurIds.every(i => matin.ids.includes(i)),
+            'la phrase désigne un message qui n’est pas dans le moment');
+
+  // Trois messages ponctués : la phrase du cœur n'en couvre qu'UN.
+  const D = '2026-04-09';
+  const dit = (m, text) => addMessage({ ts: `${D}T21:${String(m).padStart(2, '0')}:00.000Z`,
+                                        date: D, source: 'web', role: 'user', text, userId: OWNER });
+  dit(6, 'je me sens vide, j’ai plus envie de rien.');
+  dit(9, 'la soirée s’est écroulée d’un coup et je n’arrive plus à respirer.');
+  dit(20, 'bon. je vais essayer de dormir.');
+  const soir = J.momentsDuJour(D, OWNER, { zone: 'UTC' })[0];
+  assert.equal(soir.messages, 3, 'moins de 25 min entre eux : un seul moment');
+  assert.ok(soir.coeurIds.length < soir.ids.length,
+            'la phrase affichée allume encore TOUS les messages du moment');
+
+  /*
+   * Et le cas du chat : on écrit sans point, la phrase court sur trois messages.
+   * Ces trois-là SONT la phrase — les allumer tous est juste, et c'est pourquoi
+   * on ne peut pas se contenter d'un seul identifiant.
+   */
+  assert.deepEqual(J.messagesDuCoeur('je tourne en rond', ['bonjour', 'je tourne en rond'], [7, 9]), [9]);
+  assert.deepEqual(J.messagesDuCoeur('sans point je continue', ['sans point', 'je continue'], [1, 2]), [1, 2]);
+  // Coupée, la phrase ne désigne que le morceau qu'on VOIT.
+  assert.deepEqual(J.messagesDuCoeur('sans point…', ['sans point', 'je continue'], [1, 2]), [1]);
+  // Introuvable : on rend tout le moment, jamais rien.
+  assert.deepEqual(J.messagesDuCoeur('ailleurs', ['sans point'], [1]), [1]);
+});
+
 test('le compagnon ne teint pas la journée avec ses propres mots', () => {
   dire(12, 0, "c'est peut-être la fatigue qui parle, pas toi", 'pet');
   const mo = J.momentsDuJour(JOUR, OWNER, { zone: 'UTC' });
@@ -129,8 +168,8 @@ test('la journée rendue au navigateur a ses quatre parties', () => {
     // `ids` : les messages d'où le moment vient. C'est par eux que la colonne
     // de gauche désigne son passage à droite — jamais par l'heure affichée.
     assert.deepEqual(Object.keys(m).sort(),
-                     ['charge', 'coeur', 'estime', 'force', 'heure', 'ids', 'messages',
-                      'note', 'scene', 'sens', 'ts']);
+                     ['charge', 'coeur', 'coeurIds', 'estime', 'force', 'heure', 'ids',
+                      'messages', 'note', 'scene', 'sens', 'themes', 'ts', 'veille']);
   }
 });
 

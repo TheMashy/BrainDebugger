@@ -14,6 +14,14 @@
 import { messagesForDate, relevesDuJour, getEntry, OWNER } from './db.js';
 import { readMood, scoresDe, SENS, DEFAUT } from './mood.js';
 import { themeDe, THEMES, DEFAUT as DEFAUT_THEME } from '../web/reperes.js';
+/*
+ * LA VEILLE ENTRE ICI, ET DANS CE SENS-LÀ SEULEMENT.
+ *
+ * `veille.js` ne connaît que `db.js` : l'importer depuis la journée ne fait
+ * aucun cycle. L'inverse en ferait un, et c'est pour ça que le niveau d'un
+ * moment se calcule ici plutôt que là-bas.
+ */
+import { niveauDuTexte } from './veille.js';
 import { poids, CREUX } from './lexique.js';
 import { zoneCourante } from './temps.js';
 
@@ -63,6 +71,42 @@ function couper(t) {
   const bout = t.slice(0, COEUR_CAR);
   const i = bout.lastIndexOf(' ');
   return (i > COEUR_CAR * 0.55 ? bout.slice(0, i) : bout).trimEnd() + '…';
+}
+
+/**
+ * DE QUELS MESSAGES VIENT LA PHRASE QU'ON AFFICHE.
+ *
+ * Un moment tient tant qu'il ne s'est pas écoulé vingt-cinq minutes : c'est
+ * souvent la conversation entière d'un soir, cinq ou dix messages. La ligne de
+ * gauche n'en montre qu'UNE phrase, et cliquer dessus allumait les dix —
+ * c'est-à-dire la colonne de droite en entier. Une colonne entièrement verte ne
+ * désigne plus rien : c'est le défaut que cette fonction tient fermé.
+ *
+ * On refait EXACTEMENT le texte que `coeurDe` a lu (les messages recollés par
+ * une espace, les blancs réduits), on y retrouve la phrase, et on rend les
+ * messages que sa place recouvre. Un seul message par phrase serait faux : dans
+ * un chat on écrit sans point, et une phrase court alors sur trois messages —
+ * ces trois-là SONT la phrase, ils s'allument tous.
+ *
+ * Une phrase coupée à `COEUR_CAR` est un PRÉFIXE : on cherche sans l'ellipse,
+ * et seuls les messages du morceau VISIBLE s'allument. Introuvable (un cas
+ * qu'on n'a pas prévu), on rend tout le moment — le comportement d'avant,
+ * jamais pire.
+ */
+export function messagesDuCoeur(coeur, textes = [], ids = []) {
+  const noyau = String(coeur ?? '').replace(/…$/, '').trim();
+  const morceaux = textes.map(t => String(t ?? '').replace(/\s+/g, ' ').trim());
+  const debut = noyau ? morceaux.join(' ').indexOf(noyau) : -1;
+  if (debut < 0) return [...ids];
+  const fin = debut + noyau.length;
+  const dedans = [];
+  let curseur = 0;
+  morceaux.forEach((p, i) => {
+    const a = curseur, b = curseur + p.length;
+    curseur = b + 1;                       // l'espace qui recolle les messages
+    if (a < fin && b > debut && ids[i] != null) dedans.push(ids[i]);
+  });
+  return dedans.length ? dedans : [...ids];
 }
 
 /**
@@ -190,6 +234,85 @@ export function estimationDe(charge, reference = 5) {
  * mots à lui : les faire compter dans l'ambiance de la journée reviendrait à
  * lui faire teindre le décor avec ce qu'il vient de dire.
  */
+/**
+ * DE QUOI PARLE UN PASSAGE, EN ICÔNES.
+ *
+ * Les mêmes que devant les blocs de droite et que sur la frise : un sujet
+ * reconnu ici porte le dessin qu'il porte là-bas. Phrase par phrase, parce que
+ * `themeDe` prend le mieux-disant d'un TEXTE — appelé sur un moment entier il
+ * ne rendrait qu'un thème là où on en a dit deux.
+ *
+ * PAS DE SEUIL D'OCCURRENCES, contrairement à `thematiquesDuJour`. Là-bas un
+ * mot lâché une fois dans une journée n'est pas un thème de la journée ; ici le
+ * moment fait vingt-cinq minutes, et exiger qu'un sujet y revienne deux fois
+ * reviendrait à ne jamais rien montrer.
+ *
+ * À égalité, l'ordre d'apparition gagne : `Map` garde l'ordre d'insertion et le
+ * tri de V8 est stable, donc le premier sujet dit reste le premier affiché.
+ */
+export const MAX_THEMES_MOMENT = 2;
+
+export function themesDuTexte(texte, max = MAX_THEMES_MOMENT) {
+  const compte = new Map();
+  for (const p of String(texte ?? '').split(/(?<=[.!?…])\s+|\n+/)) {
+    if (p.trim().length < 8) continue;
+    const t = themeDe(p);
+    if (t === DEFAUT_THEME) continue;          // le défaut n'est pas un sujet
+    compte.set(t, (compte.get(t) ?? 0) + 1);
+  }
+  return [...compte.entries()].sort((a, b) => b[1] - a[1]).slice(0, max).map(([t]) => t);
+}
+
+/**
+ * CE QUE LA VEILLE VOIT DANS UN MOMENT.
+ *
+ * MESSAGE PAR MESSAGE, et LE CONTEXTE EST CELUI DU MOMENT, PAS CELUI DU JOUR.
+ *
+ * Première version : on passait le texte de la journée entière en contexte,
+ * comme `veilleDuJour`, pour que le pire des moments égale le niveau du jour.
+ * Ça marchait, et c'était faux. `niveauDuTexte` ne se sert du contexte que pour
+ * `enCrise`, qui fait passer une blessure AMBIGUË au rouge : la même phrase de
+ * huit heures du matin sortait donc muette un jour calme et ROUGE un jour où la
+ * crise était écrite à vingt-trois heures. Mesuré :
+ *   « je me suis coupé le doigt ce matin en préparant le repas. »
+ *   soirée calme  → aucune marque
+ *   crise à 23 h  → triangle ROUGE sur la ligne de 08 h, pendant que « j'ai
+ *                   envie de mourir » de 23 h n'était qu'AMBRE.
+ * La marque la plus grave de la journée se posait sur la coupure de cuisine.
+ * C'est le défaut que `momentsDuJour` refuse déjà pour la note, deux commentaires
+ * plus haut : rien de ce qui a été conclu le soir ne repeint la ligne du matin.
+ *
+ * Le bandeau du jour reste, lui, calculé sur la journée entière — c'est son
+ * travail de dire qu'une journée a basculé, avec sa phrase à l'appui. Une
+ * journée peut donc être rouge sans qu'aucune ligne le soit : c'est honnête, la
+ * bascule vient de la COMBINAISON et le bandeau la nomme. L'inverse ne peut pas
+ * arriver : le contexte du jour contient celui du moment, et il ne sait
+ * qu'aggraver — vérifié sur soixante-dix journées, 0 moment plus grave que son
+ * bandeau, 0 moment allumé sous un bandeau muet.
+ *
+ * On ne rend pas l'extrait : la phrase qui a déclenché le signe est déjà celle
+ * qu'on lit sur la ligne. Le genre suffit à dire QUOI surveiller — « le suicide
+ * a été évoqué » et « un objet était à portée » sont deux jaunes, et ce ne sont
+ * pas le même moment.
+ */
+function veilleDuMoment(textes, date) {
+  const contexteDuJour = textes.join(' ');
+  const motifs = [];
+  for (const t of textes) {
+    const r = niveauDuTexte(t, { contexteDuJour, aujourdhui: date });
+    if (!r.niveau) continue;
+    for (const m of r.motifs) if (!motifs.some(x => x.genre === m.genre)) motifs.push(m);
+  }
+  if (!motifs.length) return null;
+  return {
+    niveau: motifs.some(m => m.niveau === 'rouge') ? 'rouge' : 'jaune',
+    // Le plus grave d'abord : c'est celui qu'on lit si on n'en lit qu'un.
+    genres: [...new Set(motifs
+      .slice().sort((a, b) => (b.niveau === 'rouge' ? 1 : 0) - (a.niveau === 'rouge' ? 1 : 0))
+      .map(m => m.genre))]
+  };
+}
+
 export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), reference = null } = {}) {
   const note = getEntry(date, userId)?.note ?? null;
   const ref = reference ?? note ?? 5;
@@ -244,6 +367,9 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
      * constant présenté comme une lecture.
      */
     const penche = pencheDe(texte);
+    // La phrase qu'on affichera, sortie une seule fois : le moment rend aussi le
+    // message d'où elle vient, et les deux doivent parler de la MÊME phrase.
+    const coeur = coeurDe(texte);
     // Le relevé le plus proche DANS la fenêtre du moment, pas le plus proche
     // tout court : un relevé du matin ne dit rien d'un moment de minuit.
     const pose = releves.find(r => {
@@ -256,11 +382,29 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
       scene, force,
       sens: force > 0 ? (SENS[scene] ?? null) : null,
       charge,
-      coeur: coeurDe(texte),
+      coeur,
+      /*
+       * LES MESSAGES DE LA PHRASE AFFICHÉE. Cliquer un moment doit désigner CE
+       * passage-là ; avec les seuls `ids`, un moment de dix messages allumait
+       * la colonne entière — le défaut que `messagesDuCoeur` tient fermé.
+       */
+      coeurIds: messagesDuCoeur(coeur, mo.textes, mo.ids),
       messages: mo.ids.length,
       // Les mêmes que ceux des sujets : c'est par eux que les deux colonnes se
       // répondent, et non par l'heure qu'elles affichent l'une et l'autre.
       ids: mo.ids,
+      /*
+       * DE QUOI ON PARLAIT, ET S'IL Y A À SURVEILLER.
+       *
+       * La ligne portait un rond dont la couleur venait de la SCÈNE. Sur des
+       * passages de vingt mots, `readMood` se tait : sur soixante-dix journées
+       * de banc, les 225 moments sortaient tous en `drift` force 0 — le même
+       * rond, à la même couleur, sur toutes les lignes. Une marque constante
+       * n'est pas une information. Les sujets, eux, en sont une, et le signe de
+       * veille est la seule chose qu'on ne veut jamais manquer en relisant.
+       */
+      themes: themesDuTexte(texte),
+      veille: veilleDuMoment(mo.textes, date),
       estime: pose
         ? { valeur: pose.valeur, dApres: 'releve' }
         : penche == null ? null

@@ -303,3 +303,80 @@ test('un vieux digest clos sans nuit : pas de lever, et un coucher seulement est
   assert.equal(j?.lever?.heure ?? null, null);
   assert.equal(j?.coucher?.heure, '19:47'); assert.equal(j?.coucher?.source, 'estime');
 });
+
+/* ==================================================================
+ * LE 7 SEPTEMBRE : « ☀ 19:00 · 🛏 4,6 h » — et pas de lune.
+ *
+ * Levé 19:00, écrit jusqu'à 07:47 le lendemain matin. Machi Tool n'avait envoyé
+ * du 8 que le DÉBUT (00:16 → 07:47, sans le trou du matin) : la nuit lue au
+ * clavier proposait donc 21:33 pour fermer le 7. Réfuté par la phrase de 07:47
+ * — et le coucher tombait à null, alors que le candidat SUIVANT, l'estimation
+ * par le silence, disait justement 07:47. Une source réfutée n'annule pas les
+ * autres : elle laisse la place.
+ * ================================================================== */
+
+test('un coucher réfuté laisse la place au candidat suivant, il n’efface pas la journée', async () => {
+  const U = 'refute-puis-suivant';
+  const { poserActiviteJour, addMessage } = await import('../server/db.js');
+  poserActiviteJour(U, '2026-09-06', { date: '2026-09-06', plage: { de: '09:00', a: '14:24' }, trous: [] });
+  poserActiviteJour(U, '2026-09-07', { date: '2026-09-07', plage: { de: '19:00', a: '21:33' }, trous: [],
+                                       poste: { coucher: '14:24', reveil: '19:00', sommeil_h: 4.6 } });
+  // Le digest du 8 est PARTIEL : la nuit blanche a commencé, le trou du matin
+  // n'est pas encore arrivé — c'est là que la nuit du clavier se trompe.
+  poserActiviteJour(U, '2026-09-08', { date: '2026-09-08', plage: { de: '00:16', a: '07:47' }, trous: [] });
+  poserMesure({ date: '2026-09-07', source: 'dit', cle: 'lever_dit', texte: '19:00', userId: U });
+  dansLaZone('UTC', () => {
+    for (const t of ['2026-09-07T19:45', '2026-09-07T21:06', '2026-09-07T21:33',
+                     '2026-09-08T00:16', '2026-09-08T06:09', '2026-09-08T07:47'])
+      addMessage({ ts: `${t}:00.000Z`, date: '2026-09-07', role: 'user', text: 'encore debout', userId: U });
+    // Réécrit à 18:00 le 8 : ce silence de dix heures est ce qui prouve
+    // l'endormissement de 07:47.
+    addMessage({ ts: '2026-09-08T18:00:00.000Z', date: '2026-09-08', role: 'user', text: 'réveillé', userId: U });
+  });
+  const j = dansLaZone('UTC', () => api.posteDuJour('2026-09-07', U));
+  assert.equal(j?.lever?.heure, '19:00');
+  assert.equal(j?.sommeil_h, 4.6);
+  assert.equal(j?.coucher?.heure, '07:47',
+    'la nuit du clavier (21:33) est réfutée : le candidat suivant, le silence, donne 07:47');
+  assert.equal(j?.coucher?.source, 'estime');
+});
+
+test('et quand la personne a DIT son coucher, c’est lui qui passe devant l’estimation', async () => {
+  const U = 'refute-puis-dit';
+  const { poserActiviteJour, addMessage } = await import('../server/db.js');
+  poserActiviteJour(U, '2026-09-07', { date: '2026-09-07', plage: { de: '19:00', a: '21:33' }, trous: [] });
+  poserActiviteJour(U, '2026-09-08', { date: '2026-09-08', plage: { de: '00:16', a: '07:47' }, trous: [] });
+  poserMesure({ date: '2026-09-07', source: 'dit', cle: 'lever_dit', texte: '19:00', userId: U });
+  // « je me couche » écrit à 10 h du matin le 8 : passé minuit, donc il ferme le 7.
+  poserMesure({ date: '2026-09-08', source: 'dit', cle: 'coucher_dit', texte: '10:00', userId: U });
+  dansLaZone('UTC', () => {
+    for (const t of ['2026-09-07T21:33', '2026-09-08T07:47'])
+      addMessage({ ts: `${t}:00.000Z`, date: '2026-09-07', role: 'user', text: 'encore debout', userId: U });
+    addMessage({ ts: '2026-09-08T18:00:00.000Z', date: '2026-09-08', role: 'user', text: 'réveillé', userId: U });
+  });
+  const j = dansLaZone('UTC', () => api.posteDuJour('2026-09-07', U));
+  assert.equal(j?.coucher?.heure, '10:00', 'le dit vient avant le silence dans la liste');
+  assert.equal(j?.coucher?.source, 'dit');
+});
+
+test('quand AUCUN candidat ne survit, le coucher reste vide — c’est la bonne réponse', async () => {
+  const U = 'aucun-survivant';
+  const { poserActiviteJour, addMessage } = await import('../server/db.js');
+  // Le 7 est CLOS, pas en cours : ce n'est donc PAS la règle « `plage.a` ne
+  // vaut rien tant que le jour n'est pas fini » qui vide ce coucher, et le
+  // croire ferait passer ce test pour un garde-fou qu'il n'est pas. Chaque
+  // candidat tombe pour sa propre raison : rien du lendemain (ni poste ni
+  // nuit), le « je me couche » de 23:30 réfuté par la phrase de 03:18, un
+  // seul message donc aucun silence de six heures et demie, et `plage.a` à
+  // 23:59 qui est le bord du fichier du jour, pas un endormissement.
+  poserActiviteJour(U, '2026-09-07', { date: '2026-09-07', plage: { de: '15:34', a: '23:59' }, trous: [] });
+  poserMesure({ date: '2026-09-07', source: 'dit', cle: 'coucher_dit', texte: '23:30', userId: U });
+  dansLaZone('UTC', () => {
+    addMessage({ ts: '2026-09-08T03:18:00.000Z', date: '2026-09-07', role: 'user',
+                 text: 'hey non j’ai fait de la musique depuis', userId: U });
+  });
+  const j = dansLaZone('UTC', () => api.posteDuJour('2026-09-07', U));
+  assert.equal(j?.coucher?.heure ?? null, null,
+    'aucune source ne survit à la phrase de 03:18 : on ne montre rien plutôt qu’une heure fausse');
+  assert.equal(j?.coucher?.source ?? null, null);
+});

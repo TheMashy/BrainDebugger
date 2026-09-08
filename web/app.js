@@ -4806,26 +4806,60 @@ const JOURS_COURT = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
      — CE QUE TU AS ÉCRIT : la note du soir, telle quelle.
    ==================================================================== */
 
-/** Le point d'un moment : la couleur de sa scène, l'opacité de sa force. */
-function pointMoment(m) {
-  const t = TEINTE_SCENE[m.scene] ?? TEINTE_SCENE.drift;
-  const f = Math.min(1, (m.force ?? 0) / 3);
-  return `style="--s:${t};--f:${(0.28 + 0.72 * f).toFixed(2)}"`;
-}
-
-/*
- * LA TEINTE D'UNE SCÈNE.
+/**
+ * LA MARQUE D'UN MOMENT : DE QUOI IL PARLE, ET S'IL EST À SURVEILLER.
  *
- * Les mêmes huit que la passerelle envoie à une lampe, en HSL parce qu'ici on
- * module la clarté au survol. Elles ne sortent pas de la rampe des notes : un
- * moment déduit de mots ne doit jamais pouvoir se lire comme une note posée.
+ * C'ÉTAIT UN ROND BLEU, ET IL NE DISAIT RIEN. Il portait la teinte de la scène
+ * et l'opacité de sa force — sauf que `readMood` est taillé pour choisir un
+ * décor sur une journée entière, pas pour lire vingt mots : sur soixante-dix
+ * journées de banc, les 225 moments sortaient TOUS en `drift` force 0. Le même
+ * rond, à la même couleur, à la même opacité, sur chaque ligne. Une marque
+ * constante n'est pas une information, c'est du décor — et elle occupait la
+ * seule place où l'on pouvait dire de quoi ce moment-là parlait.
+ *
+ * À sa place, les icônes des SUJETS — les mêmes que devant les blocs de droite
+ * et que sur la frise, pour que la même chose ne se dise pas de deux façons —
+ * et, quand la veille a marqué ce moment-là, le signe d'alerte du ruban des
+ * mois. Le même dessin au même sens : une journée à surveiller sur le ruban, un
+ * moment à surveiller sur la ligne.
+ *
+ * L'HUMEUR NE DISPARAÎT PAS : elle est dans la barre de droite, qui la porte
+ * déjà sur l'échelle de la personne, contour pour une lecture, plein pour un
+ * relevé. Le rond, lui, la répétait sans jamais la dire.
  */
-const TEINTE_SCENE = {
-  drift: 224, brume: 205, abyss: 28, eclipse: 268,
-  voidwell: 218, monolith: 220, grain: 78, mandel: 312
+const marqueMoment = m => {
+  const sujets = (m.themes ?? [])
+    .map(t => `<span class="jmico" data-tip="${esc(NOMS[t] ?? t)}">${icone(t, 14)}</span>`).join('');
+  /* Le signe passe APRÈS les sujets, donc contre la phrase : c'est cette
+     phrase-là qu'il concerne, pas la ligne en général. */
+  const v = m.veille?.niveau
+    ? `<span class="jmalerte ${esc(m.veille.niveau)}" data-tip="${esc(ditVeille(m.veille))}">${alerteGlyph(12)}</span>`
+    : '';
+  return `<span class="jmarque">${sujets}${v}</span>`;
 };
 
-/** Un moment : son heure, son point, sa phrase. Cliquer ouvre le fil à ce moment. */
+/* Ce que le signe d'un moment annonce, par GENRE et pas par couleur — la même
+   règle que le bandeau du jour : « le suicide a été évoqué » et « un objet
+   dangereux était à portée » sont deux jaunes, et ce ne sont pas le même
+   moment. */
+/* `VEILLE_DIT` a été écrit pour le bandeau d'une JOURNÉE : trois de ses phrases
+   finissent par « ce jour-là ». Posées telles quelles sur une ligne de 08:10,
+   elles racontent la journée devant une phrase — et c'est justement ce qu'on ne
+   veut plus, puisque la marge dit maintenant CE passage-là. Seules ces trois-là
+   changent ; les autres ne situent rien et servent aux deux. */
+const VEILLE_DIT_ICI = {
+  ...VEILLE_DIT,
+  blessure:  'une blessure est écrite ici',
+  substance: 'un excès d’alcool ou une prise de substance est écrite ici',
+  surdose:   'une surdose est écrite ici'
+};
+const ditVeille = v => {
+  const quoi = [...new Set((v.genres ?? []).map(g => VEILLE_DIT_ICI[g]).filter(Boolean))];
+  return `À surveiller — ${quoi.length ? quoi.join(' · ')
+    : v.niveau === 'rouge' ? VEILLE_DIT_ICI.blessure : VEILLE_DIT_ICI.suicide}`;
+};
+
+/** Un moment : son heure, sa marque, sa phrase. Cliquer désigne son passage. */
 /**
  * L'ESTIMATION D'UN MOMENT — ET CE QUI LA DISTINGUE D'UNE NOTE.
  *
@@ -4890,7 +4924,7 @@ function estimeMarkup(e) {
  * sa phrase, au lieu de mener au jour où elle est quelque part.
  */
 function allumerMessage(id) {
-  for (const el of document.querySelectorAll('.vise')) el.classList.remove('vise');
+  for (const el of document.querySelectorAll('.vise, .autour')) el.classList.remove('vise', 'autour');
   const cle = String(id);
   // `data-ids` est une liste séparée par des virgules : `~=` ne la lit pas
   // (il attend des espaces), alors on la coupe nous-mêmes.
@@ -4908,8 +4942,8 @@ function allumerMessage(id) {
 
 function montrerLePassage(moment) {
   const dejaLa = moment?.classList.contains('vise');
-  for (const el of document.querySelectorAll('.jmoment.vise, .jsujet.vise, .jsphr.vise, .dayText.vise'))
-    el.classList.remove('vise');
+  for (const el of document.querySelectorAll('.jmoment.vise, .jsujet.vise, .jsphr.vise, .dayText.vise, .jsphr.autour'))
+    el.classList.remove('vise', 'autour');
   if (!moment || dejaLa) return;
 
   const ids = new Set((moment.dataset.ids ?? '').split(',').filter(Boolean));
@@ -4921,11 +4955,27 @@ function montrerLePassage(moment) {
    * MORCEAU de texte qui vient de ces messages (`.jsphr[data-id]`), pas tout le
    * bloc. Sans morceaux (texte importé d'un seul tenant), on retombe sur le bloc
    * entier — mieux vaut le pavé que rien.
+   *
+   * ET LA PHRASE DE LA LIGNE, PAS LES VINGT-CINQ MINUTES AUTOUR D'ELLE.
+   *
+   * Découper les blocs message par message n'avait rien changé à l'écran, parce
+   * que la granularité qui manquait n'était pas dans le bloc : elle est dans le
+   * MOMENT. Un moment tient tant qu'il ne s'est pas écoulé vingt-cinq minutes —
+   * c'est-à-dire, un soir, toute la conversation. Cliquer « 21:06 · je me sens
+   * vide » allumait donc les cinq messages du soir, soit la colonne de droite en
+   * entier, alors qu'on venait de cliquer UNE ligne qui montre UNE phrase.
+   *
+   * Les messages de la phrase AFFICHÉE (`data-coeur`) sont désignés ; les autres
+   * messages du même moment restent visibles en retrait, pour qu'on voie jusqu'où
+   * il va sans que tout se vaille. Sans `data-coeur`, on retombe sur tout le
+   * moment : le comportement d'avant, jamais pire.
    */
-  const vus = [];
-  for (const el of document.querySelectorAll('.jsphr[data-id]')) {
-    if (ids.has(el.dataset.id)) { el.classList.add('vise'); vus.push(el); }
-  }
+  const coeurs = new Set((moment.dataset.coeur ?? '').split(',').filter(Boolean));
+  const morceaux = [...document.querySelectorAll('.jsphr[data-id]')]
+    .filter(el => ids.has(el.dataset.id));
+  const designes = coeurs.size ? morceaux.filter(el => coeurs.has(el.dataset.id)) : [];
+  const vus = designes.length ? designes : morceaux;
+  for (const el of morceaux) el.classList.add(vus.includes(el) ? 'vise' : 'autour');
   if (!vus.length) {
     for (const s of document.querySelectorAll('.jsujet[data-ids]')) {
       if ((s.dataset.ids ?? '').split(',').some(x => ids.has(x))) { s.classList.add('vise'); vus.push(s); }
@@ -4944,12 +4994,21 @@ function montrerLePassage(moment) {
 }
 
 function momentMarkup(m) {
-  return `<li class="jmoment" data-moment="${esc(m.ts)}"
+  /* Le `title` revient, mais SEULEMENT quand `m.sens` existe. Il valait
+     « Neutre » sur 82 % des lignes — une infobulle qui ment par constance — et
+     c'est pour ça qu'il avait été retiré ; sauf que sur les 18 % restants il
+     portait la seule phrase qui disait l'ambiance de ce passage-là (« le vide —
+     un puits sans fond »). `m.sens` est nul dès que la force est nulle : le
+     tester suffit à garder l'un sans l'autre. */
+  return `<li class="jmoment${m.veille?.niveau ? ` aveille ${esc(m.veille.niveau)}` : ''}"
+      data-moment="${esc(m.ts)}" ${m.sens ? `title="${esc(m.sens)}"` : ''}
       ${m.ids?.length ? `data-ids="${esc(m.ids.join(','))}" tabindex="0" role="button"
-      aria-label="Montrer ce passage dans ce que tu as écrit"` : ''}
-      title="${esc(m.sens ?? NOM_SCENE[m.scene] ?? '')}">
+      ${/* Les messages de la phrase que CETTE ligne montre : c'est elle que le
+            clic désigne à droite, pas les vingt-cinq minutes autour d'elle. */''}
+      ${m.coeurIds?.length ? `data-coeur="${esc(m.coeurIds.join(','))}"` : ''}
+      aria-label="Montrer ce passage dans ce que tu as écrit"` : ''}>
     <span class="jheure mono">${esc(m.heure)}</span>
-    <span class="jpoint" ${pointMoment(m)}></span>
+    ${marqueMoment(m)}
     <span class="jcoeur">${esc(m.coeur)}</span>
     ${estimeMarkup(m.estime)}
   </li>`;
@@ -5368,10 +5427,23 @@ function sujetsMarkup(sujets) {
  * est un ressenti que la personne a posé elle-même, un point creux est lu dans
  * ses mots. La règle du produit vaut jusqu'ici.
  */
+/* Un identifiant par courbe. Deux <defs> homonymes dans la même page se marchent
+   dessus — le dégradé du second repeint le premier —, et c'est exactement le
+   piège que `_gradN` évite déjà dans charts.js. */
+let _volN = 0;
+
 function volatiliteMarkup(v, poste) {
   const hum = (v?.humeurs ?? []).filter(h => h.heure && Number.isFinite(h.valeur));
   if (hum.length < 2) return '';
-  const W = 220, H = 42, PB = 5, PX = 4;
+  // LA COURBE NE S'ÉTIRE PLUS SUR TOUTE LA COLONNE.
+  //
+  // Elle était dessinée dans un cadre de 220 × 42 que `preserveAspectRatio="none"`
+  // étirait jusqu'aux ~490 px de la colonne : les cercles sortaient en ovales de
+  // 13,4 × 6,6 px (mesuré au navigateur), et quatre points sur un ruban de
+  // 490 × 46 se lisaient comme un trait, pas comme une courbe d'humeur. Le cadre
+  // est maintenant borné en CSS (.jvcadre) et son aspect conservé : à n'importe
+  // quelle largeur de fenêtre, un cercle reste un cercle.
+  const W = 300, H = 72, PB = 10, PX = 11;
   const min = h => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(h ?? '')); return m ? +m[1] * 60 + +m[2] : null; };
   // Tout se mesure DEPUIS LE LEVER, dans le sens du temps : 06:09 après un
   // lever à 19:00 vaut 11 h 09 de journée, pas « treize heures avant ».
@@ -5384,40 +5456,127 @@ function volatiliteMarkup(v, poste) {
   // une journée d'un seul instant n'a pas d'axe.
   const fin = Math.max(coucher ? depuis(coucher, t0) ?? 0 : 0, ...ts) || 1;
   const x = t => PX + (t / fin) * (W - PX * 2);
-  const y = val => PB + (1 - val / 10) * (H - PB * 2);
-  const pts = hum.map((h, i) => ({ ...h, x: x(ts[i]), y: y(h.valeur) }));
-
-  const ligne = `<path d="${pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('')}"
-       fill="none" stroke="var(--line-soft)" stroke-width="1.2" stroke-linejoin="round"/>`;
-  const points = pts.map(p => {
-    const c = noteColor(p.valeur, 6);
-    const mesure = p.dApres === 'releve';
-    const vtxt = String(p.valeur).replace('.', ',');
-    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3"
-       fill="${mesure ? c : 'none'}" stroke="${c}" stroke-width="${mesure ? 0 : 1.5}"
-       ><title>${esc(p.heure)} · ${mesure ? '' : '≈'}${vtxt}/10${mesure ? ' (relevé)' : ' (lu dans tes mots)'}</title></circle>`;
-  }).join('');
 
   const vals = hum.map(h => h.valeur);
   const bas = Math.min(...vals), haut = Math.max(...vals);
+  /*
+   * L'ÉCHELLE VERTICALE S'OUVRE SUR LA JOURNÉE, PAS SUR TOUTE LA NOTATION.
+   *
+   * De 0 à 10 sur 32 px utiles, la journée mesurée en exemple — 4 à 8, la plus
+   * grosse bascule qu'on ait à montrer — n'occupait que 12,8 px sur 42 : tout
+   * s'écrasait au milieu, et « ce qui a bougé » ne montrait rien qui bouge.
+   *
+   * La fenêtre suit donc les valeurs du jour, avec un PLANCHER d'amplitude.
+   * Sans ce plancher, une journée de 5,0 à 5,2 se déplierait sur toute la
+   * hauteur et se lirait comme une catastrophe : trois points minimum, et une
+   * journée immobile garde le droit d'avoir l'air immobile. L'échelle bouge,
+   * elle ne se cache pas — ses deux bouts sont écrits sous la courbe (« 4 → 8 »).
+   */
+  const AMPLI_MIN = 3;
+  const marge = Math.max(0, (AMPLI_MIN - (haut - bas)) / 2);
+  let vb = bas - marge, vh = haut + marge;
+  // On repousse la fenêtre à l'intérieur de 0..10 au lieu de la rogner : rognée,
+  // une journée à 10/10 collait son point au bord haut du cadre.
+  if (vb < 0) { vh = Math.min(10, vh - vb); vb = 0; }
+  if (vh > 10) { vb = Math.max(0, vb - (vh - 10)); vh = 10; }
+  const y = val => PB + (1 - (val - vb) / (vh - vb)) * (H - PB * 2);
+
+  const pts = hum.map((h, i) => ({ ...h, x: x(ts[i]), y: y(h.valeur), c: noteColor(h.valeur, 6) }));
+  const id = `jv${++_volN}`;
+
+  /*
+   * LA LIGNE PORTE LA RAMPE DES NOTES, comme les pastilles du fil à côté : la
+   * couleur d'un segment est celle des moments qu'il relie. Une ligne grise
+   * entre des points colorés donnait deux lectures de la même chose, dont une
+   * muette.
+   *
+   * Les arrêts se posent dans l'ordre des X et non dans celui des moments : un
+   * message écrit juste avant le lever retombe en fin d'axe (l'écart au lever se
+   * compte modulo 24 h), et SVG rend un dégradé VIDE dès qu'un offset recule.
+   */
+  const arrets = [...pts].sort((a, b) => a.x - b.x).map(p =>
+    `<stop offset="${(((p.x - PX) / (W - PX * 2)) * 100).toFixed(2)}%" stop-color="${p.c}"/>`).join('');
+
+  const chemin = pts.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('L');
+  // Le remplissage est le MÊME dégradé que la ligne, fondu vers le bas par un
+  // masque. Une couleur pleine sous la courbe, sur un fond aussi sombre, faisait
+  // une tache qu'on lisait avant la courbe ; le fondu s'éteint pile sur le sol,
+  // sinon le bas de l'aire se coupe net et le graphe redevient une boîte.
+  const aire = `<path d="M${pts[0].x.toFixed(1)} ${H}L${chemin}L${pts.at(-1).x.toFixed(1)} ${H}Z"
+       fill="url(#${id}l)" mask="url(#${id}m)"/>`;
+  const ligne = `<path d="M${chemin}" fill="none" stroke="url(#${id}l)" stroke-width="1.6"
+       stroke-linejoin="round" stroke-linecap="round"/>`;
+  // Le repère de 5/10 ne se trace que s'il tombe dans la fenêtre : posé au milieu
+  // du cadre quelle que soit l'échelle — ce que faisait la ligne à H/2 —, il
+  // annonçait « 5 » à l'endroit où il y avait 7, et ça se lit sans se vérifier.
+  const cinq = vb <= 5 && 5 <= vh
+    ? `<line x1="${PX}" y1="${y(5).toFixed(1)}" x2="${W - PX}" y2="${y(5).toFixed(1)}"
+             stroke="var(--line)" stroke-dasharray="2 4"><title>5/10</title></line>` : '';
+  const points = pts.map(p => {
+    const mesure = p.dApres === 'releve';
+    const vtxt = String(p.valeur).replace('.', ',');
+    // Le creux est rempli du fond et non laissé transparent : la ligne passait
+    // au travers du point, et « plein ou creux » — mesuré ou lu — ne se
+    // distinguait plus, alors que c'est toute la règle du produit.
+    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.4"
+       fill="${mesure ? p.c : 'var(--bg)'}" stroke="${p.c}" stroke-width="${mesure ? 0 : 1.6}"
+       ><title>${esc(p.heure)} · ${mesure ? '' : '≈'}${vtxt}/10${mesure ? ' (relevé)' : ' (lu dans tes mots)'}</title></circle>`;
+  }).join('');
+
   const fmt = n => String(n).replace('.', ',');
   const surMesure = hum.some(h => h.dApres === 'releve');
-  // Les bouts de l'axe se disent, sinon « de gauche à droite » ne veut rien dire.
-  const bornes = lever && coucher ? `${esc(lever)} <span class="faint">→</span> ${esc(coucher)}`
-    : lever ? `depuis ${esc(lever)}`
-    : `${esc(hum[0].heure)} <span class="faint">→</span> ${esc(hum.at(-1).heure)}`;
+  /*
+   * LES DEUX BOUTS DE L'AXE, À LEURS DEUX BOUTS.
+   *
+   * « 19:00 → 06:30 » serré sur une ligne sous la courbe se lisait comme une
+   * légende et pas comme un axe : rien ne disait que 19:00 tombait à gauche du
+   * dessin et 06:30 à droite. Ils sont posés aux extrémités du cadre, alignés
+   * sur lui.
+   *
+   * Le « ≈ » dit ce qu'il dit partout ailleurs dans le produit : ce bout-là
+   * n'est pas un lever ou un coucher connu, c'est le premier (ou le dernier)
+   * moment, faute de mieux. Sans lui, l'axe prétendrait mesurer une journée
+   * vécue qu'on n'a pas mesurée.
+   */
+  /*
+   * LE BOUT DE DROITE N'EST PAS TOUJOURS LE COUCHER, NI LE DERNIER MOMENT ÉCRIT.
+   *
+   * Un moment de la journée vécue posé AVANT le lever mesuré retombe en fin
+   * d'axe — l'écart au lever se compte modulo 24 h, et c'est lui qui fixe
+   * `fin`. Le coucher tombait alors au MILIEU du dessin (mesuré : x=147 sur
+   * 289) pendant que « 06:30 » restait écrit tout à droite, et `hum.at(-1)`
+   * n'aurait pas mieux fait : le dernier écrit dans l'ordre des ts n'est pas
+   * le plus à droite. Une borne posée à sa place AFFIRME où elle est —
+   * l'ancienne légende « 19:00 → 06:30 » n'affirmait rien et avait donc le
+   * droit d'être approximative. On lit donc le bout SUR LE DESSIN.
+   */
+  const finEstLeCoucher = coucher != null && depuis(coucher, t0) === fin;
+  const boutDroit = pts.reduce((a, b) => (b.x > a.x ? b : a));
+  const borne = (h, connu, quoi) => `<span title="${quoi}">${connu ? '' : '≈'}${esc(h)}</span>`;
   return `<div class="jvol">
     <div class="k faint">Ce qui a bougé</div>
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="jvsvg" aria-hidden="true">
-      <line x1="0" y1="${(H / 2).toFixed(1)}" x2="${W}" y2="${(H / 2).toFixed(1)}"
-            stroke="var(--line-soft)" stroke-dasharray="2 4"/>
-      ${ligne}${points}
-    </svg>
+    <div class="jvcadre">
+      <svg viewBox="0 0 ${W} ${H}" class="jvsvg" aria-hidden="true">
+        <defs>
+          <linearGradient id="${id}l" gradientUnits="userSpaceOnUse" x1="${PX}" y1="0" x2="${W - PX}" y2="0">${arrets}</linearGradient>
+          <linearGradient id="${id}f" gradientUnits="userSpaceOnUse" x1="0" y1="${PB}" x2="0" y2="${H}">
+            <stop offset="0%" stop-color="#fff" stop-opacity=".38"/>
+            <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient>
+          <mask id="${id}m"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#${id}f)"/></mask>
+        </defs>
+        ${cinq}${aire}${ligne}${points}
+      </svg>
+      <div class="jvbornes">
+        ${borne(lever ?? hum[0].heure, !!lever, lever ? 'lever' : 'premier moment — lever inconnu')}
+        ${borne(finEstLeCoucher ? coucher : boutDroit.heure, finEstLeCoucher,
+                finEstLeCoucher ? 'coucher' : 'le bout de la journée écrite — le coucher n\'est pas là')}
+      </div>
+    </div>
     <div class="jvpied">
       <span class="jvchiffre mono">${fmt(bas)} <span class="faint">→</span> ${fmt(haut)}</span>
-      <span class="faint">${bornes}</span>
+      <span class="faint">${surMesure ? 'relevé à la main' : 'lu dans tes mots'}</span>
     </div>
-    <div class="jvpied"><span class="faint">${surMesure ? 'relevé à la main' : 'lu dans tes mots'}</span></div>
   </div>`;
 }
 
@@ -5503,6 +5662,23 @@ function wireMirror() {
   // depuis « Moi » renverrait la vue de « Ma carte », onglet inchange : la page
   // change sous les pieds sans que rien ne dise pourquoi.
   const rejouer = (d, o) => (JOUR_DANS === 'moi' ? renderMoi(d, o) : renderMirror(d, o));
+
+  /*
+   * AU CLAVIER AUSSI. Un moment porte `role="button" tabindex="0"` : il ANNONCE
+   * qu'on peut l'activer, et aucun `keydown` ne l'écoutait. On pouvait donc
+   * l'atteindre à la tabulation, le voir prendre le focus, appuyer sur Entrée
+   * et n'obtenir rien — la pire des trois issues, parce que le lecteur d'écran
+   * a promis un bouton et que le silence se lit comme une panne. Un attribut
+   * qui promet une interaction est une dette tant que le gestionnaire n'existe
+   * pas ; c'est ici qu'on la solde.
+   */
+  $('#view').onkeydown = e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const mom = e.target.closest?.('.jmoment[data-ids]');
+    if (!mom) return;
+    e.preventDefault();          // Espace fait défiler la page, sinon
+    montrerLePassage(mom);
+  };
 
   $('#view').onclick = async e => {
     /* Le mois : une case par jour, de gauche à droite. */

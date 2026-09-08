@@ -51,7 +51,17 @@ export const THEMES = [
   ['etudes',  'diplome examen concours rentree fac faculte universite ecole master licence these soutenance memoire bac partiels formation certification'],
   ['maison',  'demenagement demenage emmenage appartement appart logement maison colocation coloc studio loyer bail installe installee'],
   ['voyage',  'voyage vacances sejour depart parti partie avion train road trip escapade weekend croisiere expatriation'],
-  ['famille', 'naissance ne nee bebe enfant fille fils grossesse enceinte mariage marie mariee pacs pacse famille parents mere pere frere soeur'],
+  // « ne » a ete retire. La racine visait « ne le 3 mars » ; elle attrapait
+  // toutes les negations, et « je ne vais pas bien du tout ce soir » sortait en
+  // « famille », avec l'icone des deux personnages. Poser ce dessin-la sur cette
+  // phrase-la, ligne apres ligne, discredite toutes les autres icones.
+  // CE QUE LE RETRAIT COUTE, ET IL FAUT LE SAVOIR AVANT DE LE REMETTRE :
+  // « nee »/« nees » restent pris par le suffixe (e?s?), mais « ne » et « nes »
+  // au masculin sont perdus — mesure : « ne le 3 mars » et « mon neveu est ne
+  // hier » tombent de « famille » a « jalon ». Un libelle de repere reel dit
+  // presque toujours « naissance de… » ou nomme l'enfant, et ces racines-la
+  // restent ; c'est ce qui rend le prix acceptable, pas le fait qu'il soit nul.
+  ['famille', 'naissance nee bebe enfant fille fils grossesse enceinte mariage marie mariee pacs pacse famille parents mere pere frere soeur'],
   ['amour',   'rencontre rencontre amour amoureux amoureuse couple ensemble relation histoire date fiancailles fiance'],
   ['ami',     'ami amis amie amies soiree retrouvailles groupe bande copain copains'],
   ['argent',  'salaire augmentation prime dette credit pret banque impots budget facture argent economies achat vendu'],

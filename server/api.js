@@ -844,9 +844,13 @@ export function posteDuJour(date, userId = OWNER) {
      *
      * Le sommeil qui ferme la journée est le plus long silence de la fenêtre,
      * pas le premier qui dépasse un seuil. Le seuil ne sert plus qu'à dire
-     * « c'est une nuit, pas une pause ». La réfutation reste : sur une journée
-     * où le plus long silence est une absence de l'après-midi, elle efface, et
-     * ne rien dire vaut mieux que se tromper d'heure.
+     * « c'est une nuit, pas une pause ». Quand le plus long silence est une
+     * absence de l'après-midi, la réfutation écarte bien cette estimation —
+     * mais elle n'efface PLUS la journée pour autant : depuis que les cinq
+     * sources sont une liste et non un escalier de `return`, `plage.a` a
+     * encore sa chance derrière, et sur un jour clos c'est elle qu'on voit.
+     * Ce commentaire a dit le contraire pendant tout le temps où une source
+     * réfutée emportait les suivantes avec elle — le défaut du 7 septembre.
      */
     let choisi = null, plusLong = SEUIL;
     for (let i = 0; i < users.length - 1; i++) {
@@ -872,36 +876,50 @@ export function posteDuJour(date, userId = OWNER) {
    * ne vaut qu'au delà des cinq premières minutes du jour civil.
    */
   const auBordDeMinuitOuvrant = h => (enMinutes(h) ?? 0) <= 5;
-  const borne = g => {
-    if (g === 'lever') {
-      const d = ditLever();
-      if (d) return { heure: d, source: 'dit' };
-      if (nuit?.lever && nuit.coucher) return { heure: nuit.lever, source: 'mesure' };
-      if (poste.reveil && poste.coucher) return { heure: poste.reveil, source: 'mesure' };
-      if (plage.de && !auBordDeMinuitOuvrant(plage.de)) return { heure: plage.de, source: 'estime' };
-      return { heure: null, source: null };
-    }
-    /*
-     * LE COUCHER, DANS L'ORDRE DEMANDÉ : d'abord le JSON (l'ordinateur éteint —
-     * l'extinction mesurée), sinon ce qui est dit dans la conversation (« je vais
-     * me coucher »), sinon l'estimation par le silence. `plage.a` (la dernière
-     * activité relevée) reste le tout dernier filet.
-     */
-    if (posteFin.coucher && posteFin.reveil) return { heure: posteFin.coucher, source: 'mesure' };
+  const bornerLever = () => {
+    const d = ditLever();
+    if (d) return { heure: d, source: 'dit' };
+    if (nuit?.lever && nuit.coucher) return { heure: nuit.lever, source: 'mesure' };
+    if (poste.reveil && poste.coucher) return { heure: poste.reveil, source: 'mesure' };
+    if (plage.de && !auBordDeMinuitOuvrant(plage.de)) return { heure: plage.de, source: 'estime' };
+    return { heure: null, source: null };
+  };
+  /*
+   * LE COUCHER, DANS L'ORDRE DEMANDÉ : d'abord le JSON (l'ordinateur éteint —
+   * l'extinction mesurée), sinon la nuit lue au clavier, sinon ce qui est dit
+   * dans la conversation (« je vais me coucher »), sinon l'estimation par le
+   * silence. `plage.a` (la dernière activité relevée) reste le tout dernier filet.
+   *
+   * UNE LISTE, PAS UN ESCALIER DE `return` QUI REND LA PREMIÈRE RÉPONSE.
+   *
+   * La réfutation d'en dessous (« on ne se couche pas avant d'avoir écrit »)
+   * arrivait APRÈS le choix : la première source qui répondait gagnait, et si
+   * elle se faisait réfuter, le coucher tombait à null sans que personne n'aille
+   * demander aux suivantes. Le 7 septembre : levé 19:00, la nuit lue au clavier
+   * proposait 21:33 (Machi Tool n'avait envoyé du 8 que le début de la nuit
+   * blanche, sans le trou du matin), réfuté par la phrase de 07:47 — et
+   * l'estimation par le silence, qui donnait justement 07:47, n'était jamais
+   * consultée. « ☀ 19:00 » tout seul, sans lune, alors que la bonne heure était
+   * dans les données. On garde donc TOUS les candidats et la réfutation choisit
+   * parmi eux, au lieu d'effacer dès le premier.
+   *
+   * Chacun est une fonction, pas une valeur : `estimeCoucherParSilence` relit
+   * deux journées de messages, et on ne la paie que si les candidats d'avant
+   * n'ont rien donné ou se sont fait réfuter.
+   */
+  const candidatsCoucher = [
+    () => (posteFin.coucher && posteFin.reveil) ? { heure: posteFin.coucher, source: 'mesure' } : null,
     // Le silence du clavier qui ferme D : il traverse minuit sans se faire
     // couper, là où `plage.a` s'arrête au bord du fichier du jour.
-    if (nuitFin?.coucher) return { heure: nuitFin.coucher, source: 'mesure' };
-    const dit = ditCoucherFermant();
-    if (dit) return { heure: dit, source: 'dit' };
-    const est = estimeCoucherParSilence();
-    if (est) return { heure: est, source: 'estime' };
+    () => nuitFin?.coucher ? { heure: nuitFin.coucher, source: 'mesure' } : null,
+    () => { const dit = ditCoucherFermant(); return dit ? { heure: dit, source: 'dit' } : null; },
+    () => { const est = estimeCoucherParSilence(); return est ? { heure: est, source: 'estime' } : null; },
     // `plage.a` est la dernière touche RELEVÉE, pas la dernière de la journée :
     // sur une journée en cours, c'est « maintenant » — le digest arrivé à 19:47
     // affichait « couché 19:47 » à quelqu'un qui n'a pas quitté sa chaise. Elle
     // ne vaut estimation que sur une journée close.
-    if (plage.a && !auBordDeMinuit(plage.a) && date < today()) return { heure: plage.a, source: 'estime' };
-    return { heure: null, source: null };
-  };
+    () => (plage.a && !auBordDeMinuit(plage.a) && date < today()) ? { heure: plage.a, source: 'estime' } : null
+  ];
   const tp = dig?.temps_par_contexte_s ?? {};
   let appS = 0, webS = 0; const apps = [], webs = [];
   for (const [k, v] of Object.entries(tp)) {
@@ -934,20 +952,28 @@ export function posteDuJour(date, userId = OWNER) {
     top_app: top(apps), top_web: top(webs),
     themes: themes.length ? themes : null
   } : null;
-  const lever = borne('lever');
-  let coucher = borne('coucher');
+  const lever = bornerLever();
   /*
    * LE COUCHER FERME LA JOURNÉE QUE LE LEVER A OUVERTE — ou il n'est pas là.
    *
-   * Une journée en cours n'a pas encore de coucher (voir `borne`, qui refuse
+   * Une journée en cours n'a pas encore de coucher (le dernier candidat refuse
    * `plage.a` tant que le jour n'est pas clos), et c'est une réponse : « — »
    * se lit tout de suite, « couché 23:59 » se croit. Reste le cas où un coucher
-   * proposé est réfuté par une phrase écrite plus tard.
+   * proposé est réfuté par une phrase écrite plus tard : ça écarte CE candidat,
+   * pas la journée — le suivant a droit à sa chance. Quand aucun ne survit, on
+   * rend null, et c'est la bonne réponse.
    */
-  if (lever.heure && coucher.heure) {
-    const fin = depuisLever(coucher.heure, lever.heure);
-    const ecrit = depuisLever(dernierEcrit(), lever.heure);
-    if (ecrit != null && fin != null && fin < ecrit) coucher = { heure: null, source: null };
+  let ecrit;   // lu au plus une fois : `dernierEcrit` relit les messages du jour,
+               // et une journée où aucun candidat ne se présente n'a rien à réfuter.
+  const refute = h => {
+    if (ecrit === undefined) ecrit = lever.heure ? depuisLever(dernierEcrit(), lever.heure) : null;
+    const fin = depuisLever(h, lever.heure);
+    return ecrit != null && fin != null && fin < ecrit;
+  };
+  let coucher = { heure: null, source: null };
+  for (const proposer of candidatsCoucher) {
+    const c = proposer();
+    if (c?.heure && !refute(c.heure)) { coucher = c; break; }
   }
   const sommeil_h = nuit?.sommeil_h ?? poste.sommeil_h ?? null;
   if (!lever.heure && !coucher.heure && sommeil_h == null && !ecran) return null;
