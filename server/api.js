@@ -941,11 +941,33 @@ export function posteDuJour(date, userId = OWNER) {
    * instant que rien ne classe ne compte nulle part plutôt que d'être rangé de
    * force. L'écran doit donc le dire, pas les faire coïncider.
    */
-  const th = dig?.temps_par_theme_s ?? {};
+  /*
+   * DE QUOI PARLE CE QU'ON CONSULTE SUR INTERNET — et rien d'autre.
+   *
+   * On montrait `temps_par_theme_s`, qui mêle les applications : une heure de
+   * « création » passée DANS Blender y voisinait avec une heure passée à
+   * regarder un tuto de Blender. L'une est du travail, l'autre de la
+   * consultation, et les additionner rendait la question sans réponse. C'est
+   * `temps_par_theme_web_s` qu'on lit maintenant — le navigateur seul.
+   *
+   * ET LES TITRES DERRIÈRE, quand Machi Tool les garde : un chiffre qui annonce
+   * « 40 min de guerre » sans pouvoir montrer sur quoi il se fonde est une
+   * autorité qu'on ne peut pas contredire, et une table de mots-clés se trompe
+   * forcément quelque part. Pouvoir ouvrir la liste et dire « ça, ce n'était pas
+   * de la guerre » est la seule chose qui rend la mesure honnête.
+   */
+  const th = dig?.temps_par_theme_web_s ?? dig?.temps_par_theme_s ?? {};
+  const parTitre = dig?.titres_par_theme ?? {};
   const themes = Object.entries(th)
     .filter(([, v]) => typeof v === 'number' && v > 0)
     .sort((a, b) => b[1] - a[1])
-    .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }))
+    .map(([nom, s]) => ({
+      nom, min: Math.round(s / 60),
+      titres: Object.entries(parTitre[nom] ?? {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, sec]) => ({ titre: String(t).slice(0, 120), min: Math.round(sec / 60) }))
+        .filter(x => x.min >= 1)
+    }))
     .filter(x => x.min > 0);
   const ecran = (appS || webS) ? {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),

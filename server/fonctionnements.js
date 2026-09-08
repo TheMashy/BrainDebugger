@@ -294,6 +294,50 @@ export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = 
     extras.push(cle);
     for (const [d, v] of valeurs) ligne(d)[cle] = v;
   }
+  /*
+   * CE QU'ON CONSULTE DEVIENT UNE VARIABLE — et c'est ce qui permet enfin de
+   * demander « est-ce que ça change quelque chose ? ».
+   *
+   * Machi Tool range chaque instant passé dans un navigateur par SUJET (guerre,
+   * politique, influenceurs, création…). Tant que ce chiffre ne vivait que dans
+   * une barre de la journée, il ne se comparait à rien : on voyait « 40 min de
+   * guerre » et on passait à la suite. Versé dans la table, il passe dans le
+   * même moulin que le sommeil et le coucher — les liens, les bascules, la
+   * forme de la semaine — et la question devient : les jours où j'en regarde
+   * beaucoup, ma note du lendemain fait quoi ?
+   *
+   * ZÉRO N'EST PAS « ON NE SAIT PAS », ET C'EST TOUTE LA DIFFÉRENCE.
+   * Une journée SANS digest ne sait rien de ce qui a été regardé : elle reste
+   * vide. Une journée AVEC un digest où ce sujet n'apparaît pas vaut zéro
+   * minute — le sujet n'a pas été regardé, c'est une mesure. Confondre les deux
+   * remplirait la série de faux zéros les jours où Machi Tool était éteint, et
+   * un lien calculé là-dessus dirait exactement le contraire de la vérité.
+   *
+   * LE SEUIL EST DOUBLE. Vingt journées mesurées, comme les autres variables ;
+   * mais AUSSI dix journées où le sujet est vraiment là. Un sujet regardé deux
+   * fois en soixante jours ne se corrèle qu'au bruit, et sortirait une phrase
+   * du genre « les jours où tu regardes de la politique, tu dors moins » sur
+   * deux journées — c'est-à-dire une anecdote habillée en constat.
+   */
+  const parSujet = new Map();
+  const joursMesures = [];
+  for (const j of digests) {
+    if (j.date < debut || j.date > fin) continue;
+    const th = j.digest?.temps_par_theme_web_s;
+    if (!th || typeof th !== 'object') continue;
+    joursMesures.push(j.date);
+    for (const [nom, sec] of Object.entries(th)) {
+      if (!fini(sec) || sec <= 0) continue;
+      if (!parSujet.has(nom)) parSujet.set(nom, new Map());
+      parSujet.get(nom).set(j.date, Math.round(sec / 60));
+    }
+  }
+  for (const [nom, valeurs] of parSujet) {
+    if (joursMesures.length < 20 || valeurs.size < SEUILS.lien.min_groupe) continue;
+    const cle = `sujet_${nom}`;
+    extras.push(cle);
+    for (const d of joursMesures) ligne(d)[cle] = valeurs.get(d) ?? 0;
+  }
   const lignes = [...parDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   for (const l of lignes) { const dow = (new Date(l.date + 'T12:00:00Z').getUTCDay() + 6) % 7; l.dow = dow; l.we = dow >= 5 ? 1 : 0; l.sortie = dow === 4 || dow === 5 ? 1 : 0; }
   // Chaque ligne dit si elle porte quelque chose. La bande en a besoin : son axe
@@ -313,18 +357,67 @@ export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = 
 /* Les mots qu'on montre                                                 */
 /* ------------------------------------------------------------------ */
 const NOM = { note: 'ta note', sommeil_h: 'ton sommeil', coucher: 'ton heure de coucher', lever: 'ton heure de lever', ecran_min: 'ton temps d’écran', absolus: 'tes mots absolus' };
-const nomDe = k => NOM[k] ?? `« ${k.replace(/_/g, ' ')} »`;
+/*
+ * LES SUJETS SE DISENT EN FRANÇAIS, PAS EN NOM DE COLONNE.
+ *
+ * Sans ça, la phrase sortait « après « sujet guerre » bas (≤ 4 min) » — le nom
+ * de la variable, article compris, posé au milieu d'une phrase française. Une
+ * mesure qu'on lit mal se lit peu, et celle-ci est justement de celles qu'on
+ * n'a pas envie de lire : autant ne pas y ajouter de raison de décrocher.
+ *
+ * On dit « ce que tu regardes de la guerre » et pas « la guerre » : la variable
+ * mesure du TEMPS DE CONSULTATION, pas un événement de la vie. La nuance n'est
+ * pas cosmétique — « les jours de guerre, ta note baisse » dirait autre chose,
+ * et quelque chose de faux.
+ */
+/* DEUX FORMES, parce que le français en demande deux. « ce que tu regardes de
+   la guerre » veut l'article défini ; « peu de guerre » le refuse — « peu de la
+   guerre » n'est pas une phrase. Une seule entrée servait aux deux et sortait
+   l'une des deux fautes à chaque fois. */
+const SUJET_DIT = {
+  guerre:       ['de la guerre', 'de guerre'],
+  politique:    ['de la politique', 'de politique'],
+  influenceurs: ['des influenceurs', 'd’influenceurs'],
+  urbex:        ['de l’urbex', 'd’urbex'],
+  rp:           ['du jeu de rôle', 'de jeu de rôle'],
+  jeu:          ['du jeu vidéo', 'de jeu vidéo'],
+  creation:     ['de la création', 'de création'],
+  musique:      ['de la musique', 'de musique'],
+  science:      ['des sciences', 'de sciences'],
+  sante:        ['de la santé', 'de santé'],
+  sport:        ['du sport', 'de sport'],
+  cuisine:      ['de la cuisine', 'de cuisine'],
+  humour:       ['de l’humour', 'd’humour'],
+  voyage:       ['du voyage', 'de voyage'],
+  adulte:       ['du contenu adulte', 'de contenu adulte'],
+  actu:         ['de l’actualité', 'd’actualité'],
+  achat:        ['des achats', 'd’achats'],
+  argent:       ['de l’argent', 'd’argent'],
+  dev:          ['du code', 'de code']
+};
+const ditSujet = (k, i = 0) => (SUJET_DIT[nomSujet(k)] ?? [`du « ${nomSujet(k)} »`, `de « ${nomSujet(k)} »`])[i];
+const nomDe = k => NOM[k] ?? (estSujet(k) ? `ce que tu regardes ${ditSujet(k)}` : `« ${k.replace(/_/g, ' ')} »`);
 /* La condition d'un lien, dans les mots de la variable : « une nuit courte », pas « ton sommeil est bas ». */
 const COND = { note: ['une note basse', 'une note haute'], sommeil_h: ['une nuit courte', 'une nuit longue'], coucher: ['un coucher tôt', 'un coucher tard'], lever: ['un lever tôt', 'un lever tard'], ecran_min: ['peu d’écran', 'beaucoup d’écran'], absolus: ['peu de mots absolus', 'beaucoup de mots absolus'] };
-const condDe = (k, haut) => (COND[k] ?? [`${nomDe(k)} bas`, `${nomDe(k)} haut`])[haut ? 1 : 0];
+
+/* Et la condition, dans les mots du sujet : « peu de guerre », « beaucoup de
+   guerre » — jamais « ce que tu regardes de la guerre bas », qui n'est pas du
+   français et qui a l'air d'une variable échappée du moteur. */
+const condDe = (k, haut) => (COND[k]
+  ?? (estSujet(k) ? [`peu ${ditSujet(k, 1)}`, `beaucoup ${ditSujet(k, 1)}`]
+                  : [`${nomDe(k)} bas`, `${nomDe(k)} haut`]))[haut ? 1 : 0];
 /* L'effet, lui aussi dans les mots de la variable. sommeil_h(t) est la nuit t−1 → t : après un soir, c'est la nuit QUI SUIT. */
 const EFFET = { note: ['ta note du lendemain est sous ta médiane', 'ta note du lendemain est au-dessus de ta médiane'], sommeil_h: ['la nuit qui suit est plus courte que ta nuit médiane', 'la nuit qui suit est plus longue que ta nuit médiane'], coucher: ['le lendemain, tu te couches plus tôt que ton heure médiane', 'le lendemain, tu te couches plus tard que ton heure médiane'], lever: ['le lendemain, tu te lèves plus tôt que ton heure médiane', 'le lendemain, tu te lèves plus tard que ton heure médiane'], ecran_min: ['ton temps d’écran du lendemain est sous ta médiane', 'ton temps d’écran du lendemain est au-dessus de ta médiane'], absolus: ['tes mots absolus du lendemain sont sous ta médiane', 'tes mots absolus du lendemain sont au-dessus de ta médiane'] };
 const effetDe = (k, haut) => (EFFET[k] ?? [`${nomDe(k)} du lendemain est sous ta médiane`, `${nomDe(k)} du lendemain est au-dessus de ta médiane`])[haut ? 1 : 0];
 const UNITE = { note: '', sommeil_h: ' h', coucher: '', lever: '', ecran_min: '', absolus: ' pour 100 mots' };
+/* Un sujet consulté se lit en minutes, comme le temps d'écran dont il est une
+   part — pas en « 42 », qui ne dit pas de quoi. */
+export const estSujet = k => String(k ?? '').startsWith('sujet_');
+export const nomSujet = k => String(k ?? '').slice('sujet_'.length);
 export const fmt = (k, v) => {
   if (!fini(v)) return '—';
   if (k === 'coucher' || k === 'lever') { const min = ((Math.round(v * 60) % 1440) + 1440) % 1440; return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`; }
-  if (k === 'ecran_min') { const m = Math.round(v); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`; }
+  if (k === 'ecran_min' || estSujet(k)) { const m = Math.round(v); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`; }
   const s = Math.abs(v) >= 10 ? Math.round(v).toString() : (Math.round(v * 10) / 10).toString().replace('.', ',');
   return s + (UNITE[k] ?? '');
 };

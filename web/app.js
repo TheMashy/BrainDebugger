@@ -5203,10 +5203,16 @@ function posteMarkup(p, synchro) {
                        outil: '#3d8bd4', inconnu: '#6b7280' };
   /* Les thèmes, eux, ne sont pas des familles : une roue à part, assez large
      pour qu'aucune ne se confonde avec une voisine. */
+  /* Dix-neuf sujets, dix-neuf teintes assez écartées pour qu'aucune ne se
+     confonde avec sa voisine dans la barre. Une couleur manquante n'était pas
+     neutre : elle renvoyait au gris « inconnu », et « guerre » — le plus gros
+     segment — sortait de la même couleur que ce qui n'est pas classé. */
   const TEINTE_THEME = {
-    video: '#e05a68', jeu: '#e0913f', social: '#b79cf5', dev: '#3d8bd4', musique: '#43c1b0',
-    urbex: '#8a9a5b', conflit: '#8d5a4a', actu: '#c9b03e', creation: '#d46fb0',
-    achat: '#7f8fa6', argent: '#5c8a6a', rp: '#9b6fd4'
+    guerre: '#8d5a4a', politique: '#c9b03e', influenceurs: '#d46fb0', urbex: '#8a9a5b',
+    rp: '#9b6fd4', jeu: '#e0913f', creation: '#e05a68', musique: '#43c1b0',
+    science: '#3d8bd4', sante: '#66c2a5', sport: '#5c8a6a', cuisine: '#d98b5f',
+    humour: '#e8c547', voyage: '#4fa3c7', adulte: '#7a5c8d', actu: '#b0a58a',
+    achat: '#7f8fa6', argent: '#6b9e78', dev: '#5b7fd4'
   };
   const repartition = () => {
     const total = (p.ecran?.app_min ?? 0) + (p.ecran?.web_min ?? 0);
@@ -5261,10 +5267,25 @@ function posteMarkup(p, synchro) {
     return `<div class="jrepart jrthemes">
       <div class="jrbarre">${th.map(seg).join('')}</div>
       <div class="jrpied">
-        <ul class="jrleg">${th.filter(x => pct(x.min) >= 4).slice(0, 6).map(x => `<li>
-          <i style="background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"></i>
-          <span class="jrnom">${esc(x.nom)}</span><span class="mono faint">${Math.round(pct(x.min))} %</span>
-        </li>`).join('')}</ul>
+        ${/*
+            LA LÉGENDE S'OUVRE SUR CE QUI A ÉTÉ REGARDÉ. Un sujet sans ses titres
+            est un verdict : « 40 min de guerre », et débrouille-toi. Avec eux,
+            c'est un relevé qu'on peut ouvrir et contester — et il faut pouvoir
+            le contester, parce que c'est une table de mots-clés qui a classé,
+            pas quelqu'un qui a compris. Un sujet dont Machi Tool n'a pas gardé
+            les titres reste une ligne simple : rien à ouvrir, on ne fait pas
+            semblant. */''}
+        <ul class="jrleg">${th.filter(x => pct(x.min) >= 4).slice(0, 8).map(x => {
+          const puce = `<i style="background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"></i>
+            <span class="jrnom">${esc(x.nom)}</span><span class="mono faint">${Math.round(pct(x.min))} %</span>`;
+          if (!x.titres?.length) return `<li>${puce}</li>`;
+          return `<li class="jrouvre"><details>
+            <summary>${puce}</summary>
+            <ol class="jrtitres">${x.titres.slice(0, 10).map(t => `<li>
+              <span class="jrt">${esc(t.titre)}</span><span class="mono faint">${t.min} min</span>
+            </li>`).join('')}</ol>
+          </details></li>`;
+        }).join('')}</ul>
         ${reste >= 1 ? `<span class="faint jrreste">${Math.round(pct(reste))} % que rien ne classe</span>` : ''}
       </div>
     </div>`;

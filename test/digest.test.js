@@ -150,7 +150,11 @@ test('les thématiques traversent jusqu’à l’écran, et le non-classé se di
   });
   const p = posteDuJour('2026-04-10', U);
   assert.equal(p.ecran.app_min + p.ecran.web_min, 150);
-  assert.deepEqual(p.ecran.themes, [{ nom: 'video', min: 60 }, { nom: 'dev', min: 30 }]);
+  // `titres` est vide ici : ce digest est d'une version qui ne les envoyait pas
+  // encore, et la liste vide est la bonne réponse — l'écran n'ouvre rien plutôt
+  // que d'ouvrir sur du vide.
+  assert.deepEqual(p.ecran.themes, [{ nom: 'video', min: 60, titres: [] },
+                                    { nom: 'dev', min: 30, titres: [] }]);
   const classe = p.ecran.themes.reduce((n, x) => n + x.min, 0);
   assert.ok(classe < p.ecran.app_min + p.ecran.web_min,
             'les thèmes ne doivent pas être étirés jusqu’au total de l’écran');
@@ -166,4 +170,36 @@ test('un digest sans thématiques ne fabrique pas de tableau vide', async () => 
     temps_par_contexte_s: { 'code': 3600 },
   });
   assert.equal(posteDuJour('2026-04-11', U).ecran.themes, null);
+});
+
+test('le web se compte à part des applications, et les titres suivent', async () => {
+  /*
+   * Une heure de « création » passée DANS Blender et une heure passée à
+   * regarder un tuto de Blender ne sont pas la même heure : l'une est du
+   * travail, l'autre de la consultation. L'écran montre la seconde — c'est la
+   * question « de quoi parle ce que je regarde », et elle n'a de sens que là.
+   *
+   * Et les titres suivent, parce qu'un chiffre qui annonce « 40 min de guerre »
+   * sans pouvoir montrer sur quoi il se fonde est une autorité qu'on ne peut
+   * pas contredire.
+   */
+  const U = 'themes-web';
+  const { upsertUser, poserActiviteJour } = await import('../server/db.js');
+  const { posteDuJour } = await import('../server/api.js');
+  upsertUser({ id: U, username: U });
+  poserActiviteJour(U, '2026-04-12', {
+    date: '2026-04-12', plage: { de: '09:00', a: '23:00' }, trous: [],
+    temps_par_contexte_s: { 'blender': 3600, 'web:youtube': 3600 },
+    temps_par_theme_s: { creation: 7200 },        // tout confondu : 2 h
+    temps_par_theme_web_s: { creation: 3600 },    // sur internet : 1 h
+    titres_par_theme: { creation: { 'blender tuto rigging - youtube': 2400,
+                                    'substance painter - youtube': 1200,
+                                    'un onglet vu dix secondes': 10 } },
+  });
+  const t = posteDuJour('2026-04-12', U).ecran.themes;
+  assert.deepEqual(t.map(x => [x.nom, x.min]), [['creation', 60]],
+                   'c’est le temps WEB qui s’affiche, pas les deux heures mêlées');
+  assert.deepEqual(t[0].titres, [{ titre: 'blender tuto rigging - youtube', min: 40 },
+                                 { titre: 'substance painter - youtube', min: 20 }],
+                   'les titres arrivent, du plus long au plus court, sans les miettes');
 });
