@@ -15,8 +15,14 @@ import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi,
 import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
 import * as discord from './discord.js';
+import { commitDeploye, versionDuPaquet, DEMARRE_LE } from './version.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Ce qui tourne : commit déployé, version, heure de démarrage. Voir version.js,
+// qui vit à part pour être vérifiable sans ouvrir de serveur.
+const COMMIT = commitDeploye();
+const VERSION_APP = await versionDuPaquet(ROOT);
 const WEB = join(ROOT, 'web');
 
 const PORT = Number(process.env.PORT ?? 4173);
@@ -161,8 +167,29 @@ async function traiter(req, res) {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
   const key = `${req.method} ${url.pathname}`;
 
-  // sonde de l'hebergeur : jamais derriere le verrou
-  if (url.pathname === '/healthz') return json(res, 200, { ok: true });
+  /*
+   * SONDE DE L'HÉBERGEUR : jamais derrière le verrou.
+   *
+   * ELLE DIT AUSSI CE QUI TOURNE, et c'est la seule façon de répondre à « est-ce
+   * que le site est à jour ? » sans deviner. Un déploiement qui n'est pas parti,
+   * un déploiement en échec, un cache de navigateur : les trois se ressemblent
+   * depuis un écran, et aucune n'était vérifiable de l'extérieur.
+   *
+   * Le commit court et la date de démarrage suffisent — sept caractères se
+   * comparent à l'œil avec la dernière ligne de `git log`. Rien d'autre ne sort
+   * ici : la route est ouverte, et une sonde de santé n'a pas à décrire son
+   * environnement.
+   */
+  if (url.pathname === '/healthz') {
+    return json(res, 200, {
+      ok: true,
+      version: VERSION_APP,
+      commit: COMMIT,
+      // Depuis quand ce processus tourne : un redéploiement remet la pendule à
+      // zéro, donc une date ancienne veut dire « rien n'est reparti ».
+      demarre_le: DEMARRE_LE,
+    });
+  }
 
   /* ---------- la passerelle vers une application locale ----------
    *
