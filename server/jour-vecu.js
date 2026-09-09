@@ -85,13 +85,36 @@ const PAS_MAINTENANT = /\b(jamais|demain|hier|d[’']habitude|souvent|toujours|p
  */
 const NIE = /^\s*(ne|n[’']|pas|plus)\b/;
 
+/*
+ * CE QUI MANQUAIT, ET QUI SE DISAIT VRAIMENT.
+ *
+ * Sur une seule journee reelle, DEUX couchers ecrits noir sur blanc etaient
+ * rates : « je vais pas tarder a dormir je pense » a 11:03, et « ressenti avant
+ * de m'endormir » a 06:48. La journee vecue etait bornee aux deux bouts par ses
+ * propres phrases, et le site allait quand meme chercher un appariement de
+ * machine qui se trompait.
+ *
+ * « PAS TARDER A » N'EST PAS UNE NEGATION, et c'est le piege du francais ici :
+ * « je vais PAS tarder a dormir » veut dire « bientot », pas « je ne dors
+ * pas ». Le garde `NIE` ne s'y applique pas, puisqu'il regarde ce qui suit le
+ * verbe reconnu — et ce qui suit est « je pense ».
+ *
+ * « AVANT DE M'ENDORMIR » se dit AU MOMENT de s'endormir : c'est ce que
+ * quelqu'un ecrit dans son lit, la lumiere eteinte. Ce qui le deplacerait dans
+ * le temps — « hier avant de m'endormir », « avant de m'endormir je lis
+ * toujours » — est deja ecarte par PAS_MAINTENANT.
+ */
 const COUCHER_DIT = [
-  /\bje vais (me coucher|dormir|au lit|au dodo|pioncer|me pieuter)\b/,
+  /\bje vais (me coucher|dormir|au lit|au dodo|pioncer|me pieuter|m[’']endormir)\b/,
   /\bje (me couche|vais me coucher)\b/,
   /\bbonne nuit\b/,
   /\bau dodo\b/,
-  /\bje file (au lit|dormir|me coucher)\b/,
-  /\bj[’']vais (dormir|me coucher)\b/
+  /\ballez,? dodo\b/,
+  /\bje (file|pars) (au lit|dormir|me coucher)\b/,
+  /\bj[’']vais (dormir|me coucher|m[’']endormir)\b/,
+  /\bpas tarder [aà] (dormir|me coucher|aller au lit)\b/,
+  /\bavant de (m[’']endormir|dormir|me coucher)\b/,
+  /\ben allant (au lit|me coucher|dormir)\b/
 ];
 
 const LEVER_DIT = [
@@ -114,17 +137,39 @@ const HEURE_DITE = /\b(?:a|à|vers|depuis)\s+(\d{1,2})\s*(?:[:hH]\s*(\d{2})?)?\b
  *   `heure` n'est remplie que si la phrase la porte (« je me suis levé à 8h ») ;
  *   sinon c'est l'instant du message qui fait foi, et l'appelant le sait.
  */
+/* Autour du verbe reconnu, et pas plus loin : voir `trouve`. */
+const FENETRE_BORNE = 30;
+
 export function bornesDitesDans(texte) {
   const t = norm(texte).replace(/\s+/g, ' ').trim();
   if (!t) return null;
-  if (PAS_MAINTENANT.test(t)) return null;
 
   const trouve = r => {
     const m = r.exec(t);
     if (!m) return false;
     // La negation se juge a cote du verbe : ailleurs dans le message, elle
     // parle d'autre chose (« il y a pas longtemps »).
-    return !NIE.test(t.slice(m.index + m[0].length));
+    if (NIE.test(t.slice(m.index + m[0].length))) return false;
+    /*
+     * ET « CE N'EST PAS MAINTENANT » SE JUGE AUSSI A COTE DU VERBE.
+     *
+     * Applique au message entier, ce garde refusait une phrase reelle : « ...
+     * comme SI JE n'avais plus de futur en allant au lit ( mtn ) ... ressenti
+     * avant de m'endormir ». Le « si je » y parle d'autre chose, quarante
+     * caracteres plus tot. Un message long et reflechi contient forcement l'un
+     * de ces mots quelque part, et le chercher partout revenait a ne jamais
+     * reconnaitre de borne dans un message long — c'est-a-dire dans ceux qui
+     * comptent.
+     *
+     * On regarde donc les trente caracteres autour. « demain je vais me
+     * coucher » et « je vais me coucher, comme d'habitude » restent ecartes ;
+     * « hier soir j'etais creve, bref, je vais me coucher » l'est aussi, et
+     * c'est un rate assume — rater une borne coute une borne, en inventer une
+     * coute une journee mal rangee.
+     */
+    const deb = Math.max(0, m.index - FENETRE_BORNE);
+    const fin = Math.min(t.length, m.index + m[0].length + FENETRE_BORNE);
+    return !PAS_MAINTENANT.test(t.slice(deb, fin));
   };
   const genre = LEVER_DIT.some(trouve) ? 'lever'
               : COUCHER_DIT.some(trouve) ? 'coucher'

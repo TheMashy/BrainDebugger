@@ -69,6 +69,47 @@ test('du texte vide ou hors sujet ne dit rien', () => {
     assert.equal(bornesDitesDans(t), null);
 });
 
+/*
+ * LA JOURNÉE DU 8 SEPTEMBRE, BORNÉE PAR SES PROPRES PHRASES.
+ *
+ * Le site affichait un coucher à 16:27 et une nuit de 3,7 h, alors que la
+ * personne s'était couchée à 06:48. Ce jour-là elle avait écrit DEUX couchers
+ * noir sur blanc, et aucun des deux n'était reconnu : faute de borne dite, le
+ * site allait chercher un appariement de machine, et cet appariement se
+ * trompait. Ces deux phrases sont donc le test — si elles cessent d'être
+ * reconnues, le 16:27 revient.
+ */
+test('les deux couchers vraiment écrits le 8 septembre sont reconnus', () => {
+  assert.equal(bornesDitesDans('je vais pas tarder à dormir je pense').genre, 'coucher',
+    '« pas tarder à » veut dire bientôt : en français ce n’est pas une négation');
+  assert.equal(bornesDitesDans(
+    'j’ai l’impression de vivre comme si je n’avais plus de futur en allant au lit ' +
+    '( mtn ) c’est le fond ouais ressenti avant de m’endormir 1/10 là').genre, 'coucher',
+    'le « si je » est quarante caractères plus tôt, il parle d’autre chose');
+});
+
+test('les tournures qui manquaient disent un coucher', () => {
+  for (const t of ['allez, dodo', 'je pars me coucher', 'j’vais m’endormir',
+                   'je vais m’endormir', 'avant de dormir je voulais dire un truc'])
+    assert.equal(bornesDitesDans(t)?.genre, 'coucher', `« ${t} » est un coucher`);
+});
+
+/*
+ * Le garde « ce n'est pas maintenant » ne regarde plus le message entier, mais
+ * trente caractères autour du verbe. Il doit continuer à écarter tout ce qui
+ * déplace la phrase dans le temps QUAND c'est collé au verbe — sinon la
+ * fenêtre a été ouverte trop grand pour rien.
+ */
+test('trente caractères autour du verbe suffisent à écarter ce qui n’est pas maintenant', () => {
+  for (const t of [
+    'demain je vais me coucher tôt',
+    'je vais me coucher tôt comme d’habitude',
+    'hier avant de m’endormir j’ai pensé à ça',
+    'faut que je pense à pas tarder à dormir',
+    'je vais jamais me coucher avant 4h'
+  ]) assert.equal(bornesDitesDans(t), null, `« ${t} » ne doit pas poser de borne`);
+});
+
 /* ----------------------------- les levers connus ----------------------------- */
 
 test('ce que la personne dit passe devant le quantified self', () => {
