@@ -620,6 +620,7 @@ server.listen(PORT, HOST, () => {
   écoute      ${HOST}:${PORT}${local ? '  (local uniquement)' : ''}
   plateforme  ${PLATFORM ?? 'aucune détectée'}
   node        ${process.versions.node}
+  version     ${VERSION_APP} · commit ${COMMIT}
   base        ${DB_PATH}
   verrou      ${discord.enabled() ? `Discord${discord.GUILD ? ` (serveur ${discord.GUILD})` : ''}` : auth.enabled() ? 'mot de passe' : 'aucun'}${discord.enabled() ? `
   redirection ${process.env.BD_PUBLIC_URL
@@ -635,3 +636,57 @@ server.listen(PORT, HOST, () => {
                  '  pointe BD_DB dessus (ex. /data/braindebugger.db).\n');
   }
 });
+
+/*
+ * =====================================================================
+ *  L'HÉBERGEUR DEMANDE L'ARRÊT, ET ON L'HONORE.
+ *
+ * Railway arrête un conteneur pour trois raisons parfaitement normales : un
+ * nouveau déploiement prend la relève, la mise en veille se déclenche faute de
+ * trafic, ou la machine est déplacée. Il envoie SIGTERM, attend, puis tue.
+ *
+ * Rien n'écoutait ce signal. Deux conséquences.
+ *
+ *   1. LES LOGS NE DISAIENT RIEN. « Stopping Container » puis « npm error
+ *      signal SIGTERM » : c'est npm qui rapporte que son enfant a été
+ *      terminé, pas une erreur du site — mais ça se lit comme un plantage, et
+ *      ça a été rapporté comme tel. Une ligne à nous lève le doute.
+ *
+ *   2. LA BASE ÉTAIT COUPÉE EN PLEIN VOL. SQLite en mode WAL sur un volume
+ *      monté : un processus tué au milieu d'une écriture laisse un journal à
+ *      rejouer. Ça se répare au démarrage suivant dans le cas courant, mais
+ *      c'est un risque qu'on prend pour rien alors qu'il suffit de fermer.
+ *
+ * On cesse d'accepter, on laisse les requêtes en cours finir, on ferme la base,
+ * on sort en 0 — un arrêt demandé n'est pas un échec. Avec une limite de temps :
+ * une requête qui traîne ne doit pas transformer un arrêt propre en SIGKILL,
+ * qui nous ramènerait exactement au problème qu'on répare.
+ * =====================================================================
+ */
+const DELAI_ARRET = 8000;
+let arretEnCours = false;
+
+function arreter(signal) {
+  if (arretEnCours) return;
+  arretEnCours = true;
+  console.log(`\n  arrêt demandé (${signal}) — ce n'est pas une erreur.` +
+              ` version ${VERSION_APP}, commit ${COMMIT}`);
+
+  const finir = (comment) => {
+    try { db.close(); } catch (e) { console.log(`  base non fermée : ${e.message}`); }
+    console.log(`  arrêté proprement (${comment}).\n`);
+    process.exit(0);
+  };
+
+  // La minuterie ne retient pas le processus en vie : si tout se ferme avant,
+  // on sort tout de suite.
+  const minuterie = setTimeout(() => finir('délai dépassé, requêtes en cours abandonnées'),
+                               DELAI_ARRET);
+  minuterie.unref?.();
+  server.close(() => { clearTimeout(minuterie); finir('plus aucune requête en vol'); });
+  // Les connexions gardées ouvertes (keep-alive) empêcheraient `close` de
+  // rendre la main : Node sait les fermer depuis la 18.2.
+  server.closeIdleConnections?.();
+}
+
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => arreter(sig));
