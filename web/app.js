@@ -2896,11 +2896,50 @@ let LECTURE_ERR = null;
 
 
 /** Une barre par période. Petite, sans axe : c'est une forme, pas un graphe. */
-function serieMarkup(serie) {
-  if (!serie?.length) return '';
-  return `<span class="tserie" aria-hidden="true">${serie.map(p =>
-    `<i style="height:${[2, 34, 66, 100][p.valeur]}%" title="${esc(p.periode)} · ${p.valeur}/3"></i>`
-  ).join('')}</span>`;
+/**
+ * QUAND EST-CE ARRIVÉ — une marque par JOUR, sur un axe de temps réel.
+ *
+ * La frise groupait par mois : vingt occurrences étalées sur six mois faisaient
+ * six barres, et la forme qu'on lisait était celle du calendrier, pas celle du
+ * mécanisme. Un mois aplatit dans les deux sens — une salve de cinq jours
+ * d'affilée et cinq occurrences réparties sur trente jours sortaient
+ * identiques, alors que c'est précisément ce qu'on vient distinguer.
+ *
+ * L'AXE EST LE TEMPS, PAS LE RANG. Poser une marque par occurrence, également
+ * espacées, redonnerait le même mensonge en plus fin : deux jours de suite et
+ * deux mois d'écart se dessineraient pareil. Ici un vide est un vide, à
+ * l'échelle. C'est le seul axe qui répond à « est-ce que ça revient tous les
+ * jours, par salves, ou trois fois dans l'année ? ».
+ *
+ * On dessine sur toute la période OBSERVÉE (du premier au dernier jour, avec au
+ * moins un mois de large) et pas sur les seuls jours marqués : sans ça, un
+ * mécanisme vu trois fois en une semaine remplirait la frise autant qu'un
+ * mécanisme vu trois fois en trois ans.
+ *
+ * @param {Array<{periode: string, valeur: number}>} serie  un point par jour
+ */
+function serieMarkup(serie, { titre = 'reconnu' } = {}) {
+  const pts = (serie ?? []).filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p?.periode ?? ''));
+  if (!pts.length) return '';
+  const jour = d => Math.floor(Date.parse(d + 'T00:00:00Z') / 864e5);
+  const j0 = jour(pts[0].periode), j1 = jour(pts.at(-1).periode);
+  // Trente jours de large au minimum : sur une plage d'un ou deux jours, une
+  // marque occuperait la moitié de la frise et se lirait comme « tout le temps ».
+  const large = Math.max(30, j1 - j0);
+  const H = 22, W = 100;
+  const x = d => ((jour(d) - j0) / large) * W;
+  const marques = pts.map(p => {
+    const h = [2, 40, 70, 100][p.valeur] ?? 40;
+    return `<rect x="${x(p.periode).toFixed(2)}" y="${(H * (1 - h / 100)).toFixed(2)}"
+      width="0.9" height="${(H * h / 100).toFixed(2)}" rx="0.4"
+      ><title>${esc(fmtDay(p.periode))} · ${titre}</title></rect>`;
+  }).join('');
+  const jours = j1 - j0 + 1;
+  return `<span class="tserie" role="img"
+      aria-label="${esc(`${pts.length} ${titre} sur ${jours} jours`)}"
+      title="${esc(`${pts.length} ${titre}, du ${fmtDay(pts[0].periode)} au ${fmtDay(pts.at(-1).periode)}`)}">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${marques}</svg>
+  </span>`;
 }
 
 /*
@@ -3301,6 +3340,33 @@ const ICO_PRISE = { alcool: 'verre', cannabis: 'feuille', stimulants: 'eclair',
 const ICO_SIGNE = { arreter: 'pause', craque: 'refaire', manque: 'refaire',
                     plus_que_prevu: 'plus', cache: 'oeilbarre' };
 
+/**
+ * LES JOURS EUX-MÊMES, AVANT LES ÉCARTS ENTRE EUX.
+ *
+ * La carte n'affichait que les intervalles, en barres. Sur un journal dont la
+ * partie dense est récente, ça donnait UNE seule barre — l'écart de 473 jours
+ * qui précède tout le reste — et rien d'autre : un dessin qui ne dit ni quand
+ * ni à quel rythme, juste qu'il y a très longtemps il ne s'est rien passé.
+ *
+ * Les jours comptés viennent donc d'abord, à leur date, sur le même axe que la
+ * frise des mécanismes : c'est la question qu'on se pose vraiment en ouvrant
+ * cette carte — est-ce que ça se resserre ? est-ce que c'est par salves ?
+ *
+ * Les écarts restent EN DESSOUS, et tous. C'est la règle de ce tableau depuis
+ * le début (voir l'argument Marlatt en tête de server/prises.js) : un compteur
+ * remis à zéro transforme un soir en échec total, et l'échec total est ce qui
+ * fait enchaîner. Montrer les jours ne remplace pas les séries, ça les précède.
+ */
+function joursMarkup(p) {
+  const jours = (p.jours ?? []).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (jours.length < 2) return '';
+  return `<div class="pjours">
+    ${serieMarkup(jours.map(d => ({ periode: d, valeur: 2 })), { titre: 'compté' })}
+    <span class="psleg faint">${jours.length} jour${jours.length > 1 ? 's' : ''} comptés,
+      du ${fmtDay(jours[0])} au ${fmtDay(jours.at(-1))}</span>
+  </div>`;
+}
+
 /** Les séries sans, en barres sur une base commune : la plus longue donne l'échelle. */
 function seriesMarkup(p) {
   const series = p.series;
@@ -3362,6 +3428,7 @@ function priseMarkup(p) {
     ${avant ? `<p class="pavant">${ico('fleche', 13)}
       <span>après « <b>${esc(avant.nom)}</b> », c’est écrit le jour d’après&nbsp;: ${avant.apres} fois sur ${avant.sur}</span></p>` : ''}
 
+    ${joursMarkup(p)}
     ${seriesMarkup(p)}
 
     <p class="pfen">
@@ -4094,11 +4161,17 @@ function jaugesMarkup(jauges, manques) {
   if (!jauges?.length) return manques?.length ? `<p class="sub fonctmanque">${manques.map(esc).join(' ')}</p>` : '';
   return `<div class="fjauges">${jauges.map(j => {
     const part = Math.min(100, Math.round(100 * j.a / j.faut));
+    /* « 4 sur 30 » ne dit pas d'où vient le 4. Quand le serveur sait l'expliquer
+       (les nuits : un digest, puis une nuit dérivable dedans), la phrase se lit
+       SOUS la jauge et pas seulement au survol — c'est la première question
+       qu'on se pose devant un chiffre qui ne monte pas, et une infobulle ne
+       répond qu'à ceux qui pensent à survoler. */
     return `<div class="fjauge" title="${esc(`${j.a} sur ${j.faut} — pour ${j.pour}`)}">
       <span class="fjnom">${esc(j.quoi)}</span>
       <span class="fjrail"><i style="width:${part}%"></i></span>
       <span class="fjn mono">${j.a}<span class="faint">/${j.faut}</span></span>
       <span class="fjpour faint">${esc(j.pour)}</span>
+      ${j.pourquoi ? `<span class="fjpourquoi faint">${esc(j.pourquoi)}</span>` : ''}
     </div>`;
   }).join('')}</div>`;
 }

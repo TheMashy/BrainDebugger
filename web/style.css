@@ -1570,14 +1570,26 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
   font: 500 11.5px/1 var(--mono); color: var(--ink-faint); text-align: right;
 }
 
-/* La série : une forme, pas un graphe. Pas d'axe, pas d'échelle — on y lit
-   « ça monte », « ça revient par vagues », et c'est tout ce qu'on lui demande. */
-.tserie { display: flex; align-items: flex-end; gap: 1.5px; height: 20px; flex: none; }
-.tserie i {
-  width: 3px; border-radius: 1px;
-  background: hsl(var(--m) 45% 60%); opacity: .55;
-}
-.meca.ouvert .tserie i, .meca:hover .tserie i { opacity: .95; }
+/* Les jours comptés d'une prise, à leur date. Même axe et même grammaire que
+   la frise d'un mécanisme — c'est la même question posée d'un autre côté du
+   produit, elle n'a pas à se dessiner autrement. La teinte, elle, est celle du
+   tableau des prises et pas celle d'un mécanisme déclaré. */
+.pjours { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.pjours .tserie { min-width: 0; width: 100%; max-width: 520px; height: 26px; }
+.pjours .tserie rect { fill: var(--accent); opacity: .62; }
+
+/* La série : une forme, pas un graphe. Pas d'axe chiffré, pas d'échelle — on y
+   lit « ça revient tous les jours », « par salves », « trois fois dans
+   l'année », et c'est tout ce qu'on lui demande.
+
+   Mais l'axe HORIZONTAL est bien le temps, à l'échelle : c'est ce qui distingue
+   une salve d'un étalement, et c'était justement ce que le regroupement par
+   mois rendait impossible à voir. Les marques ne sont donc plus des enfants
+   d'un flex — elles sont posées à leur date dans un SVG qui s'étire. */
+.tserie { display: block; height: 22px; flex: none; min-width: 96px; }
+.tserie svg { width: 100%; height: 100%; display: block; }
+.tserie rect { fill: hsl(var(--m) 45% 60%); opacity: .55; }
+.meca.ouvert .tserie rect, .meca:hover .tserie rect { opacity: .95; }
 
 .tcorps { padding: 0 14px 14px 40px; }
 
@@ -4216,7 +4228,15 @@ details.jpecol .jpetop { margin-top: 5px; }
 .fjauges { display: grid; gap: 6px; margin: 10px 0 2px; max-width: 620px; }
 .fjauge {
   display: grid; grid-template-columns: 122px 110px 52px minmax(0, 1fr);
-  align-items: center; gap: 10px; font-size: 11.5px; cursor: help;
+  align-items: center; gap: 4px 10px; font-size: 11.5px; cursor: help;
+}
+/* L'explication passe sous la jauge, alignée sur son nom, et prend toute la
+   largeur : « 4 sur 30 » ne dit pas d'où vient le 4, et c'est la première chose
+   qu'on veut savoir devant un chiffre qui ne monte pas. Au survol seulement,
+   elle n'aurait répondu qu'à ceux qui pensent à survoler. */
+.fjpourquoi {
+  grid-column: 2 / -1; font-size: 11px; line-height: 1.45;
+  max-width: 64ch; margin-bottom: 4px;
 }
 .fjnom { color: var(--ink-dim); }
 .fjrail { height: 5px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }

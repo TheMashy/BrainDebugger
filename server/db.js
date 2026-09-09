@@ -1181,20 +1181,36 @@ export function allMotifs(userId = OWNER) {
  * a part : c'est la seule source qui ne puisse pas diverger de ce qui est
  * affiche dans le fil.
  */
+/**
+ * PAR JOUR, ET PLUS PAR MOIS.
+ *
+ * Le regroupement mensuel (`substr(m.date, 1, 7)`) donnait une barre par mois :
+ * vingt occurrences etalees sur six mois faisaient six barres, et la forme
+ * qu'on lisait — trois traits serres — etait celle du calendrier, pas celle du
+ * mecanisme. Or c'est exactement la question qu'on pose a une frise : est-ce
+ * que ca revient tous les jours, par salves, ou trois fois dans l'annee ? Un
+ * mois est trop gros pour y repondre, et il l'aplatit dans les deux sens : une
+ * salve de cinq jours d'affilee et cinq occurrences reparties sur trente jours
+ * sortent identiques.
+ *
+ * Le jour est la maille de tout le reste du produit (la bande, la grille de
+ * l'annee, les jours d'une prise). Il n'y avait aucune raison que celle-ci
+ * soit la seule a compter autrement.
+ */
 export function motifSeries(userId = OWNER) {
   const rows = db.prepare(`
-    SELECT v.motif_id AS id, substr(m.date, 1, 7) AS mois, COUNT(*) AS n
+    SELECT v.motif_id AS id, m.date AS jour, COUNT(*) AS n
     FROM motif_vues v
     JOIN messages m ON m.id = v.message_id
     JOIN motifs f ON f.id = v.motif_id
     WHERE f.user_id = ? AND m.user_id = ?
-    GROUP BY v.motif_id, mois
-    ORDER BY mois ASC
+    GROUP BY v.motif_id, jour
+    ORDER BY jour ASC
   `).all(userId, userId);
   const par = new Map();
   for (const r of rows) {
     if (!par.has(r.id)) par.set(r.id, []);
-    par.get(r.id).push({ periode: r.mois, n: r.n });
+    par.get(r.id).push({ periode: r.jour, n: r.n });
   }
   return par;
 }

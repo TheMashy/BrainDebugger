@@ -626,10 +626,31 @@ export function analyserTable(T) {
    * Les phrases restent : elles vont dans le repli, pour qui veut le détail.
    */
   const paires = notes >= SEUILS.min_notes ? ar1(T.jours.map(j => j.note)).paires : null;
+  /*
+   * « 4 SUR 30 » NE DIT PAS D'OÙ VIENT LE 4, et c'est la première question
+   * qu'on se pose devant une jauge qui ne monte pas : est-ce que je dors mal,
+   * est-ce que l'application est cassée, ou est-ce qu'elle n'a simplement rien
+   * reçu ? Trois réponses très différentes, et le chiffre seul ne permet de
+   * choisir aucune.
+   *
+   * Une nuit mesurée demande DEUX choses, et elles échouent séparément : un
+   * digest de Machi Tool ce jour-là, puis une nuit dérivable dedans (un silence
+   * recevable, une fin avant la première activité — voir nuits.js). On dit donc
+   * les deux, dans l'ordre où ça se casse.
+   */
+  const avecDigest = T.jours.filter(j => fini(j.ecran_min) || fini(j.sommeil_h) || fini(j.coucher)).length;
+  const pourquoiNuits = avecDigest === 0
+    ? 'Machi Tool n’a rien envoyé sur cette période : sans lui, une nuit ne se mesure pas.'
+    : nuits >= avecDigest
+      ? `${pl(avecDigest, 'journée mesurée', 'journées mesurées')} par Machi Tool, et toutes donnent leur nuit — il en faut simplement plus.`
+      : `${pl(avecDigest, 'journée mesurée', 'journées mesurées')} par Machi Tool, dont ${nuits} `
+        + `donne${nuits > 1 ? 'nt' : ''} une nuit. Les autres n’ont pas de silence assez net pour en tirer un coucher `
+        + `et un lever — l’ordinateur laissé allumé, ou éteint toute la journée.`;
   const jauges = [
     { cle: 'notes', quoi: 'journées notées', a: notes, faut: SEUILS.min_notes, pour: 'les liens, la note d’un jour à l’autre' },
     { cle: 'paires', quoi: 'lendemains notés', a: paires, faut: SEUILS.min_paires, pour: 'la note d’un jour à l’autre' },
-    { cle: 'nuits', quoi: 'nuits mesurées', a: nuits, faut: SEUILS.min_nuits, pour: 'les bascules, la régularité' },
+    { cle: 'nuits', quoi: 'nuits mesurées', a: nuits, faut: SEUILS.min_nuits, pour: 'les bascules, la régularité',
+      pourquoi: pourquoiNuits },
     { cle: 'textes', quoi: 'journées écrites', a: textes, faut: SEUILS.mots.min_jours, pour: 'les mots absolus' }
   ].filter(j => j.a != null && j.a < j.faut);
 

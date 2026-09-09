@@ -3541,10 +3541,19 @@ export function motifsDuFil(userId = OWNER) {
     const max = Math.max(1, ...brut.map(p => p.n));
     return {
       ...m,
-      serie: brut.slice(-24).map(p => ({
+      /*
+       * TOUS LES JOURS, PAS LES VINGT-QUATRE DERNIERS.
+       *
+       * Le `slice(-24)` datait du regroupement mensuel : vingt-quatre mois de
+       * frise. En jours, il coupait a vingt-quatre OCCURRENCES — c'est-a-dire
+       * qu'un mecanisme reconnu cent fois n'en montrait que la fin, sans que
+       * rien ne le dise. L'ecran, lui, place les jours sur un axe de temps
+       * reel : il n'a pas besoin qu'on lui en cache.
+       */
+      serie: brut.map(p => ({
         periode: p.periode,
         // Jamais zero quand il s'est passe quelque chose : une barre invisible
-        // dirait « rien ce mois-la » alors qu'il y a eu une occurrence.
+        // dirait « rien ce jour-la » alors qu'il y a eu une occurrence.
         valeur: Math.max(1, Math.round((p.n / max) * 3))
       }))
     };
