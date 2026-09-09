@@ -25,6 +25,7 @@ import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
 import { nuits, nuitDuJour, rythmeUtilisateur, paireEstUneNuit, MIN_NUIT } from './nuits.js';
+import { occasionDeDemander, proposerNoteBlock } from './proposer-note.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
@@ -276,6 +277,21 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   // messages par definition, donc elle est du cote volatil.
   const note = presenceNote(presence(userId));
   if (note) volatil.push(note);
+
+  /*
+   * L'OCCASION DE DEMANDER OÙ IL EN EST — volatile par nature.
+   *
+   * Elle dépend du message qu'on vient de lire et des relevés déjà posés
+   * aujourd'hui : posée du côté stable, elle invaliderait le cache à chaque
+   * phrase. Et elle est RARE par construction (voir proposer-note.js) : un bloc
+   * présent à chaque tour deviendrait du bruit, et le compagnon finirait par
+   * poser la question pour meubler.
+   */
+  try {
+    const occ = occasionDeDemander(recentMessages(30, userId), relevesDuJour(today(), userId));
+    const bloc = proposerNoteBlock(occ);
+    if (bloc) volatil.push(bloc);
+  } catch { /* un signal qui échoue ne doit pas emporter la conversation */ }
 
   return { stable, echos: volatil.length ? volatil.join('\n\n---\n\n') : null };
 }
