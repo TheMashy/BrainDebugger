@@ -1522,6 +1522,118 @@ button.btn.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 .themes { display: flex; flex-direction: column; gap: 5px; margin-bottom: 34px; }
 
+/* ===================== UN MOTIF MONTE S'IL TIENT =====================
+   Une proposition à la fois, jamais la liste : « voilà les onze mécanismes
+   qu'on a repérés chez toi » est une machine à ressasser, « celui-là revient
+   assez pour figurer sur ta carte — tu veux ? » demande une lecture. La carte
+   se distingue franchement de la liste en dessous, parce que c'est une
+   QUESTION posée, pas un élément de plus à parcourir. */
+.promo {
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  border-radius: 12px; padding: 14px 16px 12px; margin-bottom: 18px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.promotete {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--accent);
+}
+.promotete span { flex: 1 1 auto; min-width: 0; }
+.promosuiv {
+  flex: none; background: none; border: 1px solid var(--line); border-radius: 5px;
+  color: var(--ink-faint); font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer;
+}
+.promosuiv:hover { color: var(--ink); border-color: var(--ink-faint); }
+.promonom {
+  margin: 0; font-size: 17px; font-weight: 600; line-height: 1.25;
+  color: hsl(var(--t) 60% 72%);
+}
+.promoquoi { margin: -4px 0 0; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
+/* Les journées à l'appui, sur la même frise que partout ailleurs : un chiffre
+   qui annonce « douze journées » sans pouvoir les montrer est une autorité
+   qu'on ne peut pas contredire. */
+.promo .tserie { margin: 2px 0; }
+.promofaits {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: 12.5px; color: var(--ink-dim);
+}
+.promofaits b { color: var(--ink); font-weight: 600; }
+/* Un mécanisme RETENU garde sa carte et ses journées : ce qui change est le
+   bouton, pas ce qu'on montre. Le cacher ferait disparaître le mécanisme le
+   plus repéré de quelqu'un sans un mot. */
+.promo.retenu { border-color: color-mix(in srgb, var(--warn) 34%, transparent);
+                background: color-mix(in srgb, var(--warn) 5%, var(--panel)); }
+.promo.retenu .promotete { color: var(--warn); }
+.promo.retenu .promooui { background: var(--warn); }
+.promoalerte {
+  margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--warn);
+  display: flex; gap: 6px; align-items: flex-start;
+}
+.promoalerte b { font-weight: 600; }
+.promoalerte svg { flex: none; margin-top: 2px; }
+.promogestes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.promooui, .promonon {
+  font: inherit; font-size: 12.5px; border-radius: 7px; padding: 7px 13px; cursor: pointer;
+  border: 1px solid transparent; transition: background .12s, border-color .12s;
+}
+.promooui { background: var(--accent); color: #08120c; font-weight: 600; }
+.promooui:hover { filter: brightness(1.1); }
+.promonon { background: none; border-color: var(--line); color: var(--ink-dim); }
+.promonon:hover { color: var(--ink); border-color: var(--ink-faint); }
+.promooui:disabled, .promonon:disabled { opacity: .5; cursor: default; }
+/* La phrase du bas n'est pas un ornement : un accord qu'on ne peut pas retirer
+   n'est pas un accord, et il faut le lire AVANT de cliquer. */
+.promopied { margin: 0; font-size: 11px; color: var(--ink-faint); font-style: italic; }
+
+/* L'ancrage dans le corps d'un motif : compté, pas déduit d'une ressemblance
+   de noms. « Ceci, et cela juste après, tant de fois sur tant. » */
+.mancre {
+  margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink-dim);
+  display: flex; gap: 6px; align-items: flex-start;
+}
+.mancre svg { flex: none; margin-top: 3px; color: var(--ink-faint); }
+.mancre b { color: var(--ink); }
+.mancre.promuici svg { color: var(--accent); }
+
+/* `.lectmeca` est une grille de colonnes de 270 px : la proposition et la
+   liste des promus y prennent chacune UNE colonne, comme un groupe de
+   mécanismes. Sans `margin-bottom: 0`, elles décalaient la première colonne de
+   dix-huit pixels par rapport aux autres — la grille gère déjà les gouttières. */
+.promo, .promus { margin-bottom: 0; }
+.promus {  display: flex; flex-direction: column; gap: 5px; }
+.promus ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.promus li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.promusnom { color: hsl(var(--t) 55% 70%); flex: 1 1 auto; min-width: 0;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.promusdel, .ncpromudel {
+  flex: none; background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; font-size: 11px; color: var(--ink-faint); text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.promusdel:hover, .ncpromudel:hover { color: var(--ink); }
+.ncpromu {
+  margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-dim);
+  display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap;
+}
+.ncpromu svg { flex: none; margin-top: 3px; color: var(--accent); }
+.ncpromu b { color: var(--ink); }
+
+/* TROIS VISIBLES, LE RESTE DERRIÈRE UN GESTE. Le repli dit combien il y en a :
+   ce n'est pas la même chose que de ne pas les montrer — c'est la différence
+   entre une liste qu'on consulte et une liste qui vous attend. */
+.mecaplus { display: flex; flex-direction: column; gap: 5px; }
+.mecaplus summary {
+  list-style: none; cursor: pointer; font-size: 11px; color: var(--ink-faint);
+  padding: 3px 0 3px 2px; border-radius: 4px;
+}
+.mecaplus summary::-webkit-details-marker { display: none; }
+.mecaplus summary::before { content: '+ '; }
+.mecaplus[open] summary::before { content: '− '; }
+.mecaplus summary:hover { color: var(--ink); }
+.mecaplus summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .meca {
   border-radius: 11px;
   background: color-mix(in srgb, hsl(var(--m) 50% 40%) 9%, var(--panel));

@@ -3036,10 +3036,38 @@ function mecaMarkup(m, max = 0) {
   </div>`;
 }
 
-/** Une liste de mécanismes, tous à la même échelle : c'est ce qui les rend comparables. */
-const mecaListe = liste => {
+/*
+ * TROIS VISIBLES, LE RESTE DERRIÈRE UN GESTE.
+ *
+ * La liste s'affichait entière, tout le temps. Onze mécanismes rangés par
+ * fréquence, en permanence sous la carte, c'est une machine à se comparer à ce
+ * qu'on devrait être — la distinction ressassement / réflexion de Treynor &
+ * Nolen-Hoeksema porte sur la FORME, pas sur le contenu : la même liste nourrit
+ * l'un ou l'autre selon qu'elle s'impose ou qu'on va la chercher.
+ *
+ * Rien n'est caché : le repli dit combien il y en a, et le reste est à un clic.
+ * Ce n'est pas la même chose que de ne pas les montrer — c'est la différence
+ * entre une liste qu'on consulte et une liste qui vous attend.
+ *
+ * Et le tri reste la FRÉQUENCE, jamais une gravité. Le nombre de fois est un
+ * fait ; « à quel point c'est grave » serait un verdict, et le produit n'en
+ * rend pas.
+ *
+ * Tous à la même échelle : c'est ce qui les rend comparables.
+ */
+const MECA_VISIBLES = 3;
+const mecaListe = (liste, plier = true) => {
   const max = Math.max(0, ...liste.map(m => m.compte ?? 0));
-  return liste.map(m => mecaMarkup(m, max)).join('');
+  const rendre = l => l.map(m => mecaMarkup(m, max)).join('');
+  if (!plier || liste.length <= MECA_VISIBLES + 1) return rendre(liste);
+  const tete = liste.slice(0, MECA_VISIBLES), reste = liste.slice(MECA_VISIBLES);
+  // Un mécanisme ouvert qui tomberait dans le repli disparaîtrait au clic
+  // suivant : le repli s'ouvre alors avec lui.
+  const dedans = reste.some(m => MIR_THEME === m.cle);
+  return `${rendre(tete)}<details class="mecaplus"${dedans ? ' open' : ''}>
+    <summary>${reste.length} autre${reste.length > 1 ? 's' : ''}</summary>
+    ${rendre(reste)}
+  </details>`;
 };
 
 /** Un thème de la lecture : ses preuves datées, son chiffre, ses liens. */
@@ -3072,10 +3100,23 @@ function themeMeca(t, i, pistes = []) {
  * s'afficher aussi gros que celui de la semaine dernière.
  */
 function motifMeca(m) {
-  const lie = (carteCourante()?.noeuds ?? []).find(x => {
-    const a = x.nom.toLowerCase(), b = m.nom.toLowerCase();
-    return a === b || a.includes(b) || b.includes(a);
-  }) ?? null;
+  /*
+   * L'ANCRAGE REMPLACE LA RESSEMBLANCE DE NOMS.
+   *
+   * On cherchait un nœud dont le nom contenait celui du motif : « la weed »
+   * trouvait « la weed le soir », et tout le reste ne trouvait rien. C'était
+   * une coïncidence de vocabulaire présentée comme un lien, et elle manquait
+   * précisément les cas intéressants — un mécanisme et la chose qu'il touche
+   * ne portent presque jamais le même nom.
+   *
+   * L'ancrage, lui, est COMPTÉ : même test exact de Fisher sur la journée
+   * écrite suivante que les liens de la carte (voir server/promotion.js). Il ne
+   * dit pas « ça s'appelle pareil », il dit « ceci, et cela juste après, tant
+   * de fois sur tant ». Et il vit tant que le motif est un motif : c'est la
+   * flèche entre la liste et la carte, pas un nœud de plus.
+   */
+  const etat = (PROMOTION?.motifs ?? []).find(x => x.id === m.id) ?? null;
+  const a = etat?.ancrages?.[0] ?? null;
   return {
     cle: `motif:${m.id}`, nom: m.nom, teinte: m.teinte,
     intensite: m.serie?.at(-1)?.valeur ?? 1,
@@ -3084,8 +3125,11 @@ function motifMeca(m) {
       <p class="tquoi">${esc(m.mecanisme)}</p>
       <p class="mmeta">
         Reconnu <b>${m.vues}</b> fois, la dernière le ${fmtDay(m.vu_le.slice(0, 10))}.
-        ${lie ? `Sur la carte : <b>${esc(lie.nom)}</b>.` : ''}
       </p>
+      ${a ? `<p class="mancre">${ico('fleche', 12)}Sur ta carte, ${
+        esc(PROMO_SENS[a.sens](a.noeud))} — <b>${a.apres}</b> fois sur ${a.sur}.</p>` : ''}
+      ${etat?.etat === 'promu' ? `<p class="mancre promuici">${ico('valider', 12)}Il est sur
+        ta carte — tu l'as accepté.</p>` : ''}
       <div class="mpalette">
         ${TEINTES_DECLAREES.map(t => `<button data-teinte="${t}" data-pour="${m.id}"
           style="--t:${t}" aria-pressed="${m.teinte === t}" aria-label="Teinte ${t}"></button>`).join('')}
@@ -3198,10 +3242,127 @@ function chosesMarkup(noeuds, ouvert = false) {
  * de leur piste, en retrait. Un noeud est une CHOSE de sa vie, un mecanisme est
  * ce qu'elle fait -- et l'un explique l'autre.
  */
+/* ===================== UN MOTIF MONTE S'IL TIENT =====================
+ *
+ * La liste des motifs vivait SOUS la carte sans jamais la toucher, alors que
+ * les deux sont faites de la même matière : un motif est une liste de dates
+ * portant un nom, un nœud de la carte aussi. Un motif s'ancre donc à un nœud
+ * par une flèche comptée dès qu'un lien tient — et il devient un nœud
+ * seulement s'il revient assez, réparti, ET que la personne dit oui.
+ *
+ * UNE PROPOSITION À LA FOIS, JAMAIS LA LISTE.
+ *
+ * « Voilà les onze mécanismes qu'on a repérés chez toi, classés par fréquence »
+ * est une machine à ressasser : c'est la distinction ressassement / réflexion
+ * (Treynor & Nolen-Hoeksema), et c'est la forme qui décide, pas le contenu.
+ * « Celui-là revient assez pour figurer sur ta carte — tu veux ? », avec ses
+ * journées à l'appui, demande une lecture. On n'en montre donc qu'un, et le
+ * compteur dit combien attendent derrière — sans les nommer.
+ */
+let PROMOTION = null;      // ce que rend GET /api/promotion
+let PROMO_VUE = 0;         // laquelle des propositions est à l'écran
+
+const PROMO_MANQUE = {
+  journees: (a, f) => `${a} journée${a > 1 ? 's' : ''} sur les ${f} qu'il faut`,
+  reprises: (a, f) => `${a} retour${a > 1 ? 's' : ''} sur les ${f} qu'il faut — ` +
+                      `des journées d'affilée font un seul retour`,
+  ancrage: () => 'aucun lien compté vers une chose de ta carte',
+};
+
+const PROMO_SENS = {
+  de: n => `revient AVANT « ${n} »`,
+  vers: n => `revient APRÈS « ${n} »`,
+  deux: n => `va avec « ${n} », dans les deux sens`,
+};
+
+/**
+ * LA PROPOSITION : ce qu'on a compté, et la question.
+ *
+ * Trois choses et pas une de plus — le nom, la frise des journées, le compte
+ * qui a fait tenir le lien. Pas de score, pas de « gravité », pas de rang :
+ * seulement des faits datés, et deux boutons.
+ */
+function promoMarkup() {
+  /*
+   * LES RETENUS SONT MONTRÉS AVEC LES PROPOSÉS, PAS CACHÉS.
+   *
+   * Un mécanisme dont les comptes y sont mais qui ne peut pas monter — son nom
+   * emprunte au vocabulaire du diagnostic, ou un nœud porte déjà ce nom — a le
+   * droit d'être vu avec ses journées. C'est le bouton qui change, pas la
+   * carte : au lieu de « le mettre sur ma carte », l'écran dit ce qui le
+   * retient et ce qu'il y a à faire. Le cacher ferait disparaître le mécanisme
+   * le plus repéré de quelqu'un sans un mot.
+   */
+  const props = (PROMOTION?.motifs ?? []).filter(m => m.etat === 'proposable' || m.retenu);
+  if (!props.length) return '';
+  const i = Math.min(PROMO_VUE, props.length - 1);
+  const m = props[i];
+  const a = m.ancrages?.[0] ?? null;
+  const serie = m.jours.map(j => ({ periode: j, valeur: 2 }));
+  const retenu = !!m.retenu;
+  return `<div class="promo${retenu ? ' retenu' : ''}" data-promo="${m.id}">
+    <div class="promotete">
+      ${ico('carte', 13)}<span>Ce mécanisme revient assez pour figurer sur ta carte</span>
+      ${props.length > 1 ? `<button class="promosuiv" data-promo-suiv="1"
+        title="Voir la suivante">${i + 1}/${props.length} →</button>` : ''}
+    </div>
+    <p class="promonom" style="--t:${m.teinte}">${esc(m.nom)}</p>
+    ${m.mecanisme ? `<p class="promoquoi">${esc(m.mecanisme)}</p>` : ''}
+    ${serieMarkup(serie, { titre: 'reconnu' })}
+    <ul class="promofaits">
+      <li><b>${m.mesure}</b> journées, en <b>${m.reprises}</b> retours</li>
+      ${a ? `<li>${esc(PROMO_SENS[a.sens](a.noeud))} — <b>${a.apres}</b> fois sur ${a.sur}</li>` : ''}
+    </ul>
+    ${m.nom_a_revoir ? `<p class="promoalerte">${ico('alerte', 12)}<span>Ce nom vient du
+      vocabulaire des soignants, pas du tien. Il reste tel quel dans ta liste — mais la carte dure
+      et se relit, et ce qui est dit avec tes mots s'y lit comme une observation là où un mot
+      emprunté s'y installe comme une étiquette. <b>Renomme-le dans tes mots</b> et il pourra
+      monter.</span></p>` : ''}
+    ${m.collision ? `<p class="promoalerte">${ico('alerte', 12)}<span>Ta carte porte déjà une chose
+      de ce nom. Deux nœuds identiques en rendraient un inatteignable : <b>renomme celui-ci</b> pour
+      qu'on puisse les distinguer.</span></p>` : ''}
+    <div class="promogestes">
+      ${retenu
+        ? `<button class="promooui" data-meca-aller="motif:${m.id}">Le renommer</button>`
+        : `<button class="promooui" data-promo-oui="${m.id}">Le mettre sur ma carte</button>`}
+      <button class="promonon" data-promo-non="${m.id}">Pas celui-là</button>
+    </div>
+    <p class="promopied">Rien ne monte tout seul, et tout peut redescendre.</p>
+  </div>`;
+}
+
+/**
+ * CE QUI EST DÉJÀ MONTÉ, ET COMMENT LE FAIRE REDESCENDRE.
+ *
+ * Un accord qu'on ne peut pas retirer n'est pas un accord : la ligne existe
+ * pour ça, et pour rien d'autre. Elle ne s'affiche que s'il y a quelque chose
+ * à retirer.
+ */
+function promusMarkup() {
+  const p = (PROMOTION?.motifs ?? []).filter(m => m.etat === 'promu');
+  if (!p.length) return '';
+  return `<div class="promus">
+    <div class="k faint">Sur ta carte — tu l'as accepté</div>
+    <ul>${p.map(m => `<li>
+      <span class="promusnom" style="--t:${m.teinte}">${esc(m.nom)}</span>
+      <button class="promusdel" data-promo-retour="${m.id}"
+        title="Le retirer de la carte — il reste dans ta liste">retirer</button>
+    </li>`).join('')}</ul>
+  </div>`;
+}
+
 function mecaGroupes(lecture) {
   const tous = mecanismes(lecture);
   const pistes = lecture?.pistes ?? [];
-  const noeuds = lecture?.carte?.noeuds ?? [];
+  /*
+   * UN MOTIF PROMU N'APPARAÎT PAS DEUX FOIS DANS LA MÊME COLONNE.
+   *
+   * Il est un nœud sur la CARTE — c'est tout l'objet de la promotion — mais
+   * sous la carte il a déjà sa ligne de motif, avec son compte et sa frise. Le
+   * laisser passer aussi comme « chose » écrivait le même nom deux fois dans le
+   * même groupe, à deux lignes d'intervalle, sans que rien ne l'explique.
+   */
+  const noeuds = (lecture?.carte?.noeuds ?? []).filter(n => !n.promu);
   if (!pistes.length && !noeuds.length) return mecaListe(tous);
 
   const ilotDe = ilotDesNoeuds(lecture?.carte, pistes);
@@ -3495,7 +3656,6 @@ function brancherBande() {
 }
 
 /** La carte de la lecture affichée, pour rapprocher un motif d'un nœud. */
-const carteCourante = () => LECTURE?.lecture?.carte ?? null;
 
 /**
  * La carte organique.
@@ -3612,6 +3772,21 @@ function noeudMarkup() {
        * rien casser — il faut une relecture pour les voir apparaître.
        */''}
     ${p.quoi ? `<p class="ncquoi">${esc(p.quoi)}</p>` : ''}
+
+    ${/* CE NŒUD EST MONTÉ DEPUIS TES MOTIFS, ET LE PANNEAU LE DIT.
+          Un nœud écrit par le modèle et un nœud que la personne a accepté ne
+          sont pas le même objet : le premier est une lecture, le second un
+          accord. Les confondre à l'écran reviendrait à faire passer l'un pour
+          l'autre — et le retrait doit être là où l'on regarde le nœud, pas
+          dans un réglage. */''}
+    ${(() => {
+      const pm = (PROMOTION?.motifs ?? []).find(m =>
+        m.etat === 'promu' && m.nom.toLowerCase() === String(p.nom).toLowerCase());
+      if (!pm) return '';
+      return `<p class="ncpromu">${ico('valider', 12)}Monté depuis tes motifs — tu l'as accepté.
+        Reconnu <b>${pm.mesure}</b> journées en <b>${pm.reprises}</b> retours.
+        <button class="ncpromudel" data-promo-retour="${pm.id}">le retirer de la carte</button></p>`;
+    })()}
 
     ${p.extraits.length ? `<div class="ncbloc">
       <span class="nck">Là où ça revient</span>
@@ -4255,11 +4430,15 @@ async function renderLecture() {
   MIRROR_DATE = null;
   // La lecture (par modèle) et les fonctionnements (comptés ici) partent ensemble :
   // le second n'a pas à attendre le premier, il n'en dépend pas.
-  const [l, f, p] = await Promise.all([
+  const [l, f, p, pr] = await Promise.all([
     LECTURE ?? api('/api/lecture'),
     FONCT ?? api('/api/fonctionnements').catch(() => null),
-    PRISES ?? api('/api/prises').catch(() => null)]);
-  LECTURE = l; FONCT = f; PRISES = p;
+    PRISES ?? api('/api/prises').catch(() => null),
+    // La promotion ne bloque rien : sans elle la page est celle d'avant, sans
+    // proposition. C'est la bonne dégradation — une question qu'on ne pose pas
+    // vaut mieux qu'un écran qui n'arrive pas.
+    PROMOTION ?? api('/api/promotion').catch(() => null)]);
+  LECTURE = l; FONCT = f; PRISES = p; PROMOTION = pr;
   const L = LECTURE;
 
   /*
@@ -4299,7 +4478,12 @@ async function renderLecture() {
     corps = `
       <div class="lectgrille">
         <div class="lectcarte">${carteMarkup(L.lecture.carte)}${bandeMarkup(L.lecture)}</div>
-        <div class="lectmeca">${mecaGroupes(L.lecture)}</div>
+        ${/* La proposition est EN HAUT de la colonne des mécanismes : c'est
+              d'eux qu'elle parle, et une question posée au milieu d'une liste
+              ne se voit pas. Elle disparaît dès qu'il n'y a plus rien à
+              proposer — un encart permanent qui dit « rien à proposer » est
+              exactement l'exhaustivité permanente qu'on cherche à éviter. */''}
+        <div class="lectmeca">${promoMarkup()}${promusMarkup()}${mecaGroupes(L.lecture)}</div>
         <aside class="lectdit">
           ${/* Le nœud ouvert prend la place de la synthèse : c'est une réponse à
                 un geste qu'on vient de faire, elle passe devant un texte qui,
@@ -4604,6 +4788,46 @@ function wireLecture() {
       } catch (err) { toast(err.message); }
       return;
     }
+    /*
+     * MONTER, ÉCARTER, RETIRER — et voir la proposition suivante.
+     *
+     * Les trois gestes passent par la même route et rendent le même objet : un
+     * seul aller-retour, et l'état de tous les motifs revient avec. `LECTURE`
+     * est vidée parce qu'un nœud vient d'apparaître ou de disparaître sur la
+     * carte, et la carte est calculée côté serveur.
+     */
+    const pg = e.target.closest('[data-promo-oui],[data-promo-non],[data-promo-retour]');
+    if (pg) {
+      const d = pg.dataset;
+      const id = Number(d.promoOui ?? d.promoNon ?? d.promoRetour);
+      const oui = 'promoOui' in d ? true : 'promoNon' in d ? false : null;
+      pg.disabled = true;
+      try {
+        PROMOTION = await api('/api/promotion', { id, oui });
+        PROMO_VUE = 0;
+        // Un nœud vient de monter ou de descendre : la carte n'est plus celle
+        // qu'on a en mémoire.
+        if (oui !== false) LECTURE = null;
+        return renderLecture();
+      } catch (err) { pg.disabled = false; return toast(err.message); }
+    }
+    /* « Le renommer » ouvre la fiche du motif dans la liste en dessous, où le
+       champ existe déjà. Une seconde façon de renommer, dans la carte, serait
+       une seconde façon de diverger. */
+    const ma = e.target.closest('[data-meca-aller]');
+    if (ma) {
+      MIR_THEME = ma.dataset.mecaAller;
+      await renderLecture();
+      const el = $('#view')?.querySelector(`[data-meca="${CSS.escape(MIR_THEME)}"]`);
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    if (e.target.closest('[data-promo-suiv]')) {
+      const n = (PROMOTION?.motifs ?? []).filter(m => m.etat === 'proposable' || m.retenu).length;
+      PROMO_VUE = n ? (PROMO_VUE + 1) % n : 0;
+      return renderLecture();
+    }
+
     const dm = e.target.closest('[data-delmotif]');
     if (dm) {
       try {

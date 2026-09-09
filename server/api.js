@@ -3,6 +3,7 @@ import {
   addMessage, messagesForDate, recentMessages, filAncre, allEvents, deleteEvent,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
+  promouvoirMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, relevesDeToi, amplitude, amplitudes, TEINTES,
@@ -28,6 +29,7 @@ import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
 import { sensDesLiens } from './sens.js';
+import { etats as etatsMotifs, injecterPromus, SEUILS_PROMOTION } from './promotion.js';
 import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
          chiffresDuJour, contient, COUCHER, LEVER, DERNIERE, PREMIERE } from './allure.js';
 import { lireDigest } from './digest.js';
@@ -1262,6 +1264,21 @@ function aNoter(rows, aujourdhui) {
 export function lectureARefondre(userId) {
   const l = getLecture(userId);
   return !!l?.contenu && (Number(l.contenu.version) || 1) < VERSION_LECTURE;
+}
+
+/**
+ * OÙ EN EST CHAQUE MOTIF, VIS-À-VIS DE LA CARTE.
+ *
+ * Une seule source pour les deux routes qui en ont besoin : celle qui rend la
+ * lecture (pour y poser les nœuds promus) et celle qui rend la liste des
+ * motifs (pour y montrer les propositions). Deux calculs séparés finiraient par
+ * diverger, et la divergence se lirait comme un nœud proposé d'un côté et
+ * absent de l'autre — ce que personne ne saurait expliquer.
+ */
+export function etatDesMotifs(userId, carte = null) {
+  const c = carte ?? getLecture(userId)?.contenu?.carte ?? null;
+  const ecrites = series(userId).rows.filter(r => r.text && r.text.trim()).map(r => r.date);
+  return etatsMotifs(allMotifs(userId), motifSeries(userId), c, ecrites);
 }
 
 export function corpusDuJournal(userId, rows = series(userId).rows,
@@ -2704,7 +2721,29 @@ export const routes = {
       // Une lecture faite avant la bascule vers « tout le journal » : elle
       // s'affiche, mais elle est perimee par construction.
       ancienne: !!l?.ancienne,
-      lecture: l?.contenu ? decorerCarte(l.contenu, series(userId).byDate, textesParJour(userId)) : null,
+      /*
+       * LES MOTIFS PROMUS SONT POSÉS SUR LA CARTE ICI, AU RENDU.
+       *
+       * Pas en base : la lecture stockée reste ce que le modèle a écrit. Un
+       * nœud promu apparaît quand la carte part vers l'écran et disparaît si la
+       * personne revient en arrière — donc une relecture ne l'efface pas, et
+       * une promotion ne salit pas la lecture. Les deux objets gardent leur
+       * nature, ce qui est la seule raison pour laquelle cette fonctionnalité
+       * n'est pas « tous les motifs deviennent des nœuds » avec des étapes.
+       *
+       * L'injection passe AVANT `decorerCarte` : le nœud promu reçoit alors ses
+       * journées décorées et ses extraits comme n'importe quel autre, et
+       * `sensDesLiens` recompte ses flèches avec la même règle que celles du
+       * modèle. Un traitement à part se verrait, et se verrait comme un
+       * privilège.
+       */
+      lecture: l?.contenu
+        ? decorerCarte(
+            l.contenu.carte
+              ? { ...l.contenu, carte: injecterPromus(l.contenu.carte, etatDesMotifs(userId, l.contenu.carte)) }
+              : l.contenu,
+            series(userId).byDate, textesParJour(userId))
+        : null,
       fait_le: l?.fait_le ?? null,
       jours: l?.jours ?? 0,
       modele: l?.modele ?? null,
@@ -2835,6 +2874,58 @@ export const routes = {
   },
 
   'GET /api/motifs': ({ userId }) => motifsDuFil(userId),
+
+  /**
+   * OÙ EN EST CHAQUE MOTIF, ET CE QUI LUI MANQUE POUR MONTER.
+   *
+   * `manque` part avec l'état, toujours : un seuil qu'on ne peut pas voir est
+   * un seuil qu'on ne peut pas contester, et celui-ci sera contesté — c'est un
+   * chiffre choisi, pas une loi.
+   */
+  'GET /api/promotion': ({ userId }) => {
+    const carte = getLecture(userId)?.contenu?.carte ?? null;
+    return {
+      seuils: SEUILS_PROMOTION,
+      // Sans carte, aucun motif ne peut s'ancrer : l'écran doit le dire plutôt
+      // que d'afficher onze mécanismes qui « n'ont pas assez de liens ».
+      carte: carte?.noeuds?.length ?? 0,
+      motifs: etatDesMotifs(userId, carte),
+    };
+  },
+
+  /**
+   * MONTER, ÉCARTER, REVENIR EN ARRIÈRE.
+   *
+   * Trois gestes et pas deux. Sans le troisième, un « non » cliqué par erreur
+   * serait définitif et un « oui » regretté resterait sur la carte — or c'est
+   * précisément le geste qui sépare une lecture collaborative d'un verdict.
+   */
+  'POST /api/promotion': ({ body, userId }) => {
+    const id = Number(body?.id);
+    if (!Number.isInteger(id)) return { error: 'Quel motif ?' };
+    const oui = body.oui === true ? true : body.oui === false ? false : null;
+    /*
+     * ON NE MONTE QUE CE QUI EST PROPOSABLE. La route est le seul chemin, et
+     * un client (ou un onglet resté ouvert depuis avant que le compte change)
+     * pourrait sinon promouvoir un motif à trois journées. Écarter et revenir
+     * en arrière restent permis dans tous les cas : ce sont des retraits.
+     */
+    if (oui === true) {
+      const e = etatDesMotifs(userId).find(x => x.id === id);
+      if (!e) return { error: `Aucun motif #${id}.` };
+      if (e.etat !== 'proposable' && e.etat !== 'ecarte') {
+        return { error: 'Ce motif ne remplit pas encore les conditions.', manque: e.manque };
+      }
+      if (e.etat === 'ecarte' && e.manque.length) {
+        return { error: 'Ce motif ne remplit plus les conditions.', manque: e.manque };
+      }
+    }
+    const r = promouvoirMotif(id, oui, userId);
+    if (!r.ok) return { error: `Aucun motif #${id}.` };
+    const carte = getLecture(userId)?.contenu?.carte ?? null;
+    return { seuils: SEUILS_PROMOTION, carte: carte?.noeuds?.length ?? 0,
+             motifs: etatDesMotifs(userId, carte) };
+  },
 
   /**
    * Retirer un motif. C'est le compagnon qui les cree, mais c'est la personne

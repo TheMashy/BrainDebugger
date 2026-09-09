@@ -135,7 +135,12 @@ CREATE TABLE IF NOT EXISTS motifs (
   teinte     INTEGER NOT NULL,         -- degres HSL, choisis par l'app
   cree_le    TEXT NOT NULL,
   vu_le      TEXT NOT NULL,
-  vues       INTEGER NOT NULL DEFAULT 1
+  vues       INTEGER NOT NULL DEFAULT 1,
+  -- La montee sur la carte : un geste de la personne, jamais un effet de bord
+  -- d'un calcul, et reversible dans les deux sens (voir server/promotion.js).
+  promu      INTEGER NOT NULL DEFAULT 0,
+  promu_le   TEXT,
+  ecarte_le  TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_motifs_nom ON motifs(user_id, nom);
 
@@ -384,6 +389,18 @@ CREATE TABLE IF NOT EXISTS settings (
  */
 for (const [table, colonne, decl] of [
   ['releves', 'source', "TEXT NOT NULL DEFAULT 'modele'"],
+  /*
+   * UN MOTIF MONTE S'IL TIENT — et il redescend s'il ne tient plus.
+   *
+   * Trois colonnes, et aucune n'est un verdict : `promu` dit que la personne a
+   * accepte que ce motif figure sur sa carte, `ecarte_le` qu'elle a dit non
+   * (pour qu'on ne le lui redemande pas a chaque ouverture), `promu_le` quand.
+   * Les deux gestes sont reversibles, ce qui est la moitie du garde-fou : un
+   * accord qu'on ne peut pas retirer n'est pas un accord.
+   */
+  ['motifs', 'promu', 'INTEGER NOT NULL DEFAULT 0'],
+  ['motifs', 'promu_le', 'TEXT'],
+  ['motifs', 'ecarte_le', 'TEXT'],
 ]) {
   try {
     const a = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -1165,7 +1182,7 @@ export { TEINTES };
 
 export function allMotifs(userId = OWNER) {
   return db.prepare(
-    'SELECT id, nom, mecanisme, teinte, cree_le, vu_le, vues FROM motifs WHERE user_id = ? ORDER BY vues DESC, id ASC'
+    'SELECT id, nom, mecanisme, teinte, cree_le, vu_le, vues, promu, promu_le, ecarte_le FROM motifs WHERE user_id = ? ORDER BY vues DESC, id ASC'
   ).all(userId);
 }
 
@@ -1363,6 +1380,28 @@ export function renommerMotif(id, { nom, mecanisme }, userId = OWNER) {
     if (pris) return { erreur: 'ce nom est déjà pris' };
   }
   db.prepare('UPDATE motifs SET nom = ?, mecanisme = ? WHERE id = ? AND user_id = ?').run(n, m, id, userId);
+  return { ok: true, motif: db.prepare('SELECT * FROM motifs WHERE id = ?').get(id) };
+}
+
+/**
+ * UN MOTIF MONTE SUR LA CARTE, OU IL N'Y MONTE PAS.
+ *
+ * `oui` a trois valeurs et pas deux : accepter (true), ecarter (false), et
+ * REVENIR EN ARRIERE (null). Sans la troisieme, un « non » clique par erreur
+ * serait definitif et un « oui » regrette resterait sur la carte -- or c'est
+ * exactement le geste qui separe une lecture collaborative d'un verdict.
+ * Revenir en arriere remet le motif la ou il etait, et il sera reproposE.
+ */
+export function promouvoirMotif(id, oui, userId = OWNER, quand = new Date().toISOString()) {
+  const m = db.prepare('SELECT id FROM motifs WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!m) return { ok: false, raison: 'inconnu' };
+  if (oui === true) {
+    db.prepare('UPDATE motifs SET promu = 1, promu_le = ?, ecarte_le = NULL WHERE id = ?').run(quand, id);
+  } else if (oui === false) {
+    db.prepare('UPDATE motifs SET promu = 0, promu_le = NULL, ecarte_le = ? WHERE id = ?').run(quand, id);
+  } else {
+    db.prepare('UPDATE motifs SET promu = 0, promu_le = NULL, ecarte_le = NULL WHERE id = ?').run(id);
+  }
   return { ok: true, motif: db.prepare('SELECT * FROM motifs WHERE id = ?').get(id) };
 }
 
