@@ -135,6 +135,56 @@ export function ensureUserTables(db) {
   for (const [table, col, type] of AJOUTS) {
     if (!hasColumn(db, table, col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
   }
+
+  attribuerLesAnciensAppels(db);
+}
+
+/*
+ * D'OU VENAIT LA DEPENSE, AVANT QU'ON LA NOTE.
+ *
+ * `usage.source` est arrivee apres coup, donc NULL sur tout le passe -- et
+ * « on ne le devinera pas » etait la bonne reponse tant qu'on ne savait pas
+ * lire. Le probleme, c'est que les courbes PAR ECHANGE (les jetons d'un
+ * echange, ses euros, la part relue du cache) se calculent source par source :
+ * melanger une relecture de la carte et une conversation ferait des deux un
+ * seul echange, et l'echange le plus cher du mois serait un artefact. Les
+ * lignes sans source etaient donc simplement absentes de ces trois mesures --
+ * un trou sur toute la periode d'avant, c'est-a-dire exactement la partie qui
+ * dit si l'optimisation a servi.
+ *
+ * CE N'EST PAS UNE DEVINETTE, C'EST UNE LECTURE. Avant cette colonne, `record`
+ * n'avait que CINQ appelants : trois pour la carte, deux pour le chat. Et les
+ * deux du chat sont suivis, la ligne d'apres et sans rien entre les deux, d'un
+ * `addMessage({ role: 'pet' })`. Un appel suivi d'une reponse du compagnon
+ * dans la seconde est donc un echange de chat -- c'est le journal lui-meme qui
+ * le dit, pas une ressemblance. Le reste est la carte, par elimination sur une
+ * liste fermee de cinq appelants.
+ *
+ * Ce qui peut se tromper, et qu'on assume : une conversation interrompue avant
+ * la reponse (le modele a echoue, la personne a ferme l'onglet) n'a pas de
+ * message derriere elle et sera comptee comme carte. C'est rare, c'est petit,
+ * et ca ne deplace pas une mediane.
+ *
+ * Idempotent : apres un passage il ne reste plus de NULL, et la requete de
+ * garde ne trouve plus rien.
+ */
+export function attribuerLesAnciensAppels(db) {
+  if (!tableExists(db, 'usage') || !tableExists(db, 'messages')
+      || !hasColumn(db, 'usage', 'source')) return 0;
+  const restants = db.prepare('SELECT COUNT(*) n FROM usage WHERE source IS NULL').get()?.n ?? 0;
+  if (!restants) return 0;
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_user_ts ON messages(user_id, ts);
+    UPDATE usage SET source = 'chat'
+     WHERE source IS NULL AND EXISTS (
+       SELECT 1 FROM messages m
+        WHERE m.user_id = usage.user_id AND m.role = 'pet'
+          AND CAST(strftime('%s', m.ts) AS INTEGER)
+              BETWEEN CAST(strftime('%s', usage.ts) AS INTEGER)
+                  AND CAST(strftime('%s', usage.ts, '+3 seconds') AS INTEGER));
+    UPDATE usage SET source = 'carte' WHERE source IS NULL;
+  `);
+  return restants;
 }
 
 const AJOUTS = [
@@ -152,8 +202,9 @@ const AJOUTS = [
   /*
    * D'OU VIENT LA DEPENSE : le chat (une conversation, au premier plan) ou la
    * carte (relecture, retissage -- le travail de fond). Sans cette colonne, on
-   * voit COMBIEN part sans voir SI ca part en fond. NULL sur les lignes d'avant :
-   * on ne sait pas, et on ne le devinera pas.
+   * voit COMBIEN part sans voir SI ca part en fond. NULL sur les lignes d'avant,
+   * et ces NULL-la sont rattrapes par `attribuerLesAnciensAppels` : le journal
+   * lui-meme dit lesquelles etaient du chat.
    */
   ['usage', 'source', 'TEXT'],
   ['events', 'fin',    'TEXT'],     // NULL = un instant, sinon une periode

@@ -4571,7 +4571,7 @@ function fonctionnementsMarkup(F, { nu = false } = {}) {
    * rétroactif. On le dit à l'endroit exact où le chiffre se lit.
    */
   const pas = p.mesure_depuis && p.de < p.mesure_depuis
-    ? ` · les nuits et l’écran ne sont mesurés que depuis le ${fmtDay(p.mesure_depuis)}` : '';
+    ? ` · Machi Tool ne mesure que depuis le ${fmtDay(p.mesure_depuis)}${p.nuits_dites ? `, mais ${p.nuits_dites > 1 ? 'des nuits sont écrites' : 'une nuit est écrite'} avant` : ''}` : '';
   const large = p.elargie
     ? ` · remontée jusqu’à ta première journée pour rassembler ${p.nourries} journées avec quelque chose dedans` : '';
   const tete = nu ? '' : `<div class="fonctete">

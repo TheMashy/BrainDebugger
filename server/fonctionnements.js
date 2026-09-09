@@ -39,7 +39,7 @@
  */
 import { allEntries, activiteEntre, mesuresEntre, messagesForDate, OWNER } from './db.js';
 import { veilleDuJour, niveauDuTexte } from './veille.js';
-import { nuitDuJour, rythmeUtilisateur } from './nuits.js';
+import { nuitDuJour, rythmeUtilisateur, MIN_NUIT, MAX_NUIT } from './nuits.js';
 import { jourLocal } from './temps.js';
 import { addDays } from './stats.js';
 import { normaliserCle } from './mesures.js';
@@ -279,13 +279,55 @@ export function tableDe(userId = OWNER, { jours = SEUILS.jours_defaut, jusquA = 
   // Les mesures apportées (montre, balance, ou dites). Ce qui est DIT passe devant ce qui est mesuré,
   // comme dans posteDuJour : « je me couche » est une phrase de la personne, l'extinction du poste une déduction.
   const series = new Map();
+  // Les jours dont une borne vient de la PERSONNE et non d'une machine : c'est
+  // la seule condition qui autorise à recalculer une nuit ci-dessous.
+  const ditLever = new Set(), ditCoucher = new Set();
   for (const m of mesuresEntre(debut, fin, userId)) {
     const cle = normaliserCle(m.cle); if (!cle) continue;
-    if (cle === 'lever_dit') { const h = enHeures(m.texte ?? m.valeur); if (h != null) ligne(m.date).lever = h; continue; }
-    if (cle === 'coucher_dit') { const h = coucherContinu(m.texte ?? m.valeur); if (h == null) continue; const d = h >= 24 ? addDays(m.date, -1) : m.date; if (d >= debut && d <= fin) ligne(d).coucher = h; continue; }
+    if (cle === 'lever_dit') { const h = enHeures(m.texte ?? m.valeur); if (h != null) { ligne(m.date).lever = h; ditLever.add(m.date); } continue; }
+    if (cle === 'coucher_dit') { const h = coucherContinu(m.texte ?? m.valeur); if (h == null) continue; const d = h >= 24 ? addDays(m.date, -1) : m.date; if (d >= debut && d <= fin) { ligne(d).coucher = h; ditCoucher.add(d); } continue; }
     if (!fini(+m.valeur)) continue;
     if (!series.has(cle)) series.set(cle, new Map());
     series.get(cle).set(m.date, +m.valeur);
+  }
+
+  /*
+   * DEUX BORNES DITES FONT UNE NUIT — ICI AUSSI.
+   *
+   * `nuits()` le fait depuis longtemps : « je vais me coucher » le soir, « je
+   * viens de me lever » le matin, et la durée entre les deux est une nuit
+   * MESURÉE — pas déduite, témoignée. Cette table-là ne le faisait pas : elle
+   * remplaçait bien le lever et le coucher par ce qui avait été dit, mais
+   * gardait le `sommeil_h` du digest, ou rien du tout quand Machi Tool n'avait
+   * rien envoyé ce jour-là.
+   *
+   * Ce qui donnait exactement ce que le commentaire au-dessus interdit : « Ma
+   * carte » comptait une nuit, « Comment ça marche chez toi » n'en comptait
+   * pas, sur la même journée. Et comme les bornes dites, elles, se relisent sur
+   * TOUT le journal (`relireLesBornesDites`), tout un passé de nuits écrites
+   * noir sur blanc restait invisible à cette page — celle qui dit justement
+   * qu'il n'y a pas assez de nuits pour compter.
+   *
+   * LA CONDITION EST LA MÊME QUE DANS `nuits()` : il faut qu'au moins une des
+   * deux bornes ait été DITE. Deux bornes de machine ont déjà été jugées par
+   * `nuitDuJour`, qui a ses raisons de refuser une paire ; recalculer la durée
+   * à partir de la même paire écartée reviendrait à passer outre son avis avec
+   * les chiffres qu'il vient de rejeter.
+   *
+   * Les bornes de la nuit qui OUVRE le jour D : le coucher du soir de D−1 et le
+   * lever du matin de D. En heures continues, le coucher vaut 12 à 36 (23:00 =
+   * 23, 06:48 = 30,8), donc la durée est `lever + 24 − coucher`.
+   */
+  for (let d = addDays(debut, 1); d <= fin; d = addDays(d, 1)) {
+    if (!ditLever.has(d) && !ditCoucher.has(addDays(d, -1))) continue;
+    const l = ligne(d), c = ligne(addDays(d, -1)).coucher;
+    if (c == null || l.lever == null) continue;
+    const duree = l.lever + 24 - c;
+    if (duree < MIN_NUIT || duree > MAX_NUIT) continue;
+    l.sommeil_h = Math.round(duree * 10) / 10;
+    // D'où vient cette nuit-là : la jauge en dessous doit pouvoir dire « celles-ci
+    // ne viennent pas de Machi Tool », sinon son explication devient fausse.
+    l.nuit_dite = true;
   }
   const extras = [];
   for (const [cle, valeurs] of series) {
@@ -639,13 +681,29 @@ export function analyserTable(T) {
    * les deux, dans l'ordre où ça se casse.
    */
   const avecDigest = T.jours.filter(j => fini(j.ecran_min) || fini(j.sommeil_h) || fini(j.coucher)).length;
+  /*
+   * UNE NUIT ÉCRITE N'A PAS BESOIN DE MACHI TOOL, et l'explication doit le
+   * dire : depuis que deux bornes dites font une nuit ici comme dans « Ma
+   * carte », une phrase du soir et une phrase du matin suffisent. Compter ces
+   * nuits-là dans le « dont N » de Machi Tool rendrait la phrase fausse dans le
+   * sens qui décourage — « il ne mesure rien » alors que c'est la personne qui
+   * a mesuré elle-même.
+   */
+  const nuitsDites = T.jours.filter(j => j.nuit_dite).length;
+  const parMachine = nuits - nuitsDites;
+  const quEllesDisent = nuitsDites
+    ? ` ${pl(nuitsDites, 'nuit vient', 'nuits viennent')} de tes propres phrases : « je vais me coucher » le soir, `
+      + '« je viens de me lever » le matin, et la durée entre les deux.'
+    : '';
   const pourquoiNuits = avecDigest === 0
-    ? 'Machi Tool n’a rien envoyé sur cette période : sans lui, une nuit ne se mesure pas.'
-    : nuits >= avecDigest
-      ? `${pl(avecDigest, 'journée mesurée', 'journées mesurées')} par Machi Tool, et toutes donnent leur nuit — il en faut simplement plus.`
-      : `${pl(avecDigest, 'journée mesurée', 'journées mesurées')} par Machi Tool, dont ${nuits} `
-        + `donne${nuits > 1 ? 'nt' : ''} une nuit. Les autres n’ont pas de silence assez net pour en tirer un coucher `
-        + `et un lever — l’ordinateur laissé allumé, ou éteint toute la journée.`;
+    ? (nuitsDites
+        ? `Machi Tool n’a rien envoyé sur cette période.${quEllesDisent}`
+        : 'Machi Tool n’a rien envoyé sur cette période : sans lui, il reste à écrire ton coucher et ton lever pour qu’une nuit se mesure.')
+    : parMachine >= avecDigest
+      ? `${pl(avecDigest, 'journée mesurée', 'journées mesurées')} par Machi Tool, et toutes donnent leur nuit — il en faut simplement plus.${quEllesDisent}`
+      : `${pl(avecDigest, 'journée mesurée', 'journées mesurées')} par Machi Tool, dont ${parMachine} `
+        + `donne${parMachine > 1 ? 'nt' : ''} une nuit. Les autres n’ont pas de silence assez net pour en tirer un coucher `
+        + `et un lever — l’ordinateur laissé allumé, ou éteint toute la journée.${quEllesDisent}`;
   const jauges = [
     { cle: 'notes', quoi: 'journées notées', a: notes, faut: SEUILS.min_notes, pour: 'les liens, la note d’un jour à l’autre' },
     { cle: 'paires', quoi: 'lendemains notés', a: paires, faut: SEUILS.min_paires, pour: 'la note d’un jour à l’autre' },
@@ -657,7 +715,7 @@ export function analyserTable(T) {
   return {
     periode: { de: T.de, a: T.a, jours: T.jours.length, nourries: T.nourries ?? null,
                elargie: !!T.elargie, mesure_depuis: T.mesure_depuis ?? null,
-               notes, nuits, ecrans, textes },
+               notes, nuits, nuits_dites: nuitsDites, ecrans, textes },
     assez, items, manques, jauges, exclus: EXCLUS,
     series: { dates: T.jours.map(j => j.date), note: T.jours.map(j => j.note), sommeil_h: T.jours.map(j => j.sommeil_h), coucher: T.jours.map(j => j.coucher), we: T.jours.map(j => j.we), nourri: T.jours.map(j => !!j.nourri) },
   };
