@@ -24,7 +24,7 @@ import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
-import { nuits, nuitDuJour, rythmeUtilisateur } from './nuits.js';
+import { nuits, nuitDuJour, rythmeUtilisateur, paireEstUneNuit, MIN_NUIT } from './nuits.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
@@ -878,12 +878,59 @@ export function posteDuJour(date, userId = OWNER) {
    * ne vaut qu'au delà des cinq premières minutes du jour civil.
    */
   const auBordDeMinuitOuvrant = h => (enMinutes(h) ?? 0) <= 5;
+  /*
+   * ================================================================
+   * UN LEVER EST PRÉCÉDÉ D'UN SILENCE. SINON CE N'EST PAS UN LEVER.
+   *
+   * Chez quelqu'un de nocturne encore debout à minuit, le fichier du jour
+   * s'ouvre à 00:19 — et 00:19 est passé pour un lever, avec `poste.reveil`
+   * comme avec `plage.de`. Sur une journée réelle : « levé 00:19, couché 16:27,
+   * 3,7 h », là où la personne s'était couchée à 11:30 et levée à 18:00. Les
+   * trois nombres étaient faux ensemble, et rien ne le disait.
+   *
+   * Le garde qui existait ne refusait que les cinq premières minutes du jour
+   * civil — un seuil arbitraire, que dix-neuf minutes suffisent à franchir. La
+   * règle juste ne parle pas d'heure : elle demande qu'il se soit passé quelque
+   * chose AVANT, ou plutôt que rien ne se soit passé. Une dernière touche à
+   * 23:59 et un « lever » à 00:19, c'est vingt minutes : personne n'a dormi, le
+   * fichier civil a simplement changé de nom.
+   *
+   * Sans digest de la veille on ne sait pas, et on accepte : refuser
+   * effacerait le lever de la première journée de tout le monde.
+   * ================================================================
+   */
+  const digVeille = activiteDuJour(addDays(date, -1), userId)?.digest ?? null;
+  const derniereActiviteAvant = min => {
+    // Sur un axe où 0 = minuit qui ouvre `date` ; la veille est négative.
+    const bouts = [];
+    const av = enMinutes(digVeille?.plage?.a);
+    if (av != null) bouts.push(av - 1440);
+    for (const tr of digVeille?.trous ?? []) {
+      const a = enMinutes(tr.a); if (a != null) bouts.push(a - 1440);
+    }
+    for (const tr of dig?.trous ?? []) {
+      const a = enMinutes(tr.a); if (a != null) bouts.push(a);
+    }
+    const avant = bouts.filter(t => t < min);
+    return avant.length ? Math.max(...avant) : null;
+  };
+  const apresUnSilence = h => {
+    const t = enMinutes(h);
+    if (t == null) return false;
+    const derniere = derniereActiviteAvant(t);
+    // Rien de connu avant : on ne sait pas, et on ne refuse pas.
+    return derniere == null || t - derniere >= MIN_NUIT * 60;
+  };
   const bornerLever = () => {
     const d = ditLever();
     if (d) return { heure: d, source: 'dit' };
     if (nuit?.lever && nuit.coucher) return { heure: nuit.lever, source: 'mesure' };
-    if (poste.reveil && poste.coucher) return { heure: poste.reveil, source: 'mesure' };
-    if (plage.de && !auBordDeMinuitOuvrant(plage.de)) return { heure: plage.de, source: 'estime' };
+    if (paireEstUneNuit(poste) && apresUnSilence(poste.reveil)) {
+      return { heure: poste.reveil, source: 'mesure' };
+    }
+    if (plage.de && !auBordDeMinuitOuvrant(plage.de) && apresUnSilence(plage.de)) {
+      return { heure: plage.de, source: 'estime' };
+    }
     return { heure: null, source: null };
   };
   /*
@@ -910,7 +957,9 @@ export function posteDuJour(date, userId = OWNER) {
    * n'ont rien donné ou se sont fait réfuter.
    */
   const candidatsCoucher = [
-    () => (posteFin.coucher && posteFin.reveil) ? { heure: posteFin.coucher, source: 'mesure' } : null,
+    // La paire du lendemain passe par le même juge : « couché 16:27, réveil
+    // 18:00 » n'est pas une nuit, et n'était donc pas un coucher.
+    () => paireEstUneNuit(posteFin) ? { heure: posteFin.coucher, source: 'mesure' } : null,
     // Le silence du clavier qui ferme D : il traverse minuit sans se faire
     // couper, là où `plage.a` s'arrête au bord du fichier du jour.
     () => nuitFin?.coucher ? { heure: nuitFin.coucher, source: 'mesure' } : null,
@@ -1045,14 +1094,26 @@ export function posteDuJour(date, userId = OWNER) {
     const c = proposer();
     if (c?.heure && !refute(c.heure)) { coucher = c; break; }
   }
-  const sommeil_h = nuit?.sommeil_h ?? poste.sommeil_h ?? null;
+  /*
+   * LA DURÉE VIENT DE LA NUIT RETENUE, ET DE NULLE PART AILLEURS.
+   *
+   * Elle se rabattait sur `poste.sommeil_h` quand aucune nuit n'était dérivée —
+   * c'est-à-dire précisément quand `nuitDuJour` venait de JUGER cette paire
+   * inutilisable. Le chiffre revenait alors par la fenêtre : « 3,7 h » sous un
+   * lever vide, sur une journée où la personne avait dormi six heures et demie.
+   * Un seul juge, une seule réponse.
+   */
+  const sommeil_h = nuit?.sommeil_h ?? null;
   if (!lever.heure && !coucher.heure && sommeil_h == null && !ecran) return null;
   // `dormi_de` : l'heure de coucher de la nuit QU'ON A DORMIE (celle qui va avec
   // `sommeil_h` et le réveil), lue telle quelle dans le digest. C'est ce qu'on
   // montre en « couché » sur la vue minimaliste — le sommeil comme un épisode
   // (couché -> levé -> durée), pas le coucher qui fermera CE soir.
   return { lever, coucher, sommeil_h,
-           dormi_de: nuit?.coucher ?? poste.coucher ?? null, nuit_souci: nuit?.souci ?? null, ecran };
+           // Même raison que `sommeil_h` : le coucher de la nuit DORMIE vient de
+           // la nuit retenue. Le reprendre au poste ressusciterait la paire que
+           // `nuitDuJour` vient d'écarter.
+           dormi_de: nuit?.coucher ?? null, nuit_souci: nuit?.souci ?? null, ecran };
 }
 
 /* Découpe un texte en phrases, pour situer une occurrence à l'endroit précis

@@ -58,7 +58,10 @@
 import { activiteEntre, mesuresDuJour, OWNER } from './db.js';
 import { addDays } from './stats.js';
 
-const MIN_NUIT = 2, MAX_NUIT = 16;           // heures ; en dehors, ce n'est pas une nuit
+// heures ; en dehors, ce n'est pas une nuit. Exportées : `posteDuJour` juge
+// avec les MÊMES bornes les paires que Machi Tool a appariées de son côté —
+// deux seuils pour la même question finiraient par se contredire.
+export const MIN_NUIT = 2, MAX_NUIT = 16;
 const FUSION_MIN = 30;                       // minutes de clavier qui ne coupent pas une nuit
 const FENETRE = [-12 * 60, 24 * 60];         // minutes : de midi la veille à minuit le soir de D
 const MIN_POUR_RYTHME = 7;                   // nuits complètes avant de prétendre connaître un rythme
@@ -261,17 +264,67 @@ export function nuitDuJour(dig, digVeille = null, { rythme = null } = {}) {
     if (incertain) r.incertain = true;
     return souci(r, poste, autre);
   }
-  // Rien de dérivable : le poste seul, tel que Machi Tool l'a apparié — et
-  // seulement apparié. Un réveil sans coucher n'est pas une nuit, c'est le
-  // bord d'un fichier (voir `instants`) ; on rend null plutôt qu'un lever
-  // qui n'a rien devant lui.
-  if (poste.reveil && poste.coucher) {
+  /*
+   * ================================================================
+   * RIEN DE DÉRIVABLE : LE POSTE SEUL — MAIS PAS À N'IMPORTE QUEL PRIX.
+   *
+   * Un réveil sans coucher n'est pas une nuit, c'est le bord d'un fichier
+   * (voir `instants`). Un réveil AVEC coucher ne l'est pas davantage quand le
+   * clavier prouve qu'on était debout juste avant.
+   *
+   * Chez quelqu'un de nocturne encore éveillé à minuit, Machi Tool appariait
+   * « couché 20:37, réveil 00:19 » — 00:19 étant l'ouverture du fichier civil,
+   * pas un lever. Le site l'affichait tel quel : « levé 00:19, couché 16:27,
+   * 3,7 h », un jour où la personne s'était couchée à 11:30 et levée à 18:00.
+   * Les trois nombres étaient faux ensemble, et rien ne le disait.
+   *
+   * Or on a ici les instants du CLAVIER, et la dernière touche de la veille est
+   * à 23:59. Vingt minutes avant le « réveil » : personne n'a dormi. La règle
+   * ne parle donc pas d'heure — aucun seuil d'horloge n'aurait raison chez tout
+   * le monde — elle demande qu'un SILENCE précède le lever, le même minimum de
+   * deux heures qui sert partout ailleurs dans ce fichier.
+   *
+   * Sans aucun instant connu, on ne sait pas et on accepte : refuser
+   * effacerait la nuit de quiconque n'a pas encore de digest de la veille.
+   * ================================================================
+   */
+  if (poste.reveil && poste.coucher && paireEstUneNuit(poste)
+      && leverApresUnSilence(poste.reveil, fins, debuts)) {
     const pc = enMinutes(poste.coucher), pr = enMinutes(poste.reveil);
     const duree = pc != null && pr != null ? pr - (pc >= 12 * 60 ? pc - 1440 : pc) : null;
     const r = { coucher: poste.coucher, lever: poste.reveil, sommeil_h: poste.sommeil_h ?? (duree != null && duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60 ? Math.round(duree / 6) / 10 : null), source: 'poste', souci: null };
     return souci(r, poste, null);
   }
   return null;
+}
+
+/**
+ * Un lever a-t-il un silence devant lui ? On regarde les instants du CLAVIER
+ * (le poste ne prouve rien : Windows redémarre seul), et on demande le même
+ * minimum de deux heures qui définit une nuit partout ailleurs.
+ */
+function leverApresUnSilence(reveil, fins, debuts) {
+  const t = enMinutes(reveil);
+  if (t == null) return false;
+  const connus = [...fins, ...debuts].filter(x => x.src === 'activite').map(x => x.t);
+  const avant = connus.filter(x => x < t);
+  if (!avant.length) return true;          // rien de connu : on ne sait pas
+  return t - Math.max(...avant) >= MIN_NUIT * 60;
+}
+
+/**
+ * UNE PAIRE APPARIÉE PAR MACHI TOOL A-T-ELLE LA DURÉE D'UNE NUIT ?
+ *
+ * Les vieux digests en portent qui ne tiennent pas — « couché 16:27, réveil
+ * 18:00 » fait une heure et demie — et le site les affichait telles quelles.
+ * Exporté pour que `posteDuJour` juge avec les MÊMES bornes : deux seuils pour
+ * la même question finiraient par se contredire.
+ */
+export function paireEstUneNuit(poste) {
+  const c = enMinutes(poste?.coucher), r = enMinutes(poste?.reveil);
+  if (c == null || r == null) return false;
+  const duree = (((r - c) % 1440) + 1440) % 1440;
+  return duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60;
 }
 
 /** Une durée en heures, lisible : 540 min → « 9 h », 654 → « 10,9 h ». */
