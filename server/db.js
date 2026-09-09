@@ -1439,6 +1439,18 @@ export const relevesDeToi = (ids, userId = OWNER) => {
   ).all(userId, ...l);
 };
 
+/*
+ * LES RELEVES PORTES PAR UN MESSAGE.
+ *
+ * Sert a ne pas empiler deux fois la meme note : un message relu — une
+ * relecture retroactive, un rangement du journal — repasserait sinon par
+ * l'extracteur et poserait un second releve identique. L'ancre est le message,
+ * pas la journee : deux messages du meme jour ont chacun droit au sien.
+ */
+export const relevesDuMessage = (messageId, userId = OWNER) =>
+  db.prepare('SELECT id, message_id, ts, valeur, quoi, source FROM releves WHERE user_id = ? AND message_id = ?')
+    .all(userId, messageId);
+
 export const relevesDuJour = (date, userId = OWNER) =>
   db.prepare('SELECT id, message_id, ts, valeur, quoi, source FROM releves WHERE user_id = ? AND date = ? ORDER BY ts ASC')
     .all(userId, date);

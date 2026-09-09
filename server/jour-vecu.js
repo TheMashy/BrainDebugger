@@ -140,6 +140,128 @@ export function bornesDitesDans(texte) {
   return { genre, heure };
 }
 
+/* ------------------------ ce que la personne se met ------------------------ */
+
+/*
+ * =====================================================================
+ * UNE NOTE ECRITE DANS LA CONVERSATION EST UNE NOTE.
+ *
+ * « ressenti avant de m'endormir 1/10 la » : ecrit noir sur blanc, et absent
+ * partout — ni dans les humeurs de la journee, ni dans l'amplitude, ni dans
+ * rien de ce qui se compte. Le compagnon a bien un outil pour poser un releve,
+ * mais c'est LUI qui decide de s'en servir : hors ligne, distrait, ou
+ * simplement occupe a repondre, il ne le fait pas. Ce qui est ecrit en toutes
+ * lettres ne doit dependre de personne.
+ *
+ * ---------------------------------------------------------------------
+ * ON EN RATE EXPRES, ET BEAUCOUP.
+ *
+ * Meme regle que pour les bornes juste au-dessus, et pour une raison plus
+ * grave : un releve invente entre dans l'amplitude d'une journee, deplace une
+ * courbe, et se relit plus tard comme quelque chose que la personne aurait dit
+ * d'elle-meme. Rater un « ca va moyen » ne coute rien ; fabriquer un « 8/10 »
+ * a partir d'une note de film coute une journee falsifiee.
+ *
+ * TROIS PIEGES, ET LE PREMIER EST FRANCAIS.
+ *
+ *   1. « le 8/10 », « du 3/10 » : en francais, c'est une DATE. C'est le piege
+ *      le plus courant et le plus couteux, parce qu'il tombe pile dans la
+ *      plage 0-10 qu'on cherche.
+ *   2. « Elden Ring 9/10 », « ce film 8/10 » : une note, mais pas la sienne.
+ *   3. « 3 sur 10 personnes », « 4/10 mg » : un compte, une dose.
+ *
+ * D'ou la regle : il faut un mot qui parle de SON etat a portee de main du
+ * chiffre. Sans ce mot, on ne prend rien.
+ * =====================================================================
+ */
+
+/* Ce qui dit qu'on parle de soi. Cherche AVANT le chiffre, dans la meme
+   phrase : « ressenti … 1/10 », « je suis a 3/10 », « moral 2/10 ». */
+const DIT_DE_SOI = /(je me sens|je me sentais|je suis|j[’']?suis|je dirais|je me situe|je mets|ressenti|mon moral|le moral|mon humeur|mon etat|je vais|ca va|je suis a|je plafonne)/;
+
+/* Ce qui suit le chiffre et prouve que ce n'est PAS une note d'humeur :
+   une unite, un denombrement, un objet compte. */
+const PAS_UNE_NOTE_APRES = /^\s*(mg|kg|g|ml|cl|l\b|h\b|km|m\b|%|personnes?|gens|jours?|fois|heures?|minutes?|ans?|euros?|balles?|comprimes?|cachets?|gouttes?)/i;
+
+/* Ce qui precede et fait une DATE plutot qu'une note : « le 8/10 », « du 3/10 »,
+   « rendez-vous le 2/10 ». Le francais ecrit ses dates exactement comme ca. */
+const DATE_AVANT = /\b(le|du|au|jusqu[’']au|depuis le|vers le|rendez[- ]vous|rdv)\s*$/;
+
+/* Un titre juste avant : ce qu'on note, ce n'est pas soi. Deux mots suffisent
+   a le voir — un nom propre, un « ce film », un « cet album ». */
+const OBJET_AVANT = /\b(film|serie|album|jeu|episode|bouquin|livre|resto|restaurant|note|noter|sur imdb|sur senscritique)\b[^.!?]{0,20}$/;
+
+/*
+ * La fraction elle-meme : « 1/10 », « 3 sur 10 », « 7 / 10 ».
+ *
+ * DEUX OBJETS, ET C'EST DELIBERE. Le premier porte le drapeau `g` et sert a
+ * PARCOURIR ; le second, sans drapeau, sert a effacer. S'en tenir a un seul
+ * faisait boucler la fonction a l'infini : un `replace` global remet
+ * `lastIndex` a zero, et l'`exec` d'apres repartait du debut du message.
+ */
+const FRACTION = /\b(\d{1,2})\s*(?:\/|sur)\s*10\b/g;
+const FRACTION_SEULE = /\b(\d{1,2})\s*(?:\/|sur)\s*10\b/g;
+
+/**
+ * CE QUE CE MESSAGE DIT D'UNE NOTE QUE LA PERSONNE SE MET.
+ *
+ * @param {string} texte
+ * @returns {{valeur: number, extrait: string} | null}
+ *   `extrait` est le morceau de phrase qui l'a fait reconnaitre : c'est ce
+ *   qu'on montrera pour que le releve soit contestable, jamais un verdict nu.
+ */
+export function noteDiteDans(texte) {
+  const brut = String(texte ?? '');
+  const t = norm(brut).replace(/\s+/g, ' ');
+  if (!t) return null;
+
+  let trouve = null;
+  FRACTION.lastIndex = 0;
+  for (let m = FRACTION.exec(t); m; m = FRACTION.exec(t)) {
+    const v = Number(m[1]);
+    if (!Number.isFinite(v) || v > 10) continue;
+    const avant = t.slice(0, m.index);
+    const apres = t.slice(m.index + m[0].length);
+    if (DATE_AVANT.test(avant)) continue;
+    if (OBJET_AVANT.test(avant)) continue;
+    if (PAS_UNE_NOTE_APRES.test(apres)) continue;
+    /*
+     * LE MOT QUI PARLE DE SOI DOIT ETRE PROCHE. Cherche dans les quarante
+     * caracteres qui precedent, et pas dans le message entier : « je suis
+     * creve » en tete d'un paragraphe ne fait pas de « 9/10 » trois lignes
+     * plus bas une note d'humeur. Un message TRES court qui ne contient que
+     * la fraction se suffit a lui-meme — « 3/10 » tout seul, en reponse a une
+     * question, ne veut rien dire d'autre.
+     */
+    const fenetre = avant.slice(-40);
+    const seul = t.replace(FRACTION_SEULE, '').replace(/[^a-z0-9]/gi, '').length <= 3;
+    if (!seul && !DIT_DE_SOI.test(fenetre)) continue;
+    /*
+     * ET « CE N'EST PAS MAINTENANT » SE JUGE AUSSI DANS LA FENETRE.
+     *
+     * Applique au message entier, ce garde refusait la phrase meme qui a
+     * motive tout ceci : « ... comme SI JE n'avais plus de futur ... ressenti
+     * avant de m'endormir 1/10 la ». Le « si je » y parle d'autre chose, vingt
+     * mots plus tot. C'est exactement le raisonnement que ce fichier tient
+     * deja pour la negation : elle se cherche a cote du verbe, pas dans la
+     * phrase entiere. Un message long et reflechi en contient forcement un.
+     */
+    if (PAS_MAINTENANT.test(fenetre)) continue;
+    // Le DERNIER trouve gagne : quelqu'un qui se reprend (« 4/10, non plutot
+    // 2/10 ») donne son chiffre en dernier.
+    trouve = { valeur: v, index: m.index, longueur: m[0].length };
+  }
+  if (!trouve) return null;
+
+  /* L'extrait : la phrase qui porte le chiffre, bornee, prise dans le texte
+     D'ORIGINE — accents compris. C'est ce qu'on relira, et une phrase sans
+     accents se lit comme une machine. */
+  const deb = Math.max(0, trouve.index - 60);
+  const extrait = brut.slice(deb, Math.min(brut.length, trouve.index + trouve.longueur + 20))
+    .replace(/\s+/g, ' ').trim();
+  return { valeur: trouve.valeur, extrait: extrait.slice(0, 160) };
+}
+
 /* --------------------------- les levers connus --------------------------- */
 
 /** Une heure lisible, en minutes depuis minuit. Accepte « 08:23 » et 8.5 (heures). */

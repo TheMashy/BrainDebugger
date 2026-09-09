@@ -6,7 +6,7 @@ import {
   promouvoirMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
-  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, relevesDeToi, amplitude, amplitudes, TEINTES,
+  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, relevesDuMessage, relevesDeToi, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
   toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, versionMachiTool, joursEcrits,
@@ -34,7 +34,7 @@ import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
          chiffresDuJour, contient, COUCHER, LEVER, DERNIERE, PREMIERE } from './allure.js';
 import { lireDigest } from './digest.js';
 import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, veilleDe,
-         SOURCE_DIT, CLE_LEVER, CLE_COUCHER, MIDI } from './jour-vecu.js';
+         SOURCE_DIT, CLE_LEVER, CLE_COUCHER, MIDI, noteDiteDans } from './jour-vecu.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
@@ -395,6 +395,38 @@ export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
 }
 
 /**
+ * UNE NOTE ECRITE DANS LA CONVERSATION DEVIENT UN RELEVE.
+ *
+ * « ressenti avant de m'endormir 1/10 la » : ecrit noir sur blanc, et absent
+ * partout. Le compagnon a bien un outil pour poser un releve, mais c'est LUI
+ * qui decide de s'en servir — hors ligne, distrait, ou simplement occupe a
+ * repondre, il ne le fait pas. Ce qui est ecrit en toutes lettres ne doit
+ * dependre de personne.
+ *
+ * LE RELEVE PORTE `source: 'toi'`, le mot que la colonne emploie deja pour
+ * « la personne l'a pose elle-meme ». C'est exactement ce dont il s'agit : elle
+ * l'a ecrit. Inventer un troisieme mot ferait un troisieme vocabulaire pour la
+ * meme chose, et `relevesDeToi` — qui alimente deja l'ecran — ne le verrait
+ * pas.
+ *
+ * ET IL N'Y EN A QU'UN PAR MESSAGE. Le meme message relu deux fois — une
+ * relecture retroactive, un rangement — ne doit pas empiler deux fois la meme
+ * note : `addReleve` est ancre au message, et on regarde d'abord s'il en porte
+ * deja un.
+ *
+ * @returns {boolean} vrai si un releve a ete pose.
+ */
+export function noterNoteDite(texte, messageId, date, userId = OWNER) {
+  if (!messageId || !date) return false;
+  const n = noteDiteDans(texte);
+  if (!n) return false;
+  if (relevesDuMessage(messageId, userId).length) return false;
+  const r = addReleve({ messageId, date, valeur: n.valeur, quoi: n.extrait,
+                        source: 'toi', userId });
+  return !!r;
+}
+
+/**
  * LA NUIT QU'ON VIENT DE FERMER REJOINT LA JOURNEE QU'ELLE TERMINAIT.
  *
  * On apprend la frontiere APRES coup : « je vais me coucher » arrive a 6 h du
@@ -591,10 +623,35 @@ export function relireLesBornesDites(userId = OWNER) {
 }
 
 /**
+ * ET LES NOTES DITES, SUR TOUT LE JOURNAL.
+ *
+ * Même raison que pour les bornes : l'extracteur vient d'apparaître, et tout ce
+ * qui a été écrit avant lui est resté lettre morte. « ressenti avant de
+ * m'endormir 1/10 là » attendait depuis le 8 septembre.
+ *
+ * Idempotent par construction — `noterNoteDite` refuse un message qui porte
+ * déjà un relevé — donc on peut la relancer sans empiler.
+ *
+ * @returns {number} combien de relevés ont été posés.
+ */
+export function relireLesNotesDites(userId = OWNER) {
+  let poses = 0;
+  for (const msg of tousMessagesUtilisateur(userId)) {
+    if (noterNoteDite(msg.text, msg.id, msg.date, userId)) poses++;
+  }
+  return poses;
+}
+
+/**
  * RANGER TOUT LE JOURNAL. Rend ce qui a bougé, et sur combien de jours.
- * @returns {{jours: number, messages: number, sans_coupure: number, bornes_retrouvees: number}}
+ * @returns {{jours: number, messages: number, sans_coupure: number,
+ *            bornes_retrouvees: number, notes_retrouvees: number}}
  */
 export function rangerToutLeJournal(userId = OWNER) {
+  // Les notes dites d'abord : elles ne déplacent aucune journée, donc leur
+  // ordre vis-à-vis du rangement n'a pas d'importance — mais les oublier ici
+  // laisserait tout un journal sans elles jusqu'au prochain message écrit.
+  const notes_retrouvees = relireLesNotesDites(userId);
   // D'ABORD RELIRE, ENSUITE RANGER. Une borne retrouvée dans un vieux message
   // est une coupure de plus, et donc une soirée de plus remise à sa place :
   // ranger avant de relire ferait le travail sur des bornes qu'on est justement
@@ -610,7 +667,8 @@ export function rangerToutLeJournal(userId = OWNER) {
     if (bouges) { messages += bouges; jours++; }
   }
   if (messages || bornesRetrouvees) invalidate(userId);
-  return { jours, messages, sans_coupure: sansCoupure, bornes_retrouvees: bornesRetrouvees };
+  return { jours, messages, sans_coupure: sansCoupure,
+           bornes_retrouvees: bornesRetrouvees, notes_retrouvees };
 }
 
 /* ==================================================================
@@ -1508,7 +1566,11 @@ export const routes = {
     const date = body.date ?? jourVecu(userId);
     const now = new Date().toISOString();
 
-    addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
+    const idMsg = addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
+    // Une note écrite en toutes lettres devient un relevé, sans passer par le
+    // modèle : voir `noterNoteDite`. Après l'enregistrement, parce qu'un relevé
+    // s'ancre au message qui le porte.
+    noterNoteDite(text, idMsg, date, userId);
     invalidate(userId);
 
     const history = filAncre(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
@@ -3363,6 +3425,7 @@ export async function streamMessage(body, send, userId = OWNER) {
   noterBornesDites(text, userId);
   const date = body.date ?? jourVecu(userId);
   const messageId = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
+  noterNoteDite(text, messageId, date, userId);
   invalidate(userId);
   send('user', { messages: recentMessages(80, userId) });
 
