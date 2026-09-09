@@ -5306,14 +5306,46 @@ function posteMarkup(p, synchro) {
     // trait, et le nommer dans la liste ferait chercher à l'œil quelque chose
     // d'invisible.
     const lisibles = tous.filter(x => pct(x.min) >= 4).slice(0, 6);
+    /*
+     * LE NOM DE L'ONGLET EN PREMIER, LE SITE EN DESSOUS.
+     *
+     * La ligne disait « youtube · 34 % » : l'endroit, jamais la page. Personne
+     * ne se demande combien de temps il a passé « sur youtube » — la question
+     * est ce qu'il y regardait, et le titre le dit.
+     *
+     * Le site reste, en petit, parce que c'est lui qui a servi à compter : le
+     * titre montré est le PLUS LONG de la ligne, pas le seul, et le faire
+     * passer pour le tout serait faux. La ligne s'ouvre donc sur la liste
+     * entière, comme celle des sujets juste en dessous — même geste, même
+     * grammaire. Sans titres collectés, la ligne reste le site seul : on ne
+     * fait pas semblant d'avoir une donnée qu'on n'a pas.
+     */
+    const ligneLeg = x => {
+      const teinte = x.reste ? 'var(--line)' : TEINTE_CAT[categorieApp(x.nom)];
+      const part = `<span class="mono faint">${Math.round(pct(x.min))} %</span>`;
+      const puce = `<i style="background:${teinte}"></i>`;
+      if (!x.titres?.length) {
+        return `<li>${puce}<span class="jrnom">${esc(x.nom)}</span>${part}</li>`;
+      }
+      const tete = x.titres[0];
+      /* Le site passe SOUS le pli, pas à côté du titre : la colonne fait vingt
+         caractères de large, et un titre plus une part plus un badge la
+         débordaient — le badge sortait du cadre. Il reste la première chose
+         qu'on lit en ouvrant, parce que c'est lui qui a servi à compter. */
+      return `<li class="jrouvre"><details>
+        <summary>${puce}<span class="jrnom" title="${esc(`${tete.titre} — sur ${x.nom}`)}">${
+          esc(tete.titre)}</span>${part}</summary>
+        <div class="jrou">sur ${esc(x.nom)}</div>
+        <ol class="jrtitres">${x.titres.map(t => `<li>
+          <span class="jrt">${esc(t.titre)}</span><span class="mono faint">${t.min} min</span>
+        </li>`).join('')}</ol>
+      </details></li>`;
+    };
     return `<div class="jrepart">
       <div class="jrbarre" role="img" aria-label="${esc(`répartition de ${total} minutes d’écran`)}">${tous.map(seg).join('')}</div>
       <div class="jrpied">
         <span class="jpetete">${ico('oeil', 12)}${heure(total + ' min')} <span class="faint">d’écran</span></span>
-        <ul class="jrleg">${lisibles.map(x => `<li>
-          <i style="background:${x.reste ? 'var(--line)' : TEINTE_CAT[categorieApp(x.nom)]}"></i>
-          <span class="jrnom">${esc(x.nom)}</span><span class="mono faint">${Math.round(pct(x.min))} %</span>
-        </li>`).join('')}</ul>
+        <ul class="jrleg">${lisibles.map(ligneLeg).join('')}</ul>
       </div>
     </div>`;
   };
@@ -5348,12 +5380,34 @@ function posteMarkup(p, synchro) {
             pas quelqu'un qui a compris. Un sujet dont Machi Tool n'a pas gardé
             les titres reste une ligne simple : rien à ouvrir, on ne fait pas
             semblant. */''}
+        ${/*
+            ET DANS UN SUJET, DE QUOI IL S'AGIT. « 40 min de guerre » compte
+            pareil une soirée de cartes du front et une nuit de bodycams. Les
+            deux premières sous-catégories tiennent sur la ligne du sujet — donc
+            visibles sans rien ouvrir, puisque c'est là tout l'intérêt — et le
+            détail avec ses minutes attend derrière le même repli que les titres.
+
+            CE QUI N'EST PAS AFFINÉ N'EST PAS EFFACÉ : leur total est toujours
+            inférieur au sujet, et la ligne « n min que rien n'affine » le dit.
+            Sans elle, deux sous-catégories sur cinq se liraient comme la
+            totalité du sujet. */''}
         <ul class="jrleg">${th.filter(x => pct(x.min) >= 4).slice(0, 8).map(x => {
+          const sous = x.sous ?? [];
+          const apercu = sous.length
+            ? `<span class="jrsous">${sous.slice(0, 2).map(o => esc(o.nom)).join(' · ')}${
+                sous.length > 2 ? ` +${sous.length - 2}` : ''}</span>` : '';
           const puce = `<i style="background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"></i>
-            <span class="jrnom">${esc(x.nom)}</span><span class="mono faint">${Math.round(pct(x.min))} %</span>`;
-          if (!x.titres?.length) return `<li>${puce}</li>`;
+            <span class="jrnom">${esc(x.nom)}</span>${apercu}<span class="mono faint">${Math.round(pct(x.min))} %</span>`;
+          if (!x.titres?.length && !sous.length) return `<li>${puce}</li>`;
+          const flou = Math.max(0, x.min - sous.reduce((n, o) => n + o.min, 0));
+          const detail = sous.length ? `<ul class="jrsousl">${sous.map(o => `<li>
+              <span class="jrt">${esc(o.nom)}</span><span class="mono faint">${o.min} min</span>
+            </li>`).join('')}${flou >= 1 ? `<li class="jrflou">
+              <span class="jrt">rien n’affine</span><span class="mono faint">${flou} min</span>
+            </li>` : ''}</ul>` : '';
           return `<li class="jrouvre"><details>
             <summary>${puce}</summary>
+            ${detail}
             <ol class="jrtitres">${x.titres.slice(0, 10).map(t => `<li>
               <span class="jrt">${esc(t.titre)}</span><span class="mono faint">${t.min} min</span>
             </li>`).join('')}</ol>

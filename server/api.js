@@ -927,8 +927,32 @@ export function posteDuJour(date, userId = OWNER) {
     if (k.startsWith('web:')) { webS += v; webs.push([k.slice(4), v]); }
     else { appS += v; apps.push([k, v]); }
   }
-  const top = arr => arr.sort((a, b) => b[1] - a[1]).slice(0, 5)
-                        .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }));
+  /*
+   * LE NOM DE L'ONGLET D'ABORD, LE SITE ENSUITE.
+   *
+   * La légende de l'écran disait « youtube · 34 % », « autre · 9 % » — c'est-à-
+   * dire l'endroit, jamais la page. Or personne ne se demande combien de temps
+   * il a passé « sur youtube » : la question est ce qu'il y regardait, et Machi
+   * Tool envoie déjà les titres d'onglets par catégorie quand l'option est
+   * cochée. Ils étaient là, au fond du digest brut, derrière deux replis.
+   *
+   * Le site NE DISPARAÎT PAS : il reste sous le titre, parce que c'est lui qui
+   * a servi à compter et qu'un titre seul ne dit pas d'où il vient. Et quand
+   * les titres ne sont pas collectés, la ligne reste le site seul — on ne fait
+   * pas semblant d'avoir une donnée qu'on n'a pas.
+   */
+  const parCat = dig?.titres ?? {};
+  const titresDe = cle => Object.entries(parCat[cle] ?? {})
+    .filter(([, sec]) => typeof sec === 'number' && sec > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, sec]) => ({ titre: String(t).slice(0, 120), min: Math.round(sec / 60) }))
+    .filter(x => x.min >= 1)
+    .slice(0, 10);
+  const top = (arr, prefixe = '') => arr.sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([nom, s]) => {
+      const titres = titresDe(prefixe + nom);
+      return { nom, min: Math.round(s / 60), ...(titres.length ? { titres } : {}) };
+    });
   /*
    * LES THÉMATIQUES : DE QUOI PARLAIT CE QU'ON REGARDAIT.
    *
@@ -956,22 +980,44 @@ export function posteDuJour(date, userId = OWNER) {
    * forcément quelque part. Pouvoir ouvrir la liste et dire « ça, ce n'était pas
    * de la guerre » est la seule chose qui rend la mesure honnête.
    */
+  /*
+   * ET LES SOUS-CATÉGORIES, sous leur thème.
+   *
+   * « 40 min de guerre » est déjà mieux que « 249 min web ». Mais la guerre
+   * suivie sur des cartes et une nuit de bodycams ne sont pas la même soirée,
+   * et le thème les compte pareil. Machi Tool fait une seconde passe, en local,
+   * sur le titre de l'onglet.
+   *
+   * Leur total est INFÉRIEUR à celui du thème, toujours : ce qu'aucune
+   * sous-catégorie ne reconnaît reste dans son thème, compté une seule fois.
+   * L'écran doit donc les montrer comme une précision sur une part, jamais
+   * comme une découpe complète — sinon la barre mentirait par construction.
+   */
   const th = dig?.temps_par_theme_web_s ?? dig?.temps_par_theme_s ?? {};
   const parTitre = dig?.titres_par_theme ?? {};
+  const parSous = dig?.temps_par_sous_theme_web_s ?? {};
   const themes = Object.entries(th)
     .filter(([, v]) => typeof v === 'number' && v > 0)
     .sort((a, b) => b[1] - a[1])
-    .map(([nom, s]) => ({
-      nom, min: Math.round(s / 60),
-      titres: Object.entries(parTitre[nom] ?? {})
+    .map(([nom, s]) => {
+      const sous = Object.entries(parSous[nom] ?? {})
+        .filter(([, v]) => typeof v === 'number' && v > 0)
         .sort((a, b) => b[1] - a[1])
-        .map(([t, sec]) => ({ titre: String(t).slice(0, 120), min: Math.round(sec / 60) }))
-        .filter(x => x.min >= 1)
-    }))
+        .map(([n, sec]) => ({ nom: n, min: Math.round(sec / 60) }))
+        .filter(x => x.min >= 1);
+      return {
+        nom, min: Math.round(s / 60),
+        ...(sous.length ? { sous } : {}),
+        titres: Object.entries(parTitre[nom] ?? {})
+          .sort((a, b) => b[1] - a[1])
+          .map(([t, sec]) => ({ titre: String(t).slice(0, 120), min: Math.round(sec / 60) }))
+          .filter(x => x.min >= 1)
+      };
+    })
     .filter(x => x.min > 0);
   const ecran = (appS || webS) ? {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
-    top_app: top(apps), top_web: top(webs),
+    top_app: top(apps), top_web: top(webs, 'web:'),
     themes: themes.length ? themes : null
   } : null;
   const lever = bornerLever();

@@ -3478,8 +3478,13 @@ table.grid td.cell.abascule { cursor: pointer; }
 .jrseg { display: block; min-width: 2px; cursor: help; transition: filter .12s; }
 .jrseg:hover { filter: brightness(1.35); }
 .jrpied { display: flex; flex-direction: column; gap: 5px; }
-.jrleg { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; list-style: none; }
-.jrleg li { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-dim); }
+.jrleg { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; list-style: none;
+          min-width: 0; }
+/* `min-width: 0` sur les deux niveaux : sans lui, un titre de cent vingt
+   caractères impose sa largeur minimale au flex, la légende déborde la colonne
+   et la part sort du cadre. C'est le défaut de flexbox, pas du contenu. */
+.jrleg li { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
+            color: var(--ink-dim); min-width: 0; max-width: 100%; }
 .jrleg i { width: 7px; height: 7px; border-radius: 2px; flex: none; }
 .jrnom { max-width: 13ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -3487,7 +3492,11 @@ table.grid td.cell.abascule { cursor: pointer; }
    étalerait dix titres sous chacun, et la colonne du milieu ferait deux écrans.
    Le triangle du <summary> est retiré — la ligne entière est la poignée, et une
    flèche de plus dans une légende de huit entrées fait huit flèches. */
-.jrouvre { display: block; width: 100%; }
+/* `.jrleg li` est `inline-flex` et gagne en spécificité : sans le sélecteur
+   composé, `.jrouvre` restait un conteneur flex, son `<details>` devenait un
+   item de largeur min-content, et une ligne de cent vingt caractères débordait
+   la colonne de quatre-vingt-six pixels. */
+.jrleg li.jrouvre { display: block; width: 100%; }
 .jrouvre summary {
   display: inline-flex; align-items: center; gap: 5px;
   list-style: none; cursor: pointer; border-radius: 4px;
@@ -3500,11 +3509,48 @@ table.grid td.cell.abascule { cursor: pointer; }
   border-left: 1px solid var(--line);
   display: flex; flex-direction: column; gap: 3px;
 }
-.jrtitres li { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
+.jrtitres li { display: flex; align-items: baseline; gap: 8px; justify-content: space-between;
+                min-width: 0; }
+.jrtitres .jrt, .jrsousl .jrt { min-width: 0; flex: 1 1 auto; }
+.jrtitres .mono, .jrsousl .mono { flex: none; white-space: nowrap; }
 /* Le titre peut faire cent vingt caractères : il s'enroule au lieu d'être coupé.
    Un titre tronqué à « voices of the void - ker… » ne permet plus de dire si le
    classement est juste, ce qui est pourtant sa seule raison d'être ici. */
-.jrt { font-size: 11px; color: var(--ink-dim); line-height: 1.35; }
+.jrt { font-size: 11px; color: var(--ink-dim); line-height: 1.35;
+       overflow-wrap: anywhere; }
+
+/* LE TITRE DE L'ONGLET TIENT LA LIGNE, LE SITE PASSE DERRIÈRE.
+   Un nom de site tient en 13ch ; un titre de page, non — et le tronquer à
+   « voices of the vo… » redonnerait exactement ce qu'on venait d'enlever. La
+   ligne qui porte un titre a donc sa propre largeur, et le site la suit en plus
+   petit : c'est lui qui a servi à compter, il reste lisible sans prendre la
+   place. */
+.jrouvre summary { width: 100%; }
+/* Le titre prend toute la place qui reste et s'arrête en points de suspension ;
+   la part garde la sienne à droite. Sans ça, un titre de cent vingt caractères
+   poussait le pourcentage hors du cadre dans une colonne de vingt caractères. */
+.jrouvre summary .jrnom { max-width: none; flex: 1 1 auto; min-width: 0; }
+.jrouvre summary .mono { flex: none; margin-left: auto; }
+.jrou {
+  font-size: 10px; color: var(--ink-faint); letter-spacing: .02em;
+  margin: 4px 0 0 12px;
+}
+/* Les deux premières sous-catégories, sur la ligne du sujet : c'est là tout
+   l'intérêt, donc elles se voient sans rien ouvrir. Le détail chiffré attend
+   derrière le repli, avec la part que rien n'affine. */
+.jrsous { font-size: 10.5px; color: var(--ink-faint); white-space: nowrap;
+          max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+.jrsousl {
+  list-style: none; margin: 5px 0 0; padding: 0 0 0 12px;
+  border-left: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.jrsousl li { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
+.jrsousl .jrt { color: var(--ink); }
+/* Ce que rien n'affine n'est pas une sous-catégorie : il ne prend pas sa
+   couleur, et il est nommé pour ce qu'il est. Sans lui, deux sous-catégories
+   sur cinq se liraient comme la totalité du sujet. */
+.jrflou .jrt { color: var(--ink-faint); font-style: italic; }
 
 .jpecran { display: flex; flex-wrap: wrap; gap: 18px 26px; }
 .jpecol { min-width: 130px; }
