@@ -183,13 +183,26 @@ function drawGaugePanel() {
           comparé à la semaine d'avant, y répond. */''}
     <div id="usageProfil" class="uprofil"></div>
 
+    ${/*
+        DEUX RÉGLAGES, ET LE PREMIER EST LE PLUS IMPORTANT.
+        La MESURE choisit la question ; la FENÊTRE choisit sur combien de temps.
+        Le volume seul ne répondait qu'à « combien ça a tourné » — un chiffre
+        qui monte avec l'usage, et où une optimisation ne se voit pas. */''}
     <div class="usagebloc">
       <div class="usagetete">
-        <span class="k faint">Consommation de jetons</span>
-        <span class="usagetog">
-          <button type="button" data-grain="heure" class="usagesel">48 h</button>
-          <button type="button" data-grain="jour" class="usagesel on">30 j</button>
-        </span>
+        <span class="k faint" id="usageTitre">Consommation de jetons</span>
+      </div>
+      <div class="usagetog usagemes">
+        <button type="button" data-mes="volume" class="usagesel on">volume</button>
+        <button type="button" data-mes="jetons" class="usagesel">jetons / échange</button>
+        <button type="button" data-mes="cout" class="usagesel">$ / échange</button>
+        <button type="button" data-mes="cache" class="usagesel">cache</button>
+      </div>
+      <div class="usagetog usagefen">
+        <button type="button" data-grain="heure" class="usagesel">48 h</button>
+        <button type="button" data-grain="jour" class="usagesel on">30 j</button>
+        <button type="button" data-grain="semaine" class="usagesel">3 mois</button>
+        <button type="button" data-grain="mois" class="usagesel">1 an</button>
       </div>
       <div id="usageGraph" class="usagegraph"><p class="sub" style="margin:0">…</p></div>
     </div>
@@ -201,9 +214,17 @@ function drawGaugePanel() {
   el.querySelector('form')?.addEventListener('submit', () => { /* laisse le POST partir */ });
   el.querySelectorAll('[data-grain]').forEach(b => b.onclick = () => {
     el.querySelectorAll('[data-grain]').forEach(x => x.classList.toggle('on', x === b));
-    chargerGrapheUsage(b.dataset.grain);
+    USAGE_GRAIN = b.dataset.grain;
+    chargerGrapheUsage();
   });
-  chargerGrapheUsage('jour');
+  // Changer de MESURE ne redemande rien : les quatre arrivent ensemble.
+  el.querySelectorAll('[data-mes]').forEach(b => b.onclick = () => {
+    el.querySelectorAll('[data-mes]').forEach(x => x.classList.toggle('on', x === b));
+    USAGE_MESURE = b.dataset.mes;
+    dessinerUsage();
+  });
+  USAGE_GRAIN = 'jour'; USAGE_MESURE = 'volume';
+  chargerGrapheUsage();
   chargerProfilUsage();
 }
 
@@ -264,32 +285,163 @@ async function chargerProfilUsage() {
     } · médianes, comparées aux 7 jours d’avant</p>`;
 }
 
-/**
- * LA COURBE DE CONSOMMATION, chargée à la demande dans le panneau des jetons.
+/*
+ * =====================================================================
+ *  LA CONSOMMATION DANS LE TEMPS — QUATRE MESURES, QUATRE FENÊTRES.
  *
- * Des barres, pas une facture : on voit d'un coup les pics et les creux. Une
- * période vide se dit en toutes lettres — un graphe plat se lirait « rien
- * mesuré », ce qui est faux quand rien n'a été consommé.
- */
-async function chargerGrapheUsage(grain) {
-  const hote = $('#usageGraph');
-  if (!hote) return;
-  let d;
-  try { d = await api(`/api/usage/serie?grain=${grain}`); }
-  catch { hote.innerHTML = '<p class="sub" style="margin:0">Lecture impossible.</p>'; return; }
-  if (!d.total) {
-    hote.innerHTML = `<p class="sub" style="margin:0">Rien de consommé sur ${
-      grain === 'heure' ? 'les dernières 48 h' : 'les 30 derniers jours'}.</p>`;
-    return;
+ * Le graphe ne montrait que les jetons TRAVERSÉS. Ce chiffre-là monte avec
+ * l'usage : cinquante échanges à moitié prix font une barre plus haute que
+ * vingt échanges au prix fort, et une optimisation qui a divisé le coût par
+ * trois se lit comme une hausse. Il ne répond donc pas à la seule question
+ * qu'on se pose en optimisant.
+ *
+ *   volume  — des BARRES, empilées par source. « Combien ça a tourné. »
+ *   jetons  — une COURBE : les jetons d'un échange, au tarif plein.
+ *   cout    — une COURBE : les dollars d'un échange.
+ *   cache   — une COURBE : la part du prompt relue du cache, la CAUSE des deux
+ *             précédentes.
+ *
+ * DES BARRES POUR UN VOLUME, UNE COURBE POUR UN PRIX, et ce n'est pas un goût :
+ * une barre se lit comme une quantité qu'on additionne, une courbe comme un
+ * niveau qui évolue. Empiler des médianes ferait croire qu'on peut les
+ * additionner, ce qui est faux.
+ *
+ * ET LA COURBE SE ROMPT SUR LES TROUS. Une période sans échange n'a pas de prix
+ * par échange : la relier au point suivant inventerait une valeur, la ramener à
+ * zéro raconterait une optimisation qui n'a pas eu lieu. Le trait s'arrête, et
+ * c'est la réponse honnête.
+ * ===================================================================== */
+
+let USAGE_GRAIN = 'jour', USAGE_MESURE = 'volume', USAGE_DATA = null;
+
+const USAGE_MES = {
+  volume: {
+    titre: 'Consommation de jetons',
+    champ: 'tokens',
+    fmt: v => fmtTok(v) + ' jetons',
+    aide: 'Ce qui a traversé le modèle, cache compris. Monte avec l’usage : ce n’est pas ici qu’une optimisation se voit.',
+  },
+  jetons: {
+    titre: 'Jetons par échange',
+    champ: 'par_echange',
+    fmt: v => fmtTok(v) + ' jetons',
+    baisserEstBon: true,
+    aide: 'Ce que coûte UN échange, en jetons au tarif plein — un jeton relu du cache y compte pour un dixième. Médiane de la période.',
+  },
+  cout: {
+    titre: 'Dollars par échange',
+    champ: 'cout_par_echange',
+    fmt: v => (v < 0.01 ? v.toFixed(4) : v.toFixed(3)).replace('.', ',') + ' $',
+    baisserEstBon: true,
+    aide: 'La même chose, en argent. Médiane de la période, aux tarifs publics.',
+  },
+  cache: {
+    titre: 'Part relue du cache',
+    champ: 'part_cache',
+    fmt: v => String(v).replace('.', ',') + ' %',
+    baisserEstBon: false,
+    aide: 'La part du prompt relue du cache, à un dixième du prix. C’est la cause quand les deux mesures d’au-dessus bougent — et le premier endroit où regarder.',
+  },
+};
+
+/** L'étiquette d'un seau, selon la largeur du pas. */
+function usageQuand(k, unite) {
+  if (unite === 'heure') return `${k.slice(11)} h`;
+  if (unite === 'mois') {
+    const [a, m] = k.split('-');
+    return new Date(Date.UTC(+a, +m - 1, 1)).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric', timeZone: 'UTC' });
   }
+  if (unite === 'semaine') return `semaine du ${fmtDay(k)}`;
+  return fmtDay(k);
+}
+
+/* La même chose, mais pour les deux bouts de l'axe : l'année et le mot
+   « semaine » y font une deuxième ligne dans une colonne de trois cents
+   pixels, et deux bornes sur deux lignes ne se lisent plus comme un axe. */
+const usageBorne = (k, unite) =>
+  usageQuand(k, unite).replace(/^semaine du /, 'sem. ').replace(/ \d{4}$/, '');
+
+/**
+ * LA TENDANCE : la seconde moitié de la fenêtre comparée à la première.
+ *
+ * C'est la lecture qu'on vient chercher — « est-ce que le travail d'il y a
+ * trois semaines a servi ? » — et l'œil la fait mal sur une courbe bruitée. On
+ * compare deux MÉDIANES, pas les deux bouts : un seul point aberrant à chaque
+ * extrémité suffirait sinon à inverser le verdict.
+ *
+ * Rien n'est rendu s'il n'y a pas au moins trois périodes mesurées de chaque
+ * côté : en dessous, ce serait une pente tirée de deux points.
+ */
+function usageTendance(points, champ, baisserEstBon) {
+  const v = points.map(p => p[champ]).filter(x => x != null);
+  if (v.length < 6) return '';
+  const med = a => { const x = a.slice().sort((m, n) => m - n);
+    return x.length % 2 ? x[(x.length - 1) / 2] : (x[x.length / 2 - 1] + x[x.length / 2]) / 2; };
+  const moitie = Math.floor(v.length / 2);
+  const a = med(v.slice(0, moitie)), b = med(v.slice(-moitie));
+  if (!a) return '';
+  const p = Math.round(100 * (b - a) / a);
+  if (Math.abs(p) < 5) return `<span class="uev plat" title="stable sur la période">= stable</span>`;
+  const bon = baisserEstBon ? p < 0 : p > 0;
+  return `<span class="uev ${bon ? 'bon' : 'moins'}" title="${
+    'seconde moitié de la période comparée à la première, médianes'}">${
+    p < 0 ? '↓' : '↑'}${Math.abs(p)} % sur la période</span>`;
+}
+
+/**
+ * LA COURBE D'UNE MESURE PAR ÉCHANGE.
+ *
+ * Sur un axe de temps réel, un point par période mesurée, le trait rompu sur
+ * les trous. Un point tiré de moins de trois échanges est dessiné plus petit et
+ * plus pâle : la médiane d'un seul échange n'est pas une médiane, et le dire
+ * par la taille évite de l'écrire quarante fois.
+ */
+function usageCourbe(d, mes) {
+  const H = 64, W = 100, PT = 6, PB = 6;
+  const pts = d.points.map((p, i) => ({ ...p, i, v: p[mes.champ] }));
+  const vus = pts.filter(p => p.v != null);
+  if (!vus.length) return null;
+  const pic = Math.max(...vus.map(p => p.v), mes.champ === 'part_cache' ? 100 : 0);
+  const bas = 0;
+  const X = i => (d.points.length === 1 ? W / 2 : (i / (d.points.length - 1)) * W);
+  const Y = v => PT + (H - PT - PB) * (1 - (v - bas) / (pic - bas || 1));
+
+  // Le trait, en morceaux : on repart d'un « M » après chaque trou.
+  let chemin = '', ouvert = false;
+  for (const p of pts) {
+    if (p.v == null) { ouvert = false; continue; }
+    chemin += `${ouvert ? 'L' : 'M'}${X(p.i).toFixed(2)} ${Y(p.v).toFixed(2)}`;
+    ouvert = true;
+  }
+  const ronds = vus.map(p => {
+    const sur = p.echanges >= 3;
+    return `<circle cx="${X(p.i).toFixed(2)}" cy="${Y(p.v).toFixed(2)}"
+      r="${sur ? 1.7 : 1.1}" class="upt${sur ? '' : ' maigre'}"
+      data-tip="${esc(`${usageQuand(p.k, d.unite)} — ${mes.fmt(p.v)}${
+        p.echanges ? ` · ${p.echanges} échange${p.echanges > 1 ? 's' : ''}` : ''}${
+        sur ? '' : ' · trop peu pour une médiane'}`)}"></circle>`;
+  }).join('');
+  return `<svg class="ucourbe" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+      role="img" aria-label="${esc(`${mes.titre}, ${d.nom}`)}">
+    <path d="${chemin}" class="utrait" vector-effect="non-scaling-stroke"/>
+    ${ronds}
+  </svg>
+  <div class="uaxe"><span>${esc(usageBorne(d.points[0].k, d.unite))}</span>
+    <span class="umax mono">max ${esc(mes.fmt(pic))}</span>
+    <span>${esc(usageBorne(d.points.at(-1).k, d.unite))}</span></div>`;
+}
+
+/** Les barres empilées du volume : c'est la vue d'origine, inchangée. */
+function usageBarres(d) {
   // Échelle en RACINE : un seul appel énorme (souvent un retissage de « ma
   // carte ») écrase sinon toutes les petites barres à 1 px. La racine garde les
   // pics lisibles sans effacer le reste. Toute barre non nulle a un plancher
   // visible.
-  const ech = t => t <= 0 ? 0 : Math.max(8, Math.round(100 * Math.sqrt(t) / Math.sqrt(d.pic)));
+  const pic = d.pics?.volume ?? d.pic;
+  const ech = t => t <= 0 ? 0 : Math.max(8, Math.round(100 * Math.sqrt(t) / Math.sqrt(pic)));
   const seg = (v, cls) => v > 0 ? `<i class="${cls}" style="flex:${v}"></i>` : '';
   const barres = d.points.map(p => {
-    const quand = grain === 'heure' ? `${p.k.slice(11)} h` : fmtDay(p.k);
+    const quand = usageQuand(p.k, d.unite);
     const bouts = [];
     if (p.chat)  bouts.push(`chat ${fmtTok(p.chat)}`);
     if (p.carte) bouts.push(`ma carte ${fmtTok(p.carte)}`);
@@ -311,10 +463,60 @@ async function chargerGrapheUsage(grain) {
   // Répond directement à « est-ce que ça consomme en fond ? » : « ma carte »
   // (relecture, retissage) est le travail de fond, le chat est au premier plan.
   const fond = t.carte ? `dont ${fmtTok(t.carte)} en fond (ma carte)` : 'rien en fond';
-  hote.innerHTML = `<div class="ubars">${barres}</div>
+  return `<div class="ubars">${barres}</div>
     <div class="uleglist">${leg.join('')}</div>
     <p class="sub" style="margin:4px 0 0">${fmtTok(d.total)} jetons sur ${
-      grain === 'heure' ? '48 h' : '30 jours'} · ${fond} · UTC</p>`;
+      esc(d.nom)} · ${fond} · UTC</p>`;
+}
+
+/** Dessine la mesure courante à partir des données déjà chargées. */
+function dessinerUsage() {
+  const hote = $('#usageGraph');
+  if (!hote) return;
+  const d = USAGE_DATA, mes = USAGE_MES[USAGE_MESURE] ?? USAGE_MES.volume;
+  const titre = $('#usageTitre');
+  if (titre) { titre.textContent = mes.titre; titre.title = mes.aide; }
+  if (!d) { hote.innerHTML = '<p class="sub" style="margin:0">…</p>'; return; }
+
+  if (USAGE_MESURE === 'volume') {
+    hote.innerHTML = d.total ? usageBarres(d)
+      : `<p class="sub" style="margin:0">Rien de consommé sur ${esc(d.nom)}.</p>`;
+    return;
+  }
+  const courbe = usageCourbe(d, mes);
+  if (!courbe) {
+    /* Un mot sur POURQUOI c'est vide, pas seulement que ça l'est : sans
+       échange, il n'y a pas de prix par échange, et c'est différent d'un
+       branchement qui ne marche pas. */
+    hote.innerHTML = `<p class="sub" style="margin:0">Aucun échange sur ${
+      esc(d.nom)} — pas de prix à en tirer.</p>`;
+    return;
+  }
+  const tend = usageTendance(d.points, mes.champ, mes.baisserEstBon);
+  hote.innerHTML = `${courbe}
+    <p class="sub utend" style="margin:6px 0 0">${tend}
+      <span class="faint">${d.echanges} échange${d.echanges > 1 ? 's' : ''} sur ${
+        esc(d.nom)}${USAGE_MESURE === 'cout' ? ` · ${
+        String(d.coutTotal).replace('.', ',')} $ en tout` : ''} · UTC</span></p>
+    <p class="sub uaide">${esc(mes.aide)}</p>`;
+}
+
+/**
+ * LA SÉRIE, chargée à la demande dans le panneau des jetons.
+ *
+ * Un seul aller-retour par FENÊTRE : les quatre mesures arrivent ensemble, et
+ * changer d'axe ne coûte donc rien. Une période vide se dit en toutes lettres —
+ * un graphe plat se lirait « rien mesuré », ce qui est faux quand rien n'a été
+ * consommé.
+ */
+async function chargerGrapheUsage(grain = USAGE_GRAIN) {
+  const hote = $('#usageGraph');
+  if (!hote) return;
+  USAGE_DATA = null;
+  dessinerUsage();
+  try { USAGE_DATA = await api(`/api/usage/serie?grain=${grain}`); }
+  catch { hote.innerHTML = '<p class="sub" style="margin:0">Lecture impossible.</p>'; return; }
+  dessinerUsage();
 }
 
 function toggleGauge(force) {

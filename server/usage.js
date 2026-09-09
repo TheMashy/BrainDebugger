@@ -156,7 +156,12 @@ const mediane = v => {
 
 /**
  * Les appels d'une source, regroupés en échanges.
- * @returns {Array<{appels:number, equivalent:number, cout:number, traverses:number}>}
+ *
+ * `debut` est l'horodatage du PREMIER appel : c'est lui qui range l'échange
+ * dans une période. Sans lui, un échange qui traverse minuit serait coupé en
+ * deux et compté comme deux échanges à moitié prix.
+ *
+ * @returns {Array<{debut:string, appels:number, equivalent:number, cout:number, traverses:number}>}
  */
 export function echangesDe(lignes, trou = TROU_ECHANGE) {
   const out = [];
@@ -164,7 +169,7 @@ export function echangesDe(lignes, trou = TROU_ECHANGE) {
   for (const r of lignes) {
     const t = Date.parse(r.ts);
     if (!cour || !Number.isFinite(t) || !Number.isFinite(dernier) || t - dernier > trou * 1000) {
-      cour = { appels: 0, equivalent: 0, cout: 0, traverses: 0 };
+      cour = { debut: r.ts, appels: 0, equivalent: 0, cout: 0, traverses: 0 };
       out.push(cour);
     }
     const p = PRICES[r.model] ?? PRICES['claude-opus-5'];
@@ -230,58 +235,171 @@ function nextMonthStart() {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
 }
 
+/*
+ * =====================================================================
+ *  LA CONSOMMATION DANS LE TEMPS — ET CE QU'ELLE MESURE.
+ *
+ * La courbe ne montrait qu'une chose : les jetons TRAVERSÉS par période. Ce
+ * chiffre-là monte avec l'usage, et il ne répond donc pas à la seule question
+ * qu'on se pose en optimisant — « est-ce que ça baisse ? ». Cinquante échanges
+ * à moitié prix font une barre plus haute que vingt échanges au prix fort.
+ *
+ * Il y a maintenant quatre MESURES sur la même série, et le choix de la mesure
+ * est le choix de la question :
+ *
+ *   volume  — les jetons traversés. « Combien ça a tourné », par source.
+ *   jetons  — les jetons d'UN échange, au tarif plein. « Est-ce que le prompt
+ *             maigrit ? » Un jeton relu du cache y compte pour un dixième.
+ *   cout    — les dollars d'UN échange. La même chose, en argent.
+ *   cache   — la part du prompt relue du cache. C'est la CAUSE quand les deux
+ *             précédents bougent, et c'est le premier endroit où regarder.
+ *
+ * Et quatre FENÊTRES, parce qu'une optimisation se lit sur des mois, pas sur
+ * deux jours. Le pas s'élargit avec la fenêtre : trente barres tiennent dans un
+ * panneau, trois cent soixante-cinq n'y tiennent pas.
+ *
+ * UNE PÉRIODE SANS ÉCHANGE N'A PAS DE PRIX PAR ÉCHANGE — elle vaut `null`, pas
+ * zéro. C'est la même règle que partout ailleurs ici : un zéro se lit comme
+ * « c'était gratuit », un trou se lit comme « on ne sait pas », et une courbe
+ * qui plonge à zéro chaque week-end raconterait une optimisation qui n'a pas eu
+ * lieu.
+ * ===================================================================== */
+
+/** Les fenêtres : combien de pas, de quelle largeur, et comment on les nomme. */
+export const FENETRES = {
+  heure:   { pas: 48, unite: 'heure',   nom: '48 h' },
+  jour:    { pas: 30, unite: 'jour',    nom: '30 jours' },
+  semaine: { pas: 13, unite: 'semaine', nom: '3 mois' },
+  mois:    { pas: 12, unite: 'mois',    nom: '1 an' },
+};
+
+/** Le début du seau qui contient cet instant, en UTC. */
+function seau(d, unite) {
+  const t = new Date(d);
+  if (unite === 'heure') { t.setUTCMinutes(0, 0, 0); return t.toISOString().slice(0, 13); }
+  t.setUTCHours(0, 0, 0, 0);
+  if (unite === 'jour') return t.toISOString().slice(0, 10);
+  if (unite === 'semaine') {
+    // Le lundi : `getUTCDay()` rend 0 pour dimanche, qu'on ramène à 7.
+    t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+    return t.toISOString().slice(0, 10);
+  }
+  t.setUTCDate(1);
+  return t.toISOString().slice(0, 7);
+}
+
+/** Recule d'un pas. */
+function reculer(t, unite, n) {
+  const d = new Date(t);
+  if (unite === 'heure') d.setUTCHours(d.getUTCHours() - n);
+  else if (unite === 'jour') d.setUTCDate(d.getUTCDate() - n);
+  else if (unite === 'semaine') d.setUTCDate(d.getUTCDate() - 7 * n);
+  else d.setUTCMonth(d.getUTCMonth() - n);
+  return d;
+}
+
 /**
  * LA CONSOMMATION DANS LE TEMPS, POUR UNE COURBE.
  *
- * Chaque appel au modele a un horodatage et ses jetons ; on les regroupe par
- * HEURE (48 dernieres) ou par JOUR (30 derniers). On rend une serie CONTINUE,
- * trous compris (une heure sans appel vaut zero) : c'est justement le creux qui
- * dit « rien ne consommait la », et le masquer ferait croire a une activite
- * ininterrompue. Tout est en UTC, comme le reste du comptage.
+ * Chaque appel au modèle a un horodatage et ses jetons ; on les regroupe par
+ * heure, jour, semaine ou mois. La série est CONTINUE, trous compris : c'est
+ * justement le creux qui dit « rien ne consommait là », et le masquer ferait
+ * croire à une activité ininterrompue. Tout est en UTC, comme le reste du
+ * comptage.
  *
- * L'enveloppe compte tous les jetons (cache compris) : la barre mesure ce qui a
- * traverse le modele. `sortie` isole les jetons de sortie, les plus chers.
+ * LES ÉCHANGES SONT DÉCOUPÉS SUR TOUTE LA FENÊTRE, PUIS RANGÉS. Les découper
+ * seau par seau couperait en deux l'échange qui traverse minuit et compterait
+ * deux échanges à moitié prix là où il y en a un. Chaque échange va donc dans
+ * le seau de son PREMIER appel.
  */
 export function serieUsage(userId, grain = 'jour') {
-  const heure = grain === 'heure';
-  const pas = heure ? 48 : 30;
-  const fmt = heure ? '%Y-%m-%dT%H' : '%Y-%m-%d';
-  // Par bucket ET par source : le chat (au premier plan) et la carte (le fond)
-  // ne sont pas la meme depense. `chat` regroupe la conversation ; `carte` la
-  // relecture / le retissage ; `autre` les lignes d'avant le suivi par source.
-  const rows = db.prepare(
-    `SELECT strftime('${fmt}', ts) k,
-            CASE WHEN source = 'carte' THEN 'carte'
-                 WHEN source = 'chat'  THEN 'chat'
-                 ELSE 'autre' END AS s,
-            SUM(input_tokens + output_tokens
-                + COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)) t,
-            COUNT(*) n
-     FROM usage WHERE user_id = ? GROUP BY k, s`
-  ).all(userId);
-  const par = new Map();               // bucket -> {chat, carte, autre, appels}
-  for (const r of rows) {
-    const e = par.get(r.k) ?? { chat: 0, carte: 0, autre: 0, appels: 0 };
-    e[r.s] = (e[r.s] ?? 0) + r.t;
-    e.appels += r.n;
-    par.set(r.k, e);
-  }
+  const f = FENETRES[grain] ?? FENETRES.jour;
   const now = new Date();
-  const points = [];
-  for (let i = pas - 1; i >= 0; i--) {
-    const d = new Date(now);
-    if (heure) d.setUTCHours(d.getUTCHours() - i, 0, 0, 0);
-    else { d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - i); }
-    const k = heure ? d.toISOString().slice(0, 13) : d.toISOString().slice(0, 10);
-    const e = par.get(k) ?? { chat: 0, carte: 0, autre: 0, appels: 0 };
-    points.push({ k, chat: e.chat, carte: e.carte, autre: e.autre,
-                  tokens: e.chat + e.carte + e.autre, appels: e.appels });
+  // Le début de la fenêtre : le seau du premier pas, pas « il y a N jours ».
+  const debut = new Date(`${seau(reculer(now, f.unite, f.pas - 1), f.unite)}${
+    f.unite === 'heure' ? ':00:00.000Z' : f.unite === 'mois' ? '-01T00:00:00.000Z' : 'T00:00:00.000Z'}`);
+
+  const rows = db.prepare(
+    `SELECT ts, model, source, input_tokens, output_tokens,
+            COALESCE(cache_read_tokens, 0) cache_read_tokens,
+            COALESCE(cache_write_tokens, 0) cache_write_tokens
+     FROM usage WHERE user_id = ? AND ts >= ? ORDER BY ts ASC`
+  ).all(userId, debut.toISOString());
+
+  const vide = () => ({ chat: 0, carte: 0, autre: 0, appels: 0,
+                        equivalent: 0, cout: 0, lu: 0, entree: 0, ech: [] });
+  const par = new Map();
+  const ou = r => par.get(seau(r.ts, f.unite)) ?? null;
+
+  // 1. les volumes, appel par appel.
+  for (const r of rows) {
+    const k = seau(r.ts, f.unite);
+    if (!par.has(k)) par.set(k, vide());
+    const e = par.get(k);
+    const s_ = r.source === 'carte' ? 'carte' : r.source === 'chat' ? 'chat' : 'autre';
+    e[s_] += r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    e.appels++;
+    e.equivalent += equivalentDe(r);
+    e.lu += r.cache_read_tokens;
+    e.entree += r.input_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    const p = PRICES[r.model] ?? PRICES['claude-opus-5'];
+    e.cout += (r.input_tokens / 1e6) * p.in + (r.output_tokens / 1e6) * p.out
+            + (r.cache_read_tokens / 1e6) * p.in * LECTURE_CACHE
+            + (r.cache_write_tokens / 1e6) * p.in * ECRITURE_CACHE;
   }
-  const somme = c => points.reduce((s, p) => s + p[c], 0);
+
+  // 2. les échanges, découpés par SOURCE sur toute la fenêtre puis rangés dans
+  //    le seau de leur premier appel. Deux sources mélangées feraient d'une
+  //    relecture de la carte lancée pendant une conversation un seul échange.
+  for (const src of ['chat', 'carte']) {
+    const lignesSrc = rows.filter(r => r.source === src);
+    for (const e of echangesDe(lignesSrc)) {
+      const k = seau(e.debut, f.unite);
+      if (!par.has(k)) par.set(k, vide());
+      par.get(k).ech.push(e);
+    }
+  }
+
+  const points = [];
+  for (let i = f.pas - 1; i >= 0; i--) {
+    const k = seau(reculer(now, f.unite, i), f.unite);
+    const e = par.get(k) ?? vide();
+    const ech = e.ech;
+    points.push({
+      k,
+      chat: e.chat, carte: e.carte, autre: e.autre,
+      tokens: e.chat + e.carte + e.autre,
+      appels: e.appels,
+      echanges: ech.length,
+      // Les MÉDIANES, pas les moyennes : un seul échange à rallonge (un
+      // document collé, un retissage) tirerait la moyenne du seau et cacherait
+      // le quotidien — qui est précisément ce qu'on vient regarder.
+      par_echange: ech.length ? Math.round(mediane(ech.map(x => x.equivalent))) : null,
+      cout_par_echange: ech.length
+        ? Math.round(mediane(ech.map(x => x.cout)) * 1e5) / 1e5 : null,
+      // La part relue du cache n'a pas besoin d'échanges : elle se lit sur les
+      // appels, et un seul appel suffit à la mesurer.
+      part_cache: e.entree ? Math.round(1000 * e.lu / e.entree) / 10 : null,
+      cout: Math.round(e.cout * 1e4) / 1e4,
+      equivalent: Math.round(e.equivalent),
+    });
+  }
+  const somme = c => points.reduce((s2, p) => s2 + (p[c] ?? 0), 0);
+  const pics = c => Math.max(...points.map(p => p[c] ?? 0), 0);
   return {
-    grain, points,
-    total: points.reduce((s, p) => s + p.tokens, 0),
-    pic: Math.max(1, ...points.map(p => p.tokens)),
+    grain, unite: f.unite, nom: f.nom, points,
+    total: somme('tokens'),
+    pic: Math.max(1, pics('tokens')),
+    // Un pic par mesure : chacune a sa propre échelle, et réutiliser celle du
+    // volume écraserait les trois autres contre l'axe.
+    pics: {
+      volume: Math.max(1, pics('tokens')),
+      jetons: Math.max(1, pics('par_echange')),
+      cout: Math.max(1e-4, pics('cout_par_echange')),
+      cache: 100,
+    },
+    echanges: somme('echanges'),
+    coutTotal: Math.round(somme('cout') * 100) / 100,
     totaux: { chat: somme('chat'), carte: somme('carte'), autre: somme('autre') }
   };
 }

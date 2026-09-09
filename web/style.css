@@ -1156,7 +1156,13 @@ input[type=date] { color-scheme: dark; }
 
 .usagebloc { margin: 14px 0 4px; }
 .usagetete { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.usagetog { display: inline-flex; gap: 4px; }
+/* Deux rangées de pastilles : la MESURE (la question) puis la FENÊTRE (sur
+   combien de temps). Elles s'enroulent — huit pastilles ne tiennent pas sur une
+   ligne de trois cents pixels, et les couper serait pire que les empiler. */
+.usagetog { display: flex; flex-wrap: wrap; gap: 4px; }
+.usagemes { margin-bottom: 5px; }
+.usagefen { margin-bottom: 8px; }
+.usagefen .usagesel { font-size: 10.5px; padding: 1px 7px; }
 .usagesel {
   font: 500 11px var(--sans); color: var(--ink-dim); background: transparent;
   border: 1px solid var(--line-soft); border-radius: 6px; padding: 2px 8px; cursor: pointer;
@@ -1183,6 +1189,25 @@ input[type=date] { color-scheme: dark; }
 .uleg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-dim); }
 .uleg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .uleg .uchat, .uleg .ucarte, .uleg .uautre { flex: none; }
+
+/* LA COURBE D'UNE MESURE PAR ÉCHANGE.
+   Des barres pour un volume, une courbe pour un prix : une barre se lit comme
+   une quantité qu'on additionne, une courbe comme un niveau qui évolue —
+   et des médianes ne s'additionnent pas. */
+.ucourbe { display: block; width: 100%; height: 64px; overflow: visible; }
+.utrait { fill: none; stroke: var(--accent); stroke-width: 1.6px;
+          stroke-linejoin: round; stroke-linecap: round; }
+.upt { fill: var(--accent); cursor: help; }
+/* Un point tiré de moins de trois échanges est plus petit et plus pâle : la
+   médiane d'un seul échange n'est pas une médiane, et le dire par la taille
+   évite de l'écrire quarante fois. */
+.upt.maigre { fill: var(--ink-faint); opacity: .6; }
+.uaxe { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px;
+        font-size: 10px; color: var(--ink-faint); white-space: nowrap; }
+.uaxe .umax { color: var(--ink-dim); }
+.utend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.utend .uev { font-size: 11px; }
+.uaide { margin: 6px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--ink-faint); }
 /* « sans enveloppe » n'est pas une alerte : c'est un état choisi. Il se signale
    sans crier, à la façon d'une étiquette d'outil de développeur. */
 .gaugepanel .sansenv {
