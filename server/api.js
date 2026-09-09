@@ -13,7 +13,7 @@ import {
   mesuresEntre, poserMesure, normaliserTs,
   redaterMessages, rebuildEntryText, tousMessagesUtilisateur
 } from './db.js';
-import { usageFor, record as recordUsage, serieUsage, profilUsage } from './usage.js';
+import { usageFor, record as recordUsage, serieUsage, profilUsage, FENETRES } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
@@ -2274,8 +2274,16 @@ export const routes = {
    */
   'GET /api/usage/profil': ({ userId }) => profilUsage(userId),
 
+  /*
+   * QUATRE FENÊTRES, ET LA MESURE SE CHOISIT À L'ÉCRAN.
+   *
+   * Le serveur rend les quatre mesures sur la même série — volume, jetons par
+   * échange, dollars par échange, part du cache. Les recalculer par un
+   * aller-retour à chaque clic ferait payer un changement d'axe au prix d'une
+   * requête, pour des données déjà là.
+   */
   'GET /api/usage/serie': ({ query, userId }) =>
-    serieUsage(userId, query.grain === 'heure' ? 'heure' : 'jour'),
+    serieUsage(userId, FENETRES[query.grain] ? query.grain : 'jour'),
 
   /* ---------- quantified self : ce qui est arrive, et par quel tuyau ----------
    *
