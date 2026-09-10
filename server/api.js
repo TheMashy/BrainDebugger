@@ -17,6 +17,7 @@ import { usageFor, record as recordUsage, serieUsage, profilUsage, FENETRES } fr
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
+import { joursDuRendezVous, comptesDuRendezVous } from './rendez-vous.js';
 import { liens } from './liens.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
@@ -2763,6 +2764,34 @@ export const routes = {
    * sur deux fenetres (celle-ci et la precedente, de meme longueur), et il faut
    * connaitre les bornes pour les demander.
    */
+  /**
+   * LE DOCUMENT D'UN RENDEZ-VOUS, EN UN SEUL APPEL.
+   *
+   * Deux frises, et elles ne répondent pas à la même question. La première va
+   * de la naissance à aujourd'hui : c'est le CONTEXTE, les faits que la
+   * personne a posés elle-même. La seconde tient sur trente jours et montre
+   * ce qui s'est dit et ce qui s'est mesuré, jour par jour.
+   *
+   * TOUT EST DÉJÀ CALCULÉ AILLEURS, et c'est voulu : la frise vient de la même
+   * route que l'écran, les nuits de `nuits()`, les signes de `veilleDuJour`.
+   * Un document qui recalculerait ses chiffres à sa façon finirait par ne plus
+   * dire la même chose que l'application dont il sort — et c'est le document
+   * qu'on emporte, donc c'est lui qui aurait tort devant quelqu'un.
+   */
+  'GET /api/rendez-vous': ({ query, userId }) => {
+    const jours = Math.max(7, Math.min(120, parseInt(query?.jours ?? '30', 10) || 30));
+    const { byDate } = series(userId);
+    const notes = new Map([...byDate].map(([d, x]) => [d, x?.note ?? null]));
+    const derniers = joursDuRendezVous(userId, { jours, notes });
+    return {
+      fait_le: today(),
+      jours,
+      frise: routes['GET /api/frise']({ userId }),
+      derniers,
+      comptes: comptesDuRendezVous(derniers)
+    };
+  },
+
   'GET /api/compte-rendu': ({ query, userId }) => {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(query?.date ?? '')) ? query.date : today();
     const entries = allEntries(userId);

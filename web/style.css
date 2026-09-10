@@ -3588,6 +3588,11 @@ table.grid td.cell.abascule { cursor: pointer; }
 /* La duree dormie, sur sa propre ligne : c'est elle qu'on cherche le matin. */
 .jpdormi { margin-top: 4px; }
 .jpost { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+/* La ligne du document à emporter, sous la frise. Discrète : on ne prépare pas
+   un document pour sa psychologue tous les jours, et un bouton qui insiste
+   ferait croire qu'on devrait. */
+.rdvligne { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
+.rdvligne .faint { font-size: 12px; }
 /* Le numéro du jour, quand le lever et le coucher n'ont pas la même date. Il
    se lit comme une note en marge — assez petit pour ne pas concurrencer
    l'heure, assez présent pour qu'on le voie sans le chercher. */

@@ -2035,6 +2035,20 @@ async function renderYear(year) {
           return svg && COURBE === 'cumul' ? `<div class="frisewrap" id="frisewrap">${svg}
             <div class="frisetip" id="frisetip" hidden></div></div>` : '';
         })()}
+
+        ${/*
+           * LE DOCUMENT QU'ON EMPORTE À UN RENDEZ-VOUS.
+           *
+           * Il se fabrique dans le navigateur, à partir de ce que la route
+           * rend : le journal de quelqu'un n'a pas à traverser une machine de
+           * plus pour devenir un PDF. Le bouton s'ouvre dans un onglet, où la
+           * page se relit AVANT d'être imprimée — on ne tend pas à quelqu'un
+           * un document qu'on n'a pas lu.
+           */''}
+        <div class="rdvligne">
+          <button class="btn ghost" id="rdvdoc">${ico('sortir', 14)}Préparer un document pour un rendez-vous</button>
+          <span class="faint">le parcours depuis la naissance, puis les 30 derniers jours</span>
+        </div>
       </div>
 
       ${/*
@@ -2164,6 +2178,7 @@ async function renderYear(year) {
   }, true);
 
   wireFrise();
+  wireDocRdv();
   wireReperes(year);
 
   // Une note rangée, écrite ici plutôt que collée au compagnon. La date est
@@ -2544,6 +2559,40 @@ function friseMarkup(events) {
  * Le clic ouvre le jour dans le Miroir. Pour une periode, son premier jour :
  * c'est celui qu'on cherche quand on clique sur une barre, pas son milieu.
  */
+/**
+ * LE BOUTON DU DOCUMENT.
+ *
+ * `window.open` AVANT le `await`, et pas après : un onglet ouvert au retour
+ * d'une promesse n'est plus rattaché au clic, et Safari comme Firefox le
+ * bloquent. On ouvre donc l'onglet tout de suite, on y écrit ensuite.
+ */
+function wireDocRdv() {
+  const b = document.getElementById('rdvdoc');
+  if (!b) return;
+  b.addEventListener('click', async () => {
+    const onglet = window.open('', '_blank');
+    b.disabled = true;
+    try {
+      const d = await api('/api/rendez-vous?jours=30');
+      const { documentRendezVous } = await import('./document-rdv.js');
+      const html = documentRendezVous(d);
+      if (!onglet) {                     // bloqueur de fenêtres : on retombe sur un fichier
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = `document-${d.fait_le}.html`; a.click();
+        URL.revokeObjectURL(url);
+        toast('Le document a été enregistré : ouvre-le puis imprime-le.');
+        return;
+      }
+      onglet.document.write(html);
+      onglet.document.close();
+    } catch (err) {
+      onglet?.close();
+      toast(`Le document n’a pas pu être préparé : ${err.message}`);
+    } finally { b.disabled = false; }
+  });
+}
+
 function wireFrise() {
   const wrap = $('#frisewrap');
   const tip = $('#frisetip');
