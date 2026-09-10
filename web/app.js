@@ -2049,6 +2049,19 @@ async function renderYear(year) {
           <button class="btn ghost" id="rdvdoc">${ico('sortir', 14)}Préparer un document pour un rendez-vous</button>
           <span class="faint">le parcours depuis la naissance, puis les 30 derniers jours</span>
         </div>
+        ${/*
+           * LA RELECTURE DES SIGNES EST POSÉE JUSTE SOUS LE DOCUMENT, ET PAS
+           * DANS LES RÉGLAGES.
+           *
+           * C'est le document qui souffre du faux positif — « une ligne
+           * ‹ blessure le 12 › lue par une praticienne pour quelqu'un qui
+           * parlait du lycée ». Ranger le remède trois écrans plus loin que le
+           * symptôme obligerait à savoir qu'il existe pour aller le chercher.
+           */''}
+        <div class="rdvligne">
+          <button class="btn ghost" id="jugerveille">${ico('refaire', 14)}Relire les signes</button>
+          <span class="faint" id="jugetat">un modèle relit chaque passage signalé avec son contexte</span>
+        </div>
       </div>
 
       ${/*
@@ -2179,6 +2192,7 @@ async function renderYear(year) {
 
   wireFrise();
   wireDocRdv();
+  wireJugerVeille();
   wireReperes(year);
 
   // Une note rangée, écrite ici plutôt que collée au compagnon. La date est
@@ -2589,6 +2603,62 @@ function wireDocRdv() {
     } catch (err) {
       onglet?.close();
       toast(`Le document n’a pas pu être préparé : ${err.message}`);
+    } finally { b.disabled = false; }
+  });
+}
+
+/**
+ * LA RELECTURE DES PASSAGES SIGNALÉS.
+ *
+ * Elle part en LOT : on ne fait donc rien attendre à personne, et l'état se
+ * relit en passant plutôt que dans une boucle. Un `setInterval` qui
+ * interrogerait l'API toute la nuit coûterait plus d'appels que la relecture
+ * elle-même.
+ */
+async function peindreJugement({ relancer = true } = {}) {
+  const el = document.getElementById('jugetat');
+  if (!el) return;
+  try {
+    const r = await api('/api/veille/jugement');
+    if (r.erreur) { el.textContent = r.erreur; el.classList.add('warn'); return; }
+    el.classList.remove('warn');
+    if (r.enCours) {
+      el.textContent = `${r.n ?? ''} passage${(r.n ?? 0) > 1 ? 's' : ''} en cours de relecture — `
+        + 'ça se fait en fond, tu peux fermer la page.';
+      // Un lot met de quelques minutes à quelques heures : on repasse une fois,
+      // pas en boucle.
+      if (relancer) setTimeout(() => peindreJugement({ relancer: false }), 60000);
+      return;
+    }
+    const c = r.comptes ?? [];
+    if (!c.length) {
+      el.textContent = 'un modèle relit chaque passage signalé avec son contexte';
+      return;
+    }
+    const par = {};
+    for (const x of c) par[x.verdict] = (par[x.verdict] ?? 0) + x.n;
+    const total = Object.values(par).reduce((a, b) => a + b, 0);
+    /* On dit ce qui a été relu ET comment ça s'est réparti : un compteur seul
+       ne permettrait pas de voir que la consigne penche d'un côté. */
+    el.textContent = `${total} passage${total > 1 ? 's' : ''} relu${total > 1 ? 's' : ''} · `
+      + Object.entries(par).map(([v, n]) => `${n} ${(r.sens?.[v] ?? v)}`).join(' · ');
+  } catch { /* pas de clé, pas de réseau : la ligne garde son texte d'origine */ }
+}
+
+function wireJugerVeille() {
+  const b = document.getElementById('jugerveille');
+  if (!b) return;
+  peindreJugement();
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      const r = await api('/api/veille/juger', {});
+      if (r.deja) toast('Une relecture est déjà partie.');
+      else if (!r.n) toast(r.message ?? 'Tous les passages signalés ont déjà été relus.');
+      else toast(`${r.n} passages partent en relecture. Ça se fait en fond.`);
+      peindreJugement();
+    } catch (err) {
+      toast(`La relecture n’a pas pu partir : ${err.message}`);
     } finally { b.disabled = false; }
   });
 }
@@ -6729,6 +6799,19 @@ async function renderSettings() {
           <button class="btn" id="export">${ico('sortir')}Exporter en JSON</button>
           <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">${ico('partir')}Se déconnecter</button></form>
         </div>
+        <h3>Sortir la frise et l’année</h3>
+        <p class="sub">De quoi travailler le dessin ailleurs, sur de vraies données : une frise se
+          règle sur un vrai parcours, pas sur sept repères inventés qui tombent tous bien.</p>
+        <p class="sub" style="font-size:12.5px">
+          <b>Sans les phrases</b> remplace chaque citation par sa longueur. C’est ce qu’il faut pour
+          la mise en page — ce qui compte pour un dessin, c’est combien de signes une ligne doit
+          porter, pas ce qu’elle raconte. Les dates, les repères, les heures et les notes y sont
+          entiers dans les deux cas.
+        </p>
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn" id="exFriseMuet">${ico('sortir')}Sans les phrases</button>
+          <button class="btn ghost" id="exFrise">${ico('sortir')}Avec mes phrases</button>
+        </div>
         <h3>Importer un historique</h3>
                 <p class="sub">L'export d'une grille annuelle depuis un tableur : une ligne par mois,
           les notes en colonnes 1 à 31. Les repères d'étalonnage présents dans la feuille sont
@@ -6915,6 +6998,24 @@ async function renderSettings() {
       box.innerHTML = `<p class="sub" style="margin:12px 0 0;color:var(--danger)">${esc(err.message)}</p>`;
     }
   });
+
+  for (const [id, phrases] of [['exFriseMuet', 0], ['exFrise', 1]]) {
+    $('#' + id)?.addEventListener('click', async e => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      try {
+        const d = await api(`/api/export/frise?jours=60&phrases=${phrases}`);
+        const url = URL.createObjectURL(new Blob([JSON.stringify(d, null, 1)],
+                                                 { type: 'application/json' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `frise-${S.today}${phrases ? '' : '-sans-phrases'}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) { toast(`L’export a échoué : ${err.message}`); }
+      finally { b.disabled = false; }
+    });
+  }
 
   $('#export').addEventListener('click', async () => {
     const data = await api('/api/export');

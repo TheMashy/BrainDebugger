@@ -2826,6 +2826,40 @@ export const routes = {
     }
   },
 
+  /**
+   * LA FRISE ET L'ANNÉE, EN UN FICHIER QU'ON PEUT DONNER À LIRE.
+   *
+   * Pour itérer sur le dessin avec de vraies données : une frise se règle sur
+   * un vrai parcours, pas sur sept repères inventés qui tombent tous bien.
+   *
+   * `phrases=0` REMPLACE CHAQUE CITATION PAR SA LONGUEUR. C'est la version qui
+   * suffit à travailler la mise en page — ce qui compte pour un dessin, c'est
+   * combien de signes une ligne doit porter, pas ce qu'elle raconte. Elle
+   * existe pour qu'on n'ait pas à choisir entre « aider quelqu'un à régler son
+   * écran » et « lui donner son journal à lire ».
+   */
+  'GET /api/export/frise': ({ query, userId }) => {
+    const jours = Math.max(7, Math.min(400, parseInt(query?.jours ?? '30', 10) || 30));
+    const phrases = query?.phrases === '1';
+    const rdv = routes['GET /api/rendez-vous']({ query: { jours: String(jours) }, userId });
+    const muet = t => t == null ? null : (phrases ? t : `«${String(t).length} signes»`);
+    return {
+      genere_le: today(),
+      avec_phrases: phrases,
+      frise: rdv.frise,
+      comptes: rdv.comptes,
+      derniers: rdv.derniers.map(j => ({
+        ...j,
+        signes: j.signes.map(x => ({ ...x, extrait: muet(x.extrait) })),
+        evoques: j.evoques.map(x => ({ ...x, extrait: muet(x.extrait) }))
+      })),
+      // La grille de l'année : c'est elle qui donne la densité réelle du
+      // journal, et donc à quoi ressemble une frise qui n'est pas remplie.
+      annee: series(userId).rows.map(r => ({ date: r.date, note: r.note ?? null,
+                                             ecrit: !!(r.text && r.text.trim()) }))
+    };
+  },
+
   'GET /api/rendez-vous': ({ query, userId }) => {
     const jours = Math.max(7, Math.min(120, parseInt(query?.jours ?? '30', 10) || 30));
     const { byDate } = series(userId);

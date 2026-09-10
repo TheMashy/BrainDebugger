@@ -111,3 +111,20 @@ test('tous les genres du présent sont connus de la veille', () => {
     assert.ok(DIT[g], `${g} doit avoir une phrase lisible, sinon le document affiche un code`);
   assert.ok(DIT[GENRE_PASSE]);
 });
+
+/* ---------------- l'export pour travailler ailleurs ---------------- */
+
+test('SANS LES PHRASES, une citation devient sa longueur — et rien d’autre ne bouge', () => {
+  /*
+   * C'est ce qui permet de régler un dessin sur de vraies données sans donner
+   * son journal à lire. Pour une mise en page, ce qui compte est combien de
+   * signes une ligne doit porter, pas ce qu'elle raconte — donc la longueur
+   * suffit, et elle doit être EXACTE, sinon le réglage se fait sur du faux.
+   */
+  const phrase = 'j’ai bu quatre bières hier soir, encore';
+  const muet = t => `«${String(t).length} signes»`;
+  const rendu = muet(phrase);
+  assert.match(rendu, /^«\d+ signes»$/);
+  assert.equal(Number(rendu.match(/\d+/)[0]), phrase.length,
+    'la longueur annoncée est la vraie, sinon la mise en page se règle sur du faux');
+});
