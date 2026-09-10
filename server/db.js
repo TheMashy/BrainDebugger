@@ -558,6 +558,27 @@ export const DEFAULT_SETTINGS = {
   dernierRetissage: null,
   anthropicEffort: 'low',     // 'low' | 'medium' | 'high' -- latence contre profondeur
   /*
+   * EST-CE QUE LE COMPAGNON REFLECHIT AVANT DE REPONDRE ?
+   *
+   * Eteint par defaut, et c'est le poste de depense principal du produit :
+   * la reflexion se facture en SORTIE, et la sortie fait la quasi-totalite
+   * de la facture d'une soiree. Une conversation du soir -- « qu'est-ce que
+   * tu as fait apres ? » -- n'est pas une tache de raisonnement ; c'est de
+   * l'ecoute, et l'ecoute se joue sur la justesse de la question suivante,
+   * pas sur la profondeur du calcul qui la precede.
+   *
+   * DEUXIEME EFFET, MOINS EVIDENT : `max_tokens` plafonne la reflexion ET le
+   * texte ENSEMBLE. Une reflexion longue mangeait donc la reponse, et c'est
+   * une des causes des phrases coupees que `jusquAuPoint` rattrape a
+   * l'arrivee. Eteinte, les 2048 jetons vont entierement a ce qui s'affiche.
+   *
+   * Ca reste un reglage et pas une decision figee : c'est la seule chose ici
+   * qui touche a la qualite de l'ecoute, et personne d'autre que la personne
+   * qui parle au compagnon ne peut juger si le troc lui va. Un clic le
+   * rallume.
+   */
+  chatPensee: false,
+  /*
    * LA CLE DE LA PASSERELLE. Vide tant qu'on n'en a pas cree une.
    *
    * Elle n'ouvre qu'une route, en lecture, et ce que cette route rend n'est

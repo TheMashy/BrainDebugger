@@ -6897,12 +6897,15 @@ async function renderSettings() {
     const rangee = b.closest('[data-segm]');
     const cle = rangee.dataset.segm;
     if (b.getAttribute('aria-pressed') === 'true') return;   // déjà choisi
+    const bool = rangee.dataset.bool === '1';
+    const versBase = v => bool ? v === 'oui' : v;
+    const versBouton = v => bool ? (v ? 'oui' : 'non') : v;
     const avant = [...rangee.querySelectorAll('button')].map(x => x.getAttribute('aria-pressed'));
     for (const x of rangee.querySelectorAll('button')) x.disabled = true;
     try {
-      const s2 = await saveSettings({ [cle]: b.dataset.val });
+      const s2 = await saveSettings({ [cle]: versBase(b.dataset.val) });
       for (const x of rangee.querySelectorAll('button'))
-        x.setAttribute('aria-pressed', String(x.dataset.val === s2[cle]));
+        x.setAttribute('aria-pressed', String(x.dataset.val === versBouton(s2[cle])));
       if (cle === 'chatBackend') return renderBackendCfg();
     } catch (err) {
       [...rangee.querySelectorAll('button')].forEach((x, i) => x.setAttribute('aria-pressed', avant[i]));
@@ -7115,16 +7118,29 @@ const BACKENDS = [
   { id: 'ollama',    label: 'Ollama',       note: 'sur cette machine' }
 ];
 
+const PENSEES = [
+  { id: 'non', label: 'répond d’un trait',  note: 'moins cher, et la réponse entière tient' },
+  { id: 'oui', label: 'réfléchit d’abord',  note: 'plus juste sur une question difficile' }
+];
+
 const EFFORTS = [
   { id: 'low',    label: 'bas',    note: 'répond vite' },
   { id: 'medium', label: 'moyen',  note: '' },
   { id: 'high',   label: 'élevé',  note: 'réfléchit plus, répond moins vite' }
 ];
 
-const segment = (id, titre, options, valeur) => `<div class="field">
+/*
+ * `bool` : le reglage vaut vrai ou faux en base, pas « oui » ou « non ».
+ * La rangee garde des identifiants lisibles et la conversion se fait au seul
+ * endroit qui touche a la base -- la delegation. Stocker la chaine « oui »
+ * dans un reglage booleen marcherait aujourd'hui et casserait le jour ou
+ * quelqu'un ecrit `if (s.chatPensee)` : « non » est vrai.
+ */
+const segment = (id, titre, options, valeur, { bool = false } = {}) => `<div class="field">
   <span>${esc(titre)}</span>
-  <div class="segm" data-segm="${id}" role="group" aria-label="${esc(titre)}">
-    ${options.map(o => `<button type="button" data-val="${esc(o.id)}" aria-pressed="${o.id === valeur}">
+  <div class="segm" data-segm="${id}"${bool ? ' data-bool="1"' : ''} role="group" aria-label="${esc(titre)}">
+    ${options.map(o => `<button type="button" data-val="${esc(o.id)}" aria-pressed="${
+      o.id === (bool ? (valeur ? 'oui' : 'non') : valeur)}">
       <b>${esc(o.label)}</b>${o.note ? `<i>${esc(o.note)}</i>` : ''}
     </button>`).join('')}
   </div>
@@ -7218,6 +7234,11 @@ async function renderBackendCfg() {
       ${segment('anthropicModelChat', 'Le compagnon', info.models, s.anthropicModelChat)}
       ${segment('anthropicModel', 'La lecture de fond', info.models, s.anthropicModel)}
       ${segment('anthropicEffort', 'Effort', EFFORTS, s.anthropicEffort)}
+      ${/* CE RÉGLAGE-LÀ EST LE POSTE DE DÉPENSE. La réflexion se facture en
+            sortie, et la sortie fait la quasi-totalité de la facture d'une
+            soirée. Il est ici, à côté du modèle, parce que c'est la même
+            question posée deux fois : combien on met dans une phrase. */''}
+      ${segment('chatPensee', 'Sa façon de répondre', PENSEES, s.chatPensee, { bool: true })}
     </div>
     <div class="field">
       <span>Clé API</span>

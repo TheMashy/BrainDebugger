@@ -114,10 +114,19 @@ function fausseApi(port) {
      * complaisant est la raison pour laquelle la panne est passée deux fois.
      */
     const cap = chat.capacitesDe(corps.model);
+    const eteinte = corps.thinking?.type === 'disabled';
     const refus =
       ('fallbacks' in corps && !cap.repli) ? 'fallbacks: Extra inputs are not permitted'
       : (corps.thinking?.type === 'adaptive' && !cap.pense) ? 'adaptive thinking is not supported on this model'
       : (corps.output_config?.effort && !cap.effort) ? 'output_config.effort: not supported on this model'
+      /* Les deux refus qu'oppose l'API a une reflexion ETEINTE. Sans eux, ce
+         serveur redevient complaisant sur exactement le champ qu'on vient
+         d'ajouter -- et c'est comme ca que la panne est passee deux fois. */
+      : (eteinte && cap.coupe === 'omettre')
+        ? 'thinking.type: disabled is not supported for this model'
+      : (eteinte && chat.EFFORTS_SANS_COUPURE.has(corps.output_config?.effort))
+        ? 'thinking: disabled is not supported with effort xhigh or max'
+      : (eteinte && !cap.pense) ? 'thinking: not supported on this model'
       : null;
     if (refus) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -234,4 +243,82 @@ test('LE FAUX SERVEUR REFUSE VRAIMENT — sinon ce fichier ne prouve rien', asyn
     assert.equal(r.status, 400, `le faux serveur accepte ${JSON.stringify(corps)}`);
     assert.match((await r.json()).error.message, motif);
   }
+});
+
+/* ============ LA RÉFLEXION S'ÉTEINT, ET LE COMPAGNON PARLE ENCORE ============ */
+
+/*
+ * LE POSTE DE DÉPENSE. La réflexion se facture en sortie, et la sortie fait la
+ * quasi-totalité de la facture d'une soirée. Elle s'éteint donc par défaut sur
+ * le compagnon.
+ *
+ * MAIS ON NE L'ÉTEINT PAS EN RETIRANT LE CHAMP. Sur ces modèles la réflexion
+ * est active PAR DÉFAUT : omettre `thinking` laisse tourner l'adaptatif, en
+ * croyant avoir économisé. C'est l'erreur que ces tests gardent — elle ne
+ * casse rien, elle ne se voit pas, et elle coûte tous les mois.
+ */
+
+test('ÉTEINDRE, C’EST ENVOYER `disabled` — PAS RETIRER LE CHAMP', async () => {
+  const r = await chat.reply(fil, { ...reglages('claude-sonnet-5'), chatPensee: false });
+  assert.equal(r.degraded, undefined, `le compagnon est tombé en repli : ${r.degraded}`);
+  assert.deepEqual(vues.at(-1).thinking, { type: 'disabled' },
+    'la réflexion n’est pas éteinte : un champ absent la laisse tourner en adaptatif');
+});
+
+test('et se rallume en un réglage', async () => {
+  const r = await chat.reply(fil, { ...reglages('claude-sonnet-5'), chatPensee: true });
+  assert.equal(r.degraded, undefined);
+  assert.deepEqual(vues.at(-1).thinking, { type: 'adaptive' });
+});
+
+test('c’est éteint PAR DÉFAUT, et le défaut est celui de la BASE', async () => {
+  /*
+   * Deux défauts, et il faut les deux. Celui de `chat.js` (`!!s.chatPensee`)
+   * protège d'un objet de réglages incomplet ; celui de `db.js` est ce que
+   * reçoit VRAIMENT quelqu'un qui n'a jamais touché au réglage — c'est-à-dire
+   * tout le monde. Un test qui ne regarde que le premier passe au vert pendant
+   * que la facture de tout le monde double.
+   */
+  const { DEFAULT_SETTINGS } = await import('../server/db.js');
+  assert.equal(DEFAULT_SETTINGS.chatPensee, false,
+    'la réflexion est rallumée pour tous ceux qui n’ont jamais ouvert Réglages');
+
+  const sans = reglages('claude-sonnet-5');
+  assert.equal('chatPensee' in sans, false, 'le test ne prouve plus rien : le réglage est posé');
+  await chat.reply(fil, sans);
+  assert.deepEqual(vues.at(-1).thinking, { type: 'disabled' });
+});
+
+test('sur Fable, c’est l’OMISSION qui éteint : le `disabled` explicite rend 400', () => {
+  // Deux mécaniques opposées pour la même intention. La table dit laquelle.
+  assert.equal(chat.optionsDuModele('claude-fable-5', { effort: 'low', pense: false }).thinking, undefined);
+  assert.deepEqual(chat.optionsDuModele('claude-opus-5', { effort: 'low', pense: false }).thinking,
+                   { type: 'disabled' });
+});
+
+test('au-dessus de `high`, on laisse réfléchir plutôt que de tomber', () => {
+  /*
+   * `disabled` n'est accepté qu'à l'effort `high` ou en dessous. Le menu s'y
+   * arrête aujourd'hui ; le jour où il montera, c'est la réflexion qui doit
+   * rester allumée, pas le compagnon qui doit tomber. Une réflexion de trop
+   * coûte des jetons ; un 400 coûte toutes les conversations.
+   */
+  for (const effort of ['xhigh', 'max']) {
+    assert.deepEqual(chat.optionsDuModele('claude-opus-5', { effort, pense: false }).thinking,
+                     { type: 'adaptive' }, `l’effort « ${effort} » part avec une réflexion éteinte`);
+  }
+});
+
+test('CHAQUE MODÈLE DU MENU PASSE AUSSI RÉFLEXION ÉTEINTE', async () => {
+  for (const { id } of chat.ANTHROPIC_MODELS) {
+    const r = await chat.reply(fil, { ...reglages(id), chatPensee: false });
+    assert.equal(r.backend, 'anthropic', `${id} réflexion éteinte → ${r.degraded}`);
+  }
+});
+
+test('la lecture de fond n’est PAS touchée : elle garde sa réflexion', () => {
+  // Elle tourne une fois par semaine, part en lot à moitié prix, et c'est la
+  // seule tâche du produit où l'intelligence se voit vraiment.
+  assert.deepEqual(chat.optionsDuModele('claude-opus-5', { effort: 'high', repli: false }).thinking,
+                   { type: 'adaptive' });
 });

@@ -1078,19 +1078,40 @@ export async function testKey(settings) {
  * nu.
  * =====================================================================
  */
+/*
+ * `coupe` : COMMENT ON ETEINT LA REFLEXION SUR CE MODELE-LA.
+ *
+ * Il a fallu aller lire le contrat pour s'en apercevoir : sur ces modeles la
+ * reflexion est ACTIVE PAR DEFAUT. Retirer le champ ne l'eteint donc pas --
+ * ca laisse tourner l'adaptatif, exactement comme avant, en croyant avoir
+ * economise. Il faut l'envoyer, et l'envoyer a `disabled`.
+ *
+ * Sauf sur Fable 5 et Mythos 5, ou le `disabled` explicite rend 400 : la, et
+ * seulement la, c'est l'omission qui eteint. Deux mecaniques opposees pour la
+ * meme intention -- d'ou une valeur par modele plutot qu'un booleen.
+ *
+ * ATTENTION : `disabled` n'est accepte qu'a l'effort `high` ou en dessous.
+ * Le menu de Reglages s'arrete a `high` ; si un jour il monte plus haut, la
+ * garde de `optionsDuModele` est ce qui empeche le 400.
+ */
 export const CAPACITES = {
-  'claude-fable-5':    { pense: true, effort: true, repli: true },
-  'claude-mythos-5':   { pense: true, effort: true, repli: true },
-  'claude-opus-5':     { pense: true, effort: true, repli: true },
-  'claude-opus-4-8':   { pense: true, effort: true },
-  'claude-opus-4-7':   { pense: true, effort: true },
-  'claude-opus-4-6':   { pense: true, effort: true },
-  'claude-sonnet-5':   { pense: true, effort: true },
-  'claude-sonnet-4-6': { pense: true, effort: true },
+  'claude-fable-5':    { pense: true, effort: true, repli: true, coupe: 'omettre' },
+  'claude-mythos-5':   { pense: true, effort: true, repli: true, coupe: 'omettre' },
+  'claude-opus-5':     { pense: true, effort: true, repli: true, coupe: 'explicite' },
+  'claude-opus-4-8':   { pense: true, effort: true, coupe: 'explicite' },
+  'claude-opus-4-7':   { pense: true, effort: true, coupe: 'explicite' },
+  'claude-opus-4-6':   { pense: true, effort: true, coupe: 'explicite' },
+  'claude-sonnet-5':   { pense: true, effort: true, coupe: 'explicite' },
+  'claude-sonnet-4-6': { pense: true, effort: true, coupe: 'explicite' },
   // Haiku 4.5 : ni l'un ni l'autre. Sa pensee se pilote par `budget_tokens`,
   // que ce produit n'utilise pas, et l'effort y rend une erreur.
   'claude-haiku-4-5':  {}
 };
+
+/* Les efforts qui REFUSENT une reflexion eteinte. Le menu n'en propose aucun
+   aujourd'hui ; la liste existe pour que le jour ou il en propose un, ce soit
+   la reflexion qui reste allumee et pas le compagnon qui tombe. */
+export const EFFORTS_SANS_COUPURE = new Set(['xhigh', 'max']);
 
 export const capacitesDe = model => CAPACITES[String(model ?? '').trim()] ?? {};
 
@@ -1102,10 +1123,21 @@ export const capacitesDe = model => CAPACITES[String(model ?? '').trim()] ?? {};
  *        `repli` a false pour les appels qui n'en veulent pas -- l'API des lots
  *        refuse le repli serveur meme sur un modele qui le porte.
  */
-export function optionsDuModele(model, { effort = null, repli = true } = {}) {
+export function optionsDuModele(model, { effort = null, repli = true, pense = true } = {}) {
   const c = capacitesDe(model);
   const out = {};
-  if (c.pense) out.thinking = { type: 'adaptive' };
+  if (c.pense) {
+    /*
+     * On n'eteint que si le modele dit COMMENT, et si l'effort le permet.
+     * Dans le doute on laisse reflechir : une reflexion de trop coute des
+     * jetons, un 400 coute toutes les conversations. C'est la meme asymetrie
+     * qui decide le reste de cette table.
+     */
+    const coupable = !pense && c.coupe && !EFFORTS_SANS_COUPURE.has(effort);
+    if (!coupable) out.thinking = { type: 'adaptive' };
+    else if (c.coupe === 'explicite') out.thinking = { type: 'disabled' };
+    // `coupe: 'omettre'` : rien du tout, c'est l'absence qui eteint.
+  }
   if (c.effort && effort) out.output_config = { effort };
   if (c.repli && repli) {
     out.betas = ['server-side-fallback-2026-07-01'];
@@ -1242,7 +1274,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
         // `repliServeur` : demande a un modele qui ne le porte pas, il rend 400
         // et fait tomber tout le compagnon.
         ...optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5',
-                           { effort: s.anthropicEffort || 'low' }),
+                           { effort: s.anthropicEffort || 'low', pense: !!s.chatPensee }),
         /*
          * LE COMPAGNON ET LA LECTURE N'ONT PAS BESOIN DE LA MEME TETE.
          *

@@ -25,9 +25,9 @@ const fin = app.indexOf('\nasync function montrerFuseau()', debut);
 assert.ok(fin > debut, 'la fin du panneau des réglages est introuvable');
 const reglages = sansCommentaires(app.slice(debut, fin));
 
-const CLES = ['chatBackend', 'anthropicModelChat', 'anthropicModel', 'anthropicEffort'];
+const CLES = ['chatBackend', 'anthropicModelChat', 'anthropicModel', 'anthropicEffort', 'chatPensee'];
 
-test('les quatre réglages du modèle sont des rangées de boutons', () => {
+test('les cinq réglages du modèle sont des rangées de boutons', () => {
   for (const cle of CLES) {
     assert.match(reglages, new RegExp(`segment\\('${cle}'`),
       `« ${cle} » n'est plus rendu en rangée`);
@@ -45,8 +45,13 @@ test('un clic sur une rangée écrit le réglage, et relit ce que le serveur a g
   const m = reglages.match(/\$\('\.reglages'\)\?\.addEventListener\('click',[\s\S]*?\n  \}\);/);
   assert.ok(m, 'la délégation des rangées a disparu');
   const h = sansCommentaires(m[0]);
-  assert.match(h, /saveSettings\(\{ \[cle\]: b\.dataset\.val \}\)/, 'le clic n’enregistre plus');
-  assert.match(h, /x\.dataset\.val === s2\[cle\]/,
+  assert.match(h, /saveSettings\(\{ \[cle\]: versBase\(b\.dataset\.val\) \}\)/, 'le clic n’enregistre plus');
+  // Un réglage booléen doit arriver en base comme un booléen : « non » est vrai.
+  assert.match(h, /versBase = v => bool \? v === 'oui' : v/,
+    'la conversion vers la base a sauté : la chaîne « non » serait enregistrée, et elle est vraie');
+  assert.match(h, /versBouton = v => bool \? \(v \? 'oui' : 'non'\) : v/,
+    'la conversion vers le bouton a sauté : une rangée booléenne n’aurait plus de choix marqué');
+  assert.match(h, /x\.dataset\.val === versBouton\(s2\[cle\]\)/,
     'l’état des boutons ne vient plus de la réponse du serveur : un enregistrement raté mentirait');
   assert.match(h, /catch[\s\S]*setAttribute\('aria-pressed', avant\[i\]\)/,
     'un échec ne remet plus la rangée dans son état d’avant');
@@ -78,4 +83,11 @@ test('la rangée a de quoi se dessiner et se piloter au clavier', () => {
     'le choix courant n’a plus de marque visible');
   assert.match(css, /\.segm button:focus-visible/, 'la rangée n’est plus visible au clavier');
   assert.match(css, /\.segm button:disabled/, 'rien ne montre l’enregistrement en cours');
+});
+
+test('la façon de répondre est une rangée BOOLÉENNE, et elle est là', () => {
+  // Sans `bool`, « oui » et « non » partiraient en base comme des chaînes --
+  // et `if (s.chatPensee)` serait vrai dans les deux cas.
+  assert.match(reglages, /segment\('chatPensee', 'Sa façon de répondre', PENSEES, s\.chatPensee, \{ bool: true \}\)/,
+    'le réglage de la réflexion a disparu du panneau, ou n’est plus déclaré booléen');
 });
