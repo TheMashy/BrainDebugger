@@ -1348,7 +1348,33 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
     messages.push({ role: 'user', content: resultats });
   }
 
-  return { text: text.trim(), pensee: pensee.trim(), backend: 'anthropic', model: final?.model, faits, usage };
+  /*
+   * UNE PHRASE COUPÉE EN DEUX NE PART NI À L'ÉCRAN NI DANS LA BASE.
+   *
+   * `stop_reason === 'max_tokens'` n'était traité NULLE PART : seuls `refusal`
+   * et `tool_use` étaient lus, et tout le reste tombait dans le `break`. Une
+   * réponse qui butait sur le plafond partait donc telle quelle, arrêtée au
+   * milieu d'un mot — et `addMessage` l'écrivait dans le journal, où elle
+   * reste. Le compagnon relit ensuite ses propres réponses : une phrase
+   * tronquée s'y installe et se recopie.
+   *
+   * C'était rare tant que le plafond valait 2048. Ça devient l'ordinaire dès
+   * qu'on le baisse pour dépenser moins — donc ceci vient AVANT toute
+   * économie sur la sortie, pas après.
+   *
+   * On revient au dernier point. S'il n'y en a aucun — une seule longue phrase
+   * — on garde ce qu'on a : rendre du vide serait pire que rendre l'inachevé.
+   */
+  const coupee = final?.stop_reason === 'max_tokens';
+  return { text: coupee ? jusquAuPoint(text) : text.trim(), coupee,
+           pensee: pensee.trim(), backend: 'anthropic', model: final?.model, faits, usage };
+}
+
+/** Le texte jusqu'à sa dernière fin de phrase, ou tel quel s'il n'en a aucune. */
+export function jusquAuPoint(t) {
+  const s = String(t ?? '').trim();
+  const m = /^[\s\S]*[.!?…»"]/.exec(s);
+  return m && m[0].trim().length >= 20 ? m[0].trim() : s;
 }
 
 /* ---------------- les outils du compagnon ---------------- */

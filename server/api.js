@@ -1637,7 +1637,17 @@ export const routes = {
 
     const history = filAncre(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
     const m = recentMemory(date, userId, text);
-    const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos });
+    /*
+     * LES OUTILS AUSSI SUR CETTE ROUTE-CI.
+     *
+     * Elle appelait `reply` sans eux, alors que la route en flux les passe :
+     * le compagnon n'était donc pas le même selon le tuyau — ici il ne pouvait
+     * ni poser un repère, ni relever une humeur, ni corriger une date. Et
+     * comme les outils ouvrent le préfixe de cache, les deux routes n'en
+     * partageaient aucun : celle-ci repayait tout son prompt à chaque message.
+     */
+    const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos,
+                                                          outils: outilsPour(userId, idMsg) });
     if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'chat');
 
     addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
