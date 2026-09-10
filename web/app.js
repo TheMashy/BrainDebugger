@@ -6746,12 +6746,7 @@ async function renderSettings() {
         <p class="sub" style="margin:0;font-size:12px">Clique un timbre pour l'écouter.</p>
         <h3>Le modèle</h3>
               <p class="sub">Par défaut, aucun modèle : les relances sont scriptées et rien ne quitte cette machine.</p>
-      <label class="field"><span>Backend</span>
-        <select id="chatBackend">
-          <option value="scripted" ${s.chatBackend === 'scripted' ? 'selected' : ''}>Aucun modèle — relances scriptées (hors-ligne)</option>
-          <option value="anthropic" ${s.chatBackend === 'anthropic' ? 'selected' : ''}>Claude (API Anthropic)</option>
-          <option value="ollama" ${s.chatBackend === 'ollama' ? 'selected' : ''}>Ollama local</option>
-        </select></label>
+      ${segment('chatBackend', 'Backend', BACKENDS, s.chatBackend)}
       <div id="backendCfg"></div>` })}
 
       ${groupe({ cle: 'mesure', dessin: 'antenne', titre: 'Ce qui te mesure', etat: s.passerelleCle ? 'une clé posée' : 'aucune clé — rien ne peut interroger le site', corps: `
@@ -6883,6 +6878,40 @@ async function renderSettings() {
         </p>` })}
     </div>`;
 
+  /*
+   * UN SEUL ÉCOUTEUR POUR TOUTES LES RANGÉES, POSÉ SUR LE BLOC.
+   *
+   * Le bloc est reconstruit d'un coup ; les boutons qu'il contient ne
+   * survivent pas au rendu suivant. Un écouteur par bouton serait donc à
+   * raccrocher à chaque fois, et c'est autant d'occasions d'en oublier un --
+   * la panne la plus longue à comprendre, parce qu'un bouton qui ne fait
+   * rien s'affiche normalement.
+   *
+   * L'état repart de ce que le serveur a RÉELLEMENT enregistré, pas de ce
+   * qu'on vient de cliquer : si l'enregistrement échoue, le bouton ne doit
+   * pas mentir en restant allumé.
+   */
+  $('.reglages')?.addEventListener('click', async e => {
+    const b = e.target.closest('.segm button[data-val]');
+    if (!b) return;
+    const rangee = b.closest('[data-segm]');
+    const cle = rangee.dataset.segm;
+    if (b.getAttribute('aria-pressed') === 'true') return;   // déjà choisi
+    const avant = [...rangee.querySelectorAll('button')].map(x => x.getAttribute('aria-pressed'));
+    for (const x of rangee.querySelectorAll('button')) x.disabled = true;
+    try {
+      const s2 = await saveSettings({ [cle]: b.dataset.val });
+      for (const x of rangee.querySelectorAll('button'))
+        x.setAttribute('aria-pressed', String(x.dataset.val === s2[cle]));
+      if (cle === 'chatBackend') return renderBackendCfg();
+    } catch (err) {
+      [...rangee.querySelectorAll('button')].forEach((x, i) => x.setAttribute('aria-pressed', avant[i]));
+      toast(err.message);
+    } finally {
+      for (const x of rangee.querySelectorAll('button')) x.disabled = false;
+    }
+  });
+
   renderBackendCfg();
   montrerFuseau();
 
@@ -6955,11 +6984,6 @@ async function renderSettings() {
         toast(err.message);
       }
     });
-  });
-
-  $('#chatBackend').addEventListener('change', async e => {
-    await saveSettings({ chatBackend: e.target.value });
-    renderBackendCfg();
   });
 
   $('#spritepick').addEventListener('click', async e => {
@@ -7061,6 +7085,68 @@ async function renderSettings() {
   });
 }
 
+/*
+ * ==================================================================
+ *  UN CHOIX FERMÉ DE TROIS OPTIONS N'EST PAS UN MENU DÉROULANT.
+ *
+ * Ces réglages étaient des `<select>`. Sur au moins une machine, le menu
+ * natif du compagnon s'ouvrait et se refermait sans qu'on puisse cliquer
+ * dedans -- panne que je n'ai pas su reproduire ici, ni sur base vide, ni
+ * sur quatre ans de journal, ni avec un quart de seconde de latence. Un
+ * menu natif est un objet du système d'exploitation : ce qu'il fait ne se
+ * décide pas dans cette page, et donc ça ne se corrige pas depuis cette
+ * page non plus.
+ *
+ * D'où la sortie : ne plus s'en servir. Trois options, trois boutons, tout
+ * visible d'un coup. Le geste devient un clic au lieu de deux, on voit ce
+ * qu'on ne choisit pas -- ce qui compte ici, parce que la question qu'on se
+ * pose devant ce réglage est « lequel est moins cher », pas « lequel est
+ * sélectionné » -- et il ne reste plus rien qui puisse s'ouvrir ni se
+ * refermer.
+ *
+ * L'application faisait déjà ça pour la tête du compagnon (`#spritepick`) :
+ * ce n'est pas une invention, c'est la règle de la maison appliquée là où
+ * elle manquait.
+ * ==================================================================
+ */
+const BACKENDS = [
+  { id: 'scripted',  label: 'aucun modèle', note: 'relances scriptées, hors-ligne' },
+  { id: 'anthropic', label: 'Claude',       note: 'API Anthropic' },
+  { id: 'ollama',    label: 'Ollama',       note: 'sur cette machine' }
+];
+
+const EFFORTS = [
+  { id: 'low',    label: 'bas',    note: 'répond vite' },
+  { id: 'medium', label: 'moyen',  note: '' },
+  { id: 'high',   label: 'élevé',  note: 'réfléchit plus, répond moins vite' }
+];
+
+const segment = (id, titre, options, valeur) => `<div class="field">
+  <span>${esc(titre)}</span>
+  <div class="segm" data-segm="${id}" role="group" aria-label="${esc(titre)}">
+    ${options.map(o => `<button type="button" data-val="${esc(o.id)}" aria-pressed="${o.id === valeur}">
+      <b>${esc(o.label)}</b>${o.note ? `<i>${esc(o.note)}</i>` : ''}
+    </button>`).join('')}
+  </div>
+</div>`;
+
+/*
+ * LA LISTE DES MODÈLES NE CHANGE PAS ENTRE DEUX PEINTURES.
+ *
+ * Elle était relue à chaque rendu du panneau. Sur un serveur distant, cet
+ * aller-retour dure le temps du réseau, et PENDANT ce temps le bloc est
+ * vide : les trois réglages du modèle disparaissent puis reviennent. C'est
+ * exactement l'état qu'une capture d'écran a attrapé -- « Backend » seul,
+ * plus rien en dessous. Le serveur rend une constante ; on la garde.
+ */
+let MODELES_CONNUS = null;
+async function lireModeles() {
+  if (MODELES_CONNUS) return MODELES_CONNUS;
+  try { MODELES_CONNUS = await api('/api/models'); }
+  catch { return { models: [], hasEnvKey: false }; }   // sans mémoriser l'échec
+  return MODELES_CONNUS;
+}
+
 async function renderBackendCfg() {
   const s = S.settings;
   const el = $('#backendCfg');
@@ -7122,25 +7208,16 @@ async function renderBackendCfg() {
     </div>`;
 
   if (s.chatBackend === 'anthropic') {
-    let info = { models: [], hasEnvKey: false };
-    try { info = await api('/api/models'); } catch { /* ignoré */ }
-    const choix = (id, valeur) => `<select id="${id}">
-      ${info.models.map(m => `<option value="${esc(m.id)}" ${m.id === valeur ? 'selected' : ''}>${esc(m.label)} — ${esc(m.note)}</option>`).join('')}
-    </select>`;
+    const info = await lireModeles();
     el.innerHTML = `<div class="row">
       ${/* DEUX MODÈLES, PARCE QUE C'EST DEUX MÉTIERS. Le compagnon tient une
             conversation du soir, quarante fois par jour ; la lecture relit
             quatre ans de journal, une fois par semaine. C'est la seule tâche du
             produit où l'intelligence se voit vraiment, et la seule qui mérite
             le modèle le plus cher. */''}
-      <label class="field"><span>Le compagnon</span>${choix('anthropicModelChat', s.anthropicModelChat)}</label>
-      <label class="field"><span>La lecture de fond</span>${choix('anthropicModel', s.anthropicModel)}</label>
-      <label class="field"><span>Effort</span>
-        <select id="anthropicEffort">
-          <option value="low" ${s.anthropicEffort === 'low' ? 'selected' : ''}>bas — répond vite</option>
-          <option value="medium" ${s.anthropicEffort === 'medium' ? 'selected' : ''}>moyen</option>
-          <option value="high" ${s.anthropicEffort === 'high' ? 'selected' : ''}>élevé — réfléchit plus, répond moins vite</option>
-        </select></label>
+      ${segment('anthropicModelChat', 'Le compagnon', info.models, s.anthropicModelChat)}
+      ${segment('anthropicModel', 'La lecture de fond', info.models, s.anthropicModel)}
+      ${segment('anthropicEffort', 'Effort', EFFORTS, s.anthropicEffort)}
     </div>
     <div class="field">
       <span>Clé API</span>
@@ -7249,9 +7326,10 @@ async function renderBackendCfg() {
    * Tous les branchements ci-dessous passent par `?.`, donc l'absence des
    * champs du backend ne casse rien.
    */
-  for (const id of ['ollamaUrl', 'ollamaModel', 'anthropicModel', 'anthropicModelChat', 'anthropicEffort']) {
+  for (const id of ['ollamaUrl', 'ollamaModel']) {
     $('#' + id)?.addEventListener('change', async e => { await saveSettings({ [id]: e.target.value }); });
   }
+
   // Le champ est vide en permanence : une chaine vide ne doit pas effacer la
   // cle enregistree. L'effacement passe par le bouton.
   $('#apiKey')?.addEventListener('change', async e => {

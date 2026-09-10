@@ -4491,6 +4491,29 @@ details.jpecol .jpetop { margin-top: 5px; }
 .rgcorps .row { display: grid; gap: 14px; }
 .rprive { margin-bottom: 10px; max-width: 780px; }
 
+/* Un choix fermé de trois options : une rangée de boutons, pas un menu.
+   Tout est visible d'un coup -- devant ces réglages-là on ne cherche pas
+   « lequel est coché », on compare ce qu'ils coûtent. Et il ne reste rien
+   qui puisse s'ouvrir ni se refermer sous les doigts. */
+.segm { display: flex; flex-wrap: wrap; gap: 6px; }
+.segm button {
+  flex: 1 1 auto; min-width: 132px; text-align: left;
+  padding: 9px 12px; border-radius: var(--r);
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-dim);
+  display: grid; gap: 2px; line-height: 1.3;
+}
+.segm button b { font-size: 13px; font-weight: 500; }
+.segm button i { font-style: normal; font-size: 11px; color: var(--ink-faint); }
+.segm button:hover:not([aria-pressed="true"]) { border-color: var(--ink-faint); color: var(--ink); }
+.segm button[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.segm button[aria-pressed="true"] i { color: var(--accent); }
+/* Pendant l'enregistrement : on voit que ça part, sans que la rangée bouge. */
+.segm button:disabled { opacity: .55; cursor: default; }
+.segm button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* Les trois lectures de « Ma carte », repliées sous la toile. Elles reprennent
    le repli des Réglages : un seul geste à apprendre pour tout le site. */
 .pcarte { margin-top: 8px; }
