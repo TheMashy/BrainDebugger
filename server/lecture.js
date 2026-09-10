@@ -1235,7 +1235,13 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
 
 /* ------------------------------ l'appel ------------------------------ */
 
-async function clientDe(settings) {
+/*
+ * Le client est exporté pour que la relecture des passages signalés
+ * (server/juge-veille-lot.js) parte du MÊME endroit : une seconde résolution
+ * de clé finirait par diverger de celle-ci, et la panne serait « ça marche
+ * pour la lecture mais pas pour la veille », qui ne se diagnostique pas.
+ */
+export async function clientDe(settings) {
   if (!_sdk) {
     try { ({ default: _sdk } = await import('@anthropic-ai/sdk')); }
     catch { throw new Error("SDK absent — lance : npm install @anthropic-ai/sdk"); }

@@ -1,6 +1,7 @@
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, messagesForDate, recentMessages, filAncre, allEvents, deleteEvent,
+  comptesVerdicts,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
   promouvoirMotif,
@@ -18,6 +19,9 @@ import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
 import { joursDuRendezVous, comptesDuRendezVous } from './rendez-vous.js';
+import { passagesSansVerdict, lancerLotVeille, releverLotVeille, MAX_PAR_LOT }
+  from './juge-veille-lot.js';
+import { SENS_VERDICT } from './juge-veille.js';
 import { liens } from './liens.js';
 import { inspectNotes, applyNotes } from './import-notes.js';
 import * as sessions from './sessions.js';
@@ -2778,6 +2782,50 @@ export const routes = {
    * dire la même chose que l'application dont il sort — et c'est le document
    * qu'on emporte, donc c'est lui qui aurait tort devant quelqu'un.
    */
+  /**
+   * RELIRE LES PASSAGES SIGNALÉS — le lot part, et on n'attend pas.
+   *
+   * Il ne juge que ce qui n'a pas encore de verdict : un jugement est payé, et
+   * il ne changera pas tant que le passage ne change pas. Relancer sur un
+   * journal déjà relu ne repose donc rien et ne coûte rien.
+   */
+  'POST /api/veille/juger': async ({ userId }) => {
+    const s = getSettings(userId);
+    if (s.veilleLot?.id) return { deja: true, lot: s.veilleLot };
+    const dates = series(userId).rows.map(r => r.date);
+    const aJuger = passagesSansVerdict(dates, userId);
+    if (!aJuger.length) return { n: 0, message: 'Tous les passages signalés ont déjà été relus.' };
+    const lot = await lancerLotVeille(aJuger, s);
+    setSettings({ veilleLot: { id: lot.id, n: lot.n, le: Date.now() },
+                  veilleLotErreur: null }, userId);
+    return { n: lot.n, lot: lot.id, reste: aJuger.length >= MAX_PAR_LOT };
+  },
+
+  /** Où en est la relecture. Appelée en passant, jamais en boucle. */
+  'GET /api/veille/jugement': async ({ userId }) => {
+    const s = getSettings(userId);
+    const comptes = comptesVerdicts(userId);
+    if (!s.veilleLot?.id) return { enCours: false, comptes, sens: SENS_VERDICT,
+                                   erreur: s.veilleLotErreur ?? null };
+    try {
+      const dates = new Map();
+      for (const r of series(userId).rows)
+        for (const m of messagesForDate(r.date, userId)) dates.set(m.id, r.date);
+      const r = await releverLotVeille(s.veilleLot.id, s, { userId, dates });
+      if (!r.pret) return { enCours: true, etat: r.etat, n: s.veilleLot.n, comptes, sens: SENS_VERDICT };
+      setSettings({ veilleLot: null }, userId);
+      invalidate(userId);
+      return { enCours: false, poses: r.poses, illisibles: r.illisibles,
+               comptes: comptesVerdicts(userId), sens: SENS_VERDICT };
+    } catch (err) {
+      // Même règle que pour la lecture : on ne jette le lot que s'il est
+      // vraiment fini. Une coupure de trois secondes perdrait un lot déjà payé.
+      if (err?.lotFini) setSettings({ veilleLot: null,
+        veilleLotErreur: String(err.message).slice(0, 200) }, userId);
+      return { enCours: !err?.lotFini, erreur: String(err.message).slice(0, 200), comptes };
+    }
+  },
+
   'GET /api/rendez-vous': ({ query, userId }) => {
     const jours = Math.max(7, Math.min(120, parseInt(query?.jours ?? '30', 10) || 30));
     const { byDate } = series(userId);

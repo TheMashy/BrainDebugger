@@ -127,6 +127,30 @@ CREATE INDEX IF NOT EXISTS idx_carnet_user ON carnet(user_id, jour);
 -- j'ai l'habitude » sont deux fois la meme chose. La table stocke donc ce que
 -- le compagnon a nomme, pas un lexique -- et le compte des fois ou il l'a
 -- reconnu, qui est la seule mesure honnete de la duree d'un motif.
+-- CE QU'UN MODÈLE A JUGÉ D'UN PASSAGE DÉJÀ SIGNALÉ (voir server/juge-veille.js).
+--
+-- La veille, elle, n'est PAS stockée : c'est une lecture du texte, et la figer
+-- la désynchroniserait du texte. Un verdict de modèle est l'inverse — il a été
+-- payé, il ne changera pas tant que le passage ne change pas, et le recalculer
+-- à chaque affichage coûterait de l'argent pour le même résultat.
+--
+-- La clé est le MESSAGE, pas la journée : une journée peut porter deux
+-- passages signalés dont l'un est une crise et l'autre un souvenir raconté.
+CREATE TABLE IF NOT EXISTS verdicts_veille (
+  user_id    TEXT NOT NULL DEFAULT '${OWNER}',
+  message_id INTEGER NOT NULL,
+  genre      TEXT NOT NULL,          -- le genre de veille jugé
+  date       TEXT NOT NULL,          -- la journée, pour lire une période d'un coup
+  verdict    TEXT NOT NULL,          -- crise | passe | contexte | autre
+  certitude  TEXT NOT NULL,          -- haute | moyenne | basse
+  cite       TEXT,
+  pourquoi   TEXT,
+  modele     TEXT,
+  fait_le    TEXT NOT NULL,
+  PRIMARY KEY (user_id, message_id, genre)
+);
+CREATE INDEX IF NOT EXISTS idx_verdicts_user_date ON verdicts_veille(user_id, date);
+
 CREATE TABLE IF NOT EXISTS motifs (
   id         INTEGER PRIMARY KEY,
   user_id    TEXT NOT NULL DEFAULT '${OWNER}',
@@ -414,6 +438,41 @@ for (const [table, colonne, decl] of [
 const _m = migrate(db);
 if (_m.migrated) console.log('  base migrée vers le mode multi-utilisateurs');
 ensureUserTables(db);
+
+/* ---------- les verdicts de veille ---------- */
+
+/** Pose ou remplace un verdict. Rejouer un lot ne double jamais une ligne. */
+export function poserVerdict({ messageId, genre, date, verdict, certitude,
+                               cite = null, pourquoi = null, modele = null,
+                               userId = OWNER }) {
+  db.prepare(`INSERT INTO verdicts_veille
+      (user_id, message_id, genre, date, verdict, certitude, cite, pourquoi, modele, fait_le)
+      VALUES(?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(user_id, message_id, genre) DO UPDATE SET
+        verdict=excluded.verdict, certitude=excluded.certitude, cite=excluded.cite,
+        pourquoi=excluded.pourquoi, modele=excluded.modele, fait_le=excluded.fait_le`)
+    .run(userId, messageId, genre, date, verdict, certitude, cite, pourquoi, modele,
+         new Date().toISOString());
+}
+
+/** Les verdicts d'une période, rangés par message puis par genre. */
+export function verdictsEntre(debut, fin, userId = OWNER) {
+  const out = new Map();
+  for (const r of db.prepare(
+    `SELECT * FROM verdicts_veille WHERE user_id = ? AND date >= ? AND date <= ?`
+  ).all(userId, debut, fin)) {
+    if (!out.has(r.message_id)) out.set(r.message_id, new Map());
+    out.get(r.message_id).set(r.genre, r);
+  }
+  return out;
+}
+
+/** Combien de passages ont déjà été jugés, pour que l'écran puisse le dire. */
+export function comptesVerdicts(userId = OWNER) {
+  return db.prepare(
+    `SELECT verdict, certitude, COUNT(*) n FROM verdicts_veille
+      WHERE user_id = ? GROUP BY verdict, certitude`).all(userId);
+}
 
 /* ---------- utilisateurs ---------- */
 

@@ -29,8 +29,9 @@
  * écrite il y a trois semaines et jamais lue à l'époque compte ici. C'est ce
  * que veut dire « déduits rétroactivement des données totales ».
  */
-import { OWNER } from './db.js';
-import { veilleDuJour, DIT } from './veille.js';
+import { OWNER, messagesForDate, verdictsEntre } from './db.js';
+import { veilleDuJour, niveauDuTexte, DIT } from './veille.js';
+import { passagesDuJour, motifsQuiTiennent } from './juge-veille.js';
 import { nuits } from './nuits.js';
 import { addDays } from './stats.js';
 
@@ -51,17 +52,43 @@ export const GENRE_PASSE = 'evoque_passe';
  */
 export function joursDuRendezVous(userId = OWNER, {
   jours = 30, jusquA = null, notes = new Map(),
-  lireVeille = veilleDuJour, lireNuits = nuits
+  lireVeille = veilleDuJour, lireNuits = nuits,
+  lireMessages = messagesForDate, lireNiveau = niveauDuTexte, lireVerdicts = verdictsEntre
 } = {}) {
   const fin = jusquA ?? new Date().toISOString().slice(0, 10);
   const debut = addDays(fin, -(jours - 1));
   const parNuit = new Map(lireNuits(userId, { jours, jusquA: fin }).map(n => [n.date, n]));
+  /*
+   * LES VERDICTS PASSENT DEVANT LE DÉTECTEUR DE MOTS (voir juge-veille.js).
+   *
+   * Ce document est celui qu'on tend à quelqu'un : c'est exactement là que le
+   * faux positif fait le dégât. Un signe qu'un modèle a relu, avec son
+   * contexte, et jugé SÛREMENT ancien ou explicatif ne s'y imprime plus.
+   * Tout le reste — pas de verdict, un verdict hésitant — reste imprimé.
+   */
+  const verdicts = lireVerdicts(debut, fin, userId) ?? new Map();
 
   const out = [];
   for (let d = debut; d <= fin; d = addDays(d, 1)) {
-    const v = lireVeille(d, userId) ?? null;
     const n = parNuit.get(d) ?? null;
-    const motifs = v?.motifs ?? [];
+    /*
+     * On repasse par les passages MESSAGE PAR MESSAGE plutôt que par la veille
+     * de la journée : un verdict porte sur un passage, et une journée en porte
+     * parfois deux qui ne disent pas la même chose.
+     */
+    const passages = passagesDuJour(d, lireMessages(d, userId), lireNiveau);
+    let motifs, ecartes = 0;
+    if (passages.length) {
+      motifs = [];
+      for (const p of passages) {
+        const gardes = motifsQuiTiennent(p, verdicts.get?.(p.messageId) ?? null);
+        ecartes += (p.motifs?.length ?? 0) - gardes.length;
+        for (const mo of gardes) if (!motifs.some(x => x.genre === mo.genre)) motifs.push(mo);
+      }
+    } else {
+      const v = lireVeille(d, userId) ?? null;
+      motifs = v?.motifs ?? [];
+    }
     out.push({
       date: d,
       note: notes.get(d) ?? null,
@@ -77,7 +104,11 @@ export function joursDuRendezVous(userId = OWNER, {
                      libelle: DIT[m.genre] ?? m.genre, extrait: m.extrait ?? null })),
       evoques: motifs.filter(m => m.genre === GENRE_PASSE)
         .map(m => ({ genre: m.genre, libelle: DIT[m.genre] ?? m.genre,
-                     extrait: m.extrait ?? null }))
+                     extrait: m.extrait ?? null })),
+      // Combien de signes ont été relus puis écartés ce jour-là. Le document
+      // le DIT : effacer quelque chose sans le dire, c'est demander qu'on
+      // croie la machine deux fois plutôt qu'une.
+      ecartes
     });
   }
   return out;
@@ -102,6 +133,10 @@ export function comptesDuRendezVous(jours) {
     avec_signe: avecSigne.length,
     par_genre: parGenre,
     nuits_mesurees: jours.filter(j => j.sommeil_h != null).length,
-    nuits_dites: jours.filter(j => j.source_nuit === 'dit').length
+    nuits_dites: jours.filter(j => j.source_nuit === 'dit').length,
+    // Ce qu'un modèle a relu et écarté. Un total, jamais un détail : la
+    // personne peut aller voir, le document n'a pas à lister ce qu'il ne
+    // montre pas.
+    ecartes: jours.reduce((n, j) => n + (j.ecartes ?? 0), 0)
   };
 }
