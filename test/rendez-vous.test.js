@@ -62,8 +62,20 @@ test('UN SOUVENIR RACONTÉ NE FIGURE PAS COMME UN GESTE DU JOUR', () => {
   const ligne = j.find(x => x.date === FIN);
   assert.deepEqual(ligne.signes, [],
     'aucun signe du jour : c’est un souvenir, pas un geste');
-  assert.equal(ligne.evoques.length, 1, 'il n’est pas jeté pour autant, il est RANGÉ AILLEURS');
-  assert.match(ligne.evoques[0].extrait, /au lycée/);
+  /*
+   * ET IL NE FIGURE PLUS DU TOUT DANS LE DOCUMENT.
+   *
+   * Il y était rangé à part, en gris et en italique, pour ne pas se faire
+   * passer pour un geste du jour. Ça ne suffit pas : sur un document qu'on
+   * tend à quelqu'un, une blessure ancienne n'a pas à être exhumée parce qu'un
+   * détecteur l'a croisée dans une phrase. Ce qu'on veut dire de son passé, on
+   * le dit soi-même — c'est à ça que sert la frise du parcours, où c'est la
+   * personne qui a posé les repères.
+   *
+   * Le COMPTE reste, lui : rien ne doit disparaître en silence.
+   */
+  assert.deepEqual(ligne.evoques, [], 'il ne s’imprime plus');
+  assert.equal(ligne.evoques_n, 1, 'mais le document sait qu’il y en avait un');
 });
 
 test('les deux ne se mélangent jamais dans les comptes', () => {

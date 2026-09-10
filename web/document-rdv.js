@@ -50,7 +50,18 @@ const ans = (a, b) => {
 function parcours(frise) {
   const tout = [
     ...(frise.periodes ?? []).map(p => ({ ...p, periode: true })),
-    ...(frise.points ?? []).map(p => ({ ...p, periode: false }))
+    /*
+     * L'INDEX DU POINT VOYAGE AVEC LUI, PARCE QUE C'EST LA LISTE QUI COMMANDE
+     * LA FRISE.
+     *
+     * Choisir au losange ne marche pas sur des données réelles : les derniers
+     * repères sont à quelques jours d'écart sur une frise de vingt-et-un ans,
+     * donc au même pixel — cliquer l'un choisit toujours le même. La liste, où
+     * chaque repère a sa ligne et son nom lisible, est le seul endroit où le
+     * choix est possible. Le losange reste cliquable pour ceux qui sont
+     * isolés ; il ne suffit pas, il ne gêne pas.
+     */
+    ...(frise.points ?? []).map((p, i) => ({ ...p, periode: false, pt: i }))
   ].sort((a, b) => a.date.localeCompare(b.date));
   if (!tout.length) return '<p class="vide">Aucun repère n’a encore été posé sur la frise.</p>';
 
@@ -64,7 +75,9 @@ function parcours(frise) {
     <div class="an">
       <div class="anum">${an}</div>
       <div class="alignes">${liste.map(e => `
-        <div class="rep">
+        <div class="rep${e.periode ? '' : ' choisissable'}"${
+          e.periode ? '' : ` data-pt="${e.pt}" role="button" tabindex="0"
+            title="Écrire ce nom sur la frise"`}>
           <div class="rquand">${e.periode
             ? `${jourMois(e.date)} → ${e.ouvert ? 'en cours'
                 // L'ANNÉE DE FIN QUAND LA PÉRIODE TRAVERSE LES ANNÉES. « 3
@@ -94,7 +107,10 @@ function derniers(jours) {
         <div class="slib">${ech(s.libelle)}</div>
         ${s.extrait ? `<blockquote>${ech(s.extrait)}</blockquote>` : ''}
       </div>`).join('');
-    const evoques = j.evoques.map(s => `
+    /* Les blessures passées ne s'impriment plus : voir server/rendez-vous.js.
+       `evoques` arrive vide, et ceci reste pour qu'un vieux fichier gardé de
+       côté continue de s'ouvrir sans erreur. */
+    const evoques = (j.evoques ?? []).map(s => `
       <div class="signe passe">
         <div class="slib">${ech(s.libelle)}</div>
         ${s.extrait ? `<blockquote>${ech(s.extrait)}</blockquote>` : ''}
@@ -121,8 +137,8 @@ function friseParcours(f) {
   const points = (f.points ?? []);
   if (!et || (!periodes.length && !points.length)) return '';
 
-  const L = 700, MG = 22, MD = 22, util = L - MG - MD;
-  const HV = 17;                                  // hauteur d'une voie
+  const L = 700, MG = 24, MD = 24, util = L - MG - MD;
+  const HV = 22;                                  // hauteur d'une voie
   /*
    * LA MARGE ENTRE DEUX VOIES SE COMPTE EN PLACE DU LIBELLÉ, PAS EN JOURS.
    *
@@ -138,9 +154,10 @@ function friseParcours(f) {
   const lanes = voies(periodes.map(p => ({ date: p.date, fin: p.fin })),
                       Math.round(Math.max(...periodes.map(p => p.label.length), 8) * 5.2 * jourParPx));
   const nv = Math.max(1, ...lanes.map(v => v.voie + 1));
-  const yBarres = 20, hBarres = nv * HV;
-  const yAxe = yBarres + hBarres + 12;
-  const H = yAxe + 20;
+  const yBarres = 24, hBarres = nv * HV;
+  const yAxe = yBarres + hBarres + 18;
+  // De la place SOUS l'axe pour les noms qu'on choisit d'y écrire.
+  const H = yAxe + 92;
   const x = date => MG + situer(date, et) * util;
 
   const an0 = Number(et.debut.slice(0, 4)), an1 = Number(et.fin.slice(0, 4));
@@ -191,9 +208,39 @@ function friseParcours(f) {
    * Chacun son travail. Les périodes gardent leur nom : une barre a de la
    * place, un point n'en a pas.
    */
-  const marques = points.map(p => {
+  /*
+   * C'EST LA PERSONNE QUI DÉCIDE DE CE QUI EST ÉCRIT SUR LA FRISE.
+   *
+   * Tous les noms d'un coup forment une tache noire — quinze des vingt-et-un
+   * instants tombent sur les deux dernières années. Aucun nom, et le dessin ne
+   * dit plus que la densité. Or ce n'est ni à moi ni à un algorithme de
+   * choisir les trois ou quatre faits qui doivent être lisibles pendant qu'on
+   * en parle : c'est à celui qui tend le document.
+   *
+   * On clique donc un losange pour écrire son nom dessous, on reclique pour
+   * l'enlever. Ce qui n'est pas choisi reste un losange — le fait ne
+   * disparaît pas, il n'est simplement pas nommé sur le dessin, et la liste
+   * en dessous le nomme de toute façon.
+   *
+   * Le nom se pose en dessous, alterné haut et bas : deux repères voisins
+   * choisis ensemble ne se marchent pas dessus.
+   */
+  const marques = points.map((p, i) => {
     const px = x(p.date);
-    return `<path d="M${px.toFixed(1)} ${yAxe - 4.5} l4.5 4.5 -4.5 4.5 -4.5 -4.5 Z" fill="#16191c"/>`;
+    const yl = yAxe + 30;                       // ligne de départ ; `placer` répartit
+    const bord = px < 100 ? 'start' : px > L - 100 ? 'end' : 'middle';
+    const tx = bord === 'start' ? px - 6 : bord === 'end' ? px + 6 : px;
+    return `<g class="pt" data-pt="${i}" tabindex="0" role="button"
+               aria-label="${ech(p.label)} — écrire ce nom sur la frise">
+      <title>${ech(p.label)} · ${ech(jourMois(p.date))} ${p.date.slice(0, 4)}</title>
+      <circle cx="${px.toFixed(1)}" cy="${yAxe}" r="9" fill="transparent"/>
+      <path d="M${px.toFixed(1)} ${yAxe - 5.5} l5.5 5.5 -5.5 5.5 -5.5 -5.5 Z" fill="#16191c"/>
+      <g class="nom" data-x="${px.toFixed(1)}" data-y0="${yAxe + 6}">
+        <line x1="${px.toFixed(1)}" y1="${yAxe + 6}" x2="${px.toFixed(1)}" y2="${yl - 9}"
+              stroke="#9aa3ac" stroke-width=".7"/>
+        <text x="${tx.toFixed(1)}" y="${yl}" class="fpt" text-anchor="${bord}">${ech(p.label)}</text>
+      </g>
+    </g>`;
   }).join('');
 
   return `<svg class="frise" viewBox="0 0 ${L} ${H}" role="img"
@@ -348,6 +395,14 @@ export function documentRendezVous(d) {
   .rquand { font-size:11px; color:var(--gris); padding-top:3px; white-space:nowrap; }
   .rquoi { font-size:14.5px; }
   .rduree { color:var(--gris); font-size:12px; }
+  .rep.choisissable { cursor:pointer; border-radius:4px; margin-left:-6px; padding-left:6px; }
+  .rep.choisissable:hover { background:var(--pale); }
+  .rep.choisissable:focus-visible { outline:2px solid var(--encre); outline-offset:1px; }
+  /* Une ligne dont le nom est écrit sur la frise porte un trait à gauche : de
+     quoi retrouver d'un coup d'œil ce qu'on a déjà choisi, sans relire tout. */
+  .rep.surfrise { box-shadow:inset 2px 0 0 var(--encre); }
+  .rep.surfrise .rquoi { font-weight:600; }
+  @media print { .rep.choisissable { cursor:auto; } }
 
   .jour { display:grid; grid-template-columns:52px 1fr 34px; gap:12px;
           padding:6px 0 6px 8px; border-top:1px solid var(--filet); page-break-inside:avoid; }
@@ -367,9 +422,22 @@ export function documentRendezVous(d) {
 
   .frise { width:100%; height:auto; display:block; margin:2px 0 6px; page-break-inside:avoid; }
   .frise text { font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; fill:var(--gris); }
-  .frise .fpl { font-family:"Iowan Old Style",Georgia,serif; font-size:9.5px; fill:var(--encre); }
-  .frise .fpt { font-family:"Iowan Old Style",Georgia,serif; font-size:9px; fill:var(--encre); }
-  .frise .fan { font-size:8.5px; }
+  .frise .fpl { font-family:"Iowan Old Style",Georgia,serif; font-size:11px; fill:var(--encre); }
+  .frise .fpt { font-family:"Iowan Old Style",Georgia,serif; font-size:10.5px; fill:var(--encre); }
+  .frise .fan { font-size:10px; }
+  /* Le nom d'un repère n'apparaît que si on l'a choisi. Au survol, un aperçu
+     pâle : de quoi savoir ce qu'on est en train de choisir avant de cliquer.
+     
+     IL NE PREND PAS LES CLICS, MÊME INVISIBLE. Un texte à opacité zéro garde
+     sa boîte : sur les deux dernières années, où quinze repères se serrent, le
+     nom caché de l'un recouvre le losange de l'autre — et on choisissait le
+     voisin sans comprendre pourquoi. Seul le losange est cliquable. */
+  .frise .pt .nom { opacity:0; transition:opacity .12s; pointer-events:none; }
+  .frise .pt:hover .nom, .frise .pt:focus-visible .nom { opacity:.42; }
+  .frise .pt.montre .nom { opacity:1; }
+  .frise .pt { cursor:pointer; }
+  .frise .pt:focus-visible { outline:2px solid #16191c; outline-offset:2px; }
+  @media print { .frise .pt .nom { opacity:0; } .frise .pt.montre .nom { opacity:1; } }
   .frise .fh  { font-size:8px; }
   .frise .fj  { font-size:8px; }
   .flg { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:11px; color:var(--gris); margin:0 0 6px; }
@@ -395,7 +463,9 @@ export function documentRendezVous(d) {
            padding:10px 30px; display:flex; gap:10px; align-items:center; justify-content:flex-end; }
   .barre button { font:inherit; font-size:13px; padding:6px 14px; border:1px solid var(--filet);
                   background:#fff; border-radius:6px; cursor:pointer; }
-  @media print { .barre { display:none; } .page { padding:0; max-width:none; } @page { margin:16mm; } }
+  .aide { color:var(--gris); font-size:12px; margin:0 0 8px; }
+  @media print { .barre { display:none; } .aide { display:none; }
+                 .page { padding:0; max-width:none; } @page { margin:16mm; } }
 </style></head><body>
 <div class="barre"><button onclick="window.print()">Imprimer / enregistrer en PDF</button></div>
 <div class="page">
@@ -410,6 +480,9 @@ export function documentRendezVous(d) {
 
   <h2>Le parcours<span class="n">${(f.periodes?.length ?? 0) + (f.points?.length ?? 0)} repères${
     f.naissance ? ` · depuis ${complet(f.naissance)}` : ''}</span></h2>
+  <p class="aide">Clique une ligne de la liste — ou un losange — pour écrire son nom sur la frise ;
+    reclique pour l’enlever. Ce que tu ne choisis pas reste un losange, et la liste le nomme de
+    toute façon.</p>
   ${friseParcours(f)}
   ${parcours(f)}
 
@@ -432,7 +505,73 @@ export function documentRendezVous(d) {
 
   <p class="pied">Les heures de coucher et de lever sont relues sur tout le journal, pas seulement
   sur ce qui a été noté sur le moment : « écrit » signale celles que j’ai écrites moi-même, les
-  autres sont déduites de l’activité de l’ordinateur. Ce qui est présenté en italique et en gris a
-  été <b>raconté</b> — un souvenir qui remonte, pas quelque chose de ce jour-là.</p>
-</div></body></html>`;
+  autres sont déduites de l’activité de l’ordinateur.${c.evoques_n
+    ? ` ${c.evoques_n} passage${c.evoques_n > 1 ? 's' : ''} de ces trente jours ${
+        c.evoques_n > 1 ? 'parlaient' : 'parlait'} d’une blessure ANCIENNE, racontée : ${
+        c.evoques_n > 1 ? 'ils n’y figurent pas' : 'il n’y figure pas'}. Ce que je veux dire de mon
+    passé, je le dis moi-même — c’est à ça que sert la frise du haut.` : ''}</p>
+</div>
+<script>
+/* Un clic écrit le nom du repère sur la frise, un autre l'enlève. Rien n'est
+   enregistré : le document est un tirage, pas un réglage — et ce qui est
+   choisi ici ne vaut que pour la feuille qu'on va sortir. */
+/*
+ * LES NOMS CHOISIS SE RÉPARTISSENT SUR TROIS LIGNES, AU MOMENT DU CHOIX.
+ *
+ * Alterner haut/bas selon le rang du repère ne suffit pas : deux repères
+ * choisis peuvent être voisins sur la frise sans l'être dans la liste, et
+ * leurs noms se recouvraient. On ne peut pas non plus le décider au rendu —
+ * on ne sait pas encore lesquels seront choisis.
+ *
+ * On range donc de gauche à droite et on pose chaque nom sur la première
+ * ligne où il ne touche pas le précédent. La première ligne commence sous les
+ * années, pour ne pas écrire par-dessus l'échelle.
+ */
+const LIGNES = [30, 48, 66, 84];
+function placer() {
+  const svg = document.querySelector('.frise');
+  if (!svg) return;
+  const choisis = [...svg.querySelectorAll('.pt.montre .nom')]
+    .map(n => {
+      const t = n.querySelector('text');
+      let w = 60;
+      try { w = t.getComputedTextLength() || 60; } catch {}
+      const cx = parseFloat(n.dataset.x);
+      const anc = t.getAttribute('text-anchor');
+      const g = anc === 'start' ? cx - 6 : anc === 'end' ? cx + 6 - w : cx - w / 2;
+      return { n, t, g, d: g + w };
+    })
+    .sort((a, b) => a.g - b.g);
+  const finDe = LIGNES.map(() => -Infinity);
+  for (const c of choisis) {
+    let k = finDe.findIndex(f => c.g > f + 6);
+    /* Tout est plein : on prend la ligne la MOINS avancée, celle où le
+       chevauchement sera le plus court. Empiler toujours sur la dernière
+       entassait les noms au même endroit dès qu'on en choisissait cinq. */
+    if (k < 0) k = finDe.indexOf(Math.min(...finDe));
+    finDe[k] = c.d;
+    c.t.setAttribute('y', LIGNES[k] + Number(c.n.dataset.y0) - 6);
+    c.n.querySelector('line').setAttribute('y2', LIGNES[k] + Number(c.n.dataset.y0) - 15);
+  }
+}
+function basculer(i) {
+  const g = document.querySelector('.frise .pt[data-pt="' + i + '"]');
+  if (!g) return;
+  g.classList.toggle('montre');
+  document.querySelector('.rep[data-pt="' + i + '"]')
+    ?.classList.toggle('surfrise', g.classList.contains('montre'));
+  placer();
+}
+const cibleDe = t => t.closest && (t.closest('.frise .pt') || t.closest('.rep[data-pt]'));
+document.addEventListener('click', e => {
+  const el = cibleDe(e.target);
+  if (el) basculer(el.dataset.pt);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = cibleDe(e.target);
+  if (el) { e.preventDefault(); basculer(el.dataset.pt); }
+});
+</script>
+</body></html>`;
 }

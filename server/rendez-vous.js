@@ -35,6 +35,40 @@ import { passagesDuJour, motifsQuiTiennent } from './juge-veille.js';
 import { nuits } from './nuits.js';
 import { addDays } from './stats.js';
 
+/**
+ * LA PHRASE ENTIÈRE, PAS LE MORCEAU QUI A DÉCLENCHÉ.
+ *
+ * `veille.js` découpe en phrases PUIS en propositions, et rend la proposition
+ * — c'est ce qu'il lui faut pour décider, ce n'est pas ce qu'il faut pour
+ * lire. Dans le document, ça donnait des citations arrêtées au milieu d'un
+ * mot : « ...j'ai l'impression que ce n'est / ne sera ». Une praticienne lit
+ * cette ligne à voix haute avec la personne ; une phrase tronquée l'oblige à
+ * deviner la fin, ou à demander à quelqu'un de la reconstituer devant elle.
+ *
+ * On repart donc du message entier et on rend la ou les phrases COMPLÈTES qui
+ * portent l'extrait. Si on ne le retrouve pas — l'extrait est reconstruit avec
+ * des guillemets ajoutés — on garde ce qu'on avait : mieux vaut la proposition
+ * que rien.
+ */
+export function phraseEntiere(message, extrait, max = 400) {
+  const t = String(message ?? '').trim();
+  const e = String(extrait ?? '').trim();
+  if (!t || !e) return e || null;
+  // L'extrait peut être fait de plusieurs morceaux entre guillemets : on
+  // cherche le premier, qui suffit à situer la phrase.
+  const graine = (e.match(/[^«»"]{12,}/) ?? [e])[0].trim().slice(0, 40);
+  const i = t.indexOf(graine);
+  if (i < 0) return e.slice(0, max);
+  const FIN = /[.!?…]/;
+  let a = i;
+  while (a > 0 && !FIN.test(t[a - 1])) a--;
+  let b = i + graine.length;
+  while (b < t.length && !FIN.test(t[b])) b++;
+  if (b < t.length) b++;                       // la ponctuation fait partie de la phrase
+  const phrase = t.slice(a, b).trim();
+  return (phrase.length >= e.length ? phrase : e).slice(0, max);
+}
+
 /* Les genres qui parlent d'un geste ou d'une prise AU PRÉSENT. */
 export const GENRES_PRESENT = ['suicide', 'blessure', 'en_main', 'moyen',
                                'substance', 'surdose', 'dereel'];
@@ -83,7 +117,8 @@ export function joursDuRendezVous(userId = OWNER, {
       for (const p of passages) {
         const gardes = motifsQuiTiennent(p, verdicts.get?.(p.messageId) ?? null);
         ecartes += (p.motifs?.length ?? 0) - gardes.length;
-        for (const mo of gardes) if (!motifs.some(x => x.genre === mo.genre)) motifs.push(mo);
+        for (const mo of gardes)
+          if (!motifs.some(x => x.genre === mo.genre)) motifs.push({ ...mo, message: p.texte });
       }
     } else {
       const v = lireVeille(d, userId) ?? null;
@@ -101,10 +136,22 @@ export function joursDuRendezVous(userId = OWNER, {
       source_nuit: n?.source ?? null,
       signes: motifs.filter(m => GENRES_PRESENT.includes(m.genre))
         .map(m => ({ genre: m.genre, niveau: m.niveau,
-                     libelle: DIT[m.genre] ?? m.genre, extrait: m.extrait ?? null })),
-      evoques: motifs.filter(m => m.genre === GENRE_PASSE)
-        .map(m => ({ genre: m.genre, libelle: DIT[m.genre] ?? m.genre,
-                     extrait: m.extrait ?? null })),
+                     libelle: DIT[m.genre] ?? m.genre,
+                     extrait: phraseEntiere(m.message ?? '', m.extrait) })),
+      /*
+       * LES BLESSURES PASSÉES NE FIGURENT PLUS DANS LE DOCUMENT.
+       *
+       * Elles y étaient rangées à part, en gris et en italique, pour ne pas se
+       * faire passer pour un geste du jour. Ça ne suffit pas : sur un document
+       * qu'on tend à quelqu'un, une blessure ancienne n'a pas à être exhumée
+       * parce qu'un détecteur l'a croisée dans une phrase. Ce que la personne
+       * veut raconter de son passé, elle le raconte elle-même — c'est à ça que
+       * sert la frise du parcours, où c'est ELLE qui a posé les repères.
+       *
+       * Le compte reste, lui, pour que rien ne disparaisse en silence.
+       */
+      evoques: [],
+      evoques_n: motifs.filter(m => m.genre === GENRE_PASSE).length,
       // Combien de signes ont été relus puis écartés ce jour-là. Le document
       // le DIT : effacer quelque chose sans le dire, c'est demander qu'on
       // croie la machine deux fois plutôt qu'une.
