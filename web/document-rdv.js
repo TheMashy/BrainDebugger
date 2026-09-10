@@ -34,6 +34,22 @@ const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
               'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 const JOURS = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'];
 
+/*
+ * RETIRER QUELQUE CHOSE DU DOCUMENT.
+ *
+ * Demandé pour deux raisons qui n'en font qu'une : « si l'utilisateur juge
+ * qu'il ne veut pas en parler encore, ou que c'est faux ». Dans les deux cas
+ * c'est la même règle — c'est la personne qui tend le document, donc c'est
+ * elle qui décide de ce qu'il porte. Un détecteur se trompe ; et même quand il
+ * a raison, on n'est pas obligé de tout dire le même jour.
+ *
+ * Ce qui est retiré n'est pas effacé : il reste à l'écran, barré et pâle, avec
+ * de quoi le remettre. Il ne part qu'à l'impression. Un document qui efface
+ * pour de bon obligerait à tout régénérer pour changer d'avis.
+ */
+const croix = quoi => `<button class="masq" title="Retirer ${quoi} du document"
+  aria-label="Retirer ${quoi} du document">×</button>`;
+
 const ech = s => String(s ?? '').replace(/[&<>"]/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const jourMois = d => `${Number(d.slice(8))} ${MOIS[Number(d.slice(5, 7)) - 1]}`;
@@ -88,7 +104,7 @@ function parcours(frise) {
                 : (e.fin.slice(0, 4) === e.date.slice(0, 4) ? jourMois(e.fin) : complet(e.fin))}`
             : jourMois(e.date)}</div>
           <div class="rquoi">${ech(e.label)}${e.periode
-            ? ` <span class="rduree">${ans(e.date, e.fin)}</span>` : ''}</div>
+            ? ` <span class="rduree">${ans(e.date, e.fin)}</span>` : ''}${croix('ce repère')}</div>
         </div>`).join('')}</div>
     </div>`).join('');
 }
@@ -104,7 +120,7 @@ function derniers(jours) {
       : '<span class="rien">—</span>';
     const signes = j.signes.map(s => `
       <div class="signe">
-        <div class="slib">${ech(s.libelle)}</div>
+        <div class="slib">${ech(s.libelle)}${croix('ce signe')}</div>
         ${s.extrait ? `<blockquote>${ech(s.extrait)}</blockquote>` : ''}
       </div>`).join('');
     /* Les blessures passées ne s'impriment plus : voir server/rendez-vous.js.
@@ -115,11 +131,21 @@ function derniers(jours) {
         <div class="slib">${ech(s.libelle)}</div>
         ${s.extrait ? `<blockquote>${ech(s.extrait)}</blockquote>` : ''}
       </div>`).join('');
-    return `<div class="jour${j.signes.length ? ' porte' : ''}">
+    /*
+     * UNE JOURNÉE SANS RIEN SE RECONNAÎT, pour qu'on puisse la faire
+     * disparaître d'un geste. Elle reste là par défaut : sauter les journées
+     * creuses donne une frise qui se resserre autour de ce qui va mal, un
+     * dessin qui ment par la forme. Mais sur trente jours dont la moitié sont
+     * vides, quelqu'un peut vouloir tenir en une page — c'est son document.
+     */
+    const rien = !j.signes.length && !j.evoques.length && j.note == null
+              && j.sommeil_h == null && !j.coucher && !j.lever;
+    return `<div class="jour${j.signes.length ? ' porte' : ''}${rien ? ' rien' : ''}">
       <div class="jdate"><b>${Number(j.date.slice(8))}</b> <span>${nomJour(j.date)}</span></div>
       <div class="jnuit">${nuit}</div>
       <div class="jnote">${j.note != null ? String(j.note).replace('.', ',') : ''}</div>
       <div class="jsignes">${signes}${evoques}</div>
+      ${croix('cette journée')}
     </div>`;
   }).join('');
 }
@@ -243,7 +269,7 @@ function friseParcours(f) {
     </g>`;
   }).join('');
 
-  return `<svg class="frise" viewBox="0 0 ${L} ${H}" role="img"
+  return `<svg class="frise" viewBox="0 0 ${L} ${H}" data-l="${L}" data-yaxe="${yAxe}" role="img"
       aria-label="Frise du parcours, de ${complet(et.debut)} à ${complet(et.fin)}">
     ${barres}
     <line x1="${MG}" y1="${yAxe}" x2="${L - MD}" y2="${yAxe}" stroke="#16191c" stroke-width="1"/>
@@ -464,10 +490,41 @@ export function documentRendezVous(d) {
   .barre button { font:inherit; font-size:13px; padding:6px 14px; border:1px solid var(--filet);
                   background:#fff; border-radius:6px; cursor:pointer; }
   .aide { color:var(--gris); font-size:12px; margin:0 0 8px; }
+
+  /* Le bouton de retrait : discret, et il n'apparaît qu'au survol de sa ligne.
+     Un document couvert de croix se lit comme un formulaire. */
+  .masq { border:0; background:none; color:var(--gris); font-size:15px; line-height:1;
+          padding:0 4px; cursor:pointer; opacity:0; transition:opacity .12s; }
+  .rep:hover .masq, .jour:hover .masq, .signe:hover .masq,
+  .masq:focus-visible { opacity:.65; }
+  .masq:hover { opacity:1; color:var(--encre); }
+  /* Ce qui est retiré reste visible À L'ÉCRAN, barré : on peut changer d'avis.
+     Il ne disparaît qu'à l'impression. */
+  .retire { opacity:.34; }
+  .retire .rquoi, .retire .slib, .retire blockquote, .retire .jnuit { text-decoration:line-through; }
+  .retire .masq { opacity:.65; }
+  .retire .masq::before { content:'↩'; }
+  .retire .masq { font-size:12px; }
+  .opt { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--gris);
+         margin-right:auto; cursor:pointer; }
+  .compte { font-size:12px; color:var(--gris); }
+  .compte button { border:0; background:none; color:var(--encre); font:inherit;
+                   text-decoration:underline; cursor:pointer; padding:0 0 0 6px; }
+  body.sansvide .jour.rien { display:none; }
+
+  @media print {
+    .retire { display:none !important; }
+    .masq { display:none; }
+    .jour.rien { display:var(--vide, grid); }
+  }
   @media print { .barre { display:none; } .aide { display:none; }
                  .page { padding:0; max-width:none; } @page { margin:16mm; } }
 </style></head><body>
-<div class="barre"><button onclick="window.print()">Imprimer / enregistrer en PDF</button></div>
+<div class="barre">
+  <label class="opt"><input type="checkbox" id="sansvide"> masquer les journées sans rien</label>
+  <span class="compte" id="compte" hidden></span>
+  <button onclick="window.print()">Imprimer / enregistrer en PDF</button>
+</div>
 <div class="page">
   <h1>Ce que j’ai noté</h1>
   <p class="sous">Document préparé le ${complet(d.fait_le)}${de && a
@@ -527,7 +584,16 @@ export function documentRendezVous(d) {
  * ligne où il ne touche pas le précédent. La première ligne commence sous les
  * années, pour ne pas écrire par-dessus l'échelle.
  */
-const LIGNES = [30, 48, 66, 84];
+/*
+ * AUTANT DE LIGNES QU'IL EN FAUT, ET LA FRISE GRANDIT AVEC.
+ *
+ * Quatre lignes fixes suffisaient tant qu'on choisissait quatre noms ; au
+ * cinquième, il fallait bien les mettre quelque part, et ils se recouvraient.
+ * Or c'est exactement l'usage — on prépare un rendez-vous en choisissant les
+ * huit ou dix faits dont on veut parler. Le dessin s'allonge donc vers le bas
+ * au lieu d'entasser, et sa hauteur se recalcule à chaque choix.
+ */
+const H_LIGNE = 18, Y0_LIGNE = 30;
 function placer() {
   const svg = document.querySelector('.frise');
   if (!svg) return;
@@ -542,18 +608,57 @@ function placer() {
       return { n, t, g, d: g + w };
     })
     .sort((a, b) => a.g - b.g);
-  const finDe = LIGNES.map(() => -Infinity);
+  const finDe = [];
   for (const c of choisis) {
     let k = finDe.findIndex(f => c.g > f + 6);
-    /* Tout est plein : on prend la ligne la MOINS avancée, celle où le
-       chevauchement sera le plus court. Empiler toujours sur la dernière
-       entassait les noms au même endroit dès qu'on en choisissait cinq. */
-    if (k < 0) k = finDe.indexOf(Math.min(...finDe));
+    if (k < 0) { k = finDe.length; finDe.push(-Infinity); }   // une ligne de plus
     finDe[k] = c.d;
-    c.t.setAttribute('y', LIGNES[k] + Number(c.n.dataset.y0) - 6);
-    c.n.querySelector('line').setAttribute('y2', LIGNES[k] + Number(c.n.dataset.y0) - 15);
+    const y = Y0_LIGNE + k * H_LIGNE;
+    c.t.setAttribute('y', y + Number(c.n.dataset.y0) - 6);
+    c.n.querySelector('line').setAttribute('y2', y + Number(c.n.dataset.y0) - 15);
   }
+  const yAxe = Number(svg.dataset.yaxe), L = Number(svg.dataset.l);
+  const h = yAxe + Y0_LIGNE + Math.max(1, finDe.length) * H_LIGNE + 6;
+  svg.setAttribute('viewBox', '0 0 ' + L + ' ' + Math.round(h));
 }
+/*
+ * RETIRER, REMETTRE, ET SAVOIR COMBIEN.
+ *
+ * Le compte est là pour qu'on n'imprime pas sans savoir : un document dont on
+ * a retiré sept lignes sans s'en souvenir est un document qu'on ne peut plus
+ * relire honnêtement. « Tout remettre » revient à l'état de départ d'un clic.
+ */
+function compter() {
+  const n = document.querySelectorAll('.retire').length;
+  const el = document.getElementById('compte');
+  if (!el) return;
+  el.hidden = !n;
+  el.innerHTML = n
+    ? n + (n > 1 ? ' éléments retirés' : ' élément retiré') +
+      '<button type="button" id="remettre">tout remettre</button>'
+    : '';
+}
+document.addEventListener('click', e => {
+  if (e.target.id === 'remettre') {
+    document.querySelectorAll('.retire').forEach(x => x.classList.remove('retire'));
+    return compter();
+  }
+  const b = e.target.closest && e.target.closest('.masq');
+  if (!b) return;
+  /* stopPropagation ne suffirait pas : les deux écouteurs sont posés sur
+     document, et il n'arrête que la remontée, pas les voisins du même nœud.
+     Le garde est donc dans cibleDe, qui refuse tout clic parti d'une croix —
+     indépendant de l'ordre où les écouteurs ont été posés. */
+  b.closest('.rep, .jour, .signe')?.classList.toggle('retire');
+  compter();
+});
+document.getElementById('sansvide')?.addEventListener('change', e => {
+  document.body.classList.toggle('sansvide', e.target.checked);
+  // À l'impression aussi : une case cochée qui ne changerait que l'écran
+  // ferait sortir un document que la personne n'a pas relu.
+  document.documentElement.style.setProperty('--vide', e.target.checked ? 'none' : 'grid');
+});
+
 function basculer(i) {
   const g = document.querySelector('.frise .pt[data-pt="' + i + '"]');
   if (!g) return;
@@ -562,7 +667,8 @@ function basculer(i) {
     ?.classList.toggle('surfrise', g.classList.contains('montre'));
   placer();
 }
-const cibleDe = t => t.closest && (t.closest('.frise .pt') || t.closest('.rep[data-pt]'));
+const cibleDe = t => t.closest && !t.closest('.masq')
+  && (t.closest('.frise .pt') || t.closest('.rep[data-pt]'));
 document.addEventListener('click', e => {
   const el = cibleDe(e.target);
   if (el) basculer(el.dataset.pt);
