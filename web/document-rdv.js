@@ -123,11 +123,24 @@ function friseParcours(f) {
 
   const L = 700, MG = 22, MD = 22, util = L - MG - MD;
   const HV = 17;                                  // hauteur d'une voie
-  const lanes = voies(periodes.map(p => ({ date: p.date, fin: p.fin })), 400);
+  /*
+   * LA MARGE ENTRE DEUX VOIES SE COMPTE EN PLACE DU LIBELLÉ, PAS EN JOURS.
+   *
+   * `voies` sépare deux périodes qui se chevauchent ; 400 jours de marge
+   * suffisent quand la frise couvre cinq ans, et ne valent plus que trente
+   * pixels quand elle en couvre vingt-et-un — « Nobody Studio », « Unit 2025 »
+   * et « Couple » se sont retrouvés sur la même ligne, l'un par-dessus l'autre.
+   * On convertit donc la largeur qu'il faut au libellé en JOURS de cette
+   * frise-là.
+   */
+  const jourParPx = (Date.parse(et.fin + 'T00:00:00Z') - Date.parse(et.debut + 'T00:00:00Z'))
+                    / 86400000 / Math.max(1, util);
+  const lanes = voies(periodes.map(p => ({ date: p.date, fin: p.fin })),
+                      Math.round(Math.max(...periodes.map(p => p.label.length), 8) * 5.2 * jourParPx));
   const nv = Math.max(1, ...lanes.map(v => v.voie + 1));
   const yBarres = 20, hBarres = nv * HV;
   const yAxe = yBarres + hBarres + 12;
-  const H = yAxe + 46;
+  const H = yAxe + 20;
   const x = date => MG + situer(date, et) * util;
 
   const an0 = Number(et.debut.slice(0, 4)), an1 = Number(et.fin.slice(0, 4));
@@ -139,28 +152,48 @@ function friseParcours(f) {
   const barres = periodes.map((p, i) => {
     const x0 = x(p.date), x1 = Math.max(x0 + 2, x(p.fin));
     const y = yBarres + lanes[i].voie * HV;
+    /*
+     * UN LIBELLÉ QUI NE TIENT PAS DANS SA BARRE SE POSE À CÔTÉ.
+     *
+     * Écrit à l'intérieur, il en débordait : sur vingt-et-un ans de frise, six
+     * mois font quinze pixels, et « Nobody Studio » s'étalait bien au-delà de
+     * sa propre période — donnant à lire une durée qui n'existe pas. Le
+     * dessin doit rester vrai même quand le texte ne rentre pas.
+     *
+     * À droite de la barre, ou à gauche si elle est trop près du bord.
+     */
+    const large = ech(p.label).length * 5.2;
+    const dedans = (x1 - x0) > large + 8;
+    const aGauche = !dedans && x1 + large > L - MD;
+    const tx = dedans ? x0 + 3 : aGauche ? x0 - 4 : x1 + 4;
     return `<rect x="${x0.toFixed(1)}" y="${y}" width="${(x1 - x0).toFixed(1)}" height="10"
              rx="2" fill="#e7eaee" stroke="#333" stroke-width=".7"/>
-      <text x="${(x0 + 3).toFixed(1)}" y="${y + 8}" class="fpl">${ech(p.label)}</text>`;
+      <text x="${tx.toFixed(1)}" y="${y + 8}" class="fpl"${
+        aGauche ? ' text-anchor="end"' : ''}>${ech(p.label)}</text>`;
   }).join('');
 
-  /* Les points : un losange sur l'axe, et le libellé en dessous, alterné haut
-     et bas pour que deux faits proches ne se recouvrent pas. */
-  const marques = points.map((p, i) => {
-    const px = x(p.date), bas = i % 2 === 1;
-    const yl = yAxe + (bas ? 30 : 16);
-    /*
-     * UN LIBELLÉ NE SORT PAS DU CADRE. Centré, « première séance » posé sur le
-     * dernier repère débordait à droite et se faisait couper au milieu d'un
-     * mot. Près des bords on l'accroche donc par son extrémité — le trait de
-     * rappel dit de toute façon à quel point il se rattache.
-     */
-    const bord = px < 90 ? 'start' : px > L - 90 ? 'end' : 'middle';
-    const tx = bord === 'start' ? px - 5 : bord === 'end' ? px + 5 : px;
-    return `<path d="M${px.toFixed(1)} ${yAxe - 4.5} l4.5 4.5 -4.5 4.5 -4.5 -4.5 Z" fill="#16191c"/>
-      <line x1="${px.toFixed(1)}" y1="${yAxe + 4}" x2="${px.toFixed(1)}" y2="${yl - 8}"
-            stroke="#9aa3ac" stroke-width=".6"/>
-      <text x="${tx.toFixed(1)}" y="${yl}" class="fpt" text-anchor="${bord}">${ech(p.label)}</text>`;
+  /*
+   * LES INSTANTS NE PORTENT PAS LEUR NOM SUR L'AXE, ET C'EST LA VRAIE FORME
+   * DES DONNÉES QUI L'IMPOSE.
+   *
+   * Sur un parcours réel, les repères ne sont pas répartis régulièrement : ils
+   * s'entassent là où le journal existe. Vingt-et-un instants dont quinze sur
+   * les deux dernières années d'une frise qui en couvre vingt-et-une : les
+   * libellés y formaient une tache noire où plus rien ne se lisait, pendant
+   * que les quinze premières années restaient vides.
+   *
+   * On ne comprime pas l'axe pour autant — une frise dont les durées mentent
+   * n'est plus une frise, et c'est justement cet entassement qui se lit
+   * comme un fait : ça se resserre à partir de 2024.
+   *
+   * Le dessin garde donc ce que seul un dessin sait dire — QUAND ça se
+   * resserre — et la liste juste en dessous dit QUOI, dans l'ordre, lisible.
+   * Chacun son travail. Les périodes gardent leur nom : une barre a de la
+   * place, un point n'en a pas.
+   */
+  const marques = points.map(p => {
+    const px = x(p.date);
+    return `<path d="M${px.toFixed(1)} ${yAxe - 4.5} l4.5 4.5 -4.5 4.5 -4.5 -4.5 Z" fill="#16191c"/>`;
   }).join('');
 
   return `<svg class="frise" viewBox="0 0 ${L} ${H}" role="img"
@@ -170,14 +203,8 @@ function friseParcours(f) {
     ${ticks.map(a => {
       const px = x(`${a}-01-01`);
       if (px < MG - 1 || px > L - MD + 1) return '';
-      /*
-       * UNE ANNÉE QUI TOMBE SUR UN REPÈRE S'EFFACE. « déménagement » et
-       * « 2025 » s'écrivaient l'un sur l'autre, et les deux devenaient
-       * illisibles. Entre une graduation et un fait, c'est le fait qui reste :
-       * l'échelle se retrouve avec les graduations voisines, un événement ne
-       * se retrouve nulle part.
-       */
-      if (points.some(pt => Math.abs(x(pt.date) - px) < 30)) return '';
+      // Les libellés d'instants ayant quitté l'axe, plus rien ne vient écrire
+      // par-dessus les années : elles se posent toutes.
       return `<line x1="${px.toFixed(1)}" y1="${yAxe}" x2="${px.toFixed(1)}" y2="${yAxe + 4}"
                 stroke="#9aa3ac" stroke-width=".7"/>
         <text x="${px.toFixed(1)}" y="${yAxe + 13}" class="fan" text-anchor="middle">${a}</text>`;
