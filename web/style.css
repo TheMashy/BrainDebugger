@@ -4651,4 +4651,19 @@ details.jpecol .jpetop { margin-top: 5px; }
 }
 #ressentiNow[aria-expanded="true"] { color: var(--accent); }
 
+/* Ce qu'une réponse a coûté : un point et un chiffre, discrets. Un prix en
+   clair sous chaque phrase transformerait la conversation en dépense — c'est
+   déjà pour ça que la jauge du rail est un point et pas un compteur. */
+.cout {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 7px; padding: 1px 7px 1px 5px;
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--ink-faint); font: 10.5px/1.6 var(--mono);
+  opacity: .45; transition: opacity .12s, color .12s, border-color .12s;
+}
+.msg:hover .cout, .cout:focus-visible { opacity: 1; }
+.cout:hover { color: var(--ink-dim); border-color: var(--ink-faint); opacity: 1; }
+.cout .cdot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .8; }
+@media (prefers-reduced-motion: reduce) { .cout { transition: none; } }
+
 @media (prefers-reduced-motion: reduce) { .rcran { transition: none; } }

@@ -1024,6 +1024,19 @@ let FRAIS = new Set();
 /* Les messages du compagnon auxquels tu as déjà répondu par l'échelle. Rempli
    par le rendu du fil, pour ne pas redemander deux fois la même chose. */
 let RESSENTIS = new Map();
+/*
+ * CE QUE CHAQUE RÉPONSE DU COMPAGNON A COÛTÉ, par identifiant de message.
+ *
+ * ON FUSIONNE, ON NE REMPLACE PAS. Le fil complet arrive avec le détail de
+ * tous ses messages ; le flux d'une réponse n'apporte que celui de CETTE
+ * réponse. Remplacer la carte à chaque fin de message effacerait le détail de
+ * toute la soirée — les pastilles disparaîtraient une à une à mesure qu'on
+ * parle, ce qui est exactement le contraire de ce qu'on veut montrer.
+ */
+let COUTS = new Map();
+const majCouts = (obj) => {
+  for (const [id, c] of Object.entries(obj ?? {})) COUTS.set(Number(id), c);
+};
 
 function drawThread() {
   const th = $('#thread');
@@ -1104,7 +1117,7 @@ function drawThread() {
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }${reflexionMarkup(m)}<span class="tx">${esc(
         m.role === 'pet' ? sansMarqueur(m.text) : m.text
-      )}</span>${marque}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
+      )}</span>${marque}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
@@ -1133,6 +1146,60 @@ function drawThread() {
  * Elle se referme dès qu'on a répondu : une échelle qui reste ouverte devient
  * un formulaire, et un formulaire dans une conversation, on cesse de l'ouvrir.
  * ===================================================================== */
+/* =====================================================================
+ * CE QUE CETTE RÉPONSE-LÀ A COÛTÉ.
+ *
+ * Le compteur disait ce que le MOIS coûte. C'est le chiffre sur lequel on ne
+ * peut rien : on ne change pas « 0,44 $ ce mois-ci », on change une façon
+ * d'écrire ou un réglage — et pour voir l'effet il faut le voir là où il se
+ * produit, à côté de la phrase qui l'a produit.
+ *
+ * REPLIÉ EN UN POINT, ET C'EST DÉLIBÉRÉ. Un prix affiché en clair sous chaque
+ * réponse transforme chaque phrase en dépense, ce qui est la dernière chose à
+ * avoir en tête quand on vient écrire un mauvais soir — c'est déjà la raison
+ * pour laquelle la jauge du rail est un point et pas un compteur. On l'ouvre
+ * quand on cherche, il ne se met pas devant.
+ *
+ * LES ANCIENNES RÉPONSES N'EN ONT PAS, et n'en auront jamais : le lien entre
+ * une dépense et une réponse n'existait pas avant cette version. Pas de
+ * pastille plutôt qu'une pastille à zéro — zéro voudrait dire « gratuit ».
+ * ===================================================================== */
+/*
+ * EN CENTIMES SOUS DIX CENTIMES, ET C'EST TOUT L'INTÉRÊT.
+ *
+ * Une réponse coûte ici entre un quart de centime et quelques centimes. En
+ * dollars arrondis à deux décimales, elles s'écrasent toutes sur « 0,00 $ » ou
+ * « 0,02 $ » — c'est-à-dire qu'on ne voit plus la différence entre deux façons
+ * de répondre, qui est la seule chose qu'on est venu regarder.
+ */
+const dollars = d => d == null ? null
+  : d >= 0.1 ? `${d.toFixed(2).replace('.', ',')} $`
+  : `${(d * 100).toFixed(2).replace('.', ',')} ¢`;
+
+const jetonsCourts = n => n >= 10000 ? `${Math.round(n / 1000)}k`
+  : n >= 1000 ? `${(n / 1000).toFixed(1).replace('.', ',')}k` : String(n);
+
+function coutMarkup(m) {
+  if (m.role !== 'pet') return '';
+  const c = COUTS.get(Number(m.id));
+  if (!c) return '';
+  const prix = dollars(c.dollars);
+  const detail = [
+    `${c.output} jetons écrits`,
+    `${c.input} lus`,
+    c.cacheLu ? `${c.cacheLu} relus du cache` : null,
+    c.cacheEcrit ? `${c.cacheEcrit} mis en cache` : null
+  ].filter(Boolean).join(', ');
+  // Le modèle après un tiret et pas dans l'énumération : ce n'est pas un
+  // quatrième compte, c'est ce qui explique le prix des trois autres.
+  const dit = [prix, detail, c.model].filter(Boolean).join(' · ');
+  return `<button class="cout" data-cout="${m.id}"
+    aria-label="Ce que cette réponse a coûté"
+    data-tip="${esc(dit)}"
+    ><span class="cdot"></span><span class="cval">${
+      prix ?? `${jetonsCourts(c.jetons)} jetons`}</span></button>`;
+}
+
 function echelleMarkup(m, dernier) {
   const deja = RESSENTIS.get(Number(m.id));
   if (deja != null) {
@@ -1633,6 +1700,7 @@ async function send() {
       if (ev === 'user') {
         S.messages = data.messages;
         RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
+        majCouts(data.couts);
         drawThread();
         /*
          * LA BULLE EXISTE AVANT LA PREMIERE LETTRE.
@@ -1706,6 +1774,7 @@ async function send() {
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
         RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
+        majCouts(data.couts);
         if (data.motifs) S.motifs = data.motifs;
         // La journée que le serveur a retenue pour ce message. Elle peut avoir
         // changé depuis l'ouverture de la page : « aujourd'hui » commence au
@@ -8914,6 +8983,12 @@ async function boot() {
     }
   });
   appliquerPudique();
+
+  /* Le fil vient de `/api/state` : ce qui l'accompagne aussi. Sans ça, un
+     rechargement rouvrait l'échelle sous une question déjà relevée, et les
+     pastilles de coût disparaissaient jusqu'au message suivant. */
+  RESSENTIS = new Map((S.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
+  majCouts(S.couts);
 
   go('tonight');
 }

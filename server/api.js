@@ -14,7 +14,8 @@ import {
   mesuresEntre, poserMesure, normaliserTs,
   redaterMessages, rebuildEntryText, tousMessagesUtilisateur
 } from './db.js';
-import { usageFor, record as recordUsage, serieUsage, profilUsage, FENETRES } from './usage.js';
+import { usageFor, record as recordUsage, serieUsage, profilUsage, FENETRES,
+         coutsParMessage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
@@ -1559,6 +1560,10 @@ export const routes = {
     const civil = today();
     const entry = getEntry(t, userId);
     const last = ser.length ? ser[ser.length - 1] : null;
+    // Lu une fois : trois appels rendaient trois fois la même liste, et c'est
+    // la liste qui décide de tout ce qui l'accompagne ci-dessous.
+    const filDuJour = recentMessages(80, userId);
+    const idsDuFil = filDuJour.map(m => m.id);
     return {
       today: t,
       jourCivil: civil,
@@ -1569,7 +1574,24 @@ export const routes = {
       settings: publicSettings(s),
       entry,
       anchors: allAnchors(userId),
-      messages: recentMessages(80, userId),
+      messages: filDuJour,
+      /*
+       * CE QUI ACCOMPAGNE LE FIL, ET POURQUOI C'EST ICI.
+       *
+       * `GET /api/messages` les rendait deja -- mais RIEN NE L'APPELAIT. Le fil
+       * de la page vient d'ici, au demarrage, et de la reponse en flux ensuite.
+       * Resultat : au rechargement, la page ne savait plus a quelles questions
+       * on avait deja repondu, et l'echelle reapparaissait sous une question
+       * deja relevee. Le serveur refusait bien le deuxieme releve -- la donnee
+       * n'a jamais ete fausse -- mais l'ecran proposait un geste qui ne pouvait
+       * qu'echouer, ce qui est la seule chose qu'une interface ne doit pas
+       * faire.
+       *
+       * La route reste : c'est elle qui sert un JOUR PASSE qu'on rouvre.
+       */
+      ressentis: relevesDeToi(idsDuFil, userId)
+        .map(r => ({ message_id: r.message_id, valeur: r.valeur })),
+      couts: Object.fromEntries(coutsParMessage(idsDuFil, userId)),
       motifs: motifsDuFil(userId),
       user: publicUser(userId),
       usage: usageFor(userId),
@@ -1648,9 +1670,12 @@ export const routes = {
      */
     const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos,
                                                           outils: outilsPour(userId, idMsg) });
-    if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'chat');
-
-    addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet', text: r.text, userId });
+    /* L'ORDRE COMPTE : le relevé de dépense nomme la réponse, il ne peut donc
+       pas être écrit avant elle. */
+    const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
+                               text: r.text, userId });
+    if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output,
+                             r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet);
     return {
       messages: recentMessages(80, userId), backend: r.backend,
       degraded: r.degraded ?? null, refused: r.refused ?? false
@@ -1662,8 +1687,21 @@ export const routes = {
      instant se relèverait deux fois. */
   'GET /api/messages': ({ query, userId }) => {
     const messages = query.date ? messagesForDate(query.date, userId) : recentMessages(80, userId);
-    return { messages, ressentis: relevesDeToi(messages.map(m => m.id), userId)
-      .map(r => ({ message_id: r.message_id, valeur: r.valeur })) };
+    const ids = messages.map(m => m.id);
+    return {
+      messages,
+      ressentis: relevesDeToi(ids, userId).map(r => ({ message_id: r.message_id, valeur: r.valeur })),
+      /*
+       * CE QUE CHAQUE REPONSE A COUTE. Voyage avec le fil, comme les
+       * ressentis : sans ca il faudrait un appel par message, c'est-a-dire
+       * quatre-vingts appels pour afficher une pastille.
+       *
+       * Les reponses d'avant cette version n'ont pas de detail -- le lien
+       * n'existait pas. La carte n'a alors pas d'entree pour elles, et l'ecran
+       * le dit plutot que d'afficher un zero qui ressemble a « gratuit ».
+       */
+      couts: Object.fromEntries(coutsParMessage(ids, userId))
+    };
   },
 
   'POST /api/note': ({ body, userId }) => {
@@ -3664,12 +3702,18 @@ export async function streamMessage(body, send, userId = OWNER) {
     exhausted: before.exhausted,
     outils: outilsPour(userId, messageId, send)
   });
-  if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'chat');
-
-  addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
-               text: r.text, reflexion: r.pensee ?? null, userId });
+  /* Même ordre que sur l'autre route : la réponse d'abord, ce qu'elle a coûté
+     ensuite — sans quoi la dépense ne peut nommer aucun message. */
+  const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
+                             text: r.text, reflexion: r.pensee ?? null, userId });
+  if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output,
+                           r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet);
   send('done', {
     messages: recentMessages(80, userId),
+    /* Le coût de CETTE réponse, tout de suite : attendre le prochain
+       chargement du fil pour l'afficher, c'est ne jamais le montrer au moment
+       où il se rapporte à quelque chose qu'on vient de lire. */
+    couts: Object.fromEntries(coutsParMessage([idPet], userId)),
     motifs: motifsDuFil(userId),
     /*
      * LA JOURNEE OU CE MESSAGE EST TOMBE.

@@ -207,6 +207,19 @@ const AJOUTS = [
    * lui-meme dit lesquelles etaient du chat.
    */
   ['usage', 'source', 'TEXT'],
+  /*
+   * QUELLE REPONSE A COUTE CETTE LIGNE.
+   *
+   * Le compteur disait ce que le mois coute ; il ne disait pas ce que COUTE
+   * UNE PHRASE. Or c'est la seule echelle a laquelle quelqu'un peut agir : on
+   * ne change pas « 0,44 $ ce mois-ci », on change une facon d'ecrire ou un
+   * reglage, et il faut voir l'effet la ou il se produit.
+   *
+   * NULL sur toutes les lignes d'avant, et ce NULL est honnete : le lien
+   * n'existait pas, aucune heuristique ne le retrouvera message par message.
+   * L'ecran dit alors « pas de detail » plutot que d'inventer un chiffre.
+   */
+  ['usage', 'message_id', 'INTEGER'],
   ['events', 'fin',    'TEXT'],     // NULL = un instant, sinon une periode
   ['events', 'ouvert', 'INTEGER'],  // 1 = periode en cours. INVARIANT : ouvert=1 => fin IS NULL
   ['events', 'theme',  'TEXT'],     // NULL = deduit du libelle
