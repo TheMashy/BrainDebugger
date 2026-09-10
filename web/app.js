@@ -6649,6 +6649,10 @@ function qsMarkup(qs) {
       style="margin-top:12px;padding:3px 10px;font-size:11.5px">${ico('corbeille', 11)}vider le journal</button>` : ''}`;
 }
 
+/* Quels groupes des Réglages sont dépliés. Une vue qui se reconstruit ne doit
+   pas replier ce que quelqu'un vient d'ouvrir — voir `groupe` plus bas. */
+const REGLAGES_OUVERTS = new Set();
+
 async function renderSettings() {
   const s = S.settings;
 
@@ -6678,7 +6682,22 @@ async function renderSettings() {
     ? `Claude ${MODELES[s.anthropicModelChat] ?? s.anthropicModelChat ?? ''}`.trim()
     : s.chatBackend === 'ollama' ? 'Ollama, sur cette machine' : 'hors-ligne, relances scriptées';
 
-  const groupe = ({ dessin, titre, etat, corps }) => `<details class="rgroupe">
+  /*
+   * UN GROUPE OUVERT RESTE OUVERT.
+   *
+   * Ils étaient rendus sans mémoire, alors que ceux de l'onglet Année gardent
+   * la leur (`CARNET_PLI`, `REPERES_PLI`). Or `renderSettings()` reconstruit
+   * l'innerHTML de la vue, et plusieurs réglages l'appellent en se
+   * modifiant — changer la tenue, poser une clé, basculer un mode. Le groupe
+   * qu'on était en train de régler se refermait donc SOUS LES DOIGTS, à
+   * chaque changement, et il fallait le rouvrir pour faire le suivant.
+   *
+   * Le commentaire de `#pudique` plus bas disait déjà « surtout PAS
+   * renderSettings() ici : il reconstruit l'innerHTML de la vue » — c'était
+   * une rustine posée sur un réglage, là où le défaut était dans le groupe.
+   */
+  const groupe = ({ cle, dessin, titre, etat, corps }) => `<details class="rgroupe" data-pli="${cle}"${
+    REGLAGES_OUVERTS.has(cle) ? ' open' : ''}>
     <summary>
       <span class="rgico">${ico(dessin, 15)}</span>
       <span class="rgtitre">${titre}</span>
@@ -6696,7 +6715,7 @@ async function renderSettings() {
     </div>
 
     <div class="reglages">
-      ${groupe({ dessin: 'parler', titre: 'Le compagnon', etat: `${esc(s.petName)} · ${esc(etatModele)}`, corps: `
+      ${groupe({ cle: 'compagnon', dessin: 'parler', titre: 'Le compagnon', etat: `${esc(s.petName)} · ${esc(etatModele)}`, corps: `
         <h3>Son nom, sa tête</h3>
                 <p class="sub">Change sa tête et son nom. Il n'a accès à aucune de tes statistiques.</p>
         <label class="field"><span>Nom</span>
@@ -6735,7 +6754,7 @@ async function renderSettings() {
         </select></label>
       <div id="backendCfg"></div>` })}
 
-      ${groupe({ dessin: 'antenne', titre: 'Ce qui te mesure', etat: s.passerelleCle ? 'une clé posée' : 'aucune clé — rien ne peut interroger le site', corps: `
+      ${groupe({ cle: 'mesure', dessin: 'antenne', titre: 'Ce qui te mesure', etat: s.passerelleCle ? 'une clé posée' : 'aucune clé — rien ne peut interroger le site', corps: `
         <h3>La passerelle</h3>
               <p class="sub">
         Une application qui tourne sur ta machine — une guirlande, une lampe, un widget — peut venir
@@ -6774,7 +6793,7 @@ async function renderSettings() {
           comme le changement d'heure.
         </p>` })}
 
-      ${groupe({ dessin: 'suivi', titre: 'Comment tes notes se lisent', etat: `plancher ${s.floorMode === 'relative' ? 'référence − 3' : s.floor} · tenue ${s.sustain} jour${s.sustain > 1 ? 's' : ''}`, corps: `
+      ${groupe({ cle: 'notes', dessin: 'suivi', titre: 'Comment tes notes se lisent', etat: `plancher ${s.floorMode === 'relative' ? 'référence − 3' : s.floor} · tenue ${s.sustain} jour${s.sustain > 1 ? 's' : ''}`, corps: `
         <h3>Le plancher</h3>
                 <p class="sub">Sous ce seuil, aucune statistique n'est affichée. Uniquement tes entrées passées, brutes.</p>
         <label class="field"><span>Mode</span>
@@ -6789,7 +6808,7 @@ async function renderSettings() {
         <label class="field"><span>Tenue exigée <b class="mono" id="sv">${s.sustain}</b> jour${s.sustain > 1 ? 's' : ''}</span>
           <input type="range" id="sustain" min="1" max="5" step="1" value="${s.sustain}"></label>` })}
 
-      ${groupe({ dessin: 'ranger', titre: 'Tes données', etat: `${S.stats.days} journées notées · ${S.stats.textDays} avec du texte`, corps: `
+      ${groupe({ cle: 'donnees', dessin: 'ranger', titre: 'Tes données', etat: `${S.stats.days} journées notées · ${S.stats.textDays} avec du texte`, corps: `
         <h3>Ce qu'il y a</h3>
                 <p class="sub">${S.stats.days} journées notées · ${S.stats.textDays} avec du texte · ${esc(S.stats.firstDate)} → ${esc(S.stats.lastDate)}</p>
         <p class="sub" style="font-size:12.5px">
@@ -6836,7 +6855,7 @@ async function renderSettings() {
         </div>
         <div id="notesReport"></div>` })}
 
-      ${groupe({ dessin: 'corbeille', titre: 'Effacer', etat: 'sans retour', corps: `<div class="danger">        <p class="sub">Sans retour. Exporte d'abord si tu hésites — c'est le bouton juste au-dessus.</p>
+      ${groupe({ cle: 'effacer', dessin: 'corbeille', titre: 'Effacer', etat: 'sans retour', corps: `<div class="danger">        <p class="sub">Sans retour. Exporte d'abord si tu hésites — c'est le bouton juste au-dessus.</p>
         <div class="wipepick" id="wipePick">
           <button data-portee="notes" aria-pressed="false">
             <b>Les notes</b><span>les chiffres partent, le texte reste</span></button>
@@ -6849,7 +6868,7 @@ async function renderSettings() {
 
       ${/* Le texte long du mode privé : le bouton est en haut, l'explication
             ici, pour qui veut savoir ce qu'il éteint exactement. */''}
-      ${groupe({ dessin: 'oeil', titre: "Montrer l'écran", etat: s.pudique ? 'mode privé actif' : 'mode privé éteint', corps: `        <p class="sub">
+      ${groupe({ cle: 'ecran', dessin: 'oeil', titre: "Montrer l'écran", etat: s.pudique ? 'mode privé actif' : 'mode privé éteint', corps: `        <p class="sub">
           Partager son écran, c'est montrer à quelqu'un d'autre un journal écrit pour soi.
           Le mode privé éteint les <b>mots</b> et garde les <b>formes</b> : tes messages,
           tes journées, tes notes rangées, les noms des mécanismes et des repères deviennent
@@ -7016,6 +7035,20 @@ async function renderSettings() {
       finally { b.disabled = false; }
     });
   }
+
+  /*
+   * `toggle` NE REMONTE PAS : il ne bouillonne pas, donc un écouteur posé sur
+   * la vue ne le verrait jamais. On écoute donc en CAPTURE, une fois pour tous
+   * les groupes, plutôt que d'en accrocher un par `<details>` — la vue se
+   * reconstruit, et six écouteurs à raccrocher à chaque fois sont six occasions
+   * d'en oublier un.
+   */
+  $('#view').addEventListener('toggle', e => {
+    const d = e.target.closest?.('details.rgroupe');
+    if (!d?.dataset.pli) return;
+    if (d.open) REGLAGES_OUVERTS.add(d.dataset.pli);
+    else REGLAGES_OUVERTS.delete(d.dataset.pli);
+  }, true);
 
   $('#export').addEventListener('click', async () => {
     const data = await api('/api/export');
