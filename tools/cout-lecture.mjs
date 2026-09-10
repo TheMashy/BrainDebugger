@@ -211,10 +211,13 @@ if (COMPTER || REEL) {
   if (REEL) {
     console.log(`\n  Lecture réelle sur ${MODELE}, effort ${EFFORT}… (une à deux minutes)`);
     const t0 = Date.now();
+    const base = requeteLecture(corpus, { anthropicModel: MODELE });
     const res = await client.beta.messages.create({
       ...repliServeur(MODELE),
-      ...requeteLecture(corpus, { anthropicModel: MODELE }),
-      ...(EFFORT !== 'high' && req.output_config ? { output_config: { effort: EFFORT } } : {})
+      ...base,
+      // L'effort ne s'envoie que sur un modele qui le porte : `optionsDuModele`
+      // l'a deja decide, on ne fait que remplacer la valeur qu'il a posee.
+      ...(base.output_config ? { output_config: { ...base.output_config, effort: EFFORT } } : {})
     });
     const u = res.usage ?? {};
     const appel = res.content.find(b => b.type === 'tool_use');
