@@ -700,6 +700,13 @@ async function renderTonight() {
              ne voit pas est une piece qu'on envoie sans le savoir. */''}
       <div class="jointes" id="jointes" hidden></div>
 
+      <div class="ress ressnow" id="ressnow" role="group" aria-label="Où tu en es, maintenant" hidden>
+        <span class="rdit faint">où tu en es, là&nbsp;:</span>
+        <span class="rcrans">${Array.from({ length: 11 }, (_, v) =>
+          `<button class="rcran" data-ressenti-now="${v}"
+             style="--c:${noteScaleColor(v)}" aria-label="${v} sur 10"></button>`).join('')}</span>
+      </div>
+
       <div class="composer">
         ${/* LE TROMBONE JOINT UN FICHIER. Il indiquait « ce que tu tiens » --
               les objectifs -- et n'ouvrait rien : un bouton qui ne fait rien
@@ -713,6 +720,20 @@ async function renderTonight() {
         </button>
         <input type="file" id="fichiers" multiple hidden
                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,.md,.txt,.csv,.json">
+        ${/* OÙ TU EN ES, SANS ATTENDRE QU'ON TE LE DEMANDE.
+              L'échelle n'existait que sous la question du compagnon — et,
+              mesuré sur quatre ans de journal, il ne la formulait de façon
+              reconnaissable que sur 1,6 % de ses messages. Autant dire jamais.
+              Le geste ne doit pas dépendre de la façon dont quelqu'un d'autre
+              tourne sa phrase. */''}
+        <button class="clip" id="ressentiNow" aria-label="Où tu en es, maintenant"
+                aria-expanded="false"
+                data-tip="Où tu en es, là — un relevé de l'instant, pas la note de ta journée">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="8.2"/><path d="M12 12V7.6"/><path d="M12 12l3.1 2.4"/>
+          </svg>
+        </button>
         <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
         <button class="sendarrow" id="send" aria-label="Envoyer" title="Envoyer">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
@@ -874,6 +895,14 @@ async function renderTonight() {
   $('#send').onclick = send;
 
   $('#clip').onclick = () => $('#fichiers').click();
+  /* Le bouton et son échelle vivent dans le COMPOSEUR, pas dans le fil : les
+     brancher avec les gestes du fil (`bindGestes`) laissait le clic sans
+     écouteur — un bouton qui s'affiche normalement et ne fait rien. */
+  $('#ressentiNow').onclick = () => basculerRessentiNow();
+  $('#ressnow').onclick = e => {
+    const cran = e.target.closest('[data-ressenti-now]');
+    if (cran) poserRessentiMaintenant(cran.dataset.ressentiNow);
+  };
   $('#fichiers').onchange = async e => {
     await joindre(e.target.files);
     e.target.value = '';     // rejoindre deux fois le meme fichier reste possible
@@ -1119,6 +1148,39 @@ function echelleMarkup(m, dernier) {
     <span class="rdit faint">si tu veux, pose-le&nbsp;:</span>
     <span class="rcrans">${crans}</span>
   </div>`;
+}
+
+/*
+ * L'ÉCHELLE QU'ON OUVRE SOI-MÊME.
+ *
+ * On la CACHE, on ne la re-rend pas : re-peindre la vue viderait le champ de
+ * saisie à moitié écrit, et personne ne fait ça à quelqu'un au milieu d'une
+ * phrase. C'est aussi pour ça qu'elle est posée dès le rendu plutôt que créée
+ * au clic.
+ */
+function basculerRessentiNow(ouvrir = null) {
+  const el = $('#ressnow'), b = $('#ressentiNow');
+  if (!el) return;
+  const on = ouvrir == null ? el.hidden : ouvrir;
+  el.hidden = !on;
+  b?.setAttribute('aria-expanded', String(on));
+}
+
+async function poserRessentiMaintenant(valeur) {
+  basculerRessentiNow(false);
+  try {
+    const r = await api('/api/releve', { valeur: Number(valeur) });
+    if (r?.erreur) throw new Error(r.erreur);
+    /*
+     * Il s'accroche au dernier message du fil, et c'est le SERVEUR qui dit
+     * auquel : la page ne rejoue pas ce calcul. Sans ça, le chiffre
+     * s'afficherait sous une bulle et serait enregistré sous une autre le jour
+     * où le fil a bougé entre-temps.
+     */
+    if (r?.messageId != null) { RESSENTIS.set(Number(r.messageId), Number(valeur)); drawThread(); }
+  } catch (e) {
+    toast?.(`Ce ressenti n'a pas été enregistré — ${e.message}`);
+  }
 }
 
 async function poserRessenti(id, valeur) {

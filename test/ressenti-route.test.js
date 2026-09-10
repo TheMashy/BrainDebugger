@@ -35,7 +35,9 @@ test('on ne répond pas deux fois à la même question', async () => {
   const q = ecrire('assistant', 'Tu te sens comment ?');
   assert.equal((await poser(q, 4)).ok, true);
   const encore = await poser(q, 9);
-  assert.match(encore.erreur, /ne demande pas/);
+  // Le refus est maintenant nommé pour ce qu'il est : la question n'a pas
+  // changé de nature, c'est le MÊME INSTANT qu'on relèverait deux fois.
+  assert.match(encore.erreur, /viens de le poser/);
   assert.equal(relevesDeToi([q], OWNER).length, 1, 'un seul relevé, pas deux');
 });
 
@@ -76,4 +78,53 @@ test('DEUX RESSENTIS DANS LA MÊME JOURNÉE FONT UNE AMPLITUDE', () => {
   const a = amplitude(AUJ, OWNER);
   assert.ok(a && a.ecart > 0, `deux relevés au moins doivent donner un écart : ${JSON.stringify(a)}`);
   assert.ok(relevesDuJour(AUJ, OWNER).length >= 2);
+});
+
+/* =====================================================================
+ *  LE RELEVÉ QU'ON POSE SOI-MÊME, SANS QU'ON L'AIT DEMANDÉ.
+ *
+ * L'échelle n'existait que sous la question du compagnon. Mesuré sur quatre
+ * ans de journal réel, il ne la formulait de façon reconnaissable que sur 8
+ * de ses 486 messages — 1,6 %. Attendre qu'il la pose, c'est ne jamais rien
+ * relever ; le bouton du champ de saisie ouvre la même échelle à tout moment.
+ * ===================================================================== */
+
+const poserSeul = valeur => routes['POST /api/releve']({ body: { valeur }, userId: OWNER });
+
+test('SANS QUESTION, LE RELEVÉ PASSE QUAND MÊME', async () => {
+  ecrire('user', 'je sors de deux heures de scroll');
+  const dernier = ecrire('assistant', 'Ok. Rejoindre un vocal, tu l’as déjà écrit.');
+  const r = await poserSeul(6);
+  assert.equal(r.ok, true, `refusé : ${r.erreur}`);
+  assert.equal(r.releve.source, 'toi', 'un relevé posé à la main n’est pas une estimation du modèle');
+  assert.equal(r.messageId, dernier,
+    'il ne s’accroche pas au dernier message : le chiffre s’afficherait sous une autre bulle que celle où il a été posé');
+});
+
+test('le même instant ne se relève pas deux fois', async () => {
+  ecrire('user', 'et là je sais plus quoi faire');
+  ecrire('assistant', 'Tu veux en dire plus ?');
+  assert.equal((await poserSeul(4)).ok, true);
+  const encore = await poserSeul(9);
+  assert.match(encore.erreur, /viens de le poser/,
+    'rien n’a été dit entre les deux : ce serait deux clics, pas un écart');
+});
+
+test('la valeur reste la seule chose obligatoire, et elle est vérifiée', async () => {
+  ecrire('assistant', 'Et ensuite ?');
+  assert.match((await poserSeul('bof')).erreur, /valeur/);
+  assert.match((await routes['POST /api/releve']({ body: {}, userId: OWNER })).erreur, /valeur/);
+});
+
+test('la route rend le message AUQUEL elle a accroché, elle ne le fait pas deviner', async () => {
+  /*
+   * La page affiche la pastille sous la bulle que le serveur nomme. Si elle
+   * refaisait le calcul de son côté, le chiffre s'afficherait sous une bulle
+   * et serait enregistré sous une autre le jour où le fil a bougé entre-temps.
+   */
+  ecrire('user', 'bon');
+  const dernier = ecrire('assistant', 'Bon ?');
+  const r = await poserSeul(2);
+  assert.equal(r.messageId, dernier);
+  assert.deepEqual(relevesDeToi([dernier], OWNER).map(x => x.valeur), [2]);
 });

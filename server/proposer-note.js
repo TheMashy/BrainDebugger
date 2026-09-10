@@ -57,14 +57,29 @@ import { niveauDuTexte, NIVEAUX } from './veille.js';
 export const FREINS = {
   /* On ne redemande pas dans la foulée : deux relevés à cinq minutes d'écart ne
      mesurent pas un écart, ils mesurent une insistance. */
-  depuis_dernier_ms: 90 * 60 * 1000,
-  /* Trois fois par jour au maximum. Au-delà ce n'est plus un relevé, c'est un
-     suivi horaire — et le compagnon n'est pas une infirmière de nuit. */
-  par_jour: 3,
+  depuis_dernier_ms: 45 * 60 * 1000,
+  /* Au-delà ce n'est plus un relevé, c'est un suivi horaire — et le compagnon
+     n'est pas une infirmière de nuit. Six sur une soirée reste sous le rythme
+     d'une fois l'heure. */
+  par_jour: 6,
   /* La coupure au-delà de laquelle on est dans un autre moment. */
   reprise_ms: 2 * 3600 * 1000,
-  /* En dessous, il n'y a pas encore de quoi voir un changement. */
+  /* En dessous, il n'y a pas encore de quoi LIRE un changement dans le texte.
+     Ne s'applique donc qu'au signal qui lit le texte — voir plus bas. */
   mots_min: 8,
+  /* Les signaux qui lisent l'HORLOGE n'ont pas besoin de matière : ils ont
+     seulement besoin que quelqu'un soit là. Assez pour que « ok » ne compte
+     pas comme une reprise de conversation. */
+  mots_min_horloge: 4,
+  /* UN PAN DE CONVERSATION QUI N'A RIEN RELEVÉ.
+     C'est le troisième signal, et celui qui change tout : les deux autres
+     attendent un ÉVÉNEMENT (le ton bascule, la conversation reprend), et une
+     soirée ordinaire n'en produit aucun. Mesuré sur quatre ans de journal
+     réel, ils laissaient 152 tours sur 499 avec « rien n'a bougé ».
+     Or ce qu'on cherche à mesurer n'est pas l'événement : c'est l'ÉCART d'un
+     moment à l'autre. Trois quarts d'heure de conversation sans un seul
+     relevé, c'est précisément un écart qu'on ne saura pas lire demain. */
+  pan_sans_releve_ms: 45 * 60 * 1000,
 };
 
 const rang = n => (n == null ? 0 : (NIVEAUX[n] ?? 0));
@@ -92,9 +107,8 @@ export function occasionDeDemander(fil = [], releves = [], maintenant = Date.now
   if (dernierReleve != null && maintenant - dernierReleve < FREINS.depuis_dernier_ms) {
     return nonDemande('il vient de répondre');
   }
-  if (String(dernier.text).trim().split(/\s+/).length < FREINS.mots_min) {
-    return nonDemande('trop court pour y voir un changement');
-  }
+  const mots = String(dernier.text).trim().split(/\s+/).length;
+  if (mots < FREINS.mots_min_horloge) return nonDemande('trop court pour être un moment');
 
   /* --- puis les signaux --- */
   const precedents = siens.slice(0, -1);
@@ -104,6 +118,27 @@ export function occasionDeDemander(fil = [], releves = [], maintenant = Date.now
   if (Number.isFinite(ecart) && ecart >= FREINS.reprise_ms) {
     return { demander: true, pourquoi: 'la conversation reprend après une longue coupure' };
   }
+
+  /*
+   * LE PAN NON RELEVÉ. Depuis quand cette conversation n'a rien mesuré ?
+   *
+   * Le point de départ est le dernier relevé s'il y en a un, sinon le premier
+   * mot de la conversation. Prendre l'ouverture de la journée plutôt que le
+   * premier message ferait sonner le signal dès la première phrase d'une
+   * soirée qui commence à 23 h — on demanderait « où tu en es » à quelqu'un
+   * qui vient de dire bonsoir.
+   */
+  const debutDuPan = dernierReleve ?? Date.parse(siens[0]?.ts);
+  const pan = Number.isFinite(debutDuPan) ? Date.parse(dernier.ts) - debutDuPan : null;
+  if (Number.isFinite(pan) && pan >= FREINS.pan_sans_releve_ms) {
+    return { demander: true,
+             pourquoi: dernierReleve == null
+               ? 'vous parlez depuis un moment et rien n’a encore été relevé'
+               : 'il s’est passé du temps depuis le dernier relevé' };
+  }
+
+  /* Le signal qui lit le TEXTE, lui, a besoin de matière. */
+  if (mots < FREINS.mots_min) return nonDemande('trop court pour y voir un changement');
 
   /*
    * Le niveau se lit sur le message SEUL, sans le contexte de la journée : le
@@ -132,17 +167,21 @@ export function occasionDeDemander(fil = [], releves = [], maintenant = Date.now
  */
 export function proposerNoteBlock(occasion) {
   if (!occasion?.demander) return null;
-  return `Une occasion, pas une consigne : ${occasion.pourquoi}.
+  return `Une occasion : ${occasion.pourquoi}.
 
-Si ça se fait naturellement, tu peux lui demander où il en est LÀ, maintenant —
-« comment tu te sens, là ? ». Une échelle de 0 à 10 apparaîtra sous ta bulle et
-il pourra répondre d'un geste. Ce qui se mesure ainsi, c'est l'écart d'un moment
-à l'autre : deux réponses dans la même soirée disent quelque chose qu'aucune
-note de fin de journée ne dit.
+Demande-lui où il en est LÀ, maintenant — « comment tu te sens, là ? ». Une échelle
+de 0 à 10 apparaîtra sous ta bulle et il pourra répondre d'un geste, sans écrire.
+Ce qui se mesure ainsi, c'est l'écart d'un moment à l'autre : deux réponses dans la
+même soirée disent quelque chose qu'aucune note de fin de journée ne dit.
 
-Tu n'es pas obligé, et c'est important : une conversation où l'on est
-régulièrement invité à se chiffrer devient un questionnaire, et un questionnaire
-ne s'ouvre pas un mauvais soir. Si ce qu'il raconte demande autre chose, fais
-autre chose. Ne la pose jamais deux fois de suite, et ne dis pas que quelque
-chose te l'a suggéré.`;
+Pose la question EN CLAIR et sur MAINTENANT — « comment tu te sens, là ? », « tu en
+es où à cette heure ? », « ça donne quoi maintenant ? ». Une allusion ne compte pas :
+c'est la question posée sur l'instant présent qui fait apparaître l'échelle, et sans
+elle il n'a que la phrase pour répondre.
+
+Deux cas où tu ne la poses pas. Si ce qu'il vient de dire demande autre chose —
+quelque chose à quoi il faut répondre d'abord — réponds à ça, la question attendra.
+Et jamais deux fois de suite : une conversation où l'on est régulièrement invité à
+se chiffrer devient un questionnaire, et un questionnaire ne s'ouvre pas un mauvais
+soir. Ne dis jamais que quelque chose te l'a suggéré.`;
 }

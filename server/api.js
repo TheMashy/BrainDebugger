@@ -2962,22 +2962,53 @@ export const routes = {
    * message, et l'amplitude de la journée compterait des points qui ne veulent
    * rien dire.
    */
+  /*
+   * OU QUELQU'UN EN EST, MAINTENANT — PAR DEUX CHEMINS.
+   *
+   * 1. IL REPOND A LA QUESTION. `messageId` designe la bulle qui l'a posee, et
+   *    le serveur REVERIFIE qu'elle la posait : la page peut se tromper, ou
+   *    etre modifiee.
+   * 2. IL LE POSE DE LUI-MEME, sans qu'on lui ait rien demande. Mesure sur son
+   *    propre journal, le compagnon ne formulait la question de facon
+   *    reconnaissable que sur 1,6 % de ses messages -- attendre qu'il la pose,
+   *    c'est ne jamais rien relever. Le bouton du champ de saisie ouvre la meme
+   *    echelle a n'importe quel moment.
+   *
+   * UN RELEVE SPONTANE S'ACCROCHE QUAND MEME A UN MESSAGE, et ce n'est pas une
+   * contrainte de base : c'est ce qui lui donne son contexte. « 3/10 » seul ne
+   * dit rien ; « 3/10 pendant qu'on parlait de ca » se relit. D'ou le refus si
+   * le fil est vide -- il n'y a alors aucun instant ou l'accrocher, et c'est la
+   * note de la journee qui sert a ca.
+   *
+   * UN SEUL RELEVE PAR MESSAGE, sur les deux chemins. Tant que rien n'a ete
+   * dit, c'est le meme instant : le relever deux fois ne mesure pas un ecart,
+   * ca mesure deux clics.
+   */
   'POST /api/releve': ({ body, userId }) => {
-    const id = Number(body?.messageId);
     const v = Number(body?.valeur);
-    if (!Number.isFinite(id) || !Number.isFinite(v)) return { erreur: 'il manque le message ou la valeur' };
+    if (!Number.isFinite(v)) return { erreur: 'il manque la valeur' };
     const fil = recentMessages(80, userId);
-    const m = fil.find(x => Number(x.id) === id);
-    if (!m) return { erreur: 'ce message n’est plus dans le fil' };
-    const dernierDuCompagnon = [...fil].reverse().find(x => x.role === 'assistant');
     const repondus = new Set(relevesDeToi(fil.map(x => x.id), userId).map(r => Number(r.message_id)));
-    if (!proposerLechelle(m, { dernier: Number(dernierDuCompagnon?.id) === id, repondus }))
-      return { erreur: 'ce message ne demande pas où tu en es' };
-    const r = addReleve({ messageId: id, date: jourVecu(userId), valeur: v,
+
+    const spontane = body?.messageId == null;
+    const m = spontane ? fil.at(-1) : fil.find(x => Number(x.id) === Number(body.messageId));
+    if (!m) {
+      return { erreur: spontane ? 'il faut avoir dit quelque chose pour situer ce moment'
+                                : 'ce message n’est plus dans le fil' };
+    }
+    if (repondus.has(Number(m.id))) return { erreur: 'tu viens de le poser' };
+
+    if (!spontane) {
+      const dernierDuCompagnon = [...fil].reverse().find(x => x.role === 'assistant');
+      if (!proposerLechelle(m, { dernier: Number(dernierDuCompagnon?.id) === Number(m.id), repondus }))
+        return { erreur: 'ce message ne demande pas où tu en es' };
+    }
+
+    const r = addReleve({ messageId: Number(m.id), date: jourVecu(userId), valeur: v,
                           quoi: String(m.text).trim().slice(0, 160), source: 'toi', userId });
     if (!r) return { erreur: 'valeur illisible' };
     invalidate(userId);
-    return { ok: true, releve: r };
+    return { ok: true, releve: r, messageId: Number(m.id) };
   },
 
   'GET /api/lecture': async ({ userId }) => {

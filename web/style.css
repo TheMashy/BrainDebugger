@@ -4642,4 +4642,13 @@ details.jpecol .jpetop { margin-top: 5px; }
   color: var(--bg); background: var(--c);
 }
 .ress.fait small { opacity: .7; }
+/* La même échelle, ouverte depuis le champ de saisie plutôt que sous une
+   question. Elle vit au-dessus du composeur, dans le même alignement que lui :
+   c'est un geste de la conversation, pas un panneau qui s'ouvre à côté. */
+.ressnow {
+  margin: 0 0 7px; padding: 7px 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+}
+#ressentiNow[aria-expanded="true"] { color: var(--accent); }
+
 @media (prefers-reduced-motion: reduce) { .rcran { transition: none; } }
