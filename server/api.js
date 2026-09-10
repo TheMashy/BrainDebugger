@@ -1183,11 +1183,52 @@ export function posteDuJour(date, userId = OWNER) {
   // `sommeil_h` et le réveil), lue telle quelle dans le digest. C'est ce qu'on
   // montre en « couché » sur la vue minimaliste — le sommeil comme un épisode
   // (couché -> levé -> durée), pas le coucher qui fermera CE soir.
+  /*
+   * SUR QUEL JOUR TOMBE CHAQUE BORNE — parce que « levé 15:51, couché 10:33 »
+   * se lit comme une absurdité tant qu'on ne dit pas que le 10:33 est celui du
+   * LENDEMAIN.
+   *
+   * Chez quelqu'un qui vit la nuit, les deux bouts d'une même journée vécue
+   * tombent presque toujours sur deux dates civiles différentes. L'écran
+   * affichait deux heures nues, et il fallait refaire le raisonnement de tête à
+   * chaque fois — y compris pour savoir si le site s'était trompé.
+   *
+   * LE CALCUL SE FAIT ICI, ET PAS DANS LA PAGE. La règle « a-t-on passé
+   * minuit » est déjà écrite dans ce fichier, à deux endroits (`depuisLever` et
+   * `ditCoucherFermant`) ; la réécrire dans le client ferait un troisième juge,
+   * et le jour où les trois ne diraient plus la même chose, c'est l'écran qui
+   * aurait tort sans qu'on sache pourquoi.
+   *
+   * Le lever OUVRE la journée : il est sur `date`, par définition. Le coucher
+   * la FERME : il est sur `date` s'il vient après le lever dans la journée
+   * vécue, sur le lendemain s'il a fallu passer minuit pour l'atteindre. Sans
+   * lever connu, on retombe sur la convention de `ditCoucherFermant` : avant
+   * midi, c'est le lendemain.
+   */
+  const jourDeLaBorne = (h, apres) => {
+    const b = enMinutes(h);
+    if (b == null) return null;
+    const a = enMinutes(apres);
+    if (a == null) return b < MIDI ? addDays(date, 1) : date;
+    return b < a ? addDays(date, 1) : date;
+  };
+  if (lever.heure) lever.jour = date;
+  if (coucher.heure) coucher.jour = jourDeLaBorne(coucher.heure, lever.heure);
+  /*
+   * `dormi_de` est l'autre sens : c'est le coucher qui a OUVERT la nuit
+   * terminée par ce lever, donc il est DERRIÈRE lui. Même matin que le lever
+   * s'il est plus tôt dans la journée (endormi à 06:48, levé à 15:51), la
+   * veille sinon (endormi à 23:59, levé le lendemain à 15:51).
+   */
+  const dormi_de = nuit?.coucher ?? null;
+  const dormi_de_jour = dormi_de && enMinutes(dormi_de) != null && enMinutes(lever.heure) != null
+    ? (enMinutes(dormi_de) < enMinutes(lever.heure) ? date : addDays(date, -1))
+    : null;
   return { lever, coucher, sommeil_h,
            // Même raison que `sommeil_h` : le coucher de la nuit DORMIE vient de
            // la nuit retenue. Le reprendre au poste ressusciterait la paire que
            // `nuitDuJour` vient d'écarter.
-           dormi_de: nuit?.coucher ?? null, nuit_souci: nuit?.souci ?? null, ecran };
+           dormi_de, dormi_de_jour, nuit_souci: nuit?.souci ?? null, ecran };
 }
 
 /* Découpe un texte en phrases, pour situer une occurrence à l'endroit précis

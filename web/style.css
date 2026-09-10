@@ -3588,6 +3588,15 @@ table.grid td.cell.abascule { cursor: pointer; }
 /* La duree dormie, sur sa propre ligne : c'est elle qu'on cherche le matin. */
 .jpdormi { margin-top: 4px; }
 .jpost { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+/* Le numéro du jour, quand le lever et le coucher n'ont pas la même date. Il
+   se lit comme une note en marge — assez petit pour ne pas concurrencer
+   l'heure, assez présent pour qu'on le voie sans le chercher. */
+.jpjour {
+  font-family: var(--mono); font-size: 9.5px; line-height: 1;
+  color: var(--ink-faint); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 3px; margin-left: -2px;
+  align-self: flex-start; font-variant-numeric: tabular-nums;
+}
 .jpost .ico { color: var(--ink-faint); flex: none; }
 .jpost .mono { font-variant-numeric: tabular-nums; }
 .jpost .faint { font-size: 12px; }

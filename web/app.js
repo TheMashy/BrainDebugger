@@ -5642,9 +5642,33 @@ function posteMarkup(p, synchro) {
   p = p || {};
   const heure = h => `<span class="mono">${esc(h)}</span>`;
 
+  /*
+   * LE NUMÉRO DU JOUR, ET SEULEMENT QUAND IL EN FAUT UN.
+   *
+   * « levé 15:51, couché 10:33 » se lit comme une absurdité tant qu'on ne dit
+   * pas que le 10:33 est celui du lendemain. Chez quelqu'un qui vit la nuit,
+   * les deux bouts d'une même journée vécue tombent presque toujours sur deux
+   * dates différentes, et il fallait refaire le calcul de tête à chaque fois —
+   * y compris pour savoir si le site s'était trompé.
+   *
+   * On ne le montre QUE quand les deux bornes changent de jour. Le poser à
+   * chaque fois ajouterait deux nombres à lire sur toutes les journées
+   * ordinaires, pour ne rien apprendre : un numéro qui est toujours là cesse
+   * d'être un signe. Et quand il apparaît, il apparaît sur les DEUX — sinon il
+   * faut deviner laquelle des deux heures il corrige.
+   *
+   * Le jour vient du serveur (`posteDuJour`), où la règle « a-t-on passé
+   * minuit » est déjà écrite. La refaire ici ferait un juge de plus.
+   */
+  const numJour = d => String(d || '').slice(8, 10).replace(/^0/, '');
+  const deuxJours = p.lever?.jour && p.coucher?.jour && p.lever.jour !== p.coucher.jour;
+  const marque = d => deuxJours && d
+    ? `<span class="jpjour" title="${esc(d)}">${numJour(d)}</span>` : '';
+
   // Le lever, si on le connaît.
   const lever = p.lever?.heure
-    ? `<span class="jpost" title="levé">${ico('soleil', 13)}${heure(p.lever.heure)}</span>`
+    ? `<span class="jpost" title="levé${p.lever.jour ? ` le ${p.lever.jour}` : ''}">${
+        ico('soleil', 13)}${heure(p.lever.heure)}${marque(p.lever.jour)}</span>`
     : '';
 
   /*
@@ -5664,13 +5688,16 @@ function posteMarkup(p, synchro) {
   const aDormi = p.sommeil_h != null;
   const heureCoucher = p.coucher?.heure || null;
   const sommeil = heureCoucher
-    ? `<span class="jpost" title="couché — la fin de cette journée">${ico('lune', 13)}${heure(heureCoucher)}</span>`
+    ? `<span class="jpost" title="couché — la fin de cette journée${
+        p.coucher?.jour ? `, le ${p.coucher.jour}` : ''}">${
+        ico('lune', 13)}${heure(heureCoucher)}${marque(p.coucher?.jour)}</span>`
     : '';
   // LA DUREE SUR SA PROPRE LIGNE, et elle parle de la nuit qui a OUVERT la
   // journée : c'est ce qu'on cherche le matin — combien de temps j'ai dormi.
   const dormi = aDormi
     ? `<div class="jpdormi"><span class="jpost lu" title="${esc(p.dormi_de
-        ? `temps de sommeil — la nuit avant ce lever, endormi vers ${p.dormi_de}`
+        ? `temps de sommeil — la nuit avant ce lever, endormi vers ${p.dormi_de}${
+            p.dormi_de_jour ? ` le ${p.dormi_de_jour}` : ''}`
         : 'temps de sommeil — la nuit avant ce lever')}">${
         ico('lit', 13)}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span></div>`
     : '';
