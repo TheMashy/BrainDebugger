@@ -1179,6 +1179,47 @@ const dollars = d => d == null ? null
 const jetonsCourts = n => n >= 10000 ? `${Math.round(n / 1000)}k`
   : n >= 1000 ? `${(n / 1000).toFixed(1).replace('.', ',')}k` : String(n);
 
+/*
+ * DE QUOI ÉTAIT FAIT CE PROMPT-LÀ, ET CE QUI A CHANGÉ DEPUIS LE PRÉCÉDENT.
+ *
+ * Une réponse coûtait 0,14 $ dont 98 % en ÉCRITURE de cache. Le total ne dit
+ * pas QUEL bloc est réécrit, et les gros blocs viennent du journal de la
+ * personne : ils ne se reproduisent sur aucune autre machine. La mesure devait
+ * donc venir d'ici.
+ *
+ * `tete` est l'empreinte du système + de la mémoire, c'est-à-dire de tout ce
+ * qui porte un point de reprise. Deux réponses de suite avec la même tête, et
+ * le cache DOIT être relu. Si elle change, on sait sans discuter pourquoi on a
+ * payé une écriture — et la pastille le dit au lieu de le laisser deviner.
+ */
+const enMille = n => n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+
+function compositionDite(id, c) {
+  const k = c.composition;
+  if (!k) return null;
+  // En SIGNES, pas en jetons : c'est ce que le serveur peut compter sans
+  // rappeler l'API. L'ordre de grandeur suffit pour voir lequel écrase les
+  // autres, et c'est la seule chose qu'on cherche ici.
+  const parts = [
+    `système ${enMille(k.systeme)}`,
+    `mémoire ${enMille(k.memoire)}`,
+    `fil ${enMille(k.fil)}`,
+    k.echos ? `échos ${enMille(k.echos)}` : null
+  ].filter(Boolean).join(' + ');
+  const appels = k.appels > 1 ? `, ${k.appels} appels` : '';
+  return `prompt ≈ ${parts} signes${appels}${
+    teteChangee(id) ? ' — TÊTE RÉÉCRITE depuis la réponse précédente' : ''}`;
+}
+
+/* La réponse du compagnon d'avant, dans l'ordre des identifiants. */
+function teteChangee(id) {
+  const n = Number(id);
+  const avant = [...COUTS.keys()].filter(k => k < n).sort((a, b) => b - a)[0];
+  const a = COUTS.get(avant)?.composition?.tete;
+  const b = COUTS.get(n)?.composition?.tete;
+  return a != null && b != null && a !== b;
+}
+
 function coutMarkup(m) {
   if (m.role !== 'pet') return '';
   const c = COUTS.get(Number(m.id));
@@ -1192,8 +1233,8 @@ function coutMarkup(m) {
   ].filter(Boolean).join(', ');
   // Le modèle après un tiret et pas dans l'énumération : ce n'est pas un
   // quatrième compte, c'est ce qui explique le prix des trois autres.
-  const dit = [prix, detail, c.model].filter(Boolean).join(' · ');
-  return `<button class="cout" data-cout="${m.id}"
+  const dit = [prix, detail, c.model, compositionDite(m.id, c)].filter(Boolean).join(' · ');
+  return `<button class="cout${teteChangee(m.id) ? ' reecrit' : ''}" data-cout="${m.id}"
     aria-label="Ce que cette réponse a coûté"
     data-tip="${esc(dit)}"
     ><span class="cdot"></span><span class="cval">${

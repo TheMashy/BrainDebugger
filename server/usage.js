@@ -36,15 +36,16 @@ export const ECRITURE_CACHE = 1.25;
 export const currentMonth = () => new Date().toISOString().slice(0, 7);
 
 export function record(userId, model, input = 0, output = 0, cacheLu = 0, cacheEcrit = 0,
-                       source = null, messageId = null) {
+                       source = null, messageId = null, composition = null) {
   if (!input && !output && !cacheLu && !cacheEcrit) return;
   db.prepare(`
     INSERT INTO usage(user_id, ts, month, model, input_tokens, output_tokens,
-                      cache_read_tokens, cache_write_tokens, source, message_id)
-    VALUES(?,?,?,?,?,?,?,?,?,?)
+                      cache_read_tokens, cache_write_tokens, source, message_id, composition)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)
   `).run(userId, new Date().toISOString(), currentMonth(), model ?? null,
          input | 0, output | 0, cacheLu | 0, cacheEcrit | 0, source ?? null,
-         Number.isFinite(Number(messageId)) ? Number(messageId) : null);
+         Number.isFinite(Number(messageId)) ? Number(messageId) : null,
+         composition ? JSON.stringify(composition) : null);
 }
 
 /**
@@ -69,7 +70,8 @@ export function coutsParMessage(ids, userId) {
   const lignes = db.prepare(
     `SELECT message_id, model,
             SUM(input_tokens) i, SUM(output_tokens) o,
-            SUM(COALESCE(cache_read_tokens, 0)) cl, SUM(COALESCE(cache_write_tokens, 0)) ce
+            SUM(COALESCE(cache_read_tokens, 0)) cl, SUM(COALESCE(cache_write_tokens, 0)) ce,
+            MAX(composition) composition
        FROM usage
       WHERE user_id = ? AND message_id IN (${l.map(() => '?').join(',')})
       GROUP BY message_id, model`
@@ -81,8 +83,10 @@ export function coutsParMessage(ids, userId) {
     const dollars = p == null ? null
       : ((r.i + r.ce * ECRITURE_CACHE + r.cl * LECTURE_CACHE) * p.in + r.o * p.out) / 1e6;
     const deja = out.get(Number(r.message_id));
+    let composition = null;
+    try { composition = r.composition ? JSON.parse(r.composition) : null; } catch { /* illisible */ }
     const val = { model: r.model, input: r.i, output: r.o, cacheLu: r.cl, cacheEcrit: r.ce,
-                  jetons: r.i + r.o + r.cl + r.ce, dollars };
+                  jetons: r.i + r.o + r.cl + r.ce, dollars, composition };
     // Un meme message peut porter plusieurs appels (un tour d'outil relance le
     // modele) : on additionne, et un prix inconnu contamine le total plutot que
     // de disparaitre dans une somme qui aurait l'air complete.
@@ -91,6 +95,7 @@ export function coutsParMessage(ids, userId) {
       input: deja.input + val.input, output: deja.output + val.output,
       cacheLu: deja.cacheLu + val.cacheLu, cacheEcrit: deja.cacheEcrit + val.cacheEcrit,
       jetons: deja.jetons + val.jetons,
+      composition: deja.composition ?? val.composition,
       dollars: deja.dollars == null || val.dollars == null ? null : deja.dollars + val.dollars
     });
   }

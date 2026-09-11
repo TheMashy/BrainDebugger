@@ -1244,13 +1244,47 @@ export function assemblerPrompt({ memory = null, echos = null, history = [] } = 
     texte.cache_control = { type: 'ephemeral' };
     if (echos) dernier.content.push({ type: 'text', text: echos });
   }
-  return { system, messages };
+  /*
+   * ==================================================================
+   *  CE QU'IL Y A DANS LE PROMPT, BLOC PAR BLOC.
+   *
+   * Une réponse coûtait 0,14 $ dont 98 % en ÉCRITURE de cache : un bloc de
+   * cinquante mille jetons réécrit à chaque message au lieu d'être relu à un
+   * dixième. Le compteur disait le total ; il ne disait pas QUEL bloc.
+   *
+   * Et ça ne se déduit pas depuis une autre machine : les gros blocs viennent
+   * du journal de la personne — son carnet, sa lecture de fond, ses prises.
+   * La mesure doit donc être prise LÀ OÙ LA REQUÊTE PART.
+   *
+   * `empreinte` est la seule chose qui tranche vraiment : deux messages de
+   * suite avec la même empreinte et le cache DOIT être relu. Si elle change,
+   * on sait sans discuter pourquoi on paie une écriture.
+   * ==================================================================
+   */
+  const taille = t => String(t ?? '').length;
+  const empreinte = t => {
+    let h = 5381;
+    const x = String(t ?? '');
+    for (let i = 0; i < x.length; i++) h = ((h * 33) ^ x.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  };
+  const composition = {
+    systeme: taille(SYSTEM_PROMPT),
+    memoire: taille(memory),
+    fil: messages.reduce((n, m) => n + m.content.reduce((k, c) => k + taille(c.text), 0), 0)
+         - taille(echos),
+    echos: taille(echos),
+    // Ce qui NE DOIT PAS bouger d'un message à l'autre : le système et la
+    // mémoire portent les deux points de reprise explicites.
+    tete: empreinte(SYSTEM_PROMPT + '\u0000' + String(memory ?? ''))
+  };
+  return { system, messages, composition };
 }
 
 export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null, echos = null) {
   const { client, source } = await anthropicClient(s);
 
-  const { system, messages } = assemblerPrompt({ memory, echos, history });
+  const { system, messages, composition } = assemblerPrompt({ memory, echos, history });
   const boite = outils ? outilsDispo(outils) : [];
   const faits = [];              // ce que les outils ont reellement change
 
@@ -1266,7 +1300,12 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
   // Un tour par appel d'outil. La borne n'est pas theorique : sans elle, un
   // modele qui se trompe d'argument peut reessayer indefiniment, et chaque
   // tour coute des jetons a quelqu'un qui ne paie pas et ne le voit pas.
+  // Combien d'appels cette réponse a demandés. Un tour d'outil en relance un,
+  // et la dépense d'un échange est leur somme -- sans ce compte, un prompt qui
+  // a l'air énorme n'est parfois qu'un prompt envoyé trois fois.
+  let appelsApi = 0;
   for (let tour = 0; tour < 4; tour++) {
+    appelsApi++;
     let stream;
     try {
       stream = client.beta.messages.stream({
@@ -1399,7 +1438,8 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
    */
   const coupee = final?.stop_reason === 'max_tokens';
   return { text: coupee ? jusquAuPoint(text) : text.trim(), coupee,
-           pensee: pensee.trim(), backend: 'anthropic', model: final?.model, faits, usage };
+           pensee: pensee.trim(), backend: 'anthropic', model: final?.model, faits, usage,
+           composition: { ...composition, appels: appelsApi } };
 }
 
 /** Le texte jusqu'à sa dernière fin de phrase, ou tel quel s'il n'en a aucune. */

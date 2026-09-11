@@ -97,7 +97,8 @@ test('LE MESSAGE EST ÉCRIT AVANT SA DÉPENSE, SUR LES DEUX ROUTES', () => {
   const appels = [...api.matchAll(/recordUsage\(userId, r\.model,[\s\S]{0,220}?\);/g)].map(m => m[0]);
   assert.equal(appels.length, 2, 'les deux routes du compagnon ne sont plus reconnaissables');
   for (const a of appels) {
-    assert.match(a, /'chat', idPet\)/, 'un appel du compagnon n’attache plus sa dépense à sa réponse');
+    assert.match(a, /'chat', idPet, r\.composition \?\? null\)/,
+      'un appel du compagnon n’attache plus sa dépense à sa réponse, ou n’enregistre plus de quoi était fait son prompt');
   }
   // Pour chacun des deux appels : la réponse doit être écrite JUSTE AVANT, dans
   // la même poignée de lignes. Chercher « quelque part avant dans le fichier »
@@ -110,4 +111,44 @@ test('LE MESSAGE EST ÉCRIT AVANT SA DÉPENSE, SUR LES DEUX ROUTES', () => {
     assert.match(avant, /const idPet = addMessage\(/,
       'la dépense est de nouveau enregistrée avant la réponse qu’elle nomme');
   }
+});
+
+/* =====================================================================
+ *  DE QUOI ÉTAIT FAIT LE PROMPT.
+ *
+ * Une réponse coûtait 0,14 $ dont 98 % en ÉCRITURE de cache : un bloc réécrit
+ * à chaque message au lieu d'être relu à un dixième. Le total ne dit pas QUEL
+ * bloc, et les gros blocs viennent du journal de la personne — ils ne se
+ * reproduisent sur aucune autre machine. La mesure doit venir d'où la requête
+ * part.
+ * ===================================================================== */
+
+const { assemblerPrompt } = await import('../server/chat.js');
+const tour = (memory, echos, texte) => assemblerPrompt({
+  memory, echos, history: [{ role: 'user', text: texte, ts: new Date().toISOString() }] });
+
+test('le prompt dit sa composition, bloc par bloc', () => {
+  const c = tour('MEM'.repeat(200), 'ÉCHO'.repeat(50), 'salut').composition;
+  assert.equal(c.memoire, 600);
+  assert.equal(c.echos, 'ÉCHO'.repeat(50).length);
+  assert.ok(c.systeme > 1000, 'le prompt système n’est plus compté');
+  assert.ok(c.fil > 0 && c.fil < 200, `le fil compte les échos avec lui : ${c.fil}`);
+});
+
+test('LA TÊTE NE BOUGE PAS QUAND SEUL LE VOLATIL BOUGE', () => {
+  /*
+   * C'est l'invariant qui tient tout le cache : le système et la mémoire
+   * portent les deux points de reprise explicites. Si leur empreinte change
+   * d'un message à l'autre, le cache ne PEUT pas être relu — et l'écriture
+   * coûte un quart de plus que de ne rien cacher du tout.
+   */
+  const a = tour('MEM', 'échos du tour A', 'première phrase').composition;
+  const b = tour('MEM', 'échos du tour B, tout autres', 'deuxième phrase').composition;
+  assert.equal(a.tete, b.tete, 'les échos ou le fil ont contaminé la tête du prompt');
+});
+
+test('…et elle bouge dès que la mémoire bouge — sinon la mesure ne sert à rien', () => {
+  const a = tour('MEM', 'é', 'x').composition;
+  const b = tour('MEM ET UN MOT DE PLUS', 'é', 'x').composition;
+  assert.notEqual(a.tete, b.tete, 'une mémoire qui change ne se voit pas : l’instrument est aveugle');
 });

@@ -220,6 +220,20 @@ const AJOUTS = [
    * L'ecran dit alors « pas de detail » plutot que d'inventer un chiffre.
    */
   ['usage', 'message_id', 'INTEGER'],
+  /*
+   * DE QUOI ETAIT FAIT LE PROMPT DE CET APPEL-LA.
+   *
+   * `{systeme, memoire, fil, echos, tete, appels}` en JSON. La `tete` est une
+   * empreinte du systeme + de la memoire, c'est-a-dire de tout ce qui porte un
+   * point de reprise de cache : deux messages de suite avec la MEME tete et le
+   * cache doit etre relu. Si elle change, on sait sans discuter pourquoi on a
+   * paye une ecriture plutot qu'une lecture -- et lequel des deux blocs bouge.
+   *
+   * Sans ca, le compteur dit le total et jamais QUEL bloc, et les gros blocs
+   * viennent du journal de la personne : ils ne se reproduisent sur aucune
+   * autre machine.
+   */
+  ['usage', 'composition', 'TEXT'],
   ['events', 'fin',    'TEXT'],     // NULL = un instant, sinon une periode
   ['events', 'ouvert', 'INTEGER'],  // 1 = periode en cours. INVARIANT : ouvert=1 => fin IS NULL
   ['events', 'theme',  'TEXT'],     // NULL = deduit du libelle

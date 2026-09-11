@@ -4664,6 +4664,12 @@ details.jpecol .jpetop { margin-top: 5px; }
 .msg:hover .cout, .cout:focus-visible { opacity: 1; }
 .cout:hover { color: var(--ink-dim); border-color: var(--ink-faint); opacity: 1; }
 .cout .cdot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .8; }
+/* La tête du prompt a changé depuis la réponse d'avant : le cache n'a pas pu
+   être relu, et cette réponse a payé une écriture. C'est un fait technique, pas
+   une alerte — il se montre au même endroit que le reste, dans la teinte de ce
+   qui demande un coup d'œil. */
+.cout.reecrit { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 40%, transparent); opacity: .7; }
+
 @media (prefers-reduced-motion: reduce) { .cout { transition: none; } }
 
 @media (prefers-reduced-motion: reduce) { .rcran { transition: none; } }

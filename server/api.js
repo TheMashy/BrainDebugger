@@ -1675,7 +1675,7 @@ export const routes = {
     const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
                                text: r.text, userId });
     if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output,
-                             r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet);
+                             r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet, r.composition ?? null);
     return {
       messages: recentMessages(80, userId), backend: r.backend,
       degraded: r.degraded ?? null, refused: r.refused ?? false
@@ -3707,7 +3707,7 @@ export async function streamMessage(body, send, userId = OWNER) {
   const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
                              text: r.text, reflexion: r.pensee ?? null, userId });
   if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output,
-                           r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet);
+                           r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet, r.composition ?? null);
   send('done', {
     messages: recentMessages(80, userId),
     /* Le coût de CETTE réponse, tout de suite : attendre le prochain
