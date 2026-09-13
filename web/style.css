@@ -4636,12 +4636,33 @@ details.jpecol .jpetop { margin-top: 5px; }
    échelle, pas un bouton isolé. */
 .rcrans:hover .rcran { opacity: .8; }
 .rcrans .rcran:hover ~ .rcran { opacity: .28; }
+/*
+ * LE MARQUAGE D'HUMEUR, DANS LE MESSAGE.
+ *
+ * C'était une pastille pleine dans la couleur de la note, chiffre en négatif :
+ * la chose la plus voyante de la bulle, pour ce qui est le plus discret des
+ * gestes. Et sans heure, « 6/10 » se lisait comme un bilan de soirée.
+ *
+ * Il est maintenant de la même famille que la pastille de coût juste à côté —
+ * contour fin, mono, petit — avec UNE différence qui porte toute
+ * l'information : le point est PLEIN, dans la couleur de la note. C'est la
+ * règle de la courbe de volatilité, tenue jusqu'ici : plein = posé par la
+ * personne, contouré = lu dans ses mots.
+ *
+ * L'heure est en gris faible, après le chiffre. Elle ne se lit pas d'abord,
+ * mais elle est là — et c'est elle qui dit « à cet instant » plutôt que
+ * « aujourd'hui ».
+ */
 .ress.fait {
-  display: inline-flex; gap: 1px; align-items: baseline; margin-top: 8px;
-  padding: 2px 8px; border-radius: 999px; font: 12.5px var(--mono);
-  color: var(--bg); background: var(--c);
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 7px; padding: 1px 8px 1px 5px;
+  border: 1px solid color-mix(in oklab, var(--c) 40%, transparent);
+  border-radius: 999px; font: 10.5px/1.6 var(--mono);
+  background: color-mix(in oklab, var(--c) 8%, transparent);
 }
-.ress.fait small { opacity: .7; }
+.ress.fait .rpt { width: 7px; height: 7px; border-radius: 50%; background: var(--c); flex: none; }
+.ress.fait b { font: 600 11.5px/1.6 var(--mono); color: var(--ink); }
+.ress.fait .rh { color: var(--ink-faint); }
 /* La même échelle, ouverte depuis le champ de saisie plutôt que sous une
    question. Elle vit au-dessus du composeur, dans le même alignement que lui :
    c'est un geste de la conversation, pas un panneau qui s'ouvre à côté. */

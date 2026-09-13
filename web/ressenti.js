@@ -28,6 +28,22 @@
  * =====================================================================
  */
 
+/**
+ * LE RÔLE QUE CE PRODUIT ÉCRIT QUAND LE COMPAGNON PARLE.
+ *
+ * Il vaut `pet`, et il a toujours valu `pet` — `addMessage({ role: 'pet' })`.
+ * Ce fichier comparait à `'assistant'`, un mot que rien n'écrit nulle part :
+ * `proposerLechelle` rendait donc TOUJOURS faux et l'échelle n'est jamais
+ * apparue en production. La suite de tests restait verte parce que son décor
+ * inventait le rôle qui lui manquait.
+ *
+ * Le mot est nommé UNE fois, ici, et exporté : la page s'en sert pour trouver
+ * la dernière prise de parole du compagnon, où elle écrivait le même mot faux.
+ * Deux endroits, une seule vérité — corriger l'un sans l'autre n'aurait rien
+ * changé à l'écran.
+ */
+export const DU_COMPAGNON = 'pet';
+
 const norm = s => String(s ?? '').toLowerCase()
   .normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/['’`\-]/g, ' ').replace(/\s+/g, ' ');
@@ -87,7 +103,7 @@ export function demandeUnRessenti(texte) {
  * @param {number} maintenant
  */
 export function proposerLechelle(m, { dernier = false, repondus = new Set(), maintenant = Date.now() } = {}) {
-  if (!dernier || !m || m.role !== 'assistant') return false;
+  if (!dernier || !m || m.role !== DU_COMPAGNON) return false;
   if (repondus.has(Number(m.id))) return false;          // on ne redemande pas
   const t = Date.parse(m.ts);
   if (Number.isFinite(t) && maintenant - t > FRAICHEUR_MS) return false;

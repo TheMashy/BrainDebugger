@@ -10,7 +10,7 @@ import { deltaColor, noteColor, noteScaleRGB, noteScaleColor, lineChart, dailyCh
 import { poserLesNuits, graduations, enHeures, enHHMM, medianeHoraire, mediane, dureeDeLaNuit } from './nuits-axe.js';
 import { bandeLiee, bandeCouches, COUCHES, symbole, joursDe } from './bande.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
-import { proposerLechelle } from './ressenti.js';
+import { proposerLechelle, DU_COMPAGNON } from './ressenti.js';
 /* Les nombres s'écrivent pareil partout — voir `web/formats.js`, qui dit
    pourquoi c'est un fichier et pas quatre lignes ici. */
 import { virgule, fmtNb, dollars, fmtTok } from './formats.js';
@@ -1021,7 +1021,16 @@ const sansMarqueur = t => String(t ?? '').replace(MARQUEUR, '');
 let FRAIS = new Set();
 /* Les messages du compagnon auxquels tu as déjà répondu par l'échelle. Rempli
    par le rendu du fil, pour ne pas redemander deux fois la même chose. */
+/*
+ * CE QU'ON A POSÉ SOI-MÊME, PAR MESSAGE : `{ valeur, ts }`.
+ *
+ * La valeur seule ne suffisait pas. Un relevé n'est pas une note de journée,
+ * c'est un point posé À UN INSTANT — et c'est l'heure qui fait la différence
+ * entre « ma soirée valait 6 » et « à 21:06 j'étais à 6, à 00:40 à 3 ». Le
+ * second se lit sur la courbe de volatilité ; le premier ne se lit nulle part.
+ */
 let RESSENTIS = new Map();
+const releve = r => ({ valeur: Number(r.valeur), ts: r.ts ?? null });
 /*
  * CE QUE CHAQUE RÉPONSE DU COMPAGNON A COÛTÉ, par identifiant de message.
  *
@@ -1049,7 +1058,7 @@ function drawThread() {
   const parMsg = S.motifs?.parMessage ?? {};
   /* La dernière prise de parole du compagnon : c'est la seule sous laquelle
      l'échelle a un sens, puisque c'est l'instant présent qu'elle relève. */
-  const dernierDuCompagnon = [...S.messages].reverse().find(x => x.role === 'assistant');
+  const dernierDuCompagnon = [...S.messages].reverse().find(x => x.role === DU_COMPAGNON);
   th.innerHTML = S.messages.map((m, i) => {
     const day = m.date ?? m.ts.slice(0, 10);
     const sep = day !== last
@@ -1241,12 +1250,39 @@ function coutMarkup(m) {
       [prix, `${fmtTok(c.jetons)} jetons`].filter(Boolean).join(' · ')}</span></button>`;
 }
 
+/**
+ * LE MARQUAGE D'HUMEUR, POSÉ DANS LE MESSAGE, À L'INSTANT OÙ IL A ÉTÉ POSÉ.
+ *
+ * Ce qui s'affichait : un chiffre nu, « 6/10 », collé après la bulle. Il se
+ * lisait comme une note de journée — la seule chose que ce relevé n'est pas.
+ *
+ * CE QU'UN RELEVÉ EST. Un point à UN INSTANT. Deux points dans la même soirée
+ * disent ce qu'aucune note de fin de journée ne dira jamais : à quelle vitesse
+ * ça bouge. C'est déjà ce que la courbe de volatilité dessine en haut de la
+ * journée — le même geste, la même couleur, la même règle. Elle le montre à
+ * l'échelle de la journée ; ici on le montre là où il a été posé.
+ *
+ * D'OÙ CETTE FORME : une pastille pleine dans la couleur de la note, le
+ * chiffre, et l'HEURE. Pleine, parce que la volatilité tient cette règle
+ * depuis le début — ce qui est PLEIN a été posé par la personne, ce qui est
+ * CONTOURÉ a été lu dans ses mots. Un relevé « toi » est plein, toujours.
+ *
+ * L'heure n'est pas une décoration : c'est ce qui empêche de lire le chiffre
+ * comme un bilan. « 21:06 · 6 » est un instant ; « 6 » est un verdict.
+ */
+function marqueRessenti(r) {
+  const v = Number(r?.valeur);
+  if (!Number.isFinite(v)) return '';
+  const h = r?.ts ? fmtTime(r.ts) : null;
+  return `<span class="ress fait" style="--c:${noteScaleColor(v)}"
+    title="tu as posé ${virgule(v)}/10${h ? ` à ${h}` : ''}"
+    ><span class="rpt"></span><b>${v}</b>${
+      h ? `<span class="rh">${h}</span>` : ''}</span>`;
+}
+
 function echelleMarkup(m, dernier) {
   const deja = RESSENTIS.get(Number(m.id));
-  if (deja != null) {
-    return `<span class="ress fait" style="--c:${noteScaleColor(deja)}"
-      title="tu as répondu ${virgule(deja)}/10">${deja}<small>/10</small></span>`;
-  }
+  if (deja != null) return marqueRessenti(deja);
   if (!proposerLechelle(m, { dernier: Number(dernier?.id) === Number(m.id),
                              repondus: new Set(RESSENTIS.keys()) })) return '';
   const crans = Array.from({ length: 11 }, (_, v) =>
@@ -1285,7 +1321,11 @@ async function poserRessentiMaintenant(valeur) {
      * s'afficherait sous une bulle et serait enregistré sous une autre le jour
      * où le fil a bougé entre-temps.
      */
-    if (r?.messageId != null) { RESSENTIS.set(Number(r.messageId), Number(valeur)); drawThread(); }
+    if (r?.messageId != null) {
+      // L'heure vient du SERVEUR quand il la donne : c'est lui qui date le relevé.
+      RESSENTIS.set(Number(r.messageId), releve({ valeur, ts: r.ts ?? new Date().toISOString() }));
+      drawThread();
+    }
   } catch (e) {
     toast?.(`Ce ressenti n'a pas été enregistré — ${e.message}`);
   }
@@ -1295,7 +1335,7 @@ async function poserRessenti(id, valeur) {
   // On l'affiche AVANT la réponse du serveur : le geste doit se voir tout de
   // suite. Si ça échoue, on retire — mieux vaut une échelle qui revient qu'un
   // chiffre affiché que personne n'a enregistré.
-  RESSENTIS.set(Number(id), Number(valeur));
+  RESSENTIS.set(Number(id), releve({ valeur, ts: new Date().toISOString() }));
   drawThread();
   try {
     const r = await api('/api/releve', { messageId: Number(id), valeur: Number(valeur) });
@@ -1740,7 +1780,7 @@ async function send() {
 
       if (ev === 'user') {
         S.messages = data.messages;
-        RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
+        RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), releve(r)]));
         majCouts(data.couts);
         drawThread();
         /*
@@ -1814,7 +1854,7 @@ async function send() {
         if (data.usage) { S.usage = data.usage; syncGauge(); }
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
         S.messages = data.messages;
-        RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
+        RESSENTIS = new Map((data.ressentis ?? []).map(r => [Number(r.message_id), releve(r)]));
         majCouts(data.couts);
         if (data.motifs) S.motifs = data.motifs;
         // La journée que le serveur a retenue pour ce message. Elle peut avoir
@@ -9049,7 +9089,7 @@ async function boot() {
   /* Le fil vient de `/api/state` : ce qui l'accompagne aussi. Sans ça, un
      rechargement rouvrait l'échelle sous une question déjà relevée, et les
      pastilles de coût disparaissaient jusqu'au message suivant. */
-  RESSENTIS = new Map((S.ressentis ?? []).map(r => [Number(r.message_id), r.valeur]));
+  RESSENTIS = new Map((S.ressentis ?? []).map(r => [Number(r.message_id), releve(r)]));
   majCouts(S.couts);
 
   go('tonight');

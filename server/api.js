@@ -60,7 +60,7 @@ import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anc
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
 import { prises } from './prises.js';
-import { proposerLechelle } from '../web/ressenti.js';
+import { proposerLechelle, DU_COMPAGNON } from '../web/ressenti.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
    Indexe par utilisateur : un cache global rendrait le journal de l'un a
@@ -1785,8 +1785,17 @@ export const routes = {
        *
        * La route reste : c'est elle qui sert un JOUR PASSE qu'on rouvre.
        */
+      /*
+       * L'HEURE VOYAGE AVEC LA VALEUR, ET C'EST TOUT L'OBJET DU RELEVÉ.
+       *
+       * Elle était jetée ici. Un relevé n'est pas une note de journée : c'est
+       * un point posé À UN INSTANT, et deux points dans la même soirée disent
+       * ce qu'aucune note de fin de journée ne dit — à quelle vitesse ça
+       * bouge. Sans l'heure, l'écran ne pouvait afficher qu'un chiffre nu,
+       * indistinguable d'une note du jour.
+       */
       ressentis: relevesDeToi(idsDuFil, userId)
-        .map(r => ({ message_id: r.message_id, valeur: r.valeur })),
+        .map(r => ({ message_id: r.message_id, valeur: r.valeur, ts: r.ts })),
       couts: Object.fromEntries(coutsParMessage(idsDuFil, userId)),
       motifs: motifsDuFil(userId),
       user: publicUser(userId),
@@ -1887,7 +1896,7 @@ export const routes = {
     const ids = messages.map(m => m.id);
     return {
       messages,
-      ressentis: relevesDeToi(ids, userId).map(r => ({ message_id: r.message_id, valeur: r.valeur })),
+      ressentis: relevesDeToi(ids, userId).map(r => ({ message_id: r.message_id, valeur: r.valeur, ts: r.ts })),
       /*
        * CE QUE CHAQUE REPONSE A COUTE. Voyage avec le fil, comme les
        * ressentis : sans ca il faudrait un appel par message, c'est-a-dire
@@ -3234,7 +3243,10 @@ export const routes = {
     if (repondus.has(Number(m.id))) return { erreur: 'tu viens de le poser' };
 
     if (!spontane) {
-      const dernierDuCompagnon = [...fil].reverse().find(x => x.role === 'assistant');
+      // Le rôle vient de `ressenti.js`, comme dans la page. Il était écrit en
+      // dur ici — et faux : la route refusait donc TOUT relevé posé sur un
+      // message, sans jamais le dire autrement que par un refus poli.
+      const dernierDuCompagnon = [...fil].reverse().find(x => x.role === DU_COMPAGNON);
       if (!proposerLechelle(m, { dernier: Number(dernierDuCompagnon?.id) === Number(m.id), repondus }))
         return { erreur: 'ce message ne demande pas où tu en es' };
     }

@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { demandeUnRessenti, proposerLechelle, FRAICHEUR_MS } from '../web/ressenti.js';
+import { demandeUnRessenti, proposerLechelle, FRAICHEUR_MS, DU_COMPAGNON } from '../web/ressenti.js';
 
 test('les façons de demander où tu en es, maintenant', () => {
   const oui = [
@@ -48,7 +48,19 @@ test('c’est la phrase interrogative qui décide, pas le message entier', () =>
     'Tu as fumé à 23h, tu me disais. Et là, comment tu te sens ?'), true);
 });
 
-const msg = (o = {}) => ({ id: 7, role: 'assistant', text: 'Comment tu te sens, là ?',
+/*
+ * LE DÉCOR INVENTAIT SON RÔLE, ET C'EST CE QUI A CACHÉ LE BUG DES MOIS.
+ *
+ * Il écrivait `role: 'assistant'` — un mot que ce produit n'écrit nulle part.
+ * Tous les tests ci-dessous passaient au vert sur un message qui ne peut pas
+ * exister, pendant que l'échelle ne s'ouvrait jamais à l'écran.
+ *
+ * Le rôle vient donc du code, plus d'ici. Si un jour il change et que la page
+ * ne suit pas, ces tests tombent au lieu de continuer à rassurer.
+ * `ressenti-role.test.js` tient l'autre bout : que ce mot-là soit bien celui
+ * que la BASE écrit.
+ */
+const msg = (o = {}) => ({ id: 7, role: DU_COMPAGNON, text: 'Comment tu te sens, là ?',
                            ts: new Date().toISOString(), ...o });
 
 test('seulement sous la DERNIÈRE prise de parole du compagnon', () => {

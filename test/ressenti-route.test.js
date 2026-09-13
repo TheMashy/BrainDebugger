@@ -15,15 +15,27 @@ import { join } from 'node:path';
 
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-ress-')), 'test.db');
 const { OWNER, addMessage, relevesDuJour, relevesDeToi, amplitude } = await import('../server/db.js');
+const { DU_COMPAGNON } = await import('../web/ressenti.js');
 const { routes } = await import('../server/api.js');
 
 const AUJ = new Date().toISOString().slice(0, 10);
+/*
+ * LE DÉCOR ÉCRIVAIT `role: 'assistant'` DANS LA BASE, ET RIEN NE L'ÉCRIT.
+ *
+ * Ces tests passaient au vert de bout en bout sur des messages impossibles :
+ * la route cherchait « assistant », le décor en écrivait, et l'accord tenait.
+ * En production le compagnon écrit `pet`, la route ne trouvait jamais sa
+ * dernière prise de parole, et tout relevé posé sur un message était refusé.
+ *
+ * Le rôle vient donc du code. `ressenti-role.test.js` tient l'autre bout :
+ * que ce mot-là soit bien celui que la base écrit.
+ */
 const ecrire = (role, text) => addMessage({ ts: new Date().toISOString(), date: AUJ, source: 'web', role, text, userId: OWNER });
 const poser = (messageId, valeur) => routes['POST /api/releve']({ body: { messageId, valeur }, userId: OWNER });
 
 test('la question du compagnon reçoit un ressenti', async () => {
   ecrire('user', 'là je suis en train de prendre une douche');
-  const q = ecrire('assistant', 'Comment tu te sens, là ?');
+  const q = ecrire(DU_COMPAGNON, 'Comment tu te sens, là ?');
   const r = await poser(q, 7);
   assert.equal(r.ok, true);
   assert.equal(r.releve.valeur, 7);
@@ -32,7 +44,7 @@ test('la question du compagnon reçoit un ressenti', async () => {
 });
 
 test('on ne répond pas deux fois à la même question', async () => {
-  const q = ecrire('assistant', 'Tu te sens comment ?');
+  const q = ecrire(DU_COMPAGNON, 'Tu te sens comment ?');
   assert.equal((await poser(q, 4)).ok, true);
   const encore = await poser(q, 9);
   // Le refus est maintenant nommé pour ce qu'il est : la question n'a pas
@@ -42,7 +54,7 @@ test('on ne répond pas deux fois à la même question', async () => {
 });
 
 test('UN MESSAGE QUI NE DEMANDE RIEN EST REFUSÉ', async () => {
-  const m = ecrire('assistant', 'Ok. Rejoindre un vocal puis rouler, tu l’as déjà écrit.');
+  const m = ecrire(DU_COMPAGNON, 'Ok. Rejoindre un vocal puis rouler, tu l’as déjà écrit.');
   assert.match((await poser(m, 5)).erreur, /ne demande pas/);
   assert.equal(relevesDeToi([m], OWNER).length, 0);
 });
@@ -53,22 +65,22 @@ test('on ne pose pas un ressenti sur ce que TU as écrit', async () => {
 });
 
 test('une question à laquelle on a déjà parlé après ne compte plus', async () => {
-  const q = ecrire('assistant', 'Où tu en es ?');
+  const q = ecrire(DU_COMPAGNON, 'Où tu en es ?');
   ecrire('user', 'ça va mieux');
-  ecrire('assistant', 'Ok.');                       // il a repris la parole depuis
+  ecrire(DU_COMPAGNON, 'Ok.');                       // il a repris la parole depuis
   assert.match((await poser(q, 6)).erreur, /ne demande pas/,
     'ce serait relever un instant qui n’est plus le présent');
 });
 
 test('une valeur illisible ou un message inconnu ne posent rien', async () => {
-  const q = ecrire('assistant', 'Ça donne quoi là ?');
+  const q = ecrire(DU_COMPAGNON, 'Ça donne quoi là ?');
   assert.match((await poser(q, 'beaucoup')).erreur, /valeur/);
   assert.match((await poser(999999, 5)).erreur, /plus dans le fil/);
   assert.equal(relevesDeToi([q], OWNER).length, 0);
 });
 
 test('les valeurs sont bornées à 0..10', async () => {
-  const q = ecrire('assistant', 'Tu tiens comment ?');
+  const q = ecrire(DU_COMPAGNON, 'Tu tiens comment ?');
   assert.equal((await poser(q, 42)).releve.valeur, 10);
 });
 
@@ -93,7 +105,7 @@ const poserSeul = valeur => routes['POST /api/releve']({ body: { valeur }, userI
 
 test('SANS QUESTION, LE RELEVÉ PASSE QUAND MÊME', async () => {
   ecrire('user', 'je sors de deux heures de scroll');
-  const dernier = ecrire('assistant', 'Ok. Rejoindre un vocal, tu l’as déjà écrit.');
+  const dernier = ecrire(DU_COMPAGNON, 'Ok. Rejoindre un vocal, tu l’as déjà écrit.');
   const r = await poserSeul(6);
   assert.equal(r.ok, true, `refusé : ${r.erreur}`);
   assert.equal(r.releve.source, 'toi', 'un relevé posé à la main n’est pas une estimation du modèle');
@@ -103,7 +115,7 @@ test('SANS QUESTION, LE RELEVÉ PASSE QUAND MÊME', async () => {
 
 test('le même instant ne se relève pas deux fois', async () => {
   ecrire('user', 'et là je sais plus quoi faire');
-  ecrire('assistant', 'Tu veux en dire plus ?');
+  ecrire(DU_COMPAGNON, 'Tu veux en dire plus ?');
   assert.equal((await poserSeul(4)).ok, true);
   const encore = await poserSeul(9);
   assert.match(encore.erreur, /viens de le poser/,
@@ -111,7 +123,7 @@ test('le même instant ne se relève pas deux fois', async () => {
 });
 
 test('la valeur reste la seule chose obligatoire, et elle est vérifiée', async () => {
-  ecrire('assistant', 'Et ensuite ?');
+  ecrire(DU_COMPAGNON, 'Et ensuite ?');
   assert.match((await poserSeul('bof')).erreur, /valeur/);
   assert.match((await routes['POST /api/releve']({ body: {}, userId: OWNER })).erreur, /valeur/);
 });
@@ -123,7 +135,7 @@ test('la route rend le message AUQUEL elle a accroché, elle ne le fait pas devi
    * et serait enregistré sous une autre le jour où le fil a bougé entre-temps.
    */
   ecrire('user', 'bon');
-  const dernier = ecrire('assistant', 'Bon ?');
+  const dernier = ecrire(DU_COMPAGNON, 'Bon ?');
   const r = await poserSeul(2);
   assert.equal(r.messageId, dernier);
   assert.deepEqual(relevesDeToi([dernier], OWNER).map(x => x.valeur), [2]);

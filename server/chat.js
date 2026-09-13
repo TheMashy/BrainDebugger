@@ -479,16 +479,91 @@ CE QU'IL A APPORTÉ D'AILLEURS
 ${carnet.join('\n')}` : ''}`;
 }
 
-export function memoryBlock(entries) {
+/**
+ * =====================================================================
+ *  CE QUI COÛTE, CE N'EST PAS LE NOMBRE DE JOURNÉES : C'EST QUATRE SOIRÉES.
+ *
+ * Mesuré sur un journal réel de 27 journées écrites. La médiane pèse 1 456
+ * signes. Mais quatre soirées pèsent 10 191, 13 346, 17 200 et 23 297 — à
+ * elles seules 64 034 signes, soit 62 % de tout ce qui a jamais été écrit.
+ * Sur une fenêtre de quatorze journées (89 074 signes), ces quatre-là en font
+ * les trois quarts.
+ *
+ * LE SEUL LEVIER QU'ON AVAIT ÉTAIT LE MAUVAIS. Baisser le curseur de 14 à 7
+ * journées, c'est perdre SEPT JOURNÉES de contexte pour esquiver DEUX grosses
+ * soirées. On payait en mémoire ce qui aurait dû se payer en verbosité.
+ *
+ * Un plafond PAR JOURNÉE inverse ça : à 6 000 signes, il rend 47 % du poids
+ * en ne touchant que 5 journées sur 14 — les neuf autres passent entières, et
+ * le curseur continue de dire vrai sur leur NOMBRE.
+ *
+ * ET SURTOUT, ÇA SE DIT. C'est toute la différence avec le plafond global
+ * qu'on vient de retirer : celui-là remplaçait quatorze journées par trois
+ * sans que personne ne puisse le voir. Ici, la coupe est écrite DANS la
+ * journée coupée, avec sa date et l'outil qui va lire le reste. Le compagnon
+ * sait qu'il lui manque quelque chose et sait où le prendre — c'est la
+ * différence entre un contexte partiel et un contexte qui ment.
+ *
+ * On garde le DÉBUT et la FIN. Une soirée est chronologique : le début dit ce
+ * qui s'est passé, la fin dit où ça a atterri. C'est le milieu qui se relit le
+ * moins, et c'est le seul endroit où une coupe ne fait pas perdre le fil.
+ * =====================================================================
+ */
+export const PLAFOND_JOURNEE = 6000;
+
+/** La coupe cherche une frontière de phrase, pour ne pas trancher un mot. */
+const RECUL = 500;
+function auBord(t, i, arriere) {
+  const zone = arriere ? t.slice(Math.max(0, i - RECUL), i) : t.slice(i, i + RECUL);
+  const m = arriere ? [...zone.matchAll(/[.!?…]\s|\n/g)].at(-1) : /[.!?…]\s|\n/.exec(zone);
+  if (!m) return i;
+  return arriere ? Math.max(0, i - RECUL) + m.index + m[0].length : i + m.index + m[0].length;
+}
+
+/**
+ * @param {string} t        le texte d'une journée
+ * @param {number} plafond  0 ou moins : rien n'est coupé
+ * @returns {{texte: string, retire: number}}
+ */
+export function couperJournee(t, plafond = PLAFOND_JOURNEE) {
+  const texte = String(t ?? '');
+  if (!(plafond > 0) || texte.length <= plafond) return { texte, retire: 0 };
+  const fin = auBord(texte, Math.floor(plafond / 2), true);
+  const debut = auBord(texte, texte.length - (plafond - fin), false);
+  // Le recul cherche une phrase et peut ne rien trouver de mieux : si les deux
+  // bords se croisent, on renonce à la jolie coupe plutôt qu'à la coupe.
+  if (debut <= fin) {
+    const m = Math.floor(plafond / 2);
+    return { texte: texte.slice(0, m), retire: texte.length - m, brut: texte.slice(texte.length - (plafond - m)) };
+  }
+  return { texte: texte.slice(0, fin), retire: debut - fin, queue: texte.slice(debut) };
+}
+
+export function memoryBlock(entries, { plafond = PLAFOND_JOURNEE } = {}) {
   if (!entries?.length) return null;
+  let ecourtees = 0;
   const lines = entries.map(e => {
     const note = e.note === null || e.note === undefined ? 'non notée' : `notée ${e.note}/10`;
-    return `${e.date} (${note})\n${neutraliser(e.text).trim()}`;
+    const c = couperJournee(neutraliser(e.text).trim(), plafond);
+    if (!c.retire) return `${e.date} (${note})\n${c.texte}`;
+    ecourtees++;
+    /*
+     * LA COUPE SE NOMME, AVEC SA DATE ET SON OUTIL. Sans cette ligne, le
+     * compagnon lirait une soirée qui saute d'un sujet à l'autre sans savoir
+     * qu'il lui manque le milieu — et il comblerait le trou tout seul, ce qui
+     * est exactement ce que ce produit ne fait jamais.
+     */
+    return `${e.date} (${note})\n${c.texte}\n[... environ ${c.retire} signes du milieu de `
+      + `cette journée ne sont pas ici. Si la conversation y touche, `
+      + `\`chercher_journees\` sur un mot de ce jour-là la rend entière. ...]\n`
+      + (c.queue ?? c.brut ?? '');
   });
   return `Ses journées précédentes, dans ses mots à lui. C'est du contexte pour toi seul :
 tu peux t'en souvenir et t'en servir pour comprendre, mais tu ne les cites jamais, tu ne
 les résumes jamais, et tu ne les lui reformules jamais. C'est l'application qui les lui
-rendra, telles quelles.
+rendra, telles quelles.${ecourtees ? `
+
+${ecourtees === 1 ? 'UNE de ces journées a été écourtée' : `${ecourtees} de ces journées ont été écourtées`} : seuls son début et sa fin sont ici, et l'endroit de la coupe est marqué. Tu as donc ses journées TOUTES, mais pas ses plus longues soirées en entier. Quand l'une d'elles revient dans la conversation, va la relire avant d'en parler.` : ''}
 
 ${lines.join('\n\n')}`;
 }
