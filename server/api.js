@@ -138,11 +138,125 @@ function series(userId = OWNER) {
  */
 export const FIL_TRANSMIS = 24;
 
+/*
+ * =====================================================================
+ *  LA MEMOIRE A UN PLAFOND, ET CE QUI DEBORDE SE VA CHERCHER.
+ *
+ * Elle faisait 125 000 signes chez quelqu'un -- les deux tiers d'un prompt de
+ * 66 000 jetons. Le cache ne resout pas ca : il vit au mieux une heure, et
+ * quelqu'un qui revient parler toutes les une a cinq heures repart A FROID a
+ * chaque fois. Un depart a froid coute la TAILLE du prompt, plein tarif, et
+ * aucun reglage de cache n'y change rien. Mesure : 0,17 $ le message.
+ *
+ * ON NE PERD RIEN, ON DEPLACE. Le compagnon a deja `lire_carnet`,
+ * `lire_grille`, `chercher_journees` et `chercher_repere` : ce qui ne tient
+ * pas dans le budget reste atteignable, il va le chercher quand la
+ * conversation y touche -- et il ne le paie que ce jour-la, au lieu de le
+ * porter a chaque phrase de chaque soiree.
+ *
+ * CE N'EST PAS UNE INVENTION : la grille entiere tenait ici et pesait 77 % de
+ * la memoire ; elle a ete remplacee par cinq semaines, le reste derriere
+ * `lire_grille`. C'est la meme decision, etendue aux sept autres blocs.
+ *
+ * L'ORDRE EST UN ORDRE DE VALEUR POUR UNE CONVERSATION, pas de taille. Ce qui
+ * situe la personne tout de suite et ne coute presque rien passe devant ; ce
+ * qui est du materiau de reference, gros et consultable, passe derriere.
+ *
+ * EN SIGNES ET PAS EN JETONS : c'est ce que le serveur sait compter sans
+ * rappeler l'API. Vingt-huit mille signes font autour de huit mille jetons,
+ * et ramenent le prompt de 66 000 a moins de 20 000.
+ * =====================================================================
+ */
+export const BUDGET_MEMOIRE = 28_000;
+
+/* La part reservee aux journees ecrites : la moitie du budget. Elles passent
+   avant tout ce qui les suit, et ce qui deborde se lit avec
+   `chercher_journees` -- mais on ne les laisse pas manger le reste. */
+export const PART_JOURNEES = 14_000;
+
+/** L'ordre dans lequel les blocs entrent dans le budget. Le premier reste. */
+export const ORDRE_MEMOIRE = [
+  'ancres',    // sa legende de notes : trois lignes, et rien ne se lit sans
+  'grille',    // cinq semaines de notes : petit, et c'est le present
+  'repères',   // les faits dates de sa vie : ce qui fait qu'on le connait
+  'motifs',    // les mecanismes deja nommes : sans eux il les redeclare
+  'journées',  // ce qu'il a ecrit ces jours-ci, dans ses mots
+  'prises',    // ce qui a de la prise chez lui : court, et ca parle du present
+  'horizons',  // les syntheses de la lecture de fond
+  'carnet',    // ce qu'il a apporte d'ailleurs : le plus gros, le plus substituable
+];
+
+/** Ce qu'on dit au compagnon d'un bloc qui n'a pas tenu. */
+const OU_LE_TROUVER = {
+  ancres:     null,
+  grille:     'ses notes jour par jour — `lire_grille` les donne',
+  'repères':  'ses repères datés — `chercher_repere` les cherche',
+  motifs:     null,
+  'journées': 'ses journées plus anciennes — `chercher_journees` les cherche',
+  /*
+   * LES DEUX SANS OUTIL. On le dit quand meme, et differemment : ils ne se
+   * rechargent pas, donc la seule chose utile est que le compagnon sache ce
+   * qu'il n'a PAS. Sans cette ligne il repondrait « ca dure depuis longtemps »
+   * de memoire -- c'est-a-dire en l'inventant, sur le terrain exact ou ce
+   * produit ne doit jamais inventer.
+   */
+  horizons:   'les synthèses sur la durée (« depuis quand ça dure ») ne sont pas chargées : '
+              + 'ne parle pas de distance de tête, reconstruis-la avec `lire_grille` ou `chercher_journees`',
+  prises:     'ce qui a de la prise chez lui n’est pas chargé : ne le suppose pas',
+  carnet:     'ce qu’il a apporté d’ailleurs — `lire_carnet` le cherche',
+};
+
+/**
+ * @param {Map<string,string>} ecrits  les blocs, par nom
+ * @returns {{texte: string|null, hors: string[]}}
+ */
+export function memoireSousBudget(ecrits, budget = BUDGET_MEMOIRE) {
+  const gardes = [], hors = [];
+  let reste = budget;
+  // Les noms inconnus de l'ordre passent en dernier : un bloc ajoute un jour
+  // sans sa ligne ici ne doit pas pousser dehors un bloc qu'on a classe.
+  const noms = [...ORDRE_MEMOIRE.filter(n => ecrits.has(n)),
+                ...[...ecrits.keys()].filter(n => !ORDRE_MEMOIRE.includes(n))];
+  /*
+   * PRIORITE STRICTE : le premier bloc qui ne tient pas FERME LA PORTE.
+   *
+   * Un remplissage glouton -- « on saute celui-la et on prend les suivants »
+   * -- laissait passer les petits blocs de la fin par-dessus un gros bloc du
+   * debut : ses journees ecrites sortaient, et les syntheses restaient. C'est
+   * exactement l'inverse de l'ordre qu'on vient de declarer, et ca ne se voit
+   * pas -- la memoire a l'air pleine.
+   *
+   * Les blocs qui peuvent MAIGRIR le font avant d'arriver ici (voir les
+   * journees dans `recentMemory`) : c'est la seule facon de faire tenir un
+   * gros bloc prioritaire sans sacrifier tout ce qui le suit.
+   */
+  let ferme = false;
+  for (const nom of noms) {
+    const t = ecrits.get(nom);
+    if (!ferme && t.length <= reste) { gardes.push(t); reste -= t.length; }
+    else { hors.push(nom); ferme = true; }
+  }
+  /*
+   * ON DIT CE QUI MANQUE. Un contexte ampute en silence, c'est un compagnon
+   * qui affirme ne rien savoir d'une chose qu'il pourrait aller lire -- et la
+   * personne en face conclut qu'il a oublie.
+   */
+  if (hors.length) {
+    const dits = hors.map(n => OU_LE_TROUVER[n]).filter(Boolean);
+    gardes.push(`CE QUI N'EST PAS ICI, ET QUE TU PEUX ALLER CHERCHER\n`
+      + `Tout n'entre pas dans ce que tu portes en permanence — c'est ce qui te rend `
+      + `rapide et peu coûteux. Il ne manque rien : ça se lit à la demande.\n`
+      + (dits.length ? dits.map(d => `· ${d}`).join('\n') + '\n' : '')
+      + `Va le chercher quand la conversation y touche, pas avant. Et ne dis jamais `
+      + `que tu ne sais pas : dis ce que tu vas regarder, ou regarde-le.`);
+  }
+  return { texte: gardes.length ? gardes.join('\n\n---\n\n') : null, hors };
+}
+
 export function recentMemory(date, userId = OWNER, texte = null) {
   const s = getSettings(userId);
   const days = Number(s.memoryDays ?? 0);
 
-  const morceaux = [];
   /*
    * CE QUE PESE CHAQUE BLOC, NOMME.
    *
@@ -158,19 +272,37 @@ export function recentMemory(date, userId = OWNER, texte = null) {
    * lequel ecrase les autres. C'est la seule chose qu'on cherche ici.
    */
   const tailles = {};
+  const ecrits = new Map();
   const poser = (nom, bloc) => {
     if (!bloc) return;
-    morceaux.push(bloc);
+    ecrits.set(nom, String(bloc));
     tailles[nom] = String(bloc).length;
   };
 
   if (days) {
-    const rows = db.prepare(`
+    let rows = db.prepare(`
       SELECT date, note, text FROM entries
       WHERE user_id = ? AND date < ? AND text IS NOT NULL AND TRIM(text) <> ''
       ORDER BY date DESC LIMIT ?
     `).all(userId, date, days).reverse();
-    poser('journées', memoryBlock(rows));
+    /*
+     * CE QU'IL A ECRIT CES JOURS-CI EST LE BLOC QUI COMPTE LE PLUS, et c'est
+     * aussi celui qui grossit sans limite : quelqu'un qui ecrit longuement
+     * quatorze soirs de suite le fait exploser tout seul. Il maigrit donc par
+     * LA FIN LA PLUS ANCIENNE -- ce que fait deja le reglage `memoryDays`,
+     * applique ici automatiquement au lieu d'attendre que quelqu'un s'en
+     * apercoive sur sa facture.
+     *
+     * On coupe des JOURNEES ENTIERES, jamais au milieu d'une phrase : une
+     * journee tronquee se lirait comme une journee qui s'arrete net, et le
+     * compagnon y repondrait.
+     */
+    let bloc = memoryBlock(rows);
+    while (bloc && bloc.length > PART_JOURNEES && rows.length > 1) {
+      rows = rows.slice(1);
+      bloc = memoryBlock(rows);
+    }
+    poser('journées', bloc);
   }
 
   // Les reperes survivent a « Nouveau chat » : c'est ce qui fait qu'un fil
@@ -274,7 +406,8 @@ export function recentMemory(date, userId = OWNER, texte = null) {
    * part, et le compagnon les recoit dans le dernier tour.
    * ===================================================================
    */
-  const stable = morceaux.length ? morceaux.join('\n\n---\n\n') : null;
+  const { texte: stable, hors } = memoireSousBudget(ecrits);
+  for (const nom of hors) delete tailles[nom];
   const volatil = [];
 
   if (days && texte && String(texte).trim().length >= 12) {
