@@ -1188,7 +1188,19 @@ function compositionDite(id, c) {
     k.echos ? `échos ${fmtTok(k.echos)}` : null
   ].filter(Boolean).join(' + ');
   const appels = k.appels > 1 ? `, ${k.appels} appels` : '';
+  /*
+   * ET LE DÉTAIL DE LA MÉMOIRE, DU PLUS GROS AU PLUS PETIT.
+   *
+   * « mémoire 125 k » ne dit pas lequel de ses huit morceaux est la baleine —
+   * le carnet, les journées transmises, la lecture de fond, les prises. Ils
+   * viennent du journal de la personne : aucune autre machine ne les
+   * reproduit, et c'est la seule mesure qui permette de tailler au bon
+   * endroit plutôt qu'au hasard.
+   */
+  const dedans = Object.entries(k.blocs ?? {}).sort((a, b) => b[1] - a[1])
+    .map(([nom, n]) => `${nom} ${fmtTok(n)}`).join(', ');
   return `prompt ≈ ${parts} signes${appels}${
+    dedans ? ` — dans la mémoire : ${dedans}` : ''}${
     teteChangee(id) ? ' — TÊTE RÉÉCRITE depuis la réponse précédente' : ''}`;
 }
 

@@ -68,7 +68,13 @@ test('la mémoire se sépare en ce qui tient la journée et ce qui change à cha
   const a = api.recentMemory('2026-03-01', OWNER, "crise d'angoisse ce matin, la boule au ventre est revenue");
   const b = api.recentMemory('2026-03-01', OWNER, "je me demande quel film regarder ce soir");
 
-  assert.deepEqual(Object.keys(a).sort(), ['echos', 'stable']);
+  /*
+   * `tailles` s'est ajouté aux deux autres : ce que pèse chaque morceau de la
+   * mémoire, nommé. Il ne PART PAS dans la requête — il sert à répondre à
+   * « lequel des huit fait 125 000 signes ? », qui ne se déduit d'aucune autre
+   * machine. Le reste de ce test vaut pour ce qui part, lui.
+   */
+  assert.deepEqual(Object.keys(a).sort(), ['echos', 'stable', 'tailles']);
   /*
    * LA GARDE QUI COMPTE. Deux messages différents dans la même journée doivent
    * produire exactement la même partie stable — sinon elle n'est pas stable, le
@@ -142,8 +148,15 @@ test('deux points de reprise, sur ce qui ne bouge pas et sur ce qui tient la jou
   ] });
   assert.equal(r.system.length, 2);
   assert.equal(r.system[0].text, chat.SYSTEM_PROMPT);
-  assert.deepEqual(r.system[0].cache_control, { type: 'ephemeral' });
-  assert.deepEqual(r.system[1].cache_control, { type: 'ephemeral' });
+  /*
+   * UNE HEURE, ET PLUS CINQ MINUTES. Le cache par défaut vit cinq minutes :
+   * quelqu'un qui répond vingt minutes plus tard retombait à chaque fois sur
+   * une écriture complète — 0,17 $ au lieu de 1,45 centime, douze fois. Ces
+   * deux blocs-là ne bougent pas de la journée ; le fil, qui grandit à chaque
+   * phrase, garde ses cinq minutes (voir `repli.test.js`).
+   */
+  assert.deepEqual(r.system[0].cache_control, { type: 'ephemeral', ttl: '1h' });
+  assert.deepEqual(r.system[1].cache_control, { type: 'ephemeral', ttl: '1h' });
   // L'ordre de rendu est outils → système → messages : le bloc figé doit être
   // PREMIER, sinon il ne protège rien de ce qui le suit.
   assert.equal(r.system[1].text, 'LA MÉMOIRE STABLE');

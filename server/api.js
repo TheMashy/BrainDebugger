@@ -143,6 +143,26 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   const days = Number(s.memoryDays ?? 0);
 
   const morceaux = [];
+  /*
+   * CE QUE PESE CHAQUE BLOC, NOMME.
+   *
+   * La memoire fait 125 000 signes chez quelqu'un, et c'est les deux tiers du
+   * prompt : relue du cache a un dixieme du prix, elle coute quand meme un
+   * centime et demi A CHAQUE MESSAGE, et le jour ou le cache manque, dix fois
+   * ca. Le total ne dit pas LEQUEL des huit blocs est la baleine -- et ils
+   * viennent du journal de la personne, donc aucune autre machine ne les
+   * reproduit.
+   *
+   * On compte en SIGNES et pas en jetons : c'est ce que le serveur sait
+   * compter sans rappeler l'API, et l'ordre de grandeur suffit pour voir
+   * lequel ecrase les autres. C'est la seule chose qu'on cherche ici.
+   */
+  const tailles = {};
+  const poser = (nom, bloc) => {
+    if (!bloc) return;
+    morceaux.push(bloc);
+    tailles[nom] = String(bloc).length;
+  };
 
   if (days) {
     const rows = db.prepare(`
@@ -150,14 +170,12 @@ export function recentMemory(date, userId = OWNER, texte = null) {
       WHERE user_id = ? AND date < ? AND text IS NOT NULL AND TRIM(text) <> ''
       ORDER BY date DESC LIMIT ?
     `).all(userId, date, days).reverse();
-    const bloc = memoryBlock(rows);
-    if (bloc) morceaux.push(bloc);
+    poser('journées', memoryBlock(rows));
   }
 
   // Les reperes survivent a « Nouveau chat » : c'est ce qui fait qu'un fil
   // repartant de zero connait quand meme la personne en face.
-  const ancres = anchorBlock(allAnchors(userId));
-  if (ancres) morceaux.push(ancres);
+  poser('ancres', anchorBlock(allAnchors(userId)));
 
   /*
    * LA FENETRE COURTE, PAS LA GRILLE ENTIERE.
@@ -174,8 +192,7 @@ export function recentMemory(date, userId = OWNER, texte = null) {
    */
   const { rows, series: ser } = series(userId);
   const ref = ser.length ? ser[ser.length - 1].reference : null;
-  const fenetre = fenetreBlock(rows, { fin: date, reference: ref });
-  if (fenetre) morceaux.push(fenetre);
+  poser('grille', fenetreBlock(rows, { fin: date, reference: ref }));
 
   // Ce que le compagnon a deja pose. Sans cette liste il reposerait chaque
   // matin le repere de la veille, et declarerait trois fois le meme motif sous
@@ -195,22 +212,18 @@ export function recentMemory(date, userId = OWNER, texte = null) {
    * elles se mettent en cache avec le reste de la memoire stable.
    */
   if (days) {
-    const h = horizonBlock(getLecture(userId)?.contenu?.horizons);
-    if (h) morceaux.push(h);
+    poser('horizons', horizonBlock(getLecture(userId)?.contenu?.horizons));
   }
 
-  const jalons = jalonBlock(allEvents(userId));
-  if (jalons) morceaux.push(jalons);
-  const motifs = motifBlock(allMotifs(userId));
-  if (motifs) morceaux.push(motifs);
+  poser('repères', jalonBlock(allEvents(userId)));
+  poser('motifs', motifBlock(allMotifs(userId)));
 
   // Le carnet, sous le MEME `if (days)` que les journees : l'interface promet
   // qu'a zero le compagnon ne connait que la conversation du jour, et ca doit
   // rester vrai. C'est aussi la maniere de retirer le carnet du contexte sans
   // rien detruire.
   if (days && s.carnetMemoire !== false) {
-    const c = carnetBlock(series(userId).carnet);
-    if (c) morceaux.push(c);
+    poser('carnet', carnetBlock(series(userId).carnet));
   }
 
   /*
@@ -228,8 +241,7 @@ export function recentMemory(date, userId = OWNER, texte = null) {
    */
   if (days && s.prisesMemoire !== false) {
     try {
-      const p = prisesBlock(prisesDe(userId));
-      if (p) morceaux.push(p);
+      poser('prises', prisesBlock(prisesDe(userId)));
     } catch { /* un comptage qui echoue ne doit pas emporter la conversation */ }
   }
 
@@ -299,7 +311,7 @@ export function recentMemory(date, userId = OWNER, texte = null) {
     if (bloc) volatil.push(bloc);
   } catch { /* un signal qui échoue ne doit pas emporter la conversation */ }
 
-  return { stable, echos: volatil.length ? volatil.join('\n\n---\n\n') : null };
+  return { stable, echos: volatil.length ? volatil.join('\n\n---\n\n') : null, tailles };
 }
 
 /**
@@ -1669,6 +1681,7 @@ export const routes = {
      * partageaient aucun : celle-ci repayait tout son prompt à chaque message.
      */
     const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos,
+                                                          blocsMemoire: m.tailles,
                                                           outils: outilsPour(userId, idMsg) });
     /* L'ORDRE COMPTE : le relevé de dépense nomme la réponse, il ne peut donc
        pas être écrit avant elle. */
@@ -3697,6 +3710,7 @@ export async function streamMessage(body, send, userId = OWNER) {
   const r = await reply(history, settings, {
     memory: memoire.stable,
     echos: memoire.echos,
+    blocsMemoire: memoire.tailles,
     onText: chunk => send('delta', { text: chunk }),
     onPense: chunk => send('pense', { text: chunk }),
     exhausted: before.exhausted,

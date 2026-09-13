@@ -1201,9 +1201,36 @@ export const ANTHROPIC_MODELS = [
  * voit que sur une facture a la fin du mois.
  * =====================================================================
  */
-export function assemblerPrompt({ memory = null, echos = null, history = [] } = {}) {
-  const system = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
-  if (memory) system.push({ type: 'text', text: memory, cache_control: { type: 'ephemeral' } });
+export function assemblerPrompt({ memory = null, echos = null, history = [], blocsMemoire = null,
+                                  cacheLong = true } = {}) {
+  /*
+   * ==================================================================
+   *  UNE HEURE SUR LA TETE, CINQ MINUTES SUR LA QUEUE.
+   *
+   * Le cache par defaut vit CINQ MINUTES. Quelqu'un qui repond vingt minutes
+   * plus tard -- dans un train, entre deux choses -- retombe donc a chaque
+   * fois sur une ecriture complete : mesure sur un vrai echange, 0,17 $ au
+   * lieu de 1,45 centime. Douze fois.
+   *
+   * L'heure coute DEUX fois le prix d'entree a l'ecriture au lieu d'un quart
+   * en plus, et se rentabilise des la deuxieme requete de la fenetre. Sur ce
+   * produit -- une conversation du soir, par grappes, avec des trous de dix a
+   * trente minutes -- c'est exactement le cas ou elle paie.
+   *
+   * ELLE NE VA QUE SUR LA TETE. Le systeme et la memoire ne bougent pas de la
+   * journee ; le fil, lui, grandit a chaque phrase et sa fenetre de cinq
+   * minutes est toujours chaude, puisqu'on vient d'ecrire. Payer le double
+   * pour un bloc qu'on reecrit de toute facon serait payer deux fois.
+   *
+   * ET L'ORDRE N'EST PAS LIBRE : une entree d'une heure doit venir AVANT les
+   * entrees de cinq minutes. Le systeme et la memoire sont les deux premiers
+   * blocs de la requete, donc c'est le cas -- mais ca cesserait de l'etre si
+   * quelqu'un deplacait un marqueur, d'ou cette phrase ici.
+   * ==================================================================
+   */
+  const tete = cacheLong ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+  const system = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: tete }];
+  if (memory) system.push({ type: 'text', text: memory, cache_control: tete });
 
   /*
    * TOUS LES MESSAGES EN BLOCS, TOUJOURS. Un tour rendu `content: "texte"` un
@@ -1271,6 +1298,8 @@ export function assemblerPrompt({ memory = null, echos = null, history = [] } = 
   const composition = {
     systeme: taille(SYSTEM_PROMPT),
     memoire: taille(memory),
+    // Et le détail, nommé : c'est lui qui désigne la baleine.
+    ...(blocsMemoire && Object.keys(blocsMemoire).length ? { blocs: blocsMemoire } : {}),
     fil: messages.reduce((n, m) => n + m.content.reduce((k, c) => k + taille(c.text), 0), 0)
          - taille(echos),
     echos: taille(echos),
@@ -1281,10 +1310,27 @@ export function assemblerPrompt({ memory = null, echos = null, history = [] } = 
   return { system, messages, composition };
 }
 
-export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null, echos = null) {
+/* `blocsMemoire` ne sert qu'à la MESURE : le détail, nommé, de ce que pèse
+   chaque morceau de la mémoire. Il traverse jusqu'à la composition du prompt
+   et n'entre dans aucune requête. */
+/* Faux tant qu'un serveur ne l'a pas refuse. Voir le filet dans
+   `anthropicReply` : on n'en fait pas un reglage, parce que personne ne peut
+   repondre a la question « ton fournisseur accepte-t-il ce champ ? ». */
+let CACHE_LONG = true;
+
+export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null,
+                                     echos = null, blocsMemoire = null) {
   const { client, source } = await anthropicClient(s);
 
-  const { system, messages, composition } = assemblerPrompt({ memory, echos, history });
+  /*
+   * LE FILET. `ttl` est documente sans restriction de modele, mais ce produit
+   * laisse choisir le modele dans Reglages, et la regle de la maison vaut
+   * ici comme ailleurs : un champ de trop coute TOUTES les conversations.
+   * Un refus qui nomme le `ttl` fait donc repartir la requete sans lui, et
+   * on ne le redemande plus de la vie du processus.
+   */
+  let { system, messages, composition } = assemblerPrompt({ memory, echos, history, blocsMemoire,
+                                                            cacheLong: CACHE_LONG });
   const boite = outils ? outilsDispo(outils) : [];
   const faits = [];              // ce que les outils ont reellement change
 
@@ -1300,6 +1346,21 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
   // Un tour par appel d'outil. La borne n'est pas theorique : sans elle, un
   // modele qui se trompe d'argument peut reessayer indefiniment, et chaque
   // tour coute des jetons a quelqu'un qui ne paie pas et ne le voit pas.
+  /*
+   * LE FILET DU `ttl`. `ttl` est documente sans restriction de modele, mais ce
+   * produit laisse choisir le modele dans Reglages, et la regle de la maison
+   * vaut ici comme ailleurs : un champ de trop coute TOUTES les conversations.
+   * Un refus qui le nomme fait repartir la requete sans lui, et on ne le
+   * redemande plus de la vie du processus.
+   */
+  const sansTtl = err => {
+    if (!CACHE_LONG || !/ttl/i.test(String(err?.message ?? err))) return false;
+    CACHE_LONG = false;
+    ({ system, messages, composition } = assemblerPrompt({ memory, echos, history, blocsMemoire,
+                                                           cacheLong: false }));
+    return true;
+  };
+
   // Combien d'appels cette réponse a demandés. Un tour d'outil en relance un,
   // et la dépense d'un échange est leur somme -- sans ce compte, un prompt qui
   // a l'air énorme n'est parfois qu'un prompt envoyé trois fois.
@@ -1350,6 +1411,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
         messages
       });
     } catch (err) {
+      if (sansTtl(err)) { tour--; continue; }
       throw new Error(explainApiError(err, source));
     }
 
@@ -1387,6 +1449,17 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
       }
       final = await stream.finalMessage();
     } catch (err) {
+      /*
+       * ET ICI AUSSI. En streaming, `.stream()` rend la main tout de suite :
+       * un 400 ne sort pas a l'appel, il sort a l'iteration. Le filet pose
+       * sur le seul appel ne rattrapait donc RIEN -- c'est un test qui l'a
+       * montre, pas une relecture.
+       *
+       * On ne reessaie que si rien n'est encore parti a l'ecran : reprendre
+       * apres une phrase a moitie affichee la ferait recommencer sous les
+       * yeux de quelqu'un.
+       */
+      if (!text && !pensee && sansTtl(err)) { tour--; continue; }
       throw new Error(explainApiError(err, source));
     }
 
@@ -1782,7 +1855,7 @@ export async function ollamaReply(history, s, memory, onText) {
  * Tout echec d'un backend distant retombe sur `scripted` ET LE DIT. Une panne
  * silencieuse serait un mensonge sur l'endroit ou partent les donnees.
  */
-export async function reply(history, settings, { memory = null, echos = null, onText = null, onPense = null, exhausted = false, outils = null } = {}) {
+export async function reply(history, settings, { memory = null, echos = null, onText = null, onPense = null, exhausted = false, outils = null, blocsMemoire = null } = {}) {
   const backend = settings.chatBackend ?? 'scripted';
 
   // Enveloppe epuisee : on ne coupe pas la parole a quelqu'un. Le compagnon
@@ -1802,7 +1875,7 @@ export async function reply(history, settings, { memory = null, echos = null, on
 
   try {
     const r = backend === 'anthropic'
-      ? await anthropicReply(history, settings, memory, onText, outils, onPense, echos)
+      ? await anthropicReply(history, settings, memory, onText, outils, onPense, echos, blocsMemoire)
       : await ollamaReply(history, settings, memory, onText);
 
     if (r.refused) {

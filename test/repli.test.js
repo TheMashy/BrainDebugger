@@ -100,6 +100,8 @@ test('LA PAGE NE TRONQUE PLUS LE MESSAGE', () => {
  * Le faux serveur. Il refuse ce que la vraie API refuse — c'est tout ce qui le
  * distingue d'un serveur complaisant, et c'est tout ce qui compte ici.
  */
+let refuserLeTtl = false;
+
 function fausseApi(port) {
   const vues = [];
   const serveur = createServer(async (req, res) => {
@@ -114,9 +116,14 @@ function fausseApi(port) {
      * complaisant est la raison pour laquelle la panne est passée deux fois.
      */
     const cap = chat.capacitesDe(corps.model);
+    /* Un fournisseur qui ne connaît pas le `ttl` : on veut pouvoir vérifier
+       que le compagnon s'en remet, et pas seulement l'espérer. */
+    const ttl = [...(corps.system ?? []), ...(corps.messages ?? []).flatMap(m => m.content ?? [])]
+      .some(b => b?.cache_control?.ttl);
     const eteinte = corps.thinking?.type === 'disabled';
     const refus =
-      ('fallbacks' in corps && !cap.repli) ? 'fallbacks: Extra inputs are not permitted'
+      (ttl && refuserLeTtl) ? 'cache_control.ttl: Extra inputs are not permitted'
+      : ('fallbacks' in corps && !cap.repli) ? 'fallbacks: Extra inputs are not permitted'
       : (corps.thinking?.type === 'adaptive' && !cap.pense) ? 'adaptive thinking is not supported on this model'
       : (corps.output_config?.effort && !cap.effort) ? 'output_config.effort: not supported on this model'
       /* Les deux refus qu'oppose l'API a une reflexion ETEINTE. Sans eux, ce
@@ -321,4 +328,78 @@ test('la lecture de fond n’est PAS touchée : elle garde sa réflexion', () =>
   // seule tâche du produit où l'intelligence se voit vraiment.
   assert.deepEqual(chat.optionsDuModele('claude-opus-5', { effort: 'high', repli: false }).thinking,
                    { type: 'adaptive' });
+});
+
+/* ============ UNE HEURE SUR LA TÊTE, CINQ MINUTES SUR LA QUEUE ============
+ *
+ * Le cache par défaut vit CINQ MINUTES. Quelqu'un qui répond vingt minutes
+ * plus tard — dans un train, entre deux choses — retombe donc à chaque fois
+ * sur une écriture complète : mesuré sur un vrai échange, 0,17 $ au lieu de
+ * 1,45 centime. Douze fois.
+ */
+
+test('LA TÊTE EST MISE EN CACHE POUR UNE HEURE, LA QUEUE POUR CINQ MINUTES', () => {
+  const p = chat.assemblerPrompt({ memory: 'MEM', echos: 'é',
+    history: [{ role: 'user', text: 'salut', ts: new Date().toISOString() }] });
+  for (const bloc of p.system) {
+    assert.deepEqual(bloc.cache_control, { type: 'ephemeral', ttl: '1h' },
+      'le système ou la mémoire est retombé sur cinq minutes');
+  }
+  // Le fil grandit à chaque phrase : sa fenêtre de cinq minutes est toujours
+  // chaude, puisqu'on vient d'écrire. Payer le double pour un bloc qu'on
+  // réécrit de toute façon serait payer deux fois.
+  const marque = p.messages.at(-1).content.find(c => c.cache_control);
+  assert.deepEqual(marque.cache_control, { type: 'ephemeral' },
+    'le dernier tour paie le tarif de l’heure alors qu’il est réécrit à chaque phrase');
+});
+
+test('l’entrée d’une heure vient AVANT celles de cinq minutes', () => {
+  /*
+   * Ce n'est pas un goût de présentation : l'API l'exige, et l'ordre tient
+   * par le fait que le système et la mémoire sont les deux premiers blocs.
+   * Il cesserait de tenir si quelqu'un déplaçait un marqueur.
+   */
+  const p = chat.assemblerPrompt({ memory: 'MEM', echos: 'é',
+    history: [{ role: 'user', text: 'salut', ts: new Date().toISOString() }] });
+  const tous = [...p.system, ...p.messages.flatMap(m => m.content)].filter(b => b.cache_control);
+  const dernierLong = tous.map(b => b.cache_control.ttl === '1h').lastIndexOf(true);
+  const premierCourt = tous.map(b => b.cache_control.ttl == null).indexOf(true);
+  assert.ok(dernierLong < premierCourt,
+    'une entrée de cinq minutes précède une entrée d’une heure : l’API refuse');
+});
+
+test('LA MÉMOIRE DIT DE QUOI ELLE EST FAITE', () => {
+  // « mémoire 125 k » ne dit pas lequel des huit morceaux est la baleine, et
+  // ils viennent du journal de la personne : aucun test synthétique ne les
+  // reproduit, aucune autre machine non plus.
+  const p = chat.assemblerPrompt({ memory: 'MEM', blocsMemoire: { carnet: 90000, journées: 25000 } });
+  assert.deepEqual(p.composition.blocs, { carnet: 90000, journées: 25000 });
+  assert.equal('blocs' in chat.assemblerPrompt({ memory: 'MEM' }).composition, false,
+    'un détail vide occuperait l’étiquette pour ne rien dire');
+});
+
+test('UN REFUS SUR LE `ttl` NE COÛTE PAS LA CONVERSATION', async () => {
+  /*
+   * `ttl` est documenté sans restriction de modèle, mais ce produit laisse
+   * choisir le modèle dans Réglages, et la règle de la maison vaut ici comme
+   * ailleurs : un champ de trop coûte TOUTES les conversations. La requête
+   * repart donc sans lui — et on ne le redemande plus de la vie du processus.
+   *
+   * Ce test vient en DERNIER : il éteint le cache long pour de bon, et les
+   * tests d'au-dessus ne passeraient plus après lui. C'est le comportement
+   * qu'on veut, pas un effet de bord à corriger.
+   */
+  refuserLeTtl = true;
+  const r = await chat.reply(fil, reglages('claude-sonnet-5'));
+  assert.equal(r.degraded, undefined, `le compagnon est tombé en repli : ${r.degraded}`);
+  assert.equal(r.backend, 'anthropic');
+  const envoye = vues.at(-1);
+  assert.equal(envoye.system.every(b => b.cache_control?.ttl == null), true,
+    'la requête est repartie avec le `ttl` que le serveur venait de refuser');
+
+  // Et on ne réessaie pas au message suivant.
+  refuserLeTtl = false;
+  await chat.reply(fil, reglages('claude-sonnet-5'));
+  assert.equal(vues.at(-1).system.every(b => b.cache_control?.ttl == null), true,
+    'le `ttl` est redemandé après un refus : chaque message repaiera un aller-retour perdu');
 });
