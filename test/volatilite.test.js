@@ -21,6 +21,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { virgule } from '../web/formats.js';
 
 const APP = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
 const CSS = readFileSync(new URL('../web/style.css', import.meta.url), 'utf8');
@@ -32,9 +33,14 @@ const volatiliteMarkup = (() => {
   assert.ok(j > i, 'journeeMarkup ne suit plus volatiliteMarkup : la découpe est à revoir');
   // `_volN` est déclaré au-dessus de la fonction dans le fichier ; on le
   // redonne ici pour que l'extrait tienne debout tout seul.
-  return new Function('noteColor', 'esc',
+  // `virgule` vient du VRAI module : c'est un rendu qu'on vérifie, et le
+  // remplacer par un bouchon reviendrait à tester une autre écriture des
+  // nombres que celle qui part à l'écran.
+  return new Function('noteColor', 'esc', 'virgule',
     `let _volN = 0; ${APP.slice(i, j)}; return volatiliteMarkup;`
-  )(n => `C${n}`, s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+  )(n => `C${n}`,
+    s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    virgule);
 })();
 
 const H = (heure, valeur, dApres = 'mots') => ({ heure, valeur, dApres });

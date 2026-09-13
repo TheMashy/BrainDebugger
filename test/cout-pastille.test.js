@@ -51,18 +51,13 @@ test('le fil et ce qui l’accompagne arrivent ENSEMBLE, dès le démarrage', ()
   assert.match(page, /majCouts\(S\.couts\)/, 'la page ne lit plus les coûts au démarrage');
 });
 
-test('SOUS DIX CENTIMES, ON AFFICHE DES CENTIMES', () => {
-  /*
-   * Une réponse coûte ici entre un quart de centime et quelques centimes. En
-   * dollars arrondis à deux décimales, elles s'écrasent toutes sur « 0,00 $ »
-   * ou « 0,02 $ » : on ne voit plus la différence entre deux façons de
-   * répondre, qui est la seule chose qu'on est venu regarder.
-   */
-  const f = page.slice(page.indexOf('const dollars = d =>'), page.indexOf('const jetonsCourts'));
-  assert.match(f, /d >= 0\.1 \?/, 'le seuil est remonté : les petits montants s’écrasent à nouveau');
-  assert.match(f, /\* 100\)\.toFixed\(2\)/, 'les centimes ont perdu leurs décimales');
-  assert.match(f, /d == null \? null/, 'un tarif inconnu s’afficherait comme un prix');
-});
+/*
+ * LE FORMAT DE L'ARGENT A DÉMÉNAGÉ dans `web/formats.js`, avec les trois
+ * autres écritures de nombres — il servait ici ET dans le panneau des jetons,
+ * et les deux ne disaient pas la même chose. La règle (des centimes sous dix
+ * centimes, un prix inconnu qui n'est pas un prix nul) est vérifiée là-bas,
+ * sur la fonction elle-même plutôt que sur le texte du fichier.
+ */
 
 test('elle reste discrète, et lisible quand on la cherche', () => {
   assert.match(css, /\.cout \{[^}]*opacity: \.45[^}]*\}/, 'la pastille est au premier plan');

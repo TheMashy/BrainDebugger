@@ -11,6 +11,9 @@ import { poserLesNuits, graduations, enHeures, enHHMM, medianeHoraire, mediane, 
 import { bandeLiee, bandeCouches, COUCHES, symbole, joursDe } from './bande.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { proposerLechelle } from './ressenti.js';
+/* Les nombres s'écrivent pareil partout — voir `web/formats.js`, qui dit
+   pourquoi c'est un fichier et pas quatre lignes ici. */
+import { virgule, fmtNb, dollars, fmtTok } from './formats.js';
 import { ico, ICO_VUE, ICO_ARCHETYPE, ICO_FAMILLE } from './icones.js';
 import { friseMarkup as friseSVG } from './frise.js';
 import { calMarkup, calClic, moisDe } from './calendrier.js';
@@ -128,11 +131,6 @@ function syncGauge() {
   btn.setAttribute('aria-label', `Jetons : ${u.level}`);
 }
 
-/** Sous 10 000 on garde une décimale : « 5 k » pour 4 800 fait perdre 200 jetons à l'œil. */
-const fmtTok = n =>
-  n >= 1e6  ? (n / 1e6).toFixed(1).replace('.0', '') + ' M' :
-  n >= 1e4  ? Math.round(n / 1000) + ' k' :
-  n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + ' k' : String(n);
 
 function drawGaugePanel() {
   const el = $('#gaugePanel'), u = S.usage;
@@ -271,13 +269,13 @@ async function chargerProfilUsage() {
     <div class="uchifs">
       ${chiffre(fmtEuroTok(c.par_echange), '', 'jetons', evolution(av?.par_echange, c.par_echange),
         'Jetons au tarif plein pour un échange, médiane. Un jeton relu du cache y compte pour un dixième — c’est ce qu’il coûte vraiment.')}
-      ${chiffre((c.cout_par_echange ?? 0).toFixed(3).replace('.', ','), ' $', 'l’échange',
+      ${chiffre(dollars(c.cout_par_echange) ?? '—', '', 'l’échange',
         evolution(av?.cout_par_echange, c.cout_par_echange),
         'Ce que coûte un échange, médiane sur les sept derniers jours.')}
-      ${chiffre(c.part_cache ?? '—', ' %', 'relu du cache',
+      ${chiffre(fmtNb(c.part_cache), ' %', 'relu du cache',
         evolution(av?.part_cache, c.part_cache, { baisserEstBon: false }),
         'La part du prompt relue du cache, à un dixième du prix. C’est ce chiffre qui dit si la mise en cache prend : plus il est haut, moins un échange coûte.')}
-      ${chiffre(c.appels_par_echange ?? '—', '', 'appels', evolution(av?.appels_par_echange, c.appels_par_echange),
+      ${chiffre(fmtNb(c.appels_par_echange), '', 'appels', evolution(av?.appels_par_echange, c.appels_par_echange),
         'Combien d’appels à l’API pour une réponse. Chacun renvoie tout le prompt : le compagnon qui pose un repère puis marque un motif en fait trois.')}
     </div>
     <p class="sub usub">${c.echanges} échange${c.echanges > 1 ? 's' : ''} au compagnon${
@@ -331,14 +329,14 @@ const USAGE_MES = {
   cout: {
     titre: 'Dollars par échange',
     champ: 'cout_par_echange',
-    fmt: v => (v < 0.01 ? v.toFixed(4) : v.toFixed(3)).replace('.', ',') + ' $',
+    fmt: v => dollars(v) ?? '—',
     baisserEstBon: true,
     aide: 'La même chose, en argent. Médiane de la période, aux tarifs publics.',
   },
   cache: {
     titre: 'Part relue du cache',
     champ: 'part_cache',
-    fmt: v => String(v).replace('.', ',') + ' %',
+    fmt: v => fmtNb(v) + ' %',
     baisserEstBon: false,
     aide: 'La part du prompt relue du cache, à un dixième du prix. C’est la cause quand les deux mesures d’au-dessus bougent — et le premier endroit où regarder.',
   },
@@ -497,7 +495,7 @@ function dessinerUsage() {
     <p class="sub utend" style="margin:6px 0 0">${tend}
       <span class="faint">${d.echanges} échange${d.echanges > 1 ? 's' : ''} sur ${
         esc(d.nom)}${USAGE_MESURE === 'cout' ? ` · ${
-        String(d.coutTotal).replace('.', ',')} $ en tout` : ''} · UTC</span></p>
+        dollars(d.coutTotal) ?? '—'} en tout` : ''} · UTC</span></p>
     <p class="sub uaide">${esc(mes.aide)}</p>`;
 }
 
@@ -1165,21 +1163,6 @@ function drawThread() {
  * pastille plutôt qu'une pastille à zéro — zéro voudrait dire « gratuit ».
  * ===================================================================== */
 /*
- * EN CENTIMES SOUS DIX CENTIMES, ET C'EST TOUT L'INTÉRÊT.
- *
- * Une réponse coûte ici entre un quart de centime et quelques centimes. En
- * dollars arrondis à deux décimales, elles s'écrasent toutes sur « 0,00 $ » ou
- * « 0,02 $ » — c'est-à-dire qu'on ne voit plus la différence entre deux façons
- * de répondre, qui est la seule chose qu'on est venu regarder.
- */
-const dollars = d => d == null ? null
-  : d >= 0.1 ? `${d.toFixed(2).replace('.', ',')} $`
-  : `${(d * 100).toFixed(2).replace('.', ',')} ¢`;
-
-const jetonsCourts = n => n >= 10000 ? `${Math.round(n / 1000)}k`
-  : n >= 1000 ? `${(n / 1000).toFixed(1).replace('.', ',')}k` : String(n);
-
-/*
  * DE QUOI ÉTAIT FAIT CE PROMPT-LÀ, ET CE QUI A CHANGÉ DEPUIS LE PRÉCÉDENT.
  *
  * Une réponse coûtait 0,14 $ dont 98 % en ÉCRITURE de cache. Le total ne dit
@@ -1192,8 +1175,6 @@ const jetonsCourts = n => n >= 10000 ? `${Math.round(n / 1000)}k`
  * le cache DOIT être relu. Si elle change, on sait sans discuter pourquoi on a
  * payé une écriture — et la pastille le dit au lieu de le laisser deviner.
  */
-const enMille = n => n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
-
 function compositionDite(id, c) {
   const k = c.composition;
   if (!k) return null;
@@ -1201,10 +1182,10 @@ function compositionDite(id, c) {
   // rappeler l'API. L'ordre de grandeur suffit pour voir lequel écrase les
   // autres, et c'est la seule chose qu'on cherche ici.
   const parts = [
-    `système ${enMille(k.systeme)}`,
-    `mémoire ${enMille(k.memoire)}`,
-    `fil ${enMille(k.fil)}`,
-    k.echos ? `échos ${enMille(k.echos)}` : null
+    `système ${fmtTok(k.systeme)}`,
+    `mémoire ${fmtTok(k.memoire)}`,
+    `fil ${fmtTok(k.fil)}`,
+    k.echos ? `échos ${fmtTok(k.echos)}` : null
   ].filter(Boolean).join(' + ');
   const appels = k.appels > 1 ? `, ${k.appels} appels` : '';
   return `prompt ≈ ${parts} signes${appels}${
@@ -1234,18 +1215,25 @@ function coutMarkup(m) {
   // Le modèle après un tiret et pas dans l'énumération : ce n'est pas un
   // quatrième compte, c'est ce qui explique le prix des trois autres.
   const dit = [prix, detail, c.model, compositionDite(m.id, c)].filter(Boolean).join(' · ');
+  /*
+   * LES DEUX CHIFFRES, PAS UN SEUL. Le prix dit ce que ça a coûté, les jetons
+   * disent POURQUOI : une réponse de deux lignes à 0,14 $ n'a rien d'étonnant
+   * quand on voit les 66 k qu'elle a traversés — et c'est ce rapprochement-là,
+   * fait d'un coup d'œil, qui a fait trouver que 98 % de la note était de
+   * l'écriture de cache. Le prix seul ne pose pas la question.
+   */
   return `<button class="cout${teteChangee(m.id) ? ' reecrit' : ''}" data-cout="${m.id}"
     aria-label="Ce que cette réponse a coûté"
     data-tip="${esc(dit)}"
     ><span class="cdot"></span><span class="cval">${
-      prix ?? `${jetonsCourts(c.jetons)} jetons`}</span></button>`;
+      [prix, `${fmtTok(c.jetons)} jetons`].filter(Boolean).join(' · ')}</span></button>`;
 }
 
 function echelleMarkup(m, dernier) {
   const deja = RESSENTIS.get(Number(m.id));
   if (deja != null) {
     return `<span class="ress fait" style="--c:${noteScaleColor(deja)}"
-      title="tu as répondu ${String(deja).replace('.', ',')}/10">${deja}<small>/10</small></span>`;
+      title="tu as répondu ${virgule(deja)}/10">${deja}<small>/10</small></span>`;
   }
   if (!proposerLechelle(m, { dernier: Number(dernier?.id) === Number(m.id),
                              repondus: new Set(RESSENTIS.keys()) })) return '';
@@ -4719,7 +4707,7 @@ function fonctFigure(it, series) {
   if (it.type === 'bascule') return fonctBascule(it, series);
   if (it.type === 'lien') return fonctBarres({ n: it.appui.bas.n, d: it.appui.bas.sur, lab: 'après ' + (it.appui.bas.cond ?? 'un jour bas'), txt: `${it.appui.bas.n} / ${it.appui.bas.sur}` }, { n: it.appui.haut.n, d: it.appui.haut.sur, lab: 'après ' + (it.appui.haut.cond ?? 'un jour haut'), txt: `${it.appui.haut.n} / ${it.appui.haut.sur}` });
   if (it.type === 'rythme') { if (it.variable === 'coucher') return ''; return fonctBarres({ v: Math.abs(it.appui.dedans), lab: it.appui.quand, txt: it.appui.dedans_txt ?? '' }, { v: Math.abs(it.appui.dehors), lab: 'le reste', txt: it.appui.dehors_txt ?? '' }); }
-  if (it.type === 'mots') return fonctBarres({ v: it.appui.bas, lab: 'note la plus basse', txt: String(it.appui.bas.toFixed(1)).replace('.', ',') }, { v: it.appui.haut, lab: 'note la plus haute', txt: String(it.appui.haut.toFixed(1)).replace('.', ',') });
+  if (it.type === 'mots') return fonctBarres({ v: it.appui.bas, lab: 'note la plus basse', txt: virgule(it.appui.bas.toFixed(1)) }, { v: it.appui.haut, lab: 'note la plus haute', txt: virgule(it.appui.haut.toFixed(1)) });
   return '';
 }
 
@@ -5683,7 +5671,7 @@ function estimeMarkup(e) {
    * est LU dans les mots est un contour. Le nombre exact reste au survol, pour
    * qui va le chercher.
    */
-  const v = String(e.valeur).replace('.', ',');
+  const v = virgule(e.valeur);
   return `<span class="jest ${mesure ? 'mesure' : 'lu'}"
     style="--c:${noteScaleColor(e.valeur)}"
     title="${mesure ? `relevé à la main à ce moment-là — ${v}/10`
@@ -5846,7 +5834,7 @@ function phraseLien(l) {
   // « au-dessus de 6.2 » à côté de « 8,2 h » donne deux conventions décimales
   // dans trois centimètres, et l'œil bute avant de comprendre pourquoi.
   return `Les journées au-dessus de ${valMesure({ valeur: l.moitie.seuil })}${uniteDe(l)} ${quand}
-    <b>${e.toFixed(1).replace('.', ',')} point${e >= 2 ? 's' : ''}
+    <b>${virgule(e.toFixed(1))} point${e >= 2 ? 's' : ''}
     ${l.moitie.ecart > 0 ? 'plus haut' : 'plus bas'}</b> — sur ${l.n} journées.`;
 }
 
@@ -5990,7 +5978,7 @@ function posteMarkup(p, synchro) {
         ? `temps de sommeil — la nuit avant ce lever, endormi vers ${p.dormi_de}${
             p.dormi_de_jour ? ` le ${p.dormi_de_jour}` : ''}`
         : 'temps de sommeil — la nuit avant ce lever')}">${
-        ico('lit', 13)}${heure(String(p.sommeil_h).replace('.', ',') + ' h')}</span></div>`
+        ico('lit', 13)}${heure(virgule(p.sommeil_h) + ' h')}</span></div>`
     : '';
 
   /*
@@ -6406,7 +6394,7 @@ function volatiliteMarkup(v, poste) {
              stroke="var(--line)" stroke-dasharray="2 4"><title>5/10</title></line>` : '';
   const points = pts.map(p => {
     const mesure = p.dApres === 'releve';
-    const vtxt = String(p.valeur).replace('.', ',');
+    const vtxt = virgule(p.valeur);
     // Le creux est rempli du fond et non laissé transparent : la ligne passait
     // au travers du point, et « plein ou creux » — mesuré ou lu — ne se
     // distinguait plus, alors que c'est toute la règle du produit.
@@ -6415,7 +6403,7 @@ function volatiliteMarkup(v, poste) {
        ><title>${esc(p.heure)} · ${mesure ? '' : '≈'}${vtxt}/10${mesure ? ' (relevé)' : ' (lu dans tes mots)'}</title></circle>`;
   }).join('');
 
-  const fmt = n => String(n).replace('.', ',');
+  const fmt = virgule;
   const surMesure = hum.some(h => h.dApres === 'releve');
   /*
    * LES DEUX BOUTS DE L'AXE, À LEURS DEUX BOUTS.
@@ -8498,7 +8486,7 @@ function qsPucesMarkup(d) {
   if (j.bascules != null) {
     p.push({ v: qsNb(j.bascules), k: 'bascules de fenêtre',
              note: j.basculesFois != null
-               ? `${j.basculesFois.toFixed(1).replace('.', ',')}× ta normale` : null,
+               ? `${virgule(j.basculesFois.toFixed(1))}× ta normale` : null,
              sens: j.basculesFois > 1.15 ? 'plus' : j.basculesFois < 0.85 ? 'moins' : null });
   }
   if (j.pauses != null) p.push({ v: qsNb(j.pauses), k: 'pauses' });
