@@ -67,7 +67,14 @@ test('UN GROS BLOC PRIORITAIRE NE SE FAIT PAS DOUBLER PAR DES PETITS DE LA FIN',
 
 test('l’ordre est un ordre de VALEUR, et il est écrit', () => {
   assert.deepEqual(ORDRE_MEMOIRE, ['ancres', 'grille', 'repères', 'motifs',
-                                   'journées', 'prises', 'horizons', 'carnet']);
+                                   'journées', 'carte', 'prises', 'horizons', 'carnet']);
+  /*
+   * `carte` est juste derrière les journées, et c'est voulu : elle couvre TOUT
+   * le journal là où elles ne portent que les dernières, pour mille fois moins
+   * cher — mais elle ne remplace pas de lire ses mots, elle dit où aller les
+   * lire. Devant le carnet, donc, et derrière ce qu'il a écrit ces jours-ci.
+   */
+  assert.ok(ORDRE_MEMOIRE.indexOf('carte') < ORDRE_MEMOIRE.indexOf('carnet'));
 });
 
 test('ON DIT AU COMPAGNON CE QU’IL N’A PAS', () => {

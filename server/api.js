@@ -44,7 +44,7 @@ import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, ve
          SOURCE_DIT, CLE_LEVER, CLE_COUCHER, MIDI, noteDiteDans } from './jour-vecu.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 const { presence, presenceNote } = sessions;
-import { buildIndex, search, tokenize } from './search.js';
+import { buildIndex, search, tokenize, termesDuDoc } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
 // cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
@@ -54,7 +54,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock,
+import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
@@ -181,6 +181,7 @@ export const ORDRE_MEMOIRE = [
   'repères',   // les faits dates de sa vie : ce qui fait qu'on le connait
   'motifs',    // les mecanismes deja nommes : sans eux il les redeclare
   'journées',  // ce qu'il a ecrit ces jours-ci, dans ses mots
+  'carte',     // de quoi parle TOUT le reste : une ligne par journee, et l'outil pour la lire
   'prises',    // ce qui a de la prise chez lui : court, et ca parle du present
   'horizons',  // les syntheses de la lecture de fond
   'carnet',    // ce qu'il a apporte d'ailleurs : le plus gros, le plus substituable
@@ -193,6 +194,9 @@ const OU_LE_TROUVER = {
   'repères':  'ses repères datés — `chercher_repere` les cherche',
   motifs:     null,
   'journées': 'ses journées plus anciennes — `chercher_journees` les cherche',
+  carte:      'la carte de son journal n’est pas chargée : tu ne sais pas de quoi parlent '
+              + 'ses journées passées, donc ne le devine pas — `chercher_journees` sur un mot '
+              + 'qu’il vient de dire reste possible',
   /*
    * LES DEUX SANS OUTIL. On le dit quand meme, et differemment : ils ne se
    * rechargent pas, donc la seule chose utile est que le compagnon sache ce
@@ -303,6 +307,30 @@ export function recentMemory(date, userId = OWNER, texte = null) {
       bloc = memoryBlock(rows);
     }
     poser('journées', bloc);
+
+    /*
+     * ET LA CARTE DE TOUT LE RESTE.
+     *
+     * Les journees ci-dessus ne portent que les plus recentes, et elles
+     * maigrissent encore sous le budget. La carte, elle, couvre TOUT le
+     * journal pour mille fois moins cher : une ligne par journee, avec les
+     * mots qui la distinguent. C'est ce qui permet au compagnon de savoir
+     * QUOI demander a `chercher_journees` -- sans elle, il ne peut chercher
+     * que ce dont on vient de lui parler.
+     *
+     * On retire de la carte les journees dont il porte deja le texte : les
+     * lister deux fois paierait deux fois la meme journee.
+     */
+    const { index, rows: toutes, byDate, carnet: notes, indexCarnet } = series(userId);
+    const portees = new Set(rows.map(r => r.date));
+    const jours = toutes
+      .filter(r => r.text && r.text.trim() && r.date < date && !portees.has(r.date))
+      .map(r => ({ date: r.date, note: byDate.get(r.date)?.note ?? null,
+                   mots: termesDuDoc(index, r.date, 5) }));
+    const apportees = (s.carnetMemoire !== false ? notes ?? [] : [])
+      .map(n => ({ id: n.id, quand: n.quand, jour: n.jour,
+                   mots: termesDuDoc(indexCarnet, `n${n.id}`, 5) }));
+    poser('carte', sommaireBlock(jours, apportees));
   }
 
   // Les reperes survivent a « Nouveau chat » : c'est ce qui fait qu'un fil

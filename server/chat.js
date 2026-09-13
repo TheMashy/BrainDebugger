@@ -418,6 +418,67 @@ export function toChatMessages(history, { blocs = false } = {}) {
  * interdit explicitement de les citer ou de les reformuler : le rappel des mots
  * exacts est le travail du Miroir, jamais celui du compagnon (SPEC 4.3).
  */
+/*
+ * =====================================================================
+ *  LA CARTE DU JOURNAL, AU LIEU DU JOURNAL.
+ *
+ * Le compagnon portait le TEXTE des journees et du carnet en permanence :
+ * 125 000 signes chez quelqu'un, repayes a chaque phrase de chaque soiree, et
+ * plein tarif des qu'il revient apres plus d'une heure. Or il a deja de quoi
+ * aller lire ce qu'il lui faut -- `chercher_journees`, `lire_carnet`,
+ * `lire_grille`. Ce qui lui manquait, c'etait de SAVOIR QUOI DEMANDER.
+ *
+ * Une carte le lui donne pour mille fois moins cher : une ligne par journee,
+ * avec les mots qui font que cette journee-la ne ressemble pas aux autres.
+ * Soixante journees tiennent en trois mille signes, contre cent mille pour
+ * leur texte. Le geste ne change pas, le prix si -- et c'est exactement le
+ * troc propose : une reponse un peu plus lente quand il doit aller lire,
+ * contre un prompt quatre fois plus leger a chaque message.
+ *
+ * ON NE CITE JAMAIS CETTE CARTE. Ce sont des jetons sortis d'un comptage, pas
+ * ses phrases : « tu as parle de boule au ventre le 27 » a l'air d'une lecture
+ * et n'en est pas une. La regle est la meme que pour les journees brutes, en
+ * plus strict -- ici les mots ne sont meme pas les siens tels qu'il les a
+ * ecrits.
+ * =====================================================================
+ */
+export function sommaireBlock(jours = [], notes = [], { max = 120 } = {}) {
+  const lignes = [];
+  for (const j of jours.slice(-max)) {
+    if (!j.mots?.length) continue;
+    const note = j.note == null ? '—' : `${j.note}/10`;
+    lignes.push(`${j.date} (${note}) ${j.mots.join(', ')}`);
+  }
+  const carnet = [];
+  for (const n of notes.slice(-max)) {
+    if (!n.mots?.length) continue;
+    // `quand` est ce que la personne a ECRIT pour dater sa note (« vers 2019 »,
+    // « je sais plus ») : on le recopie tel quel, on ne le range pas.
+    const q = String(n.quand ?? n.jour ?? '').trim();
+    carnet.push(`#${n.id}${q ? ` (${q})` : ''} ${n.mots.join(', ')}`);
+  }
+  if (!lignes.length && !carnet.length) return null;
+
+  return `LA CARTE DE SON JOURNAL — de quoi parle chaque chose, sans le texte.
+
+Tu ne portes PAS ce qu'il a écrit : c'est consultable, et c'est ce qui te rend
+léger. Quand la conversation touche un de ces moments, VA LE LIRE avant d'en
+parler — ${lignes.length ? '`chercher_journees` pour une journée' : ''}${
+  lignes.length && carnet.length ? ', ' : ''}${carnet.length ? '`lire_carnet` pour une note apportée' : ''}.
+Prends un des mots ci-dessous comme requête : ils viennent de son texte.
+
+Ces mots sont sortis d'un COMPTAGE, pas de ses phrases. Tu ne les cites jamais,
+tu ne les lui renvoies jamais, et tu ne dis jamais « tu as parlé de X le 27 »
+sans être allé relire ce jour-là. Une carte dit de quoi ça parle ; elle ne dit
+pas ce qui a été dit.${lignes.length ? `
+
+SES JOURNÉES
+${lignes.join('\n')}` : ''}${carnet.length ? `
+
+CE QU'IL A APPORTÉ D'AILLEURS
+${carnet.join('\n')}` : ''}`;
+}
+
 export function memoryBlock(entries) {
   if (!entries?.length) return null;
   const lines = entries.map(e => {

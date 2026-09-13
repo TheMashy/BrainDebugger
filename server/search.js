@@ -123,3 +123,62 @@ export function search(index, query, { limit = 10, exclude = new Set() } = {}) {
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }
+
+/*
+ * =====================================================================
+ *  CE QUI DISTINGUE UNE JOURNEE DES AUTRES.
+ *
+ * Le compagnon portait le TEXTE des journees et du carnet en permanence --
+ * 125 000 signes chez quelqu'un, repayes a chaque phrase de chaque soiree.
+ * Une carte coute mille fois moins et permet le meme geste : il voit de quoi
+ * parle chaque journee, et va lire CELLE-LA quand la conversation y touche.
+ *
+ * C'est le meme calcul que la recherche, retourne. La recherche demande
+ * « quelles journees ressemblent a cette phrase ? » ; ici on demande « quels
+ * mots font que CETTE journee ne ressemble pas aux autres ? ». Les deux
+ * lisent `postings` et pesent pareil : un mot rare dans le journal et
+ * frequent dans la journee.
+ *
+ * UN MOT PARTOUT NE DISTINGUE RIEN. « fatigue » dans cinquante journees sur
+ * soixante ne dit pas de quoi parle celle-ci -- c'est ce que l'idf retire, et
+ * c'est pour ca qu'on ne se contente pas des mots les plus frequents.
+ * =====================================================================
+ */
+export const PART_BANALE = 0.5;
+export const CORPUS_MIN = 8;
+
+export function termesDuDoc(index, docId, n = 5) {
+  const out = [];
+  /*
+   * UN MOT PARTOUT NE DISTINGUE RIEN, et l'idf ne suffit pas a s'en
+   * debarrasser : il le penalise, mais s'il n'y a rien d'autre dans la
+   * journee il ressort quand meme. Une carte ou trente lignes sur soixante
+   * disent « fatigue, soir, rien » ne sert a rien -- elle a l'air pleine et
+   * ne permet aucun choix.
+   *
+   * On les retire donc. Pas sous huit documents : sur un journal qui commence,
+   * « la moitie des journees » ce sont deux journees, et on viderait la carte
+   * au moment ou elle sert le plus.
+   */
+  const banal = index.N >= CORPUS_MIN ? index.N * PART_BANALE : Infinity;
+  for (const [terme, posting] of index.postings) {
+    const tf = posting.get(docId);
+    if (!tf) continue;
+    const df = posting.size;
+    if (df > banal) continue;
+    const idf = Math.log(1 + (index.N - df + 0.5) / (df + 0.5)) * poids(terme);
+    const len = index.lengths.get(docId) ?? 0;
+    const denom = tf + K1 * (1 - B + B * (len / (index.avgLen || 1)));
+    out.push([terme, idf * (tf * (K1 + 1)) / denom]);
+  }
+  out.sort((a, b) => b[1] - a[1]);
+  /*
+   * LES SAILLANTS D'ABORD, LE RESTE ENSUITE. Un mot qui nomme un etat vaut
+   * mieux qu'un nom propre pour retrouver une journee -- mais une carte qui
+   * n'aurait QUE des etats se ressemblerait d'une ligne a l'autre. On prend
+   * donc les saillants en tete, puis on complete.
+   */
+  const forts = out.filter(([t]) => saillant(t));
+  const autres = out.filter(([t]) => !saillant(t));
+  return [...forts, ...autres].slice(0, n).map(([t]) => t.replace(/_/g, ' '));
+}
