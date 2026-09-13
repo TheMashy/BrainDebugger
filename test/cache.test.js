@@ -85,11 +85,31 @@ test('la mémoire se sépare en ce qui tient la journée et ce qui change à cha
 });
 
 test('la fenêtre du fil est bornée, et la borne est un chiffre nommé', () => {
-  // Soixante messages renvoyés à chaque tour, deux ou trois tours par échange :
-  // le fil traversait le réseau trois fois pour une réponse de deux phrases.
+  /*
+   * CE TEST A TENU LE BUG EN PLACE, ET C'EST POUR ÇA QU'IL EST RÉÉCRIT ICI.
+   *
+   * Il exigeait « au plus 30 ». Le raisonnement d'alors : le fil repart à
+   * chaque tour d'outil, deux ou trois fois par échange, donc il faut le
+   * garder court. Il est faux depuis que le prompt est mis en cache — les
+   * tours d'un même échange partagent le préfixe, et un message du fil relu
+   * du cache vaut un dixième de jeton neuf. Soixante messages coûtent donc
+   * des centièmes de centime par échange.
+   *
+   * Ce qu'il en coûtait, en revanche, se mesurait : une soirée fait 36
+   * messages en médiane sur un journal réel, 12 soirées sur 27 dépassent 24,
+   * la plus longue en fait 174. Le compagnon perdait les deux premiers tiers
+   * de la soirée EN COURS et redemandait ce qui venait d'être dit.
+   *
+   * La borne reste — un fil non borné finirait par renvoyer quatre ans de
+   * conversation — mais elle se pose là où elle ne coupe pas une soirée.
+   * Combien de messages elle doit couvrir se garde dans
+   * `memoire-budget.test.js`, avec la mesure qui donne le chiffre.
+   */
   assert.equal(typeof api.FIL_TRANSMIS, 'number');
-  assert.ok(api.FIL_TRANSMIS > 0 && api.FIL_TRANSMIS <= 30,
-            `${api.FIL_TRANSMIS} messages : la mémoire longue ne passe pas par le fil`);
+  assert.ok(Number.isFinite(api.FIL_TRANSMIS) && api.FIL_TRANSMIS > 0,
+            `${api.FIL_TRANSMIS} : le fil n'est pas borné, il finira par tout renvoyer`);
+  assert.ok(api.FIL_TRANSMIS <= 200,
+            `${api.FIL_TRANSMIS} messages : ce n'est plus une fenêtre, c'est le journal`);
 });
 
 /* ============ LES DEUX MODÈLES ============ */

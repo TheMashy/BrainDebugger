@@ -6823,6 +6823,26 @@ function qsMarkup(qs) {
 
 /* Quels groupes des Réglages sont dépliés. Une vue qui se reconstruit ne doit
    pas replier ce que quelqu'un vient d'ouvrir — voir `groupe` plus bas. */
+/*
+ * CE QUE CE CURSEUR COÛTE, À CÔTÉ DE CE QU'IL PROMET.
+ *
+ * Il annonçait « 14 journées passées transmises » pendant qu'un plafond
+ * serveur n'en laissait passer que trois — le compagnon ne s'en souvenait pas
+ * parce qu'il ne les avait jamais eues. Le plafond est parti : c'est le
+ * curseur qui décide maintenant, et il décide donc aussi de la dépense.
+ *
+ * Le chiffre vient de la DERNIÈRE RÉPONSE réellement partie, pas d'un calcul
+ * refait ici : c'est la seule mesure qui ne puisse pas diverger de ce qui est
+ * envoyé. Absent tant qu'aucune réponse n'a été mesurée — un curseur sans
+ * chiffre vaut mieux qu'un chiffre inventé.
+ */
+function poidsMemoireDit() {
+  const derniere = [...COUTS.keys()].sort((a, b) => b - a)
+    .map(id => COUTS.get(id)?.composition).find(c => c?.memoire);
+  if (!derniere) return '';
+  return ` · <span class="faint">sa mémoire pèse ${fmtTok(derniere.memoire)} signes à chaque message</span>`;
+}
+
 const REGLAGES_OUVERTS = new Set();
 
 async function renderSettings() {
@@ -7436,7 +7456,8 @@ async function renderBackendCfg() {
         <span id="keyResult" class="sub" style="margin:0"></span>
       </div>
     </div>
-    <label class="field"><span>Mémoire — <b class="mono">${s.memoryDays}</b> journée${s.memoryDays > 1 ? 's' : ''} passée${s.memoryDays > 1 ? 's' : ''} transmise${s.memoryDays > 1 ? 's' : ''}</span>
+    <label class="field"><span>Mémoire — <b class="mono">${s.memoryDays}</b> journée${s.memoryDays > 1 ? 's' : ''} passée${s.memoryDays > 1 ? 's' : ''} transmise${s.memoryDays > 1 ? 's' : ''}${
+      poidsMemoireDit()}</span>
       <input type="range" id="memoryDays" min="0" max="30" step="1" value="${s.memoryDays}"></label>
     <p class="sub" style="margin:0;font-size:12px">
       Ce qui donne la continuité : sans mémoire, il repart de zéro chaque soir. Seul le

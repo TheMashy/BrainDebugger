@@ -15,20 +15,38 @@ import { join } from 'node:path';
 
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-budget-')), 'test.db');
 const { db, OWNER, setSettings, addMessage } = await import('../server/db.js');
-const { memoireSousBudget, recentMemory, BUDGET_MEMOIRE, PART_JOURNEES, ORDRE_MEMOIRE }
+const { memoireSousBudget, recentMemory, BUDGET_MEMOIRE, ORDRE_MEMOIRE, FIL_TRANSMIS }
   = await import('../server/api.js');
 
 const bloc = (n, c) => c.repeat(n);
+/*
+ * LES POIDS SONT MESURÉS, PAS INVENTÉS. Ils viennent de l'export réel de
+ * quelqu'un, chargé dans une base de test : quatorze journées écrites pèsent
+ * 95 824 signes, le carnet 78 000. Le total dépasse le plafond de moitié —
+ * c'est le cas qui se produit vraiment, pas un cas construit pour déborder.
+ *
+ * Si un jour ces chiffres cessent de déborder le plafond, les tests qui
+ * suivent ne prouveront plus rien EN SILENCE : d'où le garde ci-dessous.
+ */
 const REEL = () => new Map([
   ['ancres',    bloc(100, 'A')],
   ['grille',    bloc(2400, 'G')],
   ['repères',   bloc(400, 'R')],
   ['motifs',    bloc(1100, 'M')],
-  ['journées',  bloc(14000, 'J')],
+  ['journées',  bloc(95824, 'J')],
   ['prises',    bloc(6000, 'P')],
   ['horizons',  bloc(9000, 'H')],
   ['carnet',    bloc(78000, 'C')],
 ]);
+
+test('LE DÉCOR DE CES TESTS DÉBORDE VRAIMENT LE PLAFOND', () => {
+  // Sans ça, tout ce qui suit passerait au vert en ne testant rien : un
+  // budget assez large pour tout prendre ne fait jamais sortir personne.
+  const total = [...REEL().values()].reduce((n, t) => n + t.length, 0);
+  assert.ok(total > BUDGET_MEMOIRE,
+    `${total} signes sous un plafond de ${BUDGET_MEMOIRE} : plus rien ne déborde, `
+    + `les tests de priorité ne discriminent plus`);
+});
 
 test('LE PLAFOND TIENT', () => {
   const r = memoireSousBudget(REEL());
@@ -105,37 +123,57 @@ test('rien à mettre ne rend rien, pas une note toute seule', () => {
   assert.equal(memoireSousBudget(new Map()).texte, null);
 });
 
-test('LES JOURNÉES MAIGRISSENT PAR LA FIN LA PLUS ANCIENNE, PAS AU MILIEU D’UNE PHRASE', () => {
+test('LE CURSEUR DÉCIDE DU NOMBRE DE JOURNÉES, ET RIEN NE LE CONTREDIT EN SILENCE', () => {
   /*
-   * C'est le bloc qui compte le plus, et celui qui grossit sans limite :
-   * quelqu'un qui écrit longuement quatorze soirs de suite le fait exploser
-   * tout seul. Il perd des journées ENTIÈRES — une journée tronquée se lirait
-   * comme une journée qui s'arrête net, et le compagnon y répondrait.
+   * LA RÉGRESSION QUE CE TEST GARDE, ET ELLE A ÉTÉ VÉCUE.
+   *
+   * Un plafond de 14 000 signes bornait ce bloc. Mesuré sur un journal réel :
+   * quatorze journées écrites pèsent 95 824 signes, donc le plafond n'en
+   * gardait TROIS. L'écran annonçait « 14 journées passées transmises » et le
+   * compagnon en recevait trois — il ne s'en souvenait pas parce qu'il ne les
+   * avait jamais eues, et la personne en face le voyait redemander ce qu'elle
+   * venait de dire.
+   *
+   * Un réglage qui ment est pire qu'un réglage cher : le second se voit sur
+   * une facture, le premier ne se voit nulle part.
    */
-  setSettings({ memoryDays: 14, carnetMemoire: false, prisesMemoire: false }, OWNER);
+  setSettings({ memoryDays: 9, carnetMemoire: false, prisesMemoire: false }, OWNER);
   const AUJ = '2026-03-01';
   const ins = db.prepare('INSERT OR REPLACE INTO entries(user_id,date,note,text) VALUES(?,?,?,?)');
-  for (let i = 1; i <= 14; i++) {
+  for (let i = 1; i <= 12; i++) {
     const d = new Date(Date.parse(AUJ) - i * 864e5).toISOString().slice(0, 10);
-    // Une marque par journée : la DATE seule ne prouve rien, elle figure aussi
-    // dans la grille des cinq semaines, qui est un autre bloc.
-    ins.run(OWNER, d, 5, `MARQUEJOUR${i} — ` + 'une phrase entière qui se termine. '.repeat(120));
+    // Des journées LONGUES : c'est le cas où l'ancien plafond mordait.
+    ins.run(OWNER, d, 5, `MARQUEJOUR${i} — ` + 'une phrase entière qui se termine. '.repeat(200));
   }
   const m = recentMemory(AUJ, OWNER, null);
-  assert.ok(m.tailles['journées'] <= PART_JOURNEES,
-    `${m.tailles['journées']} signes de journées pour une part de ${PART_JOURNEES}`);
-  assert.ok(m.stable.includes('MARQUEJOUR1'), 'la journée la plus RÉCENTE est sortie');
-  assert.equal(m.stable.includes('MARQUEJOUR14'), false, 'la plus ancienne est restée');
-  // Et ce qui reste se termine sur une phrase finie, pas au milieu d'un mot.
-  const dedans = m.stable.slice(m.stable.indexOf('MARQUEJOUR'));
-  assert.match(dedans.split('\n\n---\n\n')[0].trim(), /se termine\.$/,
-    'une journée a été coupée au milieu d’une phrase');
+  for (let i = 1; i <= 9; i++) {
+    assert.ok(m.stable.includes(`MARQUEJOUR${i}`),
+      `la journée ${i} manque : le curseur en demande 9 et quelque chose en a retiré`);
+  }
+  assert.equal(m.stable.includes('MARQUEJOUR10'), false, 'le curseur en demande 9, il en passe 10');
+  assert.ok(m.tailles['journées'] > 14000,
+    'le bloc tient sous 14 000 signes : le plafond qui écrasait le curseur est revenu');
+});
+
+test('LA FENÊTRE DU FIL COUVRE UNE VRAIE SOIRÉE', () => {
+  /*
+   * Elle valait 24 messages — douze échanges. Mesuré sur un journal réel : une
+   * soirée fait 36 messages en médiane, 12 soirées sur 27 dépassent 24, et la
+   * plus longue en fait 174. Le compagnon perdait donc les deux premiers tiers
+   * de la soirée EN COURS, et redemandait ce qui venait d'être dit.
+   *
+   * Le chiffre avait été choisi quand le prompt pesait 66 000 jetons. Il en
+   * pèse trois fois moins et un message du fil vaut une quarantaine de jetons
+   * relus à un dixième : la fenêtre économisait des centièmes de centime en
+   * coûtant la conversation.
+   */
+  assert.ok(FIL_TRANSMIS >= 40,
+    `${FIL_TRANSMIS} messages : la fenêtre ne couvre plus une soirée médiane de 36`);
 });
 
 test('la composition rendue ne compte QUE ce qui est parti', () => {
   // Sinon l'étiquette annoncerait 125 k pour un prompt qui en porte 24 —
   // et on chercherait une baleine qui n'est plus là.
-  const m = new Map([['ancres', bloc(100, 'A')], ['carnet', bloc(90000, 'C')]]);
-  const r = memoireSousBudget(m);
+  const r = memoireSousBudget(REEL());
   assert.deepEqual(r.hors, ['carnet']);
 });

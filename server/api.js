@@ -136,7 +136,28 @@ function series(userId = OWNER) {
  * Pair, parce que la fenetre est ancree par paliers pairs (voir `filAncre`) :
  * un debut de fenetre qui tombe toujours sur un message de la personne.
  */
-export const FIL_TRANSMIS = 24;
+/*
+ * ==================================================================
+ *  VINGT-QUATRE MESSAGES, C'ETAIT DOUZE ECHANGES.
+ *
+ * Mesure sur un journal reel : une soiree de conversation y fait 36 messages
+ * en mediane, et 12 des 27 soirees depassent les 24. La plus longue en fait
+ * 174 -- dont 150 hors de la fenetre. Le compagnon perdait donc regulierement
+ * les deux premiers tiers de la soiree EN COURS : il redemandait ce qui venait
+ * d'etre dit, et repondait a cote du contexte, sur la meme soiree.
+ *
+ * CE CHIFFRE A ETE CHOISI QUAND LE PROMPT PESAIT 66 000 JETONS et que chaque
+ * message de plus se payait plein tarif. Il en pese trois fois moins, la tete
+ * tient une heure en cache, et un message du fil vaut une quarantaine de
+ * jetons relus a un dixieme. La fenetre est donc devenue le mauvais arbitrage
+ * : elle economisait des centiemes de centime en coutant la conversation.
+ *
+ * Soixante couvre la soiree mediane et la grande majorite des autres. Ce qui
+ * deborde encore n'est pas perdu : la journee en cours est relue dans la
+ * memoire, et la carte dit ou aller chercher le reste.
+ * ==================================================================
+ */
+export const FIL_TRANSMIS = 60;
 
 /*
  * =====================================================================
@@ -163,16 +184,35 @@ export const FIL_TRANSMIS = 24;
  * qui est du materiau de reference, gros et consultable, passe derriere.
  *
  * EN SIGNES ET PAS EN JETONS : c'est ce que le serveur sait compter sans
- * rappeler l'API. Vingt-huit mille signes font autour de huit mille jetons,
- * et ramenent le prompt de 66 000 a moins de 20 000.
+ * rappeler l'API.
+ *
+ * LE CHIFFRE A ETE REMONTE DE 28 000 A 120 000, et c'est un aveu. A 28 000 il
+ * arbitrait ce que le curseur « Memoire » venait de decider -- quatorze
+ * journees demandees, trois portees -- au lieu de se contenter d'empecher un
+ * carnet d'enfler sans limite. Ce que coute la memoire se voit maintenant sur
+ * l'ecran, a cote du curseur : c'est la que ca se decide, pas ici.
  * =====================================================================
  */
-export const BUDGET_MEMOIRE = 28_000;
+export const BUDGET_MEMOIRE = 120_000;
 
-/* La part reservee aux journees ecrites : la moitie du budget. Elles passent
-   avant tout ce qui les suit, et ce qui deborde se lit avec
-   `chercher_journees` -- mais on ne les laisse pas manger le reste. */
-export const PART_JOURNEES = 14_000;
+/*
+ * IL N'Y A PLUS DE PLAFOND SUR LES JOURNEES, ET C'EST UNE CORRECTION.
+ *
+ * Il valait 14 000 signes. Mesure sur un journal reel : quatorze journees
+ * ecrites pesent 95 824 signes, donc le plafond n'en gardait TROIS. Le
+ * reglage affichait « 14 journees passees transmises » et le compagnon en
+ * recevait trois -- il ne s'en souvenait pas parce qu'il ne les avait jamais
+ * eues, et la personne en face le voyait redemander ce qu'elle venait de dire.
+ *
+ * UN REGLAGE QUI MENT EST PIRE QU'UN REGLAGE CHER. Le nombre de journees est
+ * un choix explicite, pose sur un curseur, par quelqu'un qui voit maintenant
+ * ce que chaque message lui coute. Le plafond le remplacait par un autre
+ * chiffre, sans le dire, et l'ecran continuait d'annoncer le premier.
+ *
+ * `BUDGET_MEMOIRE` reste, et c'est son vrai role : empecher un carnet ou une
+ * lecture de fond d'enfler sans limite. Il ne doit pas arbitrer un choix que
+ * quelqu'un vient de faire a la main.
+ */
 
 /** L'ordre dans lequel les blocs entrent dans le budget. Le premier reste. */
 export const ORDRE_MEMOIRE = [
@@ -284,35 +324,18 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   };
 
   if (days) {
-    let rows = db.prepare(`
+    const rows = db.prepare(`
       SELECT date, note, text FROM entries
       WHERE user_id = ? AND date < ? AND text IS NOT NULL AND TRIM(text) <> ''
       ORDER BY date DESC LIMIT ?
     `).all(userId, date, days).reverse();
-    /*
-     * CE QU'IL A ECRIT CES JOURS-CI EST LE BLOC QUI COMPTE LE PLUS, et c'est
-     * aussi celui qui grossit sans limite : quelqu'un qui ecrit longuement
-     * quatorze soirs de suite le fait exploser tout seul. Il maigrit donc par
-     * LA FIN LA PLUS ANCIENNE -- ce que fait deja le reglage `memoryDays`,
-     * applique ici automatiquement au lieu d'attendre que quelqu'un s'en
-     * apercoive sur sa facture.
-     *
-     * On coupe des JOURNEES ENTIERES, jamais au milieu d'une phrase : une
-     * journee tronquee se lirait comme une journee qui s'arrete net, et le
-     * compagnon y repondrait.
-     */
-    let bloc = memoryBlock(rows);
-    while (bloc && bloc.length > PART_JOURNEES && rows.length > 1) {
-      rows = rows.slice(1);
-      bloc = memoryBlock(rows);
-    }
-    poser('journées', bloc);
+    poser('journées', memoryBlock(rows));
 
     /*
      * ET LA CARTE DE TOUT LE RESTE.
      *
-     * Les journees ci-dessus ne portent que les plus recentes, et elles
-     * maigrissent encore sous le budget. La carte, elle, couvre TOUT le
+     * Les journees ci-dessus ne portent que les plus recentes -- autant que
+     * le curseur en demande, et pas une de moins. La carte, elle, couvre TOUT le
      * journal pour mille fois moins cher : une ligne par journee, avec les
      * mots qui la distinguent. C'est ce qui permet au compagnon de savoir
      * QUOI demander a `chercher_journees` -- sans elle, il ne peut chercher
