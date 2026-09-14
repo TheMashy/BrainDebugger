@@ -280,6 +280,117 @@ export function motsDuSuivi(brut) {
 
 const NOMBRE = '(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|demi|quelques|plusieurs|\\d+)';
 
+/*
+ * =====================================================================
+ *  COMBIEN — ET SEULEMENT QUAND C'EST ÉCRIT.
+ *
+ * Le moteur compte des JOURS. « Ce soir j'ai fumé un joint » et « ce soir
+ * j'en ai fumé cinq » font un jour chacun, et le tableau ne distingue pas.
+ * Or c'est la différence qui compte pour la personne qui le lit.
+ *
+ * TROIS RÉSULTATS POSSIBLES, ET LE TROISIÈME EST LE PLUS IMPORTANT :
+ *   un nombre      — elle l'a écrit : « deux joints », « 3 verres »
+ *   PLUSIEURS      — elle l'a dit sans compter : « des joints », « quelques »
+ *   null           — elle n'a rien dit de la quantité
+ *
+ * `null` N'EST PAS 1. C'est la même règle que partout ici : un zéro se lit
+ * « c'était ça », un trou se lit « on ne sait pas ». Quelqu'un qui écrit
+ * « j'ai fumé » n'a pas dit un ; le supposer, puis le colorer, c'est inventer
+ * une quantité sur le seul terrain où ce produit ne doit rien inventer.
+ *
+ * ON NE CUMULE PAS SUR LA JOURNÉE. « deux joints » le midi et « un joint » le
+ * soir ne font pas trois : ce sont deux phrases, et rien ne dit que la
+ * seconde n'inclut pas la première. On garde le plus grand nombre dit, et on
+ * compte à part le nombre de FOIS où elle en a parlé — deux mentions dans la
+ * même journée sont un fait, elles, et c'est ce que la personne a demandé à
+ * voir (« s'il en a parlé plusieurs fois »).
+ * =====================================================================
+ */
+export const PLUSIEURS = 'plusieurs';
+
+const MOT_NOMBRE = new Map([
+  ['un', 1], ['une', 1], ['deux', 2], ['trois', 3], ['quatre', 4], ['cinq', 5],
+  ['six', 6], ['sept', 7], ['huit', 8], ['neuf', 9], ['dix', 10], ['douze', 12],
+  // Un demi n'est pas une fraction ici : c'est le nom d'un verre de bière.
+  ['demi', 1],
+  /* Les ORDINAUX collés au produit : « un troisième verre » dit qu'il y en a
+     eu trois, et ne peut rien vouloir dire d'autre. C'est ce qui reste de la
+     règle de reprise, une fois ses idiomes retirés. */
+  ['deuxieme', 2], ['troisieme', 3], ['quatrieme', 4], ['cinquieme', 5],
+  ['second', 2], ['seconde', 2],
+  ['quelques', PLUSIEURS], ['plusieurs', PLUSIEURS], ['des', PLUSIEURS]
+]);
+const QUANTIF = `(?:${[...MOT_NOMBRE.keys()].join('|')}|\\d{1,3})`;
+
+/**
+ * Ce que la phrase dit de la quantité, pour les mots d'une famille.
+ *
+ * @returns {number|'plusieurs'|null}
+ */
+export function combienDit(q, motsRe) {
+  if (!motsRe) return null;
+  let haut = null;
+  const noms = motsRe.source.replace(/^\\b|\\b$/g, '');
+  // Le quantifieur colle au mot, avec au plus un adjectif entre les deux :
+  // « deux gros joints » oui, « deux heures après le joint » non.
+  const re = new RegExp(`\\b(${QUANTIF})\\s+([a-z]+s?\\s+)?(?:${noms})s?\\b`, 'g');
+  for (const m of q.matchAll(re)) {
+    /*
+     * L'ORDINAL GAGNE SUR L'ARTICLE QUI LE PRÉCÈDE. « un deuxième joint » :
+     * le premier mot dit « un », le second dit qu'il y en a eu deux. Sans
+     * cette ligne l'ordinal tombait dans la place de l'adjectif et la phrase
+     * rendait 1 — c'est-à-dire l'inverse de ce qu'elle dit.
+     */
+    const milieu = (m[2] ?? '').trim();
+    const mot = MOT_NOMBRE.has(milieu) ? milieu : m[1];
+    const v = MOT_NOMBRE.has(mot) ? MOT_NOMBRE.get(mot) : Number(mot);
+    if (v === PLUSIEURS) { if (haut == null || haut === 1) haut = PLUSIEURS; continue; }
+    if (!Number.isFinite(v) || v < 1 || v > 200) continue;
+    if (haut === PLUSIEURS) { if (v >= 2) haut = v; continue; }
+    if (haut == null || v > haut) haut = v;
+  }
+  return haut;
+}
+
+/*
+ * =====================================================================
+ *  LE ROUGE NE S'ALLUME QUE SUR UN NOMBRE ÉCRIT. J'AI ESSAYÉ DEUX AUTRES
+ *  RÈGLES, ET LA MESURE LES A TUÉES TOUTES LES DEUX.
+ *
+ * 1. « DEUX MENTIONS DANS LA JOURNÉE ». Sur un journal réel, le 31 août :
+ *    « il va falloir que je fume moins », « le début de la weed quotidienne
+ *    c'était en mai », « là je suis en train de fumer à 18h ». Trois mentions
+ *    — une prise, une intention, un rappel — à côté d'un « un joint » écrit
+ *    noir sur blanc. La barre passait au rouge sur une journée où la personne
+ *    avait compté UN. Écrire plusieurs fois SUR une chose n'est pas en prendre
+ *    plusieurs, et la règle punissait exactement l'écriture réflexive que ce
+ *    journal existe pour encourager.
+ *
+ * 2. « UNE PHRASE QUI DIT QU'ON RECOMMENCE » — encore un, une autre, un
+ *    deuxième. Sur la même journée : « c'est pas ENCORE UN prérequis pour
+ *    sortir », « ENCORE UNE FOIS, c'est pas un vrai argument », « j'ai
+ *    vraiment UN AUTRE état ». Quatre idiomes français, zéro vraie reprise.
+ *    C'est le piège déjà documenté sur la famille des paris : un mot qui est
+ *    une tournure courante une fois désaccentué ne compte qu'avec son contexte
+ *    attaché, ou pas du tout.
+ *
+ * CE QUI RESTE EST CE QUI NE PEUT RIEN VOULOIR DIRE D'AUTRE : un nombre ou un
+ * ordinal COLLÉ au produit. « deux joints », « un troisième verre », « des
+ * bières ». Le reste se tait — et se taire, ici, c'est ne pas peindre en rouge
+ * une soirée qu'on n'a pas mesurée.
+ * =====================================================================
+ */
+
+/**
+ * La journée porte-t-elle PLUSIEURS, au sens de la personne ?
+ *
+ * @param {number|'plusieurs'|null} combien  ce qu'elle a écrit du nombre
+ *
+ * `null` N'EST PAS PLUSIEURS, et n'est pas un non plus : elle n'a rien dit.
+ */
+export const plusieursFois = (combien) =>
+  combien === PLUSIEURS || (Number.isFinite(combien) && combien >= 2);
+
 /**
  * Une famille jetable, fabriquée pour un suivi déclaré.
  *
@@ -473,8 +584,31 @@ export function prisesDuTexte(texte, siennes = []) {
          */
         if ((!franc || f.sien) && GARDES_SUBSTANCE.intention.test(q)
             && !/\bj ai\b|\bje me suis\b|\bhier\b/.test(q)) continue;
-        if (!out.has(f.cle)) out.set(f.cle, { phrase: phrase.trim().slice(0, 200), signes: [], lus: [] });
-        const lus = out.get(f.cle).lus;
+        if (!out.has(f.cle)) out.set(f.cle,
+          { phrase: phrase.trim().slice(0, 200), signes: [], lus: [], combien: null, mentions: 0 });
+        const vu = out.get(f.cle);
+        const lus = vu.lus;
+        /* Combien, si c'est écrit — et le nombre de FOIS qu'elle en parle. Les
+           deux sont des faits ; ni l'un ni l'autre ne se devine. */
+        vu.mentions++;
+        /*
+         * DEUX NOMBRES DIFFÉRENTS DANS LA MÊME JOURNÉE : ON N'EN CHOISIT AUCUN.
+         *
+         * Le premier jet gardait le PLUS GRAND. Mesuré sur un journal réel, le
+         * 4 septembre : « je viens de prendre 6 anxios », puis « j'ai déjà pris
+         * 12 anxio et j'ai survécu ». Le second est un souvenir, pas une dose
+         * du jour — et l'écran affichait 12 pour une journée à 6.
+         *
+         * On ne sait pas trancher lequel est celui d'aujourd'hui, et deviner
+         * afficherait un chiffre que personne n'a écrit POUR CE JOUR-LÀ. On
+         * rend donc « plusieurs » : c'est ce qui reste vrai, et la couleur —
+         * qui ne regarde que « au moins deux » — ne change pas pour autant.
+         */
+        const c = combienDit(q, f.mots ?? f.franc);
+        if (c == null) { /* rien dit dans cette proposition */ }
+        else if (vu.combien == null) vu.combien = c;
+        else if (vu.combien === PLUSIEURS) { /* déjà au plus flou qu'on sache dire */ }
+        else if (c === PLUSIEURS || c !== vu.combien) vu.combien = PLUSIEURS;
         /* `MOTS_G` est figee sur les familles ecrites a la main. Une famille
            declaree fabrique la sienne a la volee : sans ca, `lus` resterait
            vide et la vue afficherait la categorie au lieu du mot ecrit. */
@@ -622,11 +756,16 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   const vues = new Map();            // cle -> { jours: [], preuves: Map<date, phrase>, lus: Map<mot, n>, reperes: n }
   const signesParJour = new Map();   // date -> [signe]
   const declare = new Set();         // les familles que les repères et les objectifs nomment
-  const poser = (cle, date, phrase, lus = [], source = 'ecrit') => {
-    if (!vues.has(cle)) vues.set(cle, { jours: [], preuves: new Map(), lus: new Map(), reperes: 0 });
+  const poser = (cle, date, phrase, lus = [], source = 'ecrit', combien = null) => {
+    if (!vues.has(cle)) vues.set(cle,
+      { jours: [], preuves: new Map(), lus: new Map(), reperes: 0, combien: new Map() });
     const x = vues.get(cle);
     if (!x.preuves.has(date)) { x.jours.push(date); x.preuves.set(date, phrase); if (source === 'repere') x.reperes++; }
     for (const m of lus) x.lus.set(m, (x.lus.get(m) ?? 0) + 1);
+    /* Ce qu'elle a écrit de la quantité ce jour-là, et combien de fois elle en
+       a parlé. Un repère n'en dit rien : `combien` reste null, et null n'est
+       pas 1 (voir `combienDit`). */
+    if (combien != null && !x.combien.has(date)) x.combien.set(date, combien);
   };
   const signaler = (date, signes) => {
     if (!signes.length) return;
@@ -638,7 +777,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
     const t = e.text;
     if (!String(t ?? '').trim()) continue;
     const lu = luDuTexte(t, siennes, sceau);
-    for (const [cle, v] of lu.prises) poser(cle, e.date, v.phrase, v.lus);
+    for (const [cle, v] of lu.prises) poser(cle, e.date, v.phrase, v.lus, 'ecrit', v.combien);
     signaler(e.date, lu.signes);
   }
 
@@ -843,14 +982,35 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   }
   const rang = new Map(semaines.map((s, i) => [s.de, i]));
   for (const p of prises) {
+    const v = vues.get(p.cle);
     const n = semaines.map(s => s.ecrites ? 0 : null);
+    /*
+     * ET L'INTENSITÉ DE LA SEMAINE, À CÔTÉ DU COMPTE.
+     *
+     * La hauteur d'une barre dit COMBIEN DE JOURS. Elle ne dit rien de ce qui
+     * s'est passé DANS un jour — « un joint » et « cinq joints » font la même
+     * barre. `plusieurs_semaine` porte le seul fait qui manque, et seulement
+     * quand il est ÉCRIT : un nombre d'au moins deux, un « des » / « quelques »,
+     * ou deux mentions dans la même journée.
+     *
+     * Une journée où elle n'a rien dit de la quantité ne pèse pas : `combien`
+     * vaut alors null, et null n'est pas 1 — le supposer puis le colorer
+     * inventerait une dose.
+     */
+    const fort = semaines.map(() => false);
     for (const d of p.jours) {
       const i = rang.get(LUNDI(d));
       // Un jour compté dans une semaine que le sol dit muette ne peut pas
       // exister — mais si ça arrivait, il fait foi : la semaine a été écrite.
-      if (i != null) n[i] = (n[i] ?? 0) + 1;
+      if (i == null) continue;
+      n[i] = (n[i] ?? 0) + 1;
+      if (plusieursFois(v?.combien?.get(d) ?? null)) fort[i] = true;
     }
     p.par_semaine = n;
+    p.plusieurs_semaine = fort;
+    /* Ce qu'elle a écrit de la quantité, jour par jour : la frise s'en sert
+       pour le dire au survol, sans jamais l'inventer là où c'est absent. */
+    p.combien_par_jour = Object.fromEntries(v?.combien ?? []);
   }
 
   /* L'ordre : ce qui a des signes d'abord, puis ce qui monte, puis le

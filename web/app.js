@@ -3475,9 +3475,11 @@ function serieMarkup(serie, { titre = 'reconnu', de = null, a = null } = {}) {
   const x = d => ((jour(d) - j0) / large) * W;
   const marques = pts.map(p => {
     const h = [2, 40, 70, 100][p.valeur] ?? 40;
+    /* `dit` : ce que la personne a écrit de la quantité ce jour-là, quand elle
+       l'a écrit. Absent, on ne met rien — on ne dit pas « 1 ». */
     return `<rect x="${x(p.periode).toFixed(2)}" y="${(H * (1 - h / 100)).toFixed(2)}"
       width="0.9" height="${(H * h / 100).toFixed(2)}" rx="0.4"
-      ><title>${esc(fmtDay(p.periode))} · ${titre}</title></rect>`;
+      ><title>${esc(fmtDay(p.periode))} · ${titre}${esc(p.dit ?? '')}</title></rect>`;
   }).join('');
   const jours = j1 - j0 + 1;
   return `<span class="tserie" role="img"
@@ -4118,36 +4120,82 @@ const ICO_SIGNE = { arreter: 'pause', craque: 'refaire', manque: 'refaire',
  */
 const SEMAINES_VUES = 26;
 
+/**
+ * L'INTENSITÉ D'UNE SEMAINE, EN COULEUR — ET CE QU'ELLE A LE DROIT DE DIRE.
+ *
+ * Une échelle qui monte vers le rouge QUALIFIE, et c'est précisément ce que ce
+ * tableau refuse partout ailleurs. Ce qui la rend tenable ici : elle ne colore
+ * pas le fait d'en avoir pris, elle colore UNE QUANTITÉ QUE LA PERSONNE A
+ * ÉCRITE. « deux joints » est de sa main ; la couleur ne fait que le rendre
+ * visible à côté des autres semaines.
+ *
+ *   vert    1 à 2 jours
+ *   jaune   3 à 4 jours
+ *   orange  5 jours et plus
+ *   rouge   au moins un jour où elle en a écrit PLUSIEURS
+ *
+ * LE ROUGE NE SE DEVINE JAMAIS. Il demande un nombre d'au moins deux, un
+ * « des » / « quelques », ou deux mentions dans la même journée. Une journée
+ * où elle a écrit « j'ai fumé » sans dire combien ne le déclenche pas : on ne
+ * sait pas, et supposer « un » puis colorer inventerait une dose.
+ */
+const RSEM_NIVEAU = n => n >= 5 ? 3 : n >= 3 ? 2 : 1;
+
 function rythmeMarkup(p, semaines) {
   const par = p.par_semaine ?? [];
   if (!semaines?.length || par.length !== semaines.length) return '';
+  const forts = p.plusieurs_semaine ?? [];
   const haut = Math.max(1, ...par.filter(n => n != null));
   const barres = semaines.map((sem, i) => {
     const n = par[i];
     if (n == null)
       return `<span class="rsem muet" title="${esc(`semaine du ${fmtDay(sem.de)} — rien d’écrit`)}"></span>`;
     const h = n ? Math.max(3, Math.round(n / haut * 26)) : 1;
-    return `<span class="rsem${n ? '' : ' zero'}" style="height:${h}px"
-      title="${esc(`semaine du ${fmtDay(sem.de)} — ${n} jour${n > 1 ? 's' : ''} sur ${
-        sem.ecrites} écrite${sem.ecrites > 1 ? 's' : ''}`)}"></span>`;
+    const cl = !n ? 'zero' : forts[i] ? 'fort' : `n${RSEM_NIVEAU(n)}`;
+    const dit = `semaine du ${fmtDay(sem.de)} — ${n} jour${n > 1 ? 's' : ''} sur ${
+      sem.ecrites} écrite${sem.ecrites > 1 ? 's' : ''}`
+      + (forts[i] ? `, dont un où tu en as écrit plusieurs` : '');
+    return `<span class="rsem ${cl}" style="height:${h}px" title="${esc(dit)}"></span>`;
   }).join('');
   return `<div class="prsem">${barres}</div>`;
 }
 
+/*
+ * DEUX RANGS, DEUX ÉCHELLES DE TEMPS — ET ILS NE S'ALIGNENT PLUS.
+ *
+ * Ils partageaient un axe imposé de vingt-six semaines. Ça les rendait
+ * comparables et ça les rendait surtout INUTILES tous les deux : la frise du
+ * haut, qui existe pour montrer le détail des derniers jours, écrasait ses
+ * marques sur trois pour cent de la largeur.
+ *
+ * Chacun répond maintenant à sa question, à son échelle :
+ *   en haut  — les 30 derniers jours, jour par jour : « quand, ces temps-ci »
+ *   en bas   — six mois, semaine par semaine : « est-ce que ça se resserre »
+ *
+ * ET C'EST DIT SOUS CHACUN. Deux rangs superposés qui ne couvrent pas la même
+ * période, sans que rien ne le dise, se lisent comme un seul axe — et l'œil
+ * en tire des coïncidences de dates qui n'existent pas. C'était le défaut
+ * qu'on cherchait à corriger en les alignant ; l'étiquette le corrige sans
+ * abîmer les deux dessins.
+ */
+const JOURS_VUS = 30;
+
 function joursMarkup(p, toutes) {
-  // La même fenêtre pour les deux rangs, et elle vient du SOL : la dernière
-  // semaine du sol est « maintenant », quelle que soit la famille.
   const semaines = (toutes ?? []).slice(-SEMAINES_VUES);
-  const depuis = semaines[0]?.de ?? null;
-  // La fin de l'axe : le dimanche de la dernière semaine du sol, pour que la
-  // dernière fente et la dernière marque tombent au même bord.
-  const finFenetre = semaines.length
+  const vue = { ...p, par_semaine: (p.par_semaine ?? []).slice(-SEMAINES_VUES),
+                plusieurs_semaine: (p.plusieurs_semaine ?? []).slice(-SEMAINES_VUES) };
+  /* La fenêtre du haut part de la FIN du sol, pas du dernier jour compté : un
+     mois sans rien doit se voir comme un mois sans rien, pas se recadrer sur
+     la dernière fois. */
+  const finSol = semaines.length
     ? new Date(Date.parse(semaines.at(-1).de + 'T00:00:00Z') + 6 * 864e5).toISOString().slice(0, 10)
     : null;
-  const vue = { ...p, par_semaine: (p.par_semaine ?? []).slice(-SEMAINES_VUES) };
-  const jours = (p.jours ?? [])
-    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!depuis || d >= depuis));
-  if (jours.length < 2) return '';
+  const depuis = finSol
+    ? new Date(Date.parse(finSol + 'T00:00:00Z') - (JOURS_VUS - 1) * 864e5).toISOString().slice(0, 10)
+    : null;
+  const tous = (p.jours ?? []).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  const jours = tous.filter(d => !depuis || d >= depuis);
+  if (tous.length < 2) return '';
   /* Le record qui reste, et le seul : l'écart le plus long. Il disparaissait
      avec les barres, et c'est précisément la compensation que l'argument
      Marlatt exige en échange du refus du compteur — les jours d'avant ne
@@ -4168,18 +4216,23 @@ function joursMarkup(p, toutes) {
    * ne s'effacent pas) ; elle ne vaut que si elle est vraie.
    */
   const record = p.lecture === 'series' ? p.plus_longue : 0;
+  const cmb = p.combien_par_jour ?? {};
+  const ditJour = d => {
+    const c = cmb[d];
+    return c == null ? '' : c === 'plusieurs' ? ' · plusieurs' : ` · ${c}`;
+  };
   return `<div class="pjours">
-    ${/* LE MÊME AXE QUE LE RANG DU DESSOUS, IMPOSÉ. Sans ces bornes, la frise
-          se recadrait sur ses seuls jours comptés — douze jours étalés sur
-          toute la largeur — pendant que le rythme couvrait vingt-six semaines.
-          Les deux rangs semblaient se répondre et ne parlaient pas du même
-          temps. */''}
-    ${serieMarkup(jours.map(d => ({ periode: d, valeur: 2 })),
-                  { titre: 'compté', de: depuis, a: finFenetre })}
-    ${rythmeMarkup(vue, semaines)}
-    <span class="psleg faint">${jours.length} jour${jours.length > 1 ? 's' : ''} comptés,
-      du ${fmtDay(jours[0])} au ${fmtDay(jours.at(-1))}${
-      record ? ` · le plus long sans&nbsp;: <b>${record} jours</b>` : ''}</span>
+    ${jours.length ? `<div class="prang">
+      ${serieMarkup(jours.map(d => ({ periode: d, valeur: 2, dit: ditJour(d) })),
+                    { titre: 'compté', de: depuis, a: finSol })}
+      <span class="psleg faint">${jours.length} jour${jours.length > 1 ? 's' : ''} sur les 30 derniers</span>
+    </div>` : `<p class="psleg faint">Rien sur les 30 derniers jours.</p>`}
+    <div class="prang">
+      ${rythmeMarkup(vue, semaines)}
+      <span class="psleg faint">six mois, par semaine · ${tous.length} jour${
+        tous.length > 1 ? 's' : ''} comptés en tout${
+        record ? ` · le plus long sans&nbsp;: <b>${record} jours</b>` : ''}</span>
+    </div>
   </div>`;
 }
 

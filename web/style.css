@@ -4603,16 +4603,39 @@ details.jpecol .jpetop { margin-top: 5px; }
    1300 : les deux rangs partageaient bien le même axe de temps et ne le
    dessinaient pas à la même échelle — le décalage se lisait comme un décalage
    de dates. */
-/* LA MÊME BOÎTE QUE LA FRISE, PAS SEULEMENT LE MÊME AXE. `.pjours .tserie`
-   est borné à 520 px ; sans la même borne ici, les deux rangs calculaient la
-   même date à deux abscisses différentes, et un jour compté se dessinait
-   au-dessus de la semaine d'à côté. Deux rangs qui prétendent partager un axe
-   doivent partager la largeur qui le porte. */
+/*
+ * LES DEUX RANGS NE PARTAGENT PLUS D'AXE, ET C'EST VOULU.
+ *
+ * Ils étaient bornés à la même largeur pour que la même date tombe à la même
+ * abscisse. Mais ils ne couvrent plus la même période — trente jours en haut,
+ * six mois en bas — et forcer la même boîte ne ferait plus que les tasser.
+ * Chacun prend la largeur qu'il a, et une légende sous chacun dit sa période :
+ * c'est ÇA qui empêche de les lire comme un seul axe.
+ */
+.prang { margin: 0 0 10px; }
+.prang:last-child { margin-bottom: 0; }
 .prsem { display: flex; align-items: flex-end; gap: 2px; height: 28px;
-  margin: 6px 0 0; width: 100%; max-width: 520px; }
+  margin: 0; width: 100%; max-width: 520px; }
 .rsem { flex: 1 1 0; min-width: 2px; border-radius: 2px 2px 0 0;
-  background: var(--accent); opacity: .55; transition: opacity .15s; }
+  background: var(--rc, var(--accent)); opacity: .6; transition: opacity .15s; }
 .rsem:hover { opacity: 1; }
+/*
+ * LA RAMPE, ET CE QU'ELLE A LE DROIT DE DIRE.
+ *
+ * Une échelle qui monte vers le rouge QUALIFIE — ce que ce tableau refuse
+ * partout ailleurs. Ce qui la rend tenable : elle ne colore pas le fait d'en
+ * avoir pris, elle colore UNE QUANTITÉ QUE LA PERSONNE A ÉCRITE. « deux
+ * joints » est de sa main ; la couleur ne fait que le rendre visible à côté
+ * des autres semaines.
+ *
+ * Le rouge ne se devine jamais : il demande un nombre d'au moins deux, un
+ * « des » / « quelques », ou deux mentions le même jour. Une journée où elle a
+ * écrit « j'ai fumé » sans dire combien ne le déclenche pas.
+ */
+.rsem.n1 { --rc: var(--accent); }
+.rsem.n2 { --rc: #d9d24a; }                 /* 3 à 4 jours */
+.rsem.n3 { --rc: var(--warn); }              /* 5 jours et plus */
+.rsem.fort { --rc: var(--danger); opacity: .8; }  /* un jour à plusieurs */
 /* Écrit, rien compté : un trait au sol. Il se voit, il ne se revendique pas —
    aucun superlatif n'est posé dessus (voir l'argument Marlatt côté serveur). */
 .rsem.zero { opacity: .3; }
