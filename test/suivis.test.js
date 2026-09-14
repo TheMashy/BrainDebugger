@@ -245,3 +245,49 @@ test('ÉCRIRE UN SUIVI VIDE LE CALCUL MÉMOISÉ', async () => {
     assert.match(bout, /invalidate\(userId\)/,
       `${nom} /api/suivis n’invalide pas le cache : la modification ne se verra pas`);
 });
+
+/* ================= l'éditeur ================= */
+
+test('LES DEUX CASES SONT DEUX GESTES DISTINCTS À L’ÉCRAN', () => {
+  /*
+   * Une seule case ferait de « le compagnon peut m’en parler » le prix de
+   * « compte-le ». Ce test lit le source parce que le rendu est une chaîne :
+   * ce qu'il garde, c'est que les deux champs existent séparément côté vue.
+   */
+  const src = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+  const i = src.indexOf('function casesMarkup');
+  assert.ok(i > 0, 'les cases n’existent plus sous ce nom');
+  const corps = src.slice(i, src.indexOf('\n}', i));
+  assert.match(corps, /'actif'/);
+  assert.match(corps, /'demander'/);
+});
+
+test('DÉCOCHER « COMPTER » DÉCOCHE AUSSI « EN PARLER »', () => {
+  // Le compagnon ne peut pas avoir le droit de parler d'une chose qu'on vient
+  // de retirer du tableau — il aurait la permission et plus les chiffres.
+  const src = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(!etat\.actif\) etat\.demander = false;/,
+    'décocher « compter » laisse « en parler » allumé');
+});
+
+test('UNE CHOSE AJOUTÉE À LA MAIN NE PEUT PAS ÉCRASER UNE FAMILLE DU MOTEUR', () => {
+  /*
+   * Sans préfixe, quelqu'un qui tape « cannabis » poserait la clé « cannabis »
+   * et écraserait la ligne de la famille écrite à la main — celle dont
+   * l'expression est bien meilleure que tout ce qu'on fabriquerait depuis
+   * quelques mots.
+   */
+  const src = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+  const i = src.indexOf('async function ajouterSuivi');
+  assert.ok(i > 0);
+  assert.match(src.slice(i, i + 1200), /cle: `sien:\$\{base\}`/,
+    'la clé n’est plus préfixée : une saisie peut prendre la place d’une famille du moteur');
+});
+
+test('LE GENRE SE VOIT SUR LA LIGNE', () => {
+  // Un traitement n'a ni record, ni pente, ni signes. Trois absences sans
+  // explication se lisent « il ne se passe rien » au lieu de « on ne surveille
+  // pas ».
+  const src = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+  assert.match(src, /p\.genre === 'traitement' \? `<span class="ptraite/);
+});

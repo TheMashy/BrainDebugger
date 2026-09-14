@@ -55,10 +55,13 @@ const enTetes = (json = false) => ({
   ...(FUSEAU ? { 'X-Fuseau': FUSEAU } : {})
 });
 
-async function api(path, body) {
+/** @param {string} [methode] pour les rares routes qui ne sont pas un POST —
+    retirer un suivi en est une, et c'est la seule suppression franche du
+    produit (voir `retirerSuivi` côté serveur). */
+async function api(path, body, methode = 'POST') {
   if (body !== undefined) FONCT = FONCT_AN = NUITS = PRISES = null;   // une note, une mesure, une synchro : la carte des fonctionnements est à refaire
   const res = await fetch(path, body
-    ? { method: 'POST', headers: enTetes(true), body: JSON.stringify(body) }
+    ? { method: methode, headers: enTetes(true), body: JSON.stringify(body) }
     : { headers: enTetes() });
   // session expirée ou déconnexion : on repasse par le verrou au lieu
   // d'empiler des erreurs dans la console
@@ -4194,6 +4197,13 @@ function priseMarkup(p) {
     <header>
       <span class="pico">${ico(ICO_PRISE[p.cle] ?? 'point', 16)}</span>
       <b>${esc(p.nom)}</b>
+      ${/* LE GENRE SE VOIT SUR LA LIGNE. Un traitement n'a ni record, ni pente,
+            ni signes — trois absences, et rien n'expliquait pourquoi. On lit
+            alors « il ne se passe rien » là où on a demandé qu'on ne surveille
+            pas. Le mot le dit, en petit, une fois. */''}
+      ${p.genre === 'traitement' ? `<span class="ptraite faint"
+        title="Un traitement se compte : combien, quand. Il ne se surveille pas — pas de record, pas de pente."
+        >traitement</span>` : ''}
       ${/* Le seul geste offert : reposer ces jours-là sur la bande, au milieu des
             cycles et des bascules. C'est là qu'on voit après quoi ça tombe —
             un tableau de chiffres ne l'a jamais montré à personne. */''}
@@ -4201,6 +4211,7 @@ function priseMarkup(p) {
       <span class="pdepuis faint">dernière fois&nbsp;: ${p.depuis === 0 ? 'aujourd’hui'
         : p.depuis === 1 ? 'hier'
         : `il y a ${p.depuis} jours`}</span>
+      ${casesMarkup(p.cle, p.suivi)}
     </header>
 
     ${avant ? `<p class="pavant">${ico('fleche', 13)}
@@ -4227,12 +4238,106 @@ function priseMarkup(p) {
   </article>`;
 }
 
+/**
+ * =====================================================================
+ *  CE QUE TU SUIS, ET CE DONT TU ACCEPTES QU'ON TE PARLE.
+ *
+ * L'éditeur vit ICI, sur la carte qui montre les comptes, et pas dans un
+ * panneau de réglages. C'est la leçon des « objectifs », retirés en leur temps
+ * avec cet argument : un suivi séparé disait « voilà ce que tu as décidé »,
+ * alors que la question qu'on se pose vraiment est « voilà à quoi ça tient ».
+ * On règle une chose là où on la regarde.
+ *
+ * DEUX CASES, PAS UNE, ET C'EST TOUT L'ENJEU DE CET ÉCRAN.
+ *
+ *   compter    — ça entre dans ce tableau
+ *   en parler  — le compagnon a le droit d'ouvrir le sujet
+ *
+ * Suivre une consommation dans un tableau qu'on ouvre quand on veut, et se la
+ * faire demander au milieu d'une conversation, ne sont pas la même chose.
+ * Confondre les deux ferait de la seconde le prix de la première. « en parler »
+ * est donc décoché par défaut, partout : sur ce terrain, l'oubli doit tomber du
+ * côté du silence.
+ *
+ * LE GENRE N'EST PAS UNE ÉTIQUETTE. « traitement » retire le record
+ * d'abstinence, la pente et les signes — on ne met pas une ordonnance sous
+ * surveillance — et impose au compagnon une question de COMPTE (« tu en as pris
+ * combien ? ») plutôt qu'un « pas trop ? ».
+ * =====================================================================
+ */
+const SUIVI_DE = (P, cle) => (P?.suivis ?? []).find(s => s.cle === cle) ?? null;
+
+function casesMarkup(cle, s) {
+  const on = (champ, actif, dit) => `<button class="scase${actif ? ' on' : ''}"
+    data-suivi-bascule="${esc(cle)}" data-champ="${champ}"
+    aria-pressed="${actif ? 'true' : 'false'}">${dit}</button>`;
+  return `<span class="scases">
+    ${on('actif', !s || s.actif, 'compter')}
+    ${on('demander', !!s?.demander, 'en parler')}
+  </span>`;
+}
+
+function suivisMarkup(P) {
+  const connues = new Set((P?.prises ?? []).map(p => p.cle));
+  /* Ce qu'elle suit et qui n'apparaît PAS dans le tableau : soit écrit moins de
+     trois jours, soit décoché. Sans cette liste, décocher une chose la ferait
+     disparaître de l'écran — et on ne pourrait plus la recocher. */
+  const ailleurs = (P?.suivis ?? []).filter(s => !connues.has(s.cle));
+  return `<div class="suivis">
+    <p class="sdit faint">Ce que tu suis. « en parler » donne au compagnon le droit
+      d’ouvrir le sujet&nbsp;; sans cette case il a les chiffres et se tait.</p>
+    ${ailleurs.length ? `<ul class="sliste">${ailleurs.map(s => `<li>
+      <span class="snom">${esc(s.nom)}</span>
+      ${s.genre === 'traitement' ? '<span class="sgenre faint">traitement</span>' : ''}
+      ${casesMarkup(s.cle, s)}
+      <button class="soter" data-suivi-oter="${esc(s.cle)}" title="ne plus suivre">×</button>
+    </li>`).join('')}</ul>` : ''}
+    <form class="sajout" data-suivi-ajout>
+      <input name="nom" placeholder="autre chose à suivre" maxlength="60" autocomplete="off">
+      <input name="mots" placeholder="les mots que tu emploies" maxlength="120" autocomplete="off">
+      <label class="straite"><input type="checkbox" name="traitement"> c’est un traitement</label>
+      <button type="submit">ajouter</button>
+    </form>
+  </div>`;
+}
+
+/**
+ * Poser un suivi depuis le formulaire.
+ *
+ * LA CLÉ EST DÉRIVÉE DU NOM, ET PRÉFIXÉE. Sans le préfixe « sien: », quelqu'un
+ * qui tape « cannabis » écraserait la ligne de la famille écrite à la main —
+ * celle dont l'expression est bien meilleure que tout ce qu'on fabriquerait.
+ * Le préfixe garantit qu'une chose ajoutée à la main ne peut jamais prendre la
+ * place d'une chose que le moteur sait déjà reconnaître.
+ */
+async function ajouterSuivi(form) {
+  if (!form) return;
+  const nom = String(form.nom?.value ?? '').trim();
+  const mots = String(form.mots?.value ?? '').trim();
+  if (!nom) return;
+  const base = nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  if (!base) return toast?.('Ce nom ne donne pas d’identifiant utilisable.');
+  try {
+    const r = await api('/api/suivis', {
+      cle: `sien:${base}`, nom, mots: mots || nom,
+      genre: form.traitement?.checked ? 'traitement' : 'reduire',
+      actif: 1, demander: 0 });
+    if (r?.erreur) return toast?.(r.erreur);
+    PRISES = null;
+    return renderLecture();
+  } catch (err) { toast?.(`Ça n’a pas été ajouté — ${err.message}`); }
+}
+
 function prisesMarkup(P) {
   if (!P) return '';
   if (!P.assez) return `<p class="pvide faint">Pas encore assez de journées écrites pour compter quoi que ce soit.</p>`;
-  if (!P.prises.length) return `<p class="pvide faint">Rien n’est écrit 3 jours ou plus.
-    ${P.ecartees.length ? `Écrit 1 ou 2 jours&nbsp;: ${P.ecartees.map(e => esc(e.nom)).join(', ')} — il en faut 3 pour compter.` : ''}</p>`;
-  return `<div class="prises">${P.prises.map(p => priseMarkup({ ...p, fenetre: P.fenetre, semaines: P.semaines })).join('')}
+  if (!P.prises.length) return `<div class="prises"><p class="pvide faint">Rien n’est écrit 3 jours ou plus.
+    ${P.ecartees.length ? `Écrit 1 ou 2 jours&nbsp;: ${P.ecartees.map(e => esc(e.nom)).join(', ')} — il en faut 3 pour compter.` : ''}</p>
+    ${suivisMarkup(P)}</div>`;
+  return `<div class="prises">${P.prises.map(p => priseMarkup({ ...p, fenetre: P.fenetre,
+      semaines: P.semaines, suivi: SUIVI_DE(P, p.cle) })).join('')}
+    ${suivisMarkup(P)}
     <p class="pnote faint">Ce tableau compte des jours écrits et te rend tes phrases. Il ne dit pas ce que tu es.</p>
   </div>`;
 }
@@ -5342,6 +5447,60 @@ function wireLecture() {
       BANDE_LECTURE = true; BANDE_MODE = 'prise';
       await renderLecture();
       $('.bandewrap')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    /*
+     * LES DEUX CASES D'UN SUIVI.
+     *
+     * Le serveur est la seule source : on ne peint pas l'état à l'avance. Ce
+     * n'est pas le même arbitrage que pour un ressenti — là-bas le geste doit
+     * se voir tout de suite, et un échec se retire. Ici, une case « en parler »
+     * qui s'allumerait sans que le serveur l'ait enregistrée ferait croire à
+     * une permission donnée. Une permission affichée et non enregistrée est
+     * pire qu'un demi-seconde d'attente.
+     */
+    const sb = e.target.closest('[data-suivi-bascule]');
+    if (sb) {
+      const cle = sb.dataset.suiviBascule, champ = sb.dataset.champ;
+      const p = (PRISES?.prises ?? []).find(x => x.cle === cle);
+      const s = (PRISES?.suivis ?? []).find(x => x.cle === cle);
+      const etat = { cle, nom: s?.nom ?? p?.nom ?? cle, mots: s?.mots ?? null,
+                     genre: s?.genre ?? p?.genre ?? 'reduire',
+                     actif: s ? !!s.actif : true, demander: !!s?.demander };
+      etat[champ] = !etat[champ];
+      /* Décocher « compter » décoche aussi « en parler » : le compagnon ne peut
+         pas avoir le droit de parler d'une chose qu'on a retirée du tableau. */
+      if (!etat.actif) etat.demander = false;
+      sb.disabled = true;
+      try {
+        const r = await api('/api/suivis', etat);
+        if (r?.erreur) throw new Error(r.erreur);
+        PRISES = null;
+        return renderLecture();
+      } catch (err) { toast?.(`Ça n’a pas été enregistré — ${err.message}`); sb.disabled = false; }
+      return;
+    }
+
+    /*
+     * AJOUTER QUELQUE CHOSE À SUIVRE.
+     *
+     * Le bouton est dans un <form>, donc le clic passe par ici avant que le
+     * navigateur ne recharge la page — d'où le `preventDefault` explicite.
+     * Il se déclenche AUSSI sur « Entrée » dans un champ, ce qui est le geste
+     * naturel et qu'on ne veut pas perdre : c'est pour ça qu'on écoute le
+     * bouton ET la soumission plutôt que le seul clic.
+     */
+    const sa = e.target.closest('[data-suivi-ajout] button[type="submit"]');
+    if (sa) { e.preventDefault(); return ajouterSuivi(sa.closest('form')); }
+
+    const so = e.target.closest('[data-suivi-oter]');
+    if (so) {
+      try {
+        await api('/api/suivis', { cle: so.dataset.suiviOter }, 'DELETE');
+        PRISES = null;
+        return renderLecture();
+      } catch (err) { toast?.(`Ça n’a pas été retiré — ${err.message}`); }
       return;
     }
     // Une journée citée par un fonctionnement s'ouvre : la preuve est à un clic.

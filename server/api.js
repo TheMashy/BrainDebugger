@@ -87,7 +87,18 @@ export function invalidate(userId) {
 }
 function prisesDe(userId = OWNER) {
   if (!_prises.has(userId))
-    _prises.set(userId, prises(userId, { carte: getLecture(userId)?.contenu?.carte ?? null }));
+    /*
+     * LES SUIVIS SONT DANS L'OBJET MÉMOÏSÉ, PAS ENVELOPPÉS AUTOUR.
+     *
+     * Enveloppés (`{ ...prisesDe(u), suivis }`), deux appels de suite rendaient
+     * deux objets différents : l'analyse restait bien partagée, mais la
+     * propriété « la route rend le même objet » — qui a son test — tombait, et
+     * avec elle la seule garde qui dit que le calcul n'est pas refait à chaque
+     * ouverture de la carte. Ici c'est gratuit : les deux écritures de suivi
+     * invalident déjà ce cache.
+     */
+    _prises.set(userId, { ...prises(userId, { carte: getLecture(userId)?.contenu?.carte ?? null }),
+                          suivis: lesSuivis(userId) });
   return _prises.get(userId);
 }
 function series(userId = OWNER) {
@@ -3218,6 +3229,10 @@ export const routes = {
    * comptages, les séries et les signes ne demandent que le journal ; seul le
    * déclencheur manque, et il manque en silence plutôt que de tout retenir.
    */
+  /* Les suivis voyagent AVEC les prises : l'écran qui les montre est celui qui
+     les règle, et un second appel pour deux cases à cocher ferait clignoter la
+     carte entre les deux réponses. Ils sont posés dans `prisesDe`, à l'intérieur
+     du cache — voir l'argument là-bas. */
   'GET /api/prises': ({ userId }) => prisesDe(userId),
 
   /*

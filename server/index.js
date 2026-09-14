@@ -528,7 +528,11 @@ async function traiter(req, res) {
   if (routes[key]) {
     try {
       const query = Object.fromEntries(url.searchParams);
-      const body = req.method === 'POST' ? await readBody(req) : {};
+      /* Le corps se lit sur tout ce qui n'est pas un GET. Il ne se lisait que
+         sur POST : une route DELETE recevait donc un corps vide en silence, et
+         son `body.cle` valait `undefined` — elle répondait « il faut dire
+         lequel » à un appel qui le disait. */
+      const body = req.method === 'GET' ? {} : await readBody(req);
       const out = await routes[key]({ query, body, req, userId: currentUser(req) });
       return json(res, out && out.error ? 400 : 200, out);
     } catch (err) {
