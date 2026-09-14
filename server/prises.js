@@ -240,6 +240,9 @@ export const FAMILLES = [
  * =====================================================================
  */
 
+/** Tous les verbes de prise réunis : un nom de produit ne peut pas en être un. */
+const VERBES_DE_PRISE = ou(V_PRENDRE, V_BOIRE, V_FUMER);
+
 /** Les mots d'un suivi, nettoyés : normalisés, échappés, dédoublonnés. */
 export function motsDuSuivi(brut) {
   const vus = new Set();
@@ -249,6 +252,27 @@ export function motsDuSuivi(brut) {
     // ce qui reste après `norm` ne peut plus contenir de métacaractère, mais on
     // ne s'appuie pas là-dessus — `norm` peut changer, cette garde reste vraie.
     if (n.length < 3 || !/^[a-z0-9 ]+$/.test(n)) continue;
+    /*
+     * UN CHIFFRE N'EST PAS UN NOM DE PRODUIT. « 100 » et « 2 mg » passaient :
+     * « j'ai pris 100 euros » devenait un jour de prise. Il faut au moins une
+     * suite de trois lettres quelque part dans le mot.
+     */
+    if (!/[a-z]{3}/.test(n)) continue;
+    /*
+     * ET SURTOUT : UN MOT QUI EST DÉJÀ UN VERBE DE PRISE FAIT S'EFFONDRER LA
+     * RÈGLE ENTIÈRE.
+     *
+     * Une famille déclarée compte quand le mot ET un verbe de prise sont dans
+     * la même proposition. Si le mot EST le verbe, il satisfait les deux
+     * conditions à lui seul. `V_PRENDRE` contient « dose », « sous », « tape »,
+     * « avale », « gobe », « consomme » — mesuré : un suivi sur « sous » compte
+     * « je suis passé sous le pont », un suivi sur « dose » compte « trois
+     * doses de sirop pour la toux ».
+     *
+     * On refuse plutôt que de bricoler : ces mots-là ne désignent de toute
+     * façon aucun produit, et quelqu'un qui suit un médicament a son nom.
+     */
+    if (VERBES_DE_PRISE.test(n)) continue;
     vus.add(n.replace(/\s+/g, ' '));
   }
   return [...vus].slice(0, 20);
@@ -377,9 +401,20 @@ function luDuTexte(texte, siennes = [], sceau = '') {
   return v;
 }
 
-/** Ce qui identifie un jeu de familles declarees : leur cle et leurs mots. */
+/**
+ * Ce qui identifie un jeu de familles declarees.
+ *
+ * LE GENRE Y EST, ET CE N'EST PAS DE LA PRECAUTION GRATUITE. La detection n'en
+ * depend pas aujourd'hui -- seul ce qu'on calcule APRES en depend. Mais c'est
+ * exactement la forme du piege deja vecu vingt lignes plus haut : le jour ou
+ * une garde de detection regardera le genre (le prescrit qui ne compte que
+ * pour un traitement, par exemple), basculer traitement <-> reduire ne
+ * changerait plus rien et resservirait l'analyse d'avant, sans qu'aucune
+ * erreur ne se voie. Le cout est un recalcul par bascule ; l'economie serait
+ * une detection figee que personne ne verrait figee.
+ */
 const sceauDe = siennes => siennes.length
-  ? empreinte(siennes.map(f => `${f.cle}=${f.mots?.source ?? ''}`).join('\u0000'))
+  ? empreinte(siennes.map(f => `${f.cle}=${f.genre ?? ''}=${f.mots?.source ?? ''}`).join('\u0000'))
   : '';
 
 /**
@@ -420,9 +455,24 @@ export function prisesDuTexte(texte, siennes = []) {
         if (f.sauf?.test(q)) continue;               // « un verre d'eau » n'est pas un verre
         const franc = f.franc.test(q);
         if (!franc && !(f.mots?.test(q) && f.verbe?.test(q))) continue;
-        // « j'ai envie de boire » n'est pas « j'ai bu » : l'envie est un signe,
-        // pas un jour de prise. Elle est relevée plus bas, sur le même texte.
-        if (!franc && GARDES_SUBSTANCE.intention.test(q) && !/\bj ai\b|\bje me suis\b|\bhier\b/.test(q)) continue;
+        /*
+         * « j'ai envie de boire » n'est pas « j'ai bu » : l'envie est un signe,
+         * pas un jour de prise. Elle est relevée plus bas, sur le même texte.
+         *
+         * ET LA GARDE VAUT AUSSI QUAND `franc` EST VRAI, POUR LES FAMILLES
+         * DÉCLARÉES. Leur `franc` est « un nombre collé au produit », et
+         * `NOMBRE` contient « un | une » : « envie de prendre UN anxio ce soir »
+         * le satisfaisait donc, et sautait cette ligne. Mesuré : la phrase
+         * comptait comme un jour de prise — un soir de médicament inventé, sur
+         * un traitement. L'en-tête de `familleDuSuivi` promettait exactement le
+         * contraire ; c'est ici que la promesse se tient.
+         *
+         * Les six familles écrites à la main gardent l'exemption : leur `franc`
+         * liste des tournures qui ne peuvent rien vouloir dire d'autre
+         * (« bourré », « gueule de bois »), pas un nombre suivi d'un mot.
+         */
+        if ((!franc || f.sien) && GARDES_SUBSTANCE.intention.test(q)
+            && !/\bj ai\b|\bje me suis\b|\bhier\b/.test(q)) continue;
         if (!out.has(f.cle)) out.set(f.cle, { phrase: phrase.trim().slice(0, 200), signes: [], lus: [] });
         const lus = out.get(f.cle).lus;
         /* `MOTS_G` est figee sur les familles ecrites a la main. Une famille
@@ -545,11 +595,25 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
     .filter(s => s?.actif && !dejaLa.has(String(s.cle)))
     .map(familleDuSuivi).filter(Boolean);
   const sceau = sceauDe(siennes);
-  /* Le genre par cle : il decide plus bas si une chose se SURVEILLE ou se
-     COMPTE, et il vaut aussi pour les familles ecrites a la main qu'un suivi
-     declare comme traitement. */
-  const genreDe = new Map((suivis ?? []).map(s => [String(s.cle), s.genre === 'traitement' ? 'traitement' : 'reduire']));
-  const parle = new Set((suivis ?? []).filter(s => s?.actif && s?.demander).map(s => String(s.cle)));
+  /*
+   * DÉSACTIVER VAUT POUR LES SIX FAMILLES ÉCRITES À LA MAIN, AUSSI.
+   *
+   * `actif` n'était filtré que sur les familles fabriquées ; les six autres
+   * étaient ajoutées sans condition. Mesuré : on décoche « le cannabis », il
+   * reste compté et affiché. Un interrupteur qui n'éteint rien est pire qu'une
+   * absence d'interrupteur — on croit avoir retiré la chose de l'écran.
+   */
+  const eteintes = new Set((suivis ?? []).filter(s => s && !s.actif).map(s => String(s.cle)));
+  /*
+   * LE GENRE, ET IL NE VIENT QUE D'UN SUIVI ACTIF.
+   *
+   * `genre` et `parle` se décidaient à une ligne d'écart, l'un filtrant `actif`
+   * et l'autre non : un suivi éteint repeignait donc la famille en
+   * « traitement » tout en refusant d'en parler. Une seule règle pour les deux.
+   */
+  const vivants = (suivis ?? []).filter(s => s?.actif);
+  const genreDe = new Map(vivants.map(s => [String(s.cle), s.genre === 'traitement' ? 'traitement' : 'reduire']));
+  const parle = new Set(vivants.filter(s => s?.demander).map(s => String(s.cle)));
   const rows = (entrees ?? []).filter(e => e?.date).sort((a, b) => a.date < b.date ? -1 : 1);
   const ecrits = rows.filter(e => String(e.text ?? '').trim()).map(e => e.date);
   const fin = aujourdhui ?? ecrits.at(-1) ?? null;
@@ -608,8 +672,10 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
 
   const prises = [], ecartees = [];
   for (const f of [...FAMILLES, ...siennes]) {
+    if (eteintes.has(f.cle)) continue;
     const v = vues.get(f.cle);
     if (!v) continue;
+    const soigne = (genreDe.get(f.cle) ?? f.genre) === 'traitement';
     v.jours.sort();
     if (v.jours.length < SEUILS_PRISES.min_jours) {
       /* « ce n'est pas une habitude » posait l'étiquette que le seuil de trois
@@ -656,10 +722,42 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
          fenêtres peuvent différer, on rend leur taille : la vue dit « 12 sur
          30 » contre « 5 sur 28 » plutôt qu'un chiffre nu. */
       avant_sur: avants.length,
-      compare: avants.length >= SEUILS_PRISES.min_compare,
+      /*
+       * =================================================================
+       *  UN TRAITEMENT SE COMPTE. IL NE SE SURVEILLE PAS.
+       *
+       * `genre` était livré comme une étiquette qui ne décidait rien. Mesuré
+       * sur un journal de soixante jours où l'anxiolytique est pris tous les
+       * soirs sauf un creux de douze, le tableau rendait `plus_longue: 12` et
+       * `compare: true` — c'est-à-dire, à l'écran :
+       *
+       *     « ton record : 12 jours sans ton traitement »
+       *     « est-ce que ça monte ? 28 sur 30, contre 20 sur 30 avant »
+       *
+       * Ces deux phrases sont exactement ce que ce fichier et la table
+       * promettent de ne jamais dire d'une ordonnance. Mettre un traitement
+       * sous surveillance fabrique une inquiétude, et fait parfois arrêter un
+       * traitement.
+       *
+       * CE QU'ON LUI RETIRE : le record d'abstinence (les séries), la pente
+       * (la comparaison des deux fenêtres), les signes (« tu as craqué »,
+       * « vouloir arrêter » — qui ne nomment pas ce qui a craqué et se
+       * colleraient sous un médicament prescrit), et la place en tête du tri.
+       *
+       * CE QU'ON LUI GARDE, ET C'EST TOUT L'INTÉRÊT DE LE SUIVRE : les jours,
+       * le compte, le rythme, la dernière fois. La différence entre
+       * « combien, quand » et « est-ce que ça monte ».
+       *
+       * ON NE LUI RETIRE PAS SES JOURS. Appliquer ici la garde du prescrit
+       * ferait disparaître tous les soirs — c'est-à-dire tous — et un tableau
+       * vide sur une chose qu'on suit se lit « il n'y en a pas eu » : la pire
+       * des deux erreurs.
+       * =================================================================
+       */
+      compare: soigne ? false : avants.length >= SEUILS_PRISES.min_compare,
       depuis: fin && v.jours.at(-1) ? jours(v.jours.at(-1), fin) : null,
-      series: seriesSans(v.jours, ecrits, fin),
-      signes: signesRetenus(v.jours, signesParJour, ecrits, f.cle, alias),
+      series: soigne ? [] : seriesSans(v.jours, ecrits, fin),
+      signes: soigne ? [] : signesRetenus(v.jours, signesParJour, ecrits, f.cle, alias),
       avant_ca: ceQuiVientAvant(v.jours, carte, suite),
       apres_ca: leLendemain(v.jours, suite, noteDe, seuilBas)
     });
@@ -760,7 +858,11 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
      première ligne pendant que les stimulants doublent en silence. */
   const pente = p => !p.compare ? 0
     : p.recent / Math.max(1, p.recent_sur) - p.avant / Math.max(1, p.avant_sur);
-  rattacherReprises(prises, signesParJour, ecrits);
+  /* Une reprise NUE (« j'ai craqué ») ne nomme pas ce qui a craqué : la
+     rattacher à la famille la plus proche sans regarder le genre écrirait
+     « tu as repris » sous un médicament prescrit. Les traitements sortent du
+     panier avant le rattachement. */
+  rattacherReprises(prises.filter(p => p.genre !== 'traitement'), signesParJour, ecrits);
   prises.sort((a, b) => (b.signes.length - a.signes.length) || (pente(b) - pente(a)) || (b.n - a.n));
 
   return {
