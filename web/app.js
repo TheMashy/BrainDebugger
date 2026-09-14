@@ -4581,16 +4581,22 @@ function carteMarkup(carte) {
     <div class="cartelegende">${
       [...new Set(carte.noeuds.map(n => n.genre))].map(g =>
         `<span><i style="--g:${TEINTE_GENRE[g]}"></i>${esc(NOM_GENRE[g] ?? g)}</span>`).join('')}
-      ${/* Sans cette ligne, la couronne se lit comme une décoration. Elle dit
-            aussi la règle de couleur en une phrase : le contour est déclaré, le
-            plein est mesuré. */''}
-      ${carte.noeuds.some(n => n.jours?.length)
-        ? `<span class="cartepoints">un point&nbsp;= une journée</span>` : ''}
-      ${/* La pointe est COMPTÉE, pas déclarée : la légende le dit, sinon on
-            lirait la flèche comme le verbe du modèle, alors qu'elle est ce
-            que les journées ont confirmé. */''}
-      ${carte.liens?.some(l => l.appui?.sens === 'de' || l.appui?.sens === 'vers')
-        ? `<span class="cartepoints">une pointe&nbsp;= compté : ceci, et cela la fois d’après</span>` : ''}
+      ${/* LES DEUX PHRASES N'EN FONT PLUS QU'UNE, sur une seule ligne.
+            Elles disaient la même famille de chose — ce qu'un dessin veut dire
+            — dans deux blocs séparés par un filet, ce qui forçait la légende
+            sur deux ou trois lignes de 11,5 px juste sous la toile.
+
+            Chaque moitié garde SA condition, et c'est la seule chose à ne pas
+            rater ici : une phrase fusionnée non conditionnée promettrait une
+            pointe comptée à une carte qui n'en dessine aucune — exactement
+            l'affirmation gratuite que ce produit refuse. */''}
+      ${(() => {
+        const dits = [];
+        if (carte.noeuds.some(n => n.jours?.length)) dits.push('un point = une journée');
+        if (carte.liens?.some(l => l.appui?.sens === 'de' || l.appui?.sens === 'vers'))
+          dits.push('une pointe = compté : ceci, et cela la fois d’après');
+        return dits.length ? `<span class="cartepoints">${dits.join('&nbsp;· ')}</span>` : '';
+      })()}
     </div>
   </div>`;
 }
@@ -4868,7 +4874,6 @@ function surveillesMarkup(C, schemas, { nu = false } = {}) {
       title="Des comptes contre les autres jours de la même période, jamais des causes. « net » veut dire que le hasard n’explique pas l’écart (test exact de Fisher à 5 %) ; sans « net », c’est un compte à regarder, pas une conclusion.">Les jours à surveiller, ce qui revient autour</div>
     <span class="lecmeta faint">${C.rythme ? esc(C.rythme) : `${C.n} ${C.n > 1 ? 'jours' : 'jour'} sur la période`}</span></div></div>`;
   if (C.manque) return `<section class="surv">${tete}<p class="sub" style="max-width:62ch">${esc(C.manque)}</p></section>`;
-  const genres = Object.entries(C.genres ?? {}).sort((a, b) => b[1] - a[1]).map(([g, n]) => `<span class="survgenre">${esc(SURV_GENRE[g] ?? g)} <b class="mono">${n}</b></span>`).join('');
   const jours = C.jours.slice(-40).map(j => `<button class="fjour ${j.niveau}" data-fonct-jour="${esc(j.date)}" title="${esc(j.genres.map(g => SURV_GENRE[g] ?? g).join(' · '))}">${esc(fmtDay(j.date).replace(/ \d{4}$/, ''))}</button>`).join('');
   /*
    * CE QUI TIENT SE MONTRE ; CE QUI NE TIENT PAS SE REPLIE.
@@ -4896,7 +4901,10 @@ function surveillesMarkup(C, schemas, { nu = false } = {}) {
   const boucleHtml = boucles.length ? `<div class="survboucles"><div class="foncttitre">${ico('refaire', 14)}<span>Les boucles où ces jours tombent</span></div>
     ${boucles.map(({ sc, dedans }) => `<p class="survboucle">« <b>${esc(sc.nom)}</b> » : ${dedans.length} de ses ${sc.jours.length} ${sc.jours.length > 1 ? 'journées' : 'journée'} ${dedans.length > 1 ? 'sont des jours' : 'est un jour'} à surveiller — ${esc(sc.comportement)}</p>`).join('')}</div>` : '';
   return `<section class="surv">${tete}
-    <div class="survgenres">${genres}</div>
+    ${/* LA RANGÉE DE GENRES AGRÉGÉS EST PARTIE. Chaque pastille de jour porte
+          déjà ses genres dans son `title`, et elle, on peut la cliquer pour
+          ouvrir la journée. Deux rangées de pastilles l'une au-dessus de
+          l'autre, dont une muette, c'est la même information deux fois. */''}
     <div class="fonctliste survjours">${jours}${C.jours.length > 40 ? `<span class="faint">… et ${C.jours.length - 40} autres</span>` : ''}</div>
     ${phrases}${replies}
     ${boucleHtml}
@@ -5099,8 +5107,11 @@ function fonctionnementsMarkup(F, { nu = false } = {}) {
     <div class="k faint">Comment ça marche chez toi</div>
     <span class="lecmeta faint">${fmtDay(p.de)} → ${fmtDay(p.a)} · ${p.notes} ${p.notes > 1 ? 'journées notées' : 'journée notée'} · ${p.nuits} ${p.nuits > 1 ? 'nuits' : 'nuit'} · ${p.textes} ${p.textes > 1 ? 'journées écrites' : 'journée écrite'}${large}${pas}</span>
   </div>`;
+  /* La phrase « Pas encore de quoi compter » est déjà l'état du repli FERMÉ,
+     mot pour mot et sur la même condition. On ouvre pour savoir ce qu'il
+     faudrait : ce sont les jauges, et elles chiffrent la distance. */
   if (!F.assez) return `<section class="fonct">${tete ? `<div class="lechead">${tete}</div>` : ''}
-    <p class="sub" style="max-width:62ch">Pas encore de quoi compter. ${F.manques.map(esc).join(' ')}</p></section>`;
+    ${jaugesMarkup(F.jauges, F.manques)}</section>`;
   const parType = new Map();
   for (const it of F.items) { if (!parType.has(it.type)) parType.set(it.type, []); parType.get(it.type).push(it); }
   const groupes = FONCT_ORDRE.filter(t => parType.has(t)).map(t => `
@@ -5121,10 +5132,38 @@ function fonctionnementsMarkup(F, { nu = false } = {}) {
    * un constat d'échec là où c'est une réponse honnête. La liste complète va
    * dans le repli, avec le reste de ce qu'on ne montre pas.
    */
-  const rien = F.items.length ? '' : `<p class="sub fonctrien">Sur cette période, aucun compte ne se détache pour l’instant : ce qui n’est pas là ne s’invente pas.</p>`;
+  /*
+   * QUAND RIEN NE SE DÉTACHE, LA LIGNE DIT CE QUI A ÉTÉ CHERCHÉ.
+   *
+   * Elle disait « aucun compte ne se détache pour l'instant » — c'est-à-dire
+   * la reformulation exacte de la ligne du repli FERMÉ, sur la même condition.
+   * Ouvrir le pli affichait la phrase qu'on venait de cliquer : un clic pour
+   * rien.
+   *
+   * Mais la supprimer creusait un trou pire que le doublon. Nommer les SIX
+   * familles cherchées est ce qui empêche de conclure qu'on n'en a regardé que
+   * trois — et cette liste était enterrée dans un repli qu'on n'ouvre pas.
+   * Elle remonte donc ici, une fois, à la place du doublon : la ligne fermée
+   * dit qu'il n'y a rien, la ligne ouverte dit ce qu'on a regardé.
+   */
+  const RIEN_TENU = 'Pas de bascule nette, pas de lien confirmé au comptage, pas de forme de '
+    + 'semaine ; un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la '
+    + 'veille sans non plus en repartir, des mots absolus qui ne suivent pas la note. Les six '
+    + 'comptes ont été faits pour l’instant, et aucun ne se détache.';
+  const rien = F.items.length ? '' : `<p class="sub fonctrien">${esc(RIEN_TENU)}</p>`;
   const manques = jaugesMarkup(F.jauges, F.manques);
   const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${
-    (F.items.length ? [] : ['Pas de bascule nette, pas de lien confirmé au comptage, pas de forme de semaine ; un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la veille sans non plus en repartir, des mots absolus qui ne suivent pas la note.']).concat(F.manques ?? []).map(x => `<li>${esc(x)}</li>`).join('')
+    /* `F.manques` N'EST PLUS RECOPIÉ ICI. Les jauges juste au-dessus portent
+       les mêmes quatre faits, avec la distance en plus — le serveur le dit
+       lui-même : elles REMPLACENT ces phrases. La vue les rendait toutes les
+       deux, à quinze pixels d'écart. */
+    /* NI `F.manques` NI LA LISTE DES SIX N'EST RECOPIÉE ICI.
+       Les jauges au-dessus portent les mêmes quatre faits que `manques`, avec
+       la distance en plus — le serveur dit lui-même qu'elles les REMPLACENT, et
+       la vue les rendait toutes les deux à quinze pixels d'écart. Et les six
+       familles sont maintenant sur la ligne visible, pas enterrées dans ce
+       repli : c'est justement la chose qu'il ne fallait pas cacher. */
+    ''
   }${F.exclus.map(e => `<li>${esc(e.raison)}</li>`).join('')}</ul></details>`;
   return `<section class="fonct">${tete ? `<div class="lechead">${tete}</div>` : ''}${rien}${fonctGraphe(F)}<div class="fonctgrille">${groupes}</div>${manques}${exclus}</section>`;
 }
@@ -5331,7 +5370,12 @@ async function renderLecture() {
 
     ${pliCarte({ dessin: 'alerte', titre: 'Les jours à surveiller',
       etat: FONCT?.surveilles?.n
-        ? `${FONCT.surveilles.n} jour${FONCT.surveilles.n > 1 ? 's' : ''}${FONCT.surveilles.rythme ? ` · ${FONCT.surveilles.rythme}` : ''}`
+        /* `rythme` COMMENCE DÉJÀ PAR LE COMPTE : « 11 jours à surveiller sur
+           180 jours, … ». La ligne fermée écrivait donc « 11 jours · 11 jours à
+           surveiller sur 180 jours » — et `.rgetat` est en nowrap avec
+           ellipsis, si bien que le doublon mangeait la moitié utile. */
+        ? (FONCT.surveilles.rythme
+           || `${FONCT.surveilles.n} jour${FONCT.surveilles.n > 1 ? 's' : ''}`)
         : null,
       corps: surveillesMarkup(FONCT?.surveilles, L.lecture?.schemas, { nu: true }) })}
   </div>${tissageMarkup()}`;

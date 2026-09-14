@@ -795,7 +795,7 @@ export function joursSurveilles(T, userId = OWNER, { veille = veilleDuJour, mess
   const ecarts = []; let grappes = 0, dansGrappe = false;
   for (let i = 1; i < dates.length; i++) { const e = Math.round((dates[i] - dates[i - 1]) / 864e5); ecarts.push(e); if (e <= 3) { if (!dansGrappe) grappes++; dansGrappe = true; } else dansGrappe = false; }
   const ecartMed = mediane(ecarts);
-  const rythme = ecartMed != null ? `${pl(n, 'jour à surveiller', 'jours à surveiller')} sur ${N} jours, ${ecartMed} jours d’écart en médiane${grappes ? `, ${pl(grappes, 'grappe', 'grappes')} de jours qui se suivent` : ''}.` : null;
+  const rythme = ecartMed != null ? `${pl(n, 'jour à surveiller', 'jours à surveiller')} sur ${N} jours, ${pl(ecartMed, 'jour d’écart', 'jours d’écart')} en médiane${grappes ? `, ${pl(grappes, 'grappe', 'grappes')} de jours qui se suivent` : ''}.` : null;
   // Ce qui s'écrit ces jours-là : les genres, comptés.
   const parGenre = {}; for (const j of jours) for (const g of j.genres) parGenre[g] = (parGenre[g] ?? 0) + 1;
   return { n, jours, rythme, ecart_median: ecartMed, grappes, genres: parGenre, phrases, manque: null };

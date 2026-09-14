@@ -306,3 +306,23 @@ test('les seuils du module sont ceux de la calibration du banc, à l’arrondi p
   assert.equal(SEUILS.lien.seuil, cal.seuils.var.seuil_var, 'lien');
   assert.equal(SEUILS.rupture.sommeil, cal.seuils.pheno.penalite, 'bascule de sommeil');
 });
+
+test('LA VUE NE REFORMULE PAS SA PROPRE LIGNE FERMÉE', () => {
+  /*
+   * Les deux replis de « Ma carte » portent leur état sur la ligne fermée :
+   * « pas encore de quoi compter », « rien ne se détache encore ». Le corps
+   * rendait la même phrase, sur la même condition, en premier — ouvrir le pli
+   * affichait donc la reformulation de ce qu'on venait de cliquer.
+   *
+   * Ce que la ligne OUVERTE doit apporter, c'est ce que la fermée ne dit pas :
+   * ce qui a été cherché, et ce qu'il faudrait pour que ça compte.
+   */
+  /* On lit le CODE du bloc, pas `textes` : l'extracteur rend tout le gabarit
+     de retour comme une seule grande chaîne, où un ancrage ne peut rien
+     matcher. Les deux phrases de la ligne fermée vivent dans `renderLecture`,
+     hors de ce découpage — toute occurrence ici est donc l'écho. */
+  const { code } = textesDeLaVue();
+  for (const phrase of ['Pas encore de quoi compter', 'aucun compte ne se détache pour l'])
+    assert.equal(code.includes(phrase), false,
+      `le corps répète sa ligne fermée : « ${phrase} »`);
+});

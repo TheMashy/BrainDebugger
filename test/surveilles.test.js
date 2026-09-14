@@ -77,3 +77,20 @@ test('aucune phrase de la machine ne porte un mot interdit', () => {
   for (const p of r.phrases) assert.doesNotMatch(p.phrase, MOTS_INTERDITS, p.phrase);
   assert.doesNotMatch(r.rythme, MOTS_INTERDITS);
 });
+
+test('« 1 jour d’écart », pas « 1 jours d’écart »', () => {
+  /*
+   * Ce défaut d'accord était invisible tant que la phrase vivait au fond d'un
+   * repli. Elle porte maintenant tout le résumé de la ligne fermée — c'est ce
+   * qui l'a rendu visible, et c'est la raison de le corriger ici : une
+   * compaction rend load-bearing ce qui traînait.
+   */
+  // Des jours rouges CONSÉCUTIFS : l'écart médian vaut alors 1, et c'est le
+  // seul cas où le défaut se voit. Espacés de deux, la phrase est juste dans
+  // les deux versions et le test ne prouverait rien.
+  const rouges = new Set([10, 11, 12, 13, 14, 15].map(dateDe));
+  const T = table(60, () => ({ note: 6 }));
+  const r = joursSurveilles(T, 'u', { veille: veilleDe(rouges), messages: messagesDe(23), niveau: niveauOui });
+  assert.ok(r.rythme, `pas de rythme rendu par ce décor (n=${r.n})`);
+  assert.equal(/\b1 jours d’écart/.test(r.rythme), false, r.rythme);
+});
