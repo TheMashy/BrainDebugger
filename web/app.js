@@ -3451,11 +3451,20 @@ let LECTURE_ERR = null;
  *
  * @param {Array<{periode: string, valeur: number}>} serie  un point par jour
  */
-function serieMarkup(serie, { titre = 'reconnu' } = {}) {
+/**
+ * @param {{de?: string, a?: string}} bornes  l'axe IMPOSÉ, quand un autre dessin
+ *   doit partager exactement le même. Sans elles, l'axe se déduit des points —
+ *   c'est le comportement historique, et celui de tous les autres appels.
+ *
+ *   Deux frises qui se superposent en croyant partager un axe alors que chacune
+ *   se recadre sur ses propres bornes est pire que deux dessins séparés : l'œil
+ *   lit une coïncidence de dates qui n'existe pas.
+ */
+function serieMarkup(serie, { titre = 'reconnu', de = null, a = null } = {}) {
   const pts = (serie ?? []).filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p?.periode ?? ''));
   if (!pts.length) return '';
   const jour = d => Math.floor(Date.parse(d + 'T00:00:00Z') / 864e5);
-  const j0 = jour(pts[0].periode), j1 = jour(pts.at(-1).periode);
+  const j0 = jour(de ?? pts[0].periode), j1 = jour(a ?? pts.at(-1).periode);
   // Trente jours de large au minimum : sur une plage d'un ou deux jours, une
   // marque occuperait la moitié de la frise et se lirait comme « tout le temps ».
   const large = Math.max(30, j1 - j0);
@@ -4051,48 +4060,123 @@ const ICO_SIGNE = { arreter: 'pause', craque: 'refaire', manque: 'refaire',
  * remis à zéro transforme un soir en échec total, et l'échec total est ce qui
  * fait enchaîner. Montrer les jours ne remplace pas les séries, ça les précède.
  */
-function joursMarkup(p) {
-  const jours = (p.jours ?? []).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
-  if (jours.length < 2) return '';
-  return `<div class="pjours">
-    ${serieMarkup(jours.map(d => ({ periode: d, valeur: 2 })), { titre: 'compté' })}
-    <span class="psleg faint">${jours.length} jour${jours.length > 1 ? 's' : ''} comptés,
-      du ${fmtDay(jours[0])} au ${fmtDay(jours.at(-1))}</span>
-  </div>`;
+/**
+ * =====================================================================
+ *  LES JOURS AVEC, ET LE RYTHME — UN SEUL DESSIN, UN SEUL AXE.
+ *
+ * Il y en avait deux. En haut les jours comptés à leur date ; en dessous, les
+ * INTERVALLES entre eux, en barres, sous la légende « jours d'affilée sans ».
+ *
+ * Le second ne mesurait rien de plus que le premier : `seriesSans` ne fait que
+ * relever l'écart entre deux jours marqués consécutifs, donc la hauteur d'une
+ * barre EST l'espacement entre deux barrettes de la frise, ré-encodé dans une
+ * grammaire opposée — le temps en haut, le rang en bas. Deux dessins, une
+ * mesure, et aucun des deux ne répondait à la question qu'on se pose vraiment
+ * en ouvrant ce tableau : est-ce que ça se resserre ?
+ *
+ * Le rang du bas compte donc maintenant les jours AVEC, semaine par semaine,
+ * sur le MÊME axe de temps que le rang du haut.
+ *
+ * ET NON, CE N'EST PAS LE COMPTEUR QUE L'ARGUMENT MARLATT REFUSE.
+ * Ce qu'il interdit (voir la tête de server/prises.js) est UN nombre qui
+ * retombe à zéro le lendemain d'un écart, parce qu'il transforme un soir en
+ * échec total et que l'échec total est ce qui fait enchaîner. Une fréquence
+ * hebdomadaire n'a pas d'événement de remise à zéro : un écart déplace UNE
+ * barre de un, et les quarante semaines d'avant restent là avec leur valeur.
+ * C'est même ce que le fichier réclame — « toutes les séries, côte à côte » —
+ * avec la semaine pour unité.
+ *
+ * DEUX CREUX QUI NE SE DESSINENT PAS PAREIL, ET C'EST LA MOITIÉ DU TRAVAIL.
+ *   · une semaine écrite sans prise : un trait plein, à ras. On SAIT.
+ *   · une semaine sans une ligne écrite : une fente vide, hachurée. On ne sait
+ *     pas, et c'est ce que `par_semaine[i] === null` veut dire.
+ * Les fondre ferait lire une abstinence là où il n'y a qu'un silence — sur ce
+ * terrain-là, c'est l'invention la plus facile et la plus coûteuse.
+ *
+ * ON NE MET AUCUN SUPERLATIF SUR LES ZÉROS. Pas de « meilleure semaine », pas
+ * de « 6 semaines à 0 » : un record de zéros est un compteur d'abstinence
+ * déguisé, qui se remet à zéro au premier écart. Le seul record gardé est
+ * l'écart le plus long, qui, lui, ne se revendique pas.
+ * =====================================================================
+ */
+/*
+ * LA FENÊTRE : SIX MOIS, ET C'EST UNE CORRECTION MESURÉE.
+ *
+ * Le rang couvrait TOUT le journal, de la première ligne écrite à aujourd'hui.
+ * Sur un vrai dossier — 27 journées écrites, dont l'essentiel sur les trois
+ * dernières semaines, et 1717 jours de compte — ça donnait 142 fentes dont 124
+ * hachurées : un mur de « on ne sait pas » dans lequel les trois semaines qui
+ * portent l'information tenaient sur 3 % de la largeur.
+ *
+ * Honnête, et illisible. Or l'axe du rang du haut, lui, ne couvre que les jours
+ * comptés : les deux rangs n'étaient donc pas le même axe, et deux axes censés
+ * être le même qui glissent l'un par rapport à l'autre valent moins que deux
+ * dessins séparés. Les deux sont maintenant bornés à la même fenêtre.
+ */
+const SEMAINES_VUES = 26;
+
+function rythmeMarkup(p, semaines) {
+  const par = p.par_semaine ?? [];
+  if (!semaines?.length || par.length !== semaines.length) return '';
+  const haut = Math.max(1, ...par.filter(n => n != null));
+  const barres = semaines.map((sem, i) => {
+    const n = par[i];
+    if (n == null)
+      return `<span class="rsem muet" title="${esc(`semaine du ${fmtDay(sem.de)} — rien d’écrit`)}"></span>`;
+    const h = n ? Math.max(3, Math.round(n / haut * 26)) : 1;
+    return `<span class="rsem${n ? '' : ' zero'}" style="height:${h}px"
+      title="${esc(`semaine du ${fmtDay(sem.de)} — ${n} jour${n > 1 ? 's' : ''} sur ${
+        sem.ecrites} écrite${sem.ecrites > 1 ? 's' : ''}`)}"></span>`;
+  }).join('');
+  return `<div class="prsem">${barres}</div>`;
 }
 
-/** Les séries sans, en barres sur une base commune : la plus longue donne l'échelle. */
-function seriesMarkup(p) {
-  const series = p.series;
-  if (!series?.length) return '';
-  /* Journal tenu : ce sont des séries SANS, et la plus longue est un record.
-     Journal ouvert un jour sur douze : ce ne sont que des écarts entre deux
-     fois — on ne sait pas ce qui s'est passé dedans, on ne le raconte donc
-     pas comme une abstinence. Voir `analyserPrises`. */
-  const sans = p.lecture !== 'ecarts';
-  const vues = series.slice(-14);
-  const haut = Math.max(...vues.map(s => s.jours), 1);
-  const barres = vues.map(s => {
-    const h = Math.max(3, Math.round(s.jours / haut * 34));
-    // Les pointillés ne servent qu'à distinguer, dans une lecture « sans », la
-    // série qu'on ne peut pas revendiquer. En lecture « écarts » ils n'ont plus
-    // rien à dire : tout le monde est logé à la même enseigne.
-    const cl = ['pbar', s.encours ? 'encours' : '', sans && s.maigre ? 'maigre' : ''].filter(Boolean).join(' ');
-    const dit = sans
-      ? `${s.jours} jour${s.jours > 1 ? 's' : ''} sans, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
-        + (s.trou > 21 ? ` — mais ${s.trou} jours sans rien écrire au milieu`
-           : s.maigre ? ` — écrit ${s.ecrites} fois seulement dedans` : '')
-      : `${s.jours} jours entre deux fois, du ${fmtDay(s.de)} au ${fmtDay(s.a)}`
-        + ` — écrit ${s.ecrites} fois dedans`;
-    return `<span class="${cl}" style="height:${h}px" title="${esc(dit)}"><i></i></span>`;
-  }).join('');
-  const record = sans ? p.plus_longue : p.plus_long_ecart;
-  return `<div class="pseries">
-    <div class="pbarres">${barres}</div>
-    <span class="psleg faint">${sans
-      ? `${vues.length < series.length ? 'les 14 dernières' : 'jours d’affilée sans'}, du plus ancien à maintenant`
-      : 'jours entre deux fois'}${
-      record ? ` · le plus long&nbsp;: <b>${record} jours</b>` : ''}</span>
+function joursMarkup(p, toutes) {
+  // La même fenêtre pour les deux rangs, et elle vient du SOL : la dernière
+  // semaine du sol est « maintenant », quelle que soit la famille.
+  const semaines = (toutes ?? []).slice(-SEMAINES_VUES);
+  const depuis = semaines[0]?.de ?? null;
+  // La fin de l'axe : le dimanche de la dernière semaine du sol, pour que la
+  // dernière fente et la dernière marque tombent au même bord.
+  const finFenetre = semaines.length
+    ? new Date(Date.parse(semaines.at(-1).de + 'T00:00:00Z') + 6 * 864e5).toISOString().slice(0, 10)
+    : null;
+  const vue = { ...p, par_semaine: (p.par_semaine ?? []).slice(-SEMAINES_VUES) };
+  const jours = (p.jours ?? [])
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!depuis || d >= depuis));
+  if (jours.length < 2) return '';
+  /* Le record qui reste, et le seul : l'écart le plus long. Il disparaissait
+     avec les barres, et c'est précisément la compensation que l'argument
+     Marlatt exige en échange du refus du compteur — les jours d'avant ne
+     s'effacent pas. On le nomme selon la densité du journal : « sans » quand
+     il est tenu, « entre deux fois » quand on ne sait pas ce qu'il y a dedans. */
+  /*
+   * LE RECORD NE SE DIT QUE QUAND IL VEUT DIRE QUELQUE CHOSE.
+   *
+   * Il affichait « le plus long écart : 473 jours » sur un dossier où ces 473
+   * jours sont simplement une période où la personne n'écrivait pas. Le mot
+   * « écart » y promet une mesure, et il n'y en a pas : c'est un trou de
+   * journal, pas une abstinence.
+   *
+   * `lecture` porte déjà exactement cette distinction côté serveur — « series »
+   * quand le journal est assez tenu pour que l'intervalle veuille dire quelque
+   * chose, « ecarts » sinon. On ne garde donc le record que dans le premier
+   * cas. C'est la compensation que l'argument Marlatt exige (les jours d'avant
+   * ne s'effacent pas) ; elle ne vaut que si elle est vraie.
+   */
+  const record = p.lecture === 'series' ? p.plus_longue : 0;
+  return `<div class="pjours">
+    ${/* LE MÊME AXE QUE LE RANG DU DESSOUS, IMPOSÉ. Sans ces bornes, la frise
+          se recadrait sur ses seuls jours comptés — douze jours étalés sur
+          toute la largeur — pendant que le rythme couvrait vingt-six semaines.
+          Les deux rangs semblaient se répondre et ne parlaient pas du même
+          temps. */''}
+    ${serieMarkup(jours.map(d => ({ periode: d, valeur: 2 })),
+                  { titre: 'compté', de: depuis, a: finFenetre })}
+    ${rythmeMarkup(vue, semaines)}
+    <span class="psleg faint">${jours.length} jour${jours.length > 1 ? 's' : ''} comptés,
+      du ${fmtDay(jours[0])} au ${fmtDay(jours.at(-1))}${
+      record ? ` · le plus long sans&nbsp;: <b>${record} jours</b>` : ''}</span>
   </div>`;
 }
 
@@ -4122,14 +4206,15 @@ function priseMarkup(p) {
     ${avant ? `<p class="pavant">${ico('fleche', 13)}
       <span>après « <b>${esc(avant.nom)}</b> », c’est écrit le jour d’après&nbsp;: ${avant.apres} fois sur ${avant.sur}</span></p>` : ''}
 
-    ${joursMarkup(p)}
-    ${seriesMarkup(p)}
+    ${joursMarkup(p, p.semaines)}
 
     <p class="pfen">
       <span class="pf"><b>${p.recent}</b> <span class="faint">des ${p.recent_sur ?? p.fenetre ?? 30} dernières journées écrites</span></span>
-      ${p.compare ? `<span class="pf faint">les ${p.avant_sur} d’avant&nbsp;: ${p.avant}</span>
-        <span class="ptend ${tendance}" title="${tendance === 'monte' ? 'plus souvent qu’avant'
-          : tendance === 'baisse' ? 'moins souvent qu’avant' : 'autant qu’avant'}"
+      ${/* LE CHIFFRE NU EST PARTI, LA FLÈCHE RESTE. « les 28 d'avant : 5 » ne
+            donnait que la matière première d'un calcul déjà rendu — la flèche
+            dit « plus souvent qu'avant » et son titre porte les deux taux. */''}
+      ${p.compare ? `<span class="ptend ${tendance}" title="${esc(
+          `${p.recent} sur ${p.recent_sur} — contre ${p.avant} sur ${p.avant_sur} avant`)}"
           >${tendance === 'monte' ? '↗' : tendance === 'baisse' ? '↘' : '='}</span>` : ''}
     </p>
 
@@ -4147,7 +4232,7 @@ function prisesMarkup(P) {
   if (!P.assez) return `<p class="pvide faint">Pas encore assez de journées écrites pour compter quoi que ce soit.</p>`;
   if (!P.prises.length) return `<p class="pvide faint">Rien n’est écrit 3 jours ou plus.
     ${P.ecartees.length ? `Écrit 1 ou 2 jours&nbsp;: ${P.ecartees.map(e => esc(e.nom)).join(', ')} — il en faut 3 pour compter.` : ''}</p>`;
-  return `<div class="prises">${P.prises.map(p => priseMarkup({ ...p, fenetre: P.fenetre })).join('')}
+  return `<div class="prises">${P.prises.map(p => priseMarkup({ ...p, fenetre: P.fenetre, semaines: P.semaines })).join('')}
     <p class="pnote faint">Ce tableau compte des jours écrits et te rend tes phrases. Il ne dit pas ce que tu es.</p>
   </div>`;
 }

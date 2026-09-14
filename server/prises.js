@@ -686,6 +686,75 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
     p.lecture = p.series.length && tenues >= p.series.length / 2 ? 'series' : 'ecarts';
   }
 
+  /*
+   * =====================================================================
+   *  LE RYTHME, SEMAINE PAR SEMAINE — ET SON DÉNOMINATEUR.
+   *
+   * La vue dessinait deux choses : les jours comptés à leur date, PUIS les
+   * intervalles entre eux, en barres. Le second est dérivé du premier —
+   * `seriesSans` ne fait que mesurer l'écart entre deux jours marqués
+   * consécutifs — donc la hauteur d'une barre EST l'espacement entre deux
+   * barrettes de la frise, ré-encodé dans une grammaire opposée (le temps en
+   * haut, le rang en bas). Deux dessins, une seule mesure.
+   *
+   * Ce qui répond vraiment à « est-ce que ça se resserre ? », c'est la
+   * FRÉQUENCE : combien de jours avec, par semaine.
+   *
+   * ET CE N'EST PAS UN COMPTEUR D'ABSTINENCE. L'argument Marlatt en tête de
+   * ce fichier interdit UN nombre qui retombe à zéro le lendemain d'un écart,
+   * parce qu'il transforme un soir en échec total. Une fréquence hebdomadaire
+   * n'a pas d'événement de remise à zéro : un écart déplace UNE barre de un,
+   * et les quarante semaines d'avant restent affichées avec leur valeur. C'est
+   * même ce que le fichier réclame — « on montre TOUTES les séries, côte à
+   * côte » — avec la semaine pour unité au lieu de l'intervalle.
+   *
+   * LE DÉNOMINATEUR EST OBLIGATOIRE, ET C'EST LA MOITIÉ DU TRAVAIL.
+   *
+   * Une semaine à zéro et une semaine sans rien d'écrit se dessineraient
+   * pareil — et se liraient « il n'y en a pas eu ». C'est l'inversion exacte
+   * de la règle du produit : un zéro se lit « c'était gratuit », un trou se
+   * lit « on ne sait pas ». `ecrites` dit combien de journées ont été écrites
+   * cette semaine-là ; à zéro, la barre vaut `null` et non `0`, et la vue a de
+   * quoi dessiner une fente vide plutôt qu'un plein mensonger.
+   *
+   * ON COMPTE, ON NE FAIT PAS DE TAUX. « 2 journées écrites, 2 avec » donnerait
+   * 100 % et hurlerait. La hauteur est un compte brut ; le sol est le nombre de
+   * journées écrites. Lisser en taux réintroduirait le mensonge.
+   * =====================================================================
+   */
+  const LUNDI = d => {
+    const t = new Date(d + 'T00:00:00Z');
+    t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+    return t.toISOString().slice(0, 10);
+  };
+  const semaines = [];
+  if (ecrits.length) {
+    const parSemaine = new Map();
+    for (const d of ecrits) parSemaine.set(LUNDI(d), (parSemaine.get(LUNDI(d)) ?? 0) + 1);
+    // Toutes les semaines du calendrier entre la première et la dernière, y
+    // compris celles sans une ligne : c'est précisément celles-là qu'il faut
+    // pouvoir dessiner en creux.
+    let cur = LUNDI(ecrits[0]);
+    const finS = LUNDI(fin ?? ecrits.at(-1));
+    for (let garde = 0; cur <= finS && garde < 1200; garde++) {
+      semaines.push({ de: cur, ecrites: parSemaine.get(cur) ?? 0 });
+      const t = new Date(cur + 'T00:00:00Z');
+      t.setUTCDate(t.getUTCDate() + 7);
+      cur = t.toISOString().slice(0, 10);
+    }
+  }
+  const rang = new Map(semaines.map((s, i) => [s.de, i]));
+  for (const p of prises) {
+    const n = semaines.map(s => s.ecrites ? 0 : null);
+    for (const d of p.jours) {
+      const i = rang.get(LUNDI(d));
+      // Un jour compté dans une semaine que le sol dit muette ne peut pas
+      // exister — mais si ça arrivait, il fait foi : la semaine a été écrite.
+      if (i != null) n[i] = (n[i] ?? 0) + 1;
+    }
+    p.par_semaine = n;
+  }
+
   /* L'ordre : ce qui a des signes d'abord, puis ce qui monte, puis le
      nombre. Le tabac, constant et sans signe, ne doit pas occuper la
      première ligne pendant que les stimulants doublent en silence. */
@@ -697,6 +766,9 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   return {
     assez: ecrits.length >= 2 * SEUILS_PRISES.min_jours,
     ecrites: ecrits.length, fenetre: SEUILS_PRISES.fenetre,
+    // Le sol, partagé : une seule liste pour toutes les familles, et chaque
+    // prise porte un `par_semaine` aligné sur le MÊME index.
+    semaines,
     de: ecrits[0] ?? null, a: fin, prises, ecartees
   };
 }

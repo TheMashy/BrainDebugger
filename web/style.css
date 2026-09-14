@@ -4580,19 +4580,45 @@ details.jpecol .jpetop { margin-top: 5px; }
 .pavant svg { flex: none; margin-top: 2px; color: var(--accent); }
 .pavant b { font-weight: 550; }
 
-/* Les séries : des barres sur une base commune. Toutes, pas la dernière — une
-   rechute est une barre parmi des barres, et les semaines d'avant restent là. */
-.pseries { margin: 0 0 9px; }
-.pbarres { display: flex; align-items: flex-end; gap: 4px; height: 42px; }
-.pbar { display: block; width: 14px; border-radius: 3px 3px 0 0;
-  background: var(--accent); opacity: .5; transition: opacity .15s; }
-.pbar:hover { opacity: .85; }
-.pbar.encours { opacity: 1; }
-/* Une série qu'on n'a presque pas écrite : le contour y est, le plein non.
-   On la voit, on ne peut pas s'en vanter. */
-.pbar.maigre { background: none; border: 1px dashed var(--ink-faint);
-  border-bottom: none; opacity: .85; }
-.pbar i { display: none; }
+/*
+ * LE RYTHME : LES JOURS AVEC, SEMAINE PAR SEMAINE.
+ *
+ * Il y avait ici des barres d'INTERVALLES (« jours d'affilée sans »), sur un
+ * axe de rang. Elles ne mesuraient rien que la frise juste au-dessus ne dise
+ * déjà — l'écart entre deux jours marqués EST l'espacement entre deux
+ * barrettes — et dans la grammaire inverse. Elles sont parties.
+ *
+ * Ce rang-ci est sur le MÊME axe de temps que la frise : une fente par semaine
+ * du calendrier, trous compris, alignée à gauche comme elle.
+ *
+ * TROIS ÉTATS, ET LES CONFONDRE SERAIT LE SEUL VRAI BUG DE CE DESSIN :
+ *   plein, haut   — N jours avec cette semaine-là
+ *   plein, à ras  — semaine écrite, aucun jour avec. On SAIT.
+ *   hachuré       — rien d'écrit de la semaine. On ne sait pas.
+ * Fondre les deux derniers ferait lire une abstinence là où il n'y a qu'un
+ * silence, ce qui est l'invention la plus facile de ce terrain.
+ */
+/* Le rang OCCUPE LA LARGEUR, comme la frise au-dessus. Borné à 12 px par
+   fente, vingt-six semaines tenaient sur 340 px dans un panneau qui en fait
+   1300 : les deux rangs partageaient bien le même axe de temps et ne le
+   dessinaient pas à la même échelle — le décalage se lisait comme un décalage
+   de dates. */
+/* LA MÊME BOÎTE QUE LA FRISE, PAS SEULEMENT LE MÊME AXE. `.pjours .tserie`
+   est borné à 520 px ; sans la même borne ici, les deux rangs calculaient la
+   même date à deux abscisses différentes, et un jour compté se dessinait
+   au-dessus de la semaine d'à côté. Deux rangs qui prétendent partager un axe
+   doivent partager la largeur qui le porte. */
+.prsem { display: flex; align-items: flex-end; gap: 2px; height: 28px;
+  margin: 6px 0 0; width: 100%; max-width: 520px; }
+.rsem { flex: 1 1 0; min-width: 2px; border-radius: 2px 2px 0 0;
+  background: var(--accent); opacity: .55; transition: opacity .15s; }
+.rsem:hover { opacity: 1; }
+/* Écrit, rien compté : un trait au sol. Il se voit, il ne se revendique pas —
+   aucun superlatif n'est posé dessus (voir l'argument Marlatt côté serveur). */
+.rsem.zero { opacity: .3; }
+/* Pas une ligne écrite : le contour, jamais le plein. On ne sait pas. */
+.rsem.muet { align-self: stretch; background: none; opacity: .5;
+  border-left: 1px dashed var(--ink-faint); border-radius: 0; }
 .psleg { display: block; margin-top: 5px; font-size: 11.5px; }
 .psleg b { color: var(--ink-dim); font-weight: 500; }
 
