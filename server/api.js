@@ -7,6 +7,7 @@ import {
   promouvoirMotif,
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
+  lesSuivis, poserSuivi, retirerSuivi,
   getLecture, setLecture, rembobiner, addReleve, relevesDuJour, relevesDuMessage, relevesDeToi, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
@@ -59,7 +60,7 @@ import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anc
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
-import { prises } from './prises.js';
+import { prises, FAMILLES, motsDuSuivi } from './prises.js';
 import { proposerLechelle, DU_COMPAGNON } from '../web/ressenti.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -3191,6 +3192,45 @@ export const routes = {
    * déclencheur manque, et il manque en silence plutôt que de tout retenir.
    */
   'GET /api/prises': ({ userId }) => prisesDe(userId),
+
+  /*
+   * CE QU'ELLE A DIT QU'ELLE SUIVAIT.
+   *
+   * Le moteur compte six familles qu'il sait reconnaitre. Il ne connait pas son
+   * traitement, et il ne peut pas connaitre tout ce qui existe sans devenir un
+   * catalogue de faux positifs. Ces routes sont la ou elle le lui dit.
+   *
+   * `invalidate` a CHAQUE ecriture, et ce n'est pas une precaution : le calcul
+   * des prises est memoise par utilisateur (`_prises`), et la memoisation du
+   * detecteur est clavee sur les familles declarees. Sans cet appel, on ajoute
+   * un mot, la page se recharge, et rien n'a bouge -- on conclut que ca ne
+   * marche pas.
+   */
+  'GET /api/suivis': ({ userId }) => ({ suivis: lesSuivis(userId) }),
+
+  'POST /api/suivis': ({ body, userId }) => {
+    const cle = String(body?.cle ?? '').trim();
+    if (!cle) return { erreur: 'il faut dire de quoi il s’agit' };
+    /* UNE CHOSE QU'ON NE SAIT PAS CHERCHER NE SE SUIT PAS -- et on le DIT.
+       Rangee muette, elle apparaitrait dans la liste, cochee, sans jamais rien
+       compter : la pire des deux erreurs, parce qu'elle se lit comme « il n'y
+       en a pas eu ». */
+    const dejaLa = FAMILLES.some(f => f.cle === cle);
+    if (!dejaLa && !motsDuSuivi(body?.mots).length)
+      return { erreur: 'il faut au moins un mot de trois lettres pour la retrouver dans tes journées' };
+    const s = poserSuivi({ cle, nom: body?.nom, mots: body?.mots, genre: body?.genre,
+                           actif: body?.actif ?? 1, demander: body?.demander ?? 0, userId });
+    invalidate(userId);
+    return { suivi: s, suivis: lesSuivis(userId) };
+  },
+
+  'DELETE /api/suivis': ({ body, query, userId }) => {
+    const cle = String(body?.cle ?? query?.cle ?? '').trim();
+    if (!cle) return { erreur: 'il faut dire lequel' };
+    const fait = retirerSuivi(cle, userId);
+    invalidate(userId);
+    return { retire: fait, suivis: lesSuivis(userId) };
+  },
 
   /*
    * TU RÉPONDS TOI-MÊME À LA QUESTION QU'IL VIENT DE POSER.

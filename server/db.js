@@ -204,6 +204,51 @@ CREATE TABLE IF NOT EXISTS objectifs (
 );
 CREATE INDEX IF NOT EXISTS idx_objectifs_user ON objectifs(user_id);
 
+/*
+ * CE QUE LA PERSONNE A DIT QU'ELLE SUIVAIT.
+ *
+ * "server/prises.js" compte tout seul six familles qu'il sait reconnaitre dans
+ * les mots du journal. C'est utile et c'est aveugle sur deux points, et les
+ * deux comptent :
+ *
+ * 1. IL NE CONNAIT PAS SON TRAITEMENT. Quelqu'un qui prend un anxiolytique
+ *    tous les soirs est compte dans « les calmants », au milieu de l'heroine
+ *    et de la morphine, avec un tableau qui demande « est-ce que ca monte ? ».
+ *    Ce n'est pas la meme question. "genre" la separe : un traitement se
+ *    COMPTE (combien, quand) et ne se SURVEILLE pas -- on ne met pas une
+ *    ordonnance sous surveillance, et le faire pousse a arreter un traitement.
+ *
+ * 2. IL NE CONNAIT QUE CE QUI EST DANS SA LISTE. Un produit qui n'y est pas
+ *    n'existe pas, et la liste ne peut pas etre exhaustive sans devenir un
+ *    catalogue de faux positifs. "mots" laisse la personne nommer le sien.
+ *
+ * DEUX CONSENTEMENTS, PAS UN. "actif" dit « compte-le » ; "demander" dit « tu
+ * as le droit de m'en parler ». Ce n'est pas la meme permission : suivre une
+ * consommation dans un tableau qu'on ouvre quand on veut, et se la faire
+ * demander au milieu d'une conversation, sont deux choses differentes, et
+ * confondre les deux ferait de la seconde le prix de la premiere.
+ *
+ * "demander" vaut 0 par defaut, et c'est deliberement le sens inverse de
+ * l'autre. Sur ce terrain, l'oubli doit tomber du cote du silence : personne
+ * ne se fait questionner sur sa consommation pour avoir omis de decocher.
+ */
+CREATE TABLE IF NOT EXISTS suivis (
+  id       INTEGER PRIMARY KEY,
+  user_id  TEXT NOT NULL DEFAULT '${OWNER}',
+  cle      TEXT NOT NULL,       -- 'cannabis' (une famille du moteur) ou 'sien:xxx' (la sienne)
+  nom      TEXT NOT NULL,       -- dans SES mots : « mon anxio du soir »
+  mots     TEXT,                -- ce qu'on cherche dans ses journees, separe par des virgules
+  genre    TEXT NOT NULL DEFAULT 'reduire',  -- 'reduire' | 'traitement'
+  actif    INTEGER NOT NULL DEFAULT 1,       -- compte-le et montre-le
+  demander INTEGER NOT NULL DEFAULT 0,       -- le compagnon a le droit d'en parler
+  cree_le  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_suivis_cle ON suivis(user_id, cle);
+
+-- LA COLONNE QU'ON N'AJOUTE JAMAIS : une dose cible. « 2 mg max » transforme
+-- chaque soir en reussite ou en echec, et l'echec est ce qui fait enchainer
+-- (voir l'argument Marlatt en tete de server/prises.js). On compte, on ne note pas.
+
 -- LA COLONNE QU'ON N'AJOUTE JAMAIS : un pourcentage de reussite. Un objectif
 -- tenu a 62 % n'apprend rien a la personne qui le vit, et transforme un
 -- indicateur en note.
@@ -1203,6 +1248,58 @@ export function setLecture({ contenu, jusqu_au, jours, modele, userId = OWNER,
 
 export const deleteLectures = (userId = OWNER) =>
   db.prepare('DELETE FROM lectures WHERE user_id = ?').run(userId).changes;
+
+/* ---------- suivis : ce que la personne a dit qu'elle suivait ---------- */
+
+export const lesSuivis = (userId = OWNER) => db.prepare(
+  `SELECT id, cle, nom, mots, genre, actif, demander, cree_le
+     FROM suivis WHERE user_id = ? ORDER BY genre, nom`
+).all(userId);
+
+/**
+ * POSER OU METTRE A JOUR UN SUIVI, SUR SA CLE.
+ *
+ * L'ecriture est un upsert et pas un insert : la cle est ce qui identifie la
+ * chose suivie (« cannabis », « sien:anxio »), et reposer la meme deux fois
+ * doit la corriger, pas la dedoubler. Un tableau qui contient deux fois « le
+ * cannabis » avec deux reglages contraires n'a plus de reponse a « est-ce que
+ * j'en parle ? ».
+ *
+ * `mots` arrive comme une chaine de la personne. On le range tel quel : c'est
+ * `server/prises.js` qui en fabrique une expression, et c'est LUI qui doit
+ * savoir echapper -- range ici, il serait echappe deux fois ou pas du tout
+ * selon l'appelant.
+ */
+export function poserSuivi({ cle, nom, mots = null, genre = 'reduire', actif = 1,
+                             demander = 0, userId = OWNER,
+                             quand = new Date().toISOString() }) {
+  const k = String(cle ?? '').trim().slice(0, 80);
+  if (!k) return null;
+  db.prepare(`
+    INSERT INTO suivis(user_id, cle, nom, mots, genre, actif, demander, cree_le)
+    VALUES(?,?,?,?,?,?,?,?)
+    ON CONFLICT(user_id, cle) DO UPDATE SET
+      nom = excluded.nom, mots = excluded.mots, genre = excluded.genre,
+      actif = excluded.actif, demander = excluded.demander
+  `).run(userId, k, String(nom ?? k).trim().slice(0, 120),
+         mots == null ? null : String(mots).trim().slice(0, 400) || null,
+         genre === 'traitement' ? 'traitement' : 'reduire',
+         actif ? 1 : 0, demander ? 1 : 0, quand);
+  return db.prepare('SELECT id, cle, nom, mots, genre, actif, demander, cree_le FROM suivis WHERE user_id = ? AND cle = ?')
+           .get(userId, k);
+}
+
+/**
+ * RETIRER UN SUIVI.
+ *
+ * C'est la seule suppression franche du produit, et elle est voulue : ce que
+ * quelqu'un a ecrit dans son journal ne s'efface pas, mais une declaration
+ * « surveille ceci » doit pouvoir se retirer entierement. La garder desactivee
+ * laisserait une ligne « le cannabis, desactive » dans une base qu'on exporte
+ * -- c'est-a-dire l'aveu, conserve, de ce qu'on a voulu retirer.
+ */
+export const retirerSuivi = (cle, userId = OWNER) =>
+  db.prepare('DELETE FROM suivis WHERE user_id = ? AND cle = ?').run(userId, String(cle)).changes > 0;
 
 /* ---------- objectifs ---------- */
 

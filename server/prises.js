@@ -49,7 +49,7 @@
  * =====================================================================
  */
 
-import { allEntries, allEvents, allObjectifs, OWNER } from './db.js';
+import { allEntries, allEvents, allObjectifs, lesSuivis, OWNER } from './db.js';
 import { norm, propositions, GARDES_SUBSTANCE } from './veille.js';
 import { sensDuLien, suiteDe, SEUILS_SENS } from './sens.js';
 import { fisher } from './fonctionnements.js';
@@ -193,6 +193,94 @@ export const FAMILLES = [
     sauf: FUMEE_SAUF, franc: FUMEE_NUE }
 ];
 
+/*
+ * =====================================================================
+ *  LES FAMILLES QUE LA PERSONNE A DÉCLARÉES ELLE-MÊME.
+ *
+ * La liste ci-dessus est bonne et bornée : six familles, écrites à la main,
+ * chacune payée en faux positifs. Elle ne peut pas être exhaustive — un
+ * catalogue de tous les produits et de tous les médicaments deviendrait un
+ * champ de mines de mots français ordinaires (voir le piège de « paris »,
+ * « cote », « mise » sur la famille des paris juste au-dessus).
+ *
+ * Alors on ne devine pas : la personne nomme ce qu'elle suit, et on cherche
+ * SES mots. C'est aussi la seule façon de suivre un traitement, que la liste
+ * ne peut pas connaître.
+ *
+ * TROIS RÈGLES, ET CHACUNE EMPÊCHE UNE FAÇON DE SE TROMPER.
+ *
+ * 1. ON ÉCHAPPE. Ces mots viennent d'un champ de saisie. « ( » ou « * » tapés
+ *    dedans feraient une expression invalide — donc une page qui tombe — et
+ *    « .* » ferait compter TOUTES ses journées comme des jours de prise. Ce
+ *    n'est pas une faille de sécurité ici (personne d'autre ne lit sa base),
+ *    c'est un tableau qui deviendrait faux sans prévenir.
+ *
+ * 2. ON NORMALISE COMME AU MOMENT DE CHERCHER. `norm` retire les accents avant
+ *    la comparaison. Quelqu'un qui tape « anxiolytique » cherche dans un texte
+ *    déjà désaccentué : sans passer ses mots par la même moulinette, « théralène »
+ *    ne rencontrerait jamais « theralene ».
+ *
+ * 3. TROIS LETTRES MINIMUM. « md » est dans la liste écrite à la main parce
+ *    qu'on a vérifié qu'il ne heurte rien ; un mot de deux lettres tapé à la
+ *    volée (« ap », « xa ») tomberait partout. Mieux vaut manquer une ligne
+ *    que teindre un journal entier.
+ *
+ * ET UN CHOIX DE FOND : PAS DE `franc` FABRIQUÉ DEPUIS UN MOT NU.
+ *
+ * `franc` fait compter sur le mot seul, sans verbe — et il court-circuite au
+ * passage la garde d'intention (« j'ai envie d'un anxio » n'est pas « j'ai
+ * pris un anxio »). Le donner à un mot tapé à la volée ferait compter chaque
+ * phrase où le produit est simplement NOMMÉ : « faut que je rachète des
+ * anxios », « le médecin m'a parlé d'anxio ». On garde donc `mots` + `verbe`,
+ * avec les mêmes verbes de prise que les familles écrites à la main.
+ *
+ * La seule exception est le compte explicite — « deux anxios », « 3 gouttes » —
+ * parce qu'un nombre collé au produit ne veut rien dire d'autre, et que c'est
+ * exactement la forme qu'on cherche ici : « combien ce soir ».
+ * =====================================================================
+ */
+
+/** Les mots d'un suivi, nettoyés : normalisés, échappés, dédoublonnés. */
+export function motsDuSuivi(brut) {
+  const vus = new Set();
+  for (const m of String(brut ?? '').split(/[,;\n]/)) {
+    const n = norm(m).trim();
+    // Trois lettres, et rien que des lettres, des chiffres ou des espaces :
+    // ce qui reste après `norm` ne peut plus contenir de métacaractère, mais on
+    // ne s'appuie pas là-dessus — `norm` peut changer, cette garde reste vraie.
+    if (n.length < 3 || !/^[a-z0-9 ]+$/.test(n)) continue;
+    vus.add(n.replace(/\s+/g, ' '));
+  }
+  return [...vus].slice(0, 20);
+}
+
+const NOMBRE = '(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|demi|quelques|plusieurs|\\d+)';
+
+/**
+ * Une famille jetable, fabriquée pour un suivi déclaré.
+ *
+ * @param {{cle:string, nom:string, mots:string, genre:string}} s
+ * @returns {object|null} une famille de la même forme que celles écrites à la main
+ */
+export function familleDuSuivi(s) {
+  const mots = motsDuSuivi(s?.mots);
+  if (!mots.length) return null;
+  // Les espaces d'un mot composé (« fleur de cbd ») deviennent « un ou plusieurs
+  // blancs » : `norm` écrase déjà les séparateurs, mais le texte cherché, lui,
+  // a pu garder un retour à la ligne au milieu.
+  const alt = mots.map(m => m.replace(/ /g, '\\s+')).join('|');
+  return {
+    cle: String(s.cle),
+    nom: String(s.nom ?? s.cle),
+    sym: s.genre === 'traitement' ? 'gelule' : 'point',
+    sien: true,
+    genre: s.genre === 'traitement' ? 'traitement' : 'reduire',
+    mots: new RegExp(`\\b(?:${alt})\\b`),
+    verbe: V_PRENDRE,
+    franc: new RegExp(`\\b${NOMBRE}\\s+(?:${alt})s?\\b`)
+  };
+}
+
 /** La famille qu'une phrase NOMME — le mot y est, sans qu'on sache si elle
     l'a pris. Sert au rattachement des signes et à la lecture des repères. */
 const nomme = np => FAMILLES.filter(f => f.mots?.test(np) && !f.sauf?.test(np)).map(f => f.cle);
@@ -264,17 +352,35 @@ function empreinte(t) {
   for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
   return `${t.length}:${(h >>> 0).toString(36)}`;
 }
-function luDuTexte(texte) {
+/*
+ * LE MEMO PORTE AUSSI LES FAMILLES DECLAREES, ET C'EST UN PIEGE VECU DE JUSTESSE.
+ *
+ * Il etait clave sur le seul texte. Des l'instant ou les familles peuvent
+ * changer -- on active un suivi, on corrige ses mots -- la meme journee rend
+ * alors le resultat d'AVANT, indefiniment, sans qu'aucune erreur ne se voie :
+ * on ajoute « anxio », on relit son journal, rien n'apparait, et on conclut
+ * que la detection ne marche pas.
+ *
+ * L'empreinte des familles entre donc dans la cle. Elle ne compte que les
+ * declarees : les six ecrites a la main ne bougent qu'avec le code, et le
+ * processus redemarre quand le code change.
+ */
+function luDuTexte(texte, siennes = [], sceau = '') {
   const t = String(texte ?? '');
-  const cle = empreinte(t);
+  const cle = sceau ? `${sceau}|${empreinte(t)}` : empreinte(t);
   let v = MEMO.get(cle);
   if (!v) {
-    v = { prises: prisesDuTexte(t), signes: signesDuTexte(t) };
+    v = { prises: prisesDuTexte(t, siennes), signes: signesDuTexte(t) };
     if (MEMO.size >= MEMO_MAX) MEMO.delete(MEMO.keys().next().value);
     MEMO.set(cle, v);
   }
   return v;
 }
+
+/** Ce qui identifie un jeu de familles declarees : leur cle et leurs mots. */
+const sceauDe = siennes => siennes.length
+  ? empreinte(siennes.map(f => `${f.cle}=${f.mots?.source ?? ''}`).join('\u0000'))
+  : '';
 
 /**
  * Les familles vues dans un texte, chacune avec la proposition qui l'a fait
@@ -285,10 +391,20 @@ function luDuTexte(texte) {
  *   `lus` : les mots de la famille effectivement lus (« md », « xanax »),
  *   pour que la vue puisse rendre ce qui a été écrit plutôt que la catégorie.
  */
-export function prisesDuTexte(texte) {
+export function prisesDuTexte(texte, siennes = []) {
   const out = new Map();
   const brut = String(texte ?? '');
   if (!brut.trim()) return out;
+  /*
+   * LES SIENNES PASSENT EN DERNIER, ET C'EST VOULU.
+   *
+   * Toutes les gardes au-dessus (le tiers qui parle, la negation, le souvenir,
+   * l'hyperbole) s'appliquent d'abord et valent pour elles aussi : une famille
+   * declaree n'achete pas le droit de compter « mon frere a pris un anxio ».
+   * Seul l'ordre de la boucle change, et il ne change rien au resultat -- deux
+   * familles peuvent compter la meme phrase, chacune pour elle.
+   */
+  const familles = siennes.length ? [...FAMILLES, ...siennes] : FAMILLES;
   for (const phrase of brut.split(/(?<=[.!?…])\s+|\n+/)) {
     const np = norm(phrase);
     if (!np.trim()) continue;
@@ -300,7 +416,7 @@ export function prisesDuTexte(texte) {
       if (TIERS_APRES.test(q) && !/\b(?:je|j ai|moi|on a)\b/.test(q)) continue;
       if (GARDES_SUBSTANCE.negation.test(q)) continue;
       if (SOUVENIR.test(q)) continue;
-      for (const f of FAMILLES) {
+      for (const f of familles) {
         if (f.sauf?.test(q)) continue;               // « un verre d'eau » n'est pas un verre
         const franc = f.franc.test(q);
         if (!franc && !(f.mots?.test(q) && f.verbe?.test(q))) continue;
@@ -309,7 +425,11 @@ export function prisesDuTexte(texte) {
         if (!franc && GARDES_SUBSTANCE.intention.test(q) && !/\bj ai\b|\bje me suis\b|\bhier\b/.test(q)) continue;
         if (!out.has(f.cle)) out.set(f.cle, { phrase: phrase.trim().slice(0, 200), signes: [], lus: [] });
         const lus = out.get(f.cle).lus;
-        for (const m of q.match(MOTS_G.get(f.cle)) ?? []) if (!lus.includes(m)) lus.push(m);
+        /* `MOTS_G` est figee sur les familles ecrites a la main. Une famille
+           declaree fabrique la sienne a la volee : sans ca, `lus` resterait
+           vide et la vue afficherait la categorie au lieu du mot ecrit. */
+        const g = MOTS_G.get(f.cle) ?? (f.mots ? new RegExp(f.mots.source, 'g') : null);
+        for (const m of (g ? q.match(g) : null) ?? []) if (!lus.includes(m)) lus.push(m);
       }
     }
   }
@@ -409,7 +529,27 @@ const ARRET = /\b(?:arret|arrete|arreter|stop|sevrage|sobre|sobriete|abstinence|
  * libellé pour phrase ; un objectif qui la nomme est le signe « vouloir
  * arrêter », daté du jour où il a été posé.
  */
-export function analyserPrises(entrees, { carte = null, aujourdhui = null, reperes = [], objectifs = [] } = {}) {
+export function analyserPrises(entrees, { carte = null, aujourdhui = null, reperes = [],
+                                          objectifs = [], suivis = [] } = {}) {
+  /*
+   * CE QU'ELLE A DECLARE SUIVRE, TRADUIT EN FAMILLES JETABLES.
+   *
+   * Seules les ACTIVES entrent : desactiver un suivi doit le faire disparaitre
+   * du tableau, pas seulement du compagnon. Et un suivi qui reprend la cle
+   * d'une famille ecrite a la main (« cannabis ») ne fabrique rien -- la
+   * famille existe deja et elle est meilleure ; la ligne ne sert alors qu'a
+   * porter le genre et les deux permissions.
+   */
+  const dejaLa = new Set(FAMILLES.map(f => f.cle));
+  const siennes = (suivis ?? [])
+    .filter(s => s?.actif && !dejaLa.has(String(s.cle)))
+    .map(familleDuSuivi).filter(Boolean);
+  const sceau = sceauDe(siennes);
+  /* Le genre par cle : il decide plus bas si une chose se SURVEILLE ou se
+     COMPTE, et il vaut aussi pour les familles ecrites a la main qu'un suivi
+     declare comme traitement. */
+  const genreDe = new Map((suivis ?? []).map(s => [String(s.cle), s.genre === 'traitement' ? 'traitement' : 'reduire']));
+  const parle = new Set((suivis ?? []).filter(s => s?.actif && s?.demander).map(s => String(s.cle)));
   const rows = (entrees ?? []).filter(e => e?.date).sort((a, b) => a.date < b.date ? -1 : 1);
   const ecrits = rows.filter(e => String(e.text ?? '').trim()).map(e => e.date);
   const fin = aujourdhui ?? ecrits.at(-1) ?? null;
@@ -433,7 +573,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   for (const e of rows) {
     const t = e.text;
     if (!String(t ?? '').trim()) continue;
-    const lu = luDuTexte(t);
+    const lu = luDuTexte(t, siennes, sceau);
     for (const [cle, v] of lu.prises) poser(cle, e.date, v.phrase, v.lus);
     signaler(e.date, lu.signes);
   }
@@ -441,7 +581,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   for (const r of reperes ?? []) {
     const date = String(r?.date ?? '').slice(0, 10);
     if (!DATE.test(date) || !String(r.label ?? '').trim()) continue;
-    const lu = luDuTexte(r.label);
+    const lu = luDuTexte(r.label, siennes, sceau);
     let fams = [...lu.prises.keys()];
     /* Un repère de consommation qui ne fait que nommer — « cannabis », posé
        comme période — est une déclaration, pas une phrase à garder : on le
@@ -467,7 +607,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   const seuilBas = medianeMoins(noteDe);
 
   const prises = [], ecartees = [];
-  for (const f of FAMILLES) {
+  for (const f of [...FAMILLES, ...siennes]) {
     const v = vues.get(f.cle);
     if (!v) continue;
     v.jours.sort();
@@ -481,6 +621,21 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
     const set = new Set(v.jours);
     prises.push({
       cle: f.cle, nom: f.nom, sym: f.sym, source: v.reperes ? 'ecrit+repere' : 'ecrit',
+      /*
+       * DEUX CHAMPS QUI VIENNENT DE CE QU'ELLE A DECLARE, PAS DE SON TEXTE.
+       *
+       * `genre` : « traitement » ou « reduire ». Un traitement se COMPTE
+       * (combien, quand) et ne se SURVEILLE pas. Mettre une ordonnance sous
+       * surveillance fabrique une inquietude, et parfois fait arreter un
+       * traitement -- prises.js porte deja cette garde sur les calmants.
+       *
+       * `parle` : le compagnon a le droit d'ouvrir le sujet. Faux par defaut,
+       * et pour tout ce qui n'a pas ete declare. Il ne se deduit jamais du
+       * comptage : compter une chose n'autorise pas a en parler.
+       */
+      genre: genreDe.get(f.cle) ?? (f.genre ?? 'reduire'),
+      parle: parle.has(f.cle),
+      sien: !!f.sien,
       jours: v.jours, n: v.jours.length,
       /* Les mots lus, les plus fréquents d'abord : « md », « xanax » — ce que
          la personne a écrit, pour que la vue n'ait pas à dire « les
@@ -722,5 +877,6 @@ function leLendemain(joursPrise, suite, noteDe, seuilBas) {
  * ------------------------------------------------------------------ */
 export function prises(userId = OWNER, { carte = null, aujourdhui = null } = {}) {
   return analyserPrises(allEntries(userId),
-    { carte, aujourdhui, reperes: allEvents(userId), objectifs: allObjectifs(userId) });
+    { carte, aujourdhui, reperes: allEvents(userId), objectifs: allObjectifs(userId),
+      suivis: lesSuivis(userId) });
 }
