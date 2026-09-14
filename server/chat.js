@@ -711,11 +711,32 @@ ${lignes.join('\n')}`;
  * ce bloc dont il ne peut pas contester la provenance.
  */
 export function prisesBlock(prises) {
-  const liste = (prises?.prises ?? []).slice(0, 3);
+  const toutes = prises?.prises ?? [];
+  /*
+   * CE QU'IL A COCHÉ PASSE DEVANT, ET C'EST UNE CORRECTION.
+   *
+   * La liste est triée par signes, puis par pente, puis par nombre de jours, et
+   * on n'en garde que trois. Une chose dont il a explicitement ouvert le sujet
+   * pouvait donc tomber quatrième : le compagnon avait le droit d'en parler, et
+   * pas les nombres pour le faire. Le tri reste déterministe — le bloc reste
+   * donc stable d'un tour à l'autre, ce dont le cache dépend.
+   */
+  const liste = [...toutes.filter(p => p.parle), ...toutes.filter(p => !p.parle)].slice(0, 3);
   if (!liste.length) return null;
+  /*
+   * L'ÉTAT SE LIT SUR LA LIGNE, PAS DANS UN PARAGRAPHE AILLEURS.
+   *
+   * Un modèle qui doit recouper une liste de noms avec une consigne trois
+   * paragraphes plus haut se trompera un soir sur dix — et le soir où il se
+   * trompe, il pose la question sur ce que la personne n'a PAS ouvert.
+   */
+  const etat = p => !p.parle ? ''
+    : p.genre === 'traitement' ? '   [il t\u2019a ouvert le sujet — c\u2019est son traitement]'
+    : '   [il t\u2019a ouvert le sujet]';
   const lignes = liste.map(p => {
     const l = [`${p.nom} — ${p.n} journées où c'est écrit`
-      + (p.compare ? ` ; ${p.recent} sur ses ${p.recent_sur} dernières, ${p.avant} sur les ${p.avant_sur} d'avant` : '')];
+      + (p.compare ? ` ; ${p.recent} sur ses ${p.recent_sur} dernières, ${p.avant} sur les ${p.avant_sur} d'avant` : '')
+      + etat(p)];
     const av = p.avant_ca?.[0];
     if (av) l.push(`  ça tombe surtout sur la journée écrite d'après « ${neutraliser(av.nom)} » — ${av.apres} fois sur ${av.sur}`);
     if (p.apres_ca?.tient)
@@ -724,18 +745,82 @@ export function prisesBlock(prises) {
     for (const g of (p.signes ?? []).slice(0, 2)) l.push(`  il a écrit : « ${neutraliser(g.phrase)} »`);
     return l.join('\n');
   });
+  const ouvert = liste.some(p => p.parle);
   return `Ce que l'application a COMPTÉ dans son journal, sur les mots qu'il emploie lui-même.
 Des jours, pas un diagnostic : elle ne sait pas ce que ça veut dire pour lui, et toi non plus.
 
-Tu n'ouvres pas le sujet. Poser « tu as bu combien de fois ce mois-ci ? » à quelqu'un qui
-venait parler d'autre chose transforme la conversation en contrôle, et on cesse d'ouvrir un
-outil qui contrôle — les mauvais soirs d'abord, c'est-à-dire ceux qui comptent.
+${ouvert ? `TU N'OUVRES LE SUJET QUE SUR CE QU'IL A COCHÉ.
+Chaque ligne ci-dessous porte sa décision à lui. « il t'a ouvert le sujet » veut dire qu'il est
+allé cocher, lui-même, que tu avais le droit d'en parler. Tout le reste — les lignes sans cette
+mention, et tout ce qui n'est pas dans cette liste — reste fermé : tu as les nombres, tu ne poses
+pas la question.` : `TU N'OUVRES PAS LE SUJET.
+Il n'a coché aucune de ces lignes, et tant qu'il ne l'a pas fait, la question ne se pose pas.`}
+Poser « tu as bu combien de fois ce mois-ci ? » à quelqu'un qui ne te l'a pas demandé transforme
+la conversation en contrôle, et on cesse d'ouvrir un outil qui contrôle — les mauvais soirs
+d'abord, c'est-à-dire ceux qui comptent.${ouvert ? `
 
-Mais quand LUI en parle, tu as les nombres, et tu les donnes tels quels sans les commenter.
-Et quand ce qui vient juste avant est écrit noir sur blanc dans ce qu'il vient de te dire, tu
-peux le lui rappeler une fois, comme un fait daté, sans en tirer de conclusion ni de conseil.
+QUAND, SUR CE QU'IL T'A OUVERT.
+Quand tu ne SAIS pas, et que ne pas savoir change ce que tu vas répondre. Le reste du temps tu
+n'as pas un doute, tu as une curiosité — et une curiosité ne justifie pas cette question-là.
+
+COMMENT.
+Court, sur maintenant, et sans détour : « pas trop de cannabis aujourd'hui ? », « tu en as pris
+combien ce soir ? ». UNE chose, celle qui te manque. Jamais deux dans le même message, jamais une
+liste, jamais une relance si la réponse ne vient pas. Une question qui revient est un
+questionnaire, et un questionnaire ne s'ouvre pas un mauvais soir.
+
+CE QU'IL RÉPOND EST CE QU'IL A VOULU DIRE.
+Tu ne le recoupes pas avec les nombres ci-dessous, tu ne fais pas remarquer un écart, tu ne
+redemandes pas autrement. S'il ne répond pas, c'est une réponse : tu continues comme si tu
+n'avais rien demandé, et tu ne reviens pas dessus. Tu ne notes rien et tu ne comptes rien — ce
+qui est compté ici l'est sur ce qu'il écrit dans son journal, pas sur ce qu'il te dit.
+
+UN TRAITEMENT SE COMPTE, IL NE SE SURVEILLE PAS.
+Sur ces lignes-là, la seule question possible est un compte — « tu en as pris combien ? ».
+Jamais « pas trop ? », jamais « ça monte, non ? », jamais un mot sur la fréquence. Mettre une
+ordonnance sous surveillance fabrique une inquiétude, et fait parfois arrêter un traitement.
+
+ET TU NE DIS JAMAIS CE QUI T'A FAIT DEMANDER.
+Il n'y a pas d'alerte, pas de seuil, rien qui te l'ait soufflé. Commenter ce qui t'a poussé
+revient à lui apprendre qu'il est surveillé, et c'est la dernière fois qu'il écrit ça.` : ''}
+
+Quand LUI en parle — sur n'importe quelle ligne, cochée ou non — tu as les nombres, et tu les
+donnes tels quels sans les commenter. Et quand ce qui vient juste avant est écrit noir sur blanc
+dans ce qu'il vient de te dire, tu peux le lui rappeler une fois, comme un fait daté, sans en
+tirer de conclusion ni de conseil.
 
 ${lignes.join('\n')}`;
+}
+
+/**
+ * L'OCCASION DATÉE, À CÔTÉ DE LA RÈGLE PERMANENTE.
+ *
+ * La règle (« seulement ce qu'il a coché ») vit dans le bloc ci-dessus, qui est
+ * stable et donc mis en cache. L'occasion, elle, change à chaque tour : elle
+ * part à part, comme celle du ressenti, et pour la même raison — une phrase qui
+ * bouge en tête du prompt invaliderait tout ce qui suit.
+ *
+ * ELLE NE DÉCIDE RIEN. Elle rend un fait au compagnon, qui reste libre de ne
+ * pas s'en servir : une conversation où l'assistant obéit à un déclencheur ne
+ * se lit plus comme une conversation.
+ */
+export function demanderConsoBlock(occasion) {
+  if (!occasion?.demander) return null;
+  const compte = occasion.genre === 'traitement';
+  return `Une occasion, sur « ${occasion.nom} » — il t'a ouvert ce sujet-là, et ${occasion.pourquoi}.
+
+${compte
+  ? `Demande-lui COMBIEN, simplement — « tu en as pris combien ce soir ? ». C'est son traitement :
+un compte, jamais « pas trop ? », jamais un mot sur la fréquence ou sur la pente.`
+  : `Demande-lui où ça en est ce soir, court et sans détour — « pas trop de ${
+      String(occasion.nom).replace(/^(?:l[\u2019']|le |la |les )/, '')} aujourd'hui ? ».`}
+
+Une seule chose, celle-là, et pas une liste. S'il répond, tu prends ce qu'il dit tel quel sans le
+recouper avec les nombres. S'il ne répond pas, c'est une réponse : tu continues, et tu n'y
+reviens pas. Et si ce qu'il vient de dire demande autre chose d'abord, réponds à ça — la question
+attendra, ou ne se posera pas.
+
+Ne dis jamais que quelque chose te l'a suggéré.`;
 }
 
 /*

@@ -33,6 +33,7 @@ import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
 import { nuits, nuitDuJour, rythmeUtilisateur, paireEstUneNuit, MIN_NUIT } from './nuits.js';
 import { occasionDeDemander, proposerNoteBlock } from './proposer-note.js';
+import { occasionDeDemanderConso } from './demander-conso.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
@@ -55,12 +56,12 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock,
+import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock, demanderConsoBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
-import { prises, FAMILLES, motsDuSuivi } from './prises.js';
+import { prises, FAMILLES, motsDuSuivi, familleDuSuivi } from './prises.js';
 import { proposerLechelle, DU_COMPAGNON } from '../web/ressenti.js';
 
 /* ---------- cache : la serie complete coute ~10ms sur 1700 jours ----------
@@ -495,6 +496,32 @@ export function recentMemory(date, userId = OWNER, texte = null) {
     const bloc = proposerNoteBlock(occ);
     if (bloc) volatil.push(bloc);
   } catch { /* un signal qui échoue ne doit pas emporter la conversation */ }
+
+  /*
+   * ET L'OCCASION D'OUVRIR LE SUJET D'UNE CONSOMMATION — même endroit, même
+   * raison, freins bien plus stricts (voir server/demander-conso.js).
+   *
+   * LE FIL VA CHERCHER UNE SEMAINE, ET PAS TRENTE MESSAGES. Un des freins est
+   * « pas deux fois la même chose dans la semaine », et il se lit dans le fil :
+   * sur trente messages on ne voit pas au-delà d'une soirée, et le frein
+   * hebdomadaire ne freinerait rien. C'est la différence entre un mécanisme
+   * qui se retient et un mécanisme qui a l'air de se retenir.
+   */
+  try {
+    const P = prisesDe(userId);
+    if (P?.prises?.some(p => p.parle)) {
+      const suivis = lesSuivis(userId);
+      const dejaLa = new Set(FAMILLES.map(f => f.cle));
+      const familles = [...FAMILLES, ...suivis.filter(x => x.actif && !dejaLa.has(x.cle))
+                                             .map(familleDuSuivi).filter(Boolean)];
+      const occ = occasionDeDemanderConso({
+        fil: recentMessages(400, userId), prises: P.prises, familles,
+        veille: veilleDuJour(today(), userId)?.niveau ?? null
+      });
+      const bloc = demanderConsoBlock(occ);
+      if (bloc) volatil.push(bloc);
+    }
+  } catch { /* idem : un signal qui échoue ne doit pas emporter la conversation */ }
 
   return { stable, echos: volatil.length ? volatil.join('\n\n---\n\n') : null, tailles };
 }
