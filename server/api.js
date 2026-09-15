@@ -56,7 +56,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // meme endroit, sinon le serveur annonce une hauteur et le navigateur en
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
-import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock, demanderConsoBlock,
+import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock, demanderConsoBlock, posteBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
@@ -492,6 +492,23 @@ export function recentMemory(date, userId = OWNER, texte = null) {
   // messages par definition, donc elle est du cote volatil.
   const note = presenceNote(presence(userId));
   if (note) volatil.push(note);
+
+  /*
+   * CE QUE SA MACHINE A MESURÉ AUJOURD'HUI — volatil, et pour deux raisons.
+   *
+   * Les minutes d'écran grandissent toute la journée et le coucher n'apparaît
+   * qu'en fin de soirée : posé du côté stable, ce bloc invaliderait le cache à
+   * chaque message. Il change aussi de jour vécu à jour vécu.
+   *
+   * ON PASSE PAR `jourVecu`, PAS PAR `today()`. Quelqu'un qui écrit à 3 h du
+   * matin finit la journée ouverte la veille à 15 h ; `today()` lui rendrait le
+   * poste d'une journée qui n'a pas encore commencé pour lui — c'est-à-dire un
+   * lever vide, un instant après lui avoir dit à quelle heure il s'est levé.
+   */
+  try {
+    const bloc = posteBlock(posteDuJour(jourVecu(userId), userId));
+    if (bloc) volatil.push(bloc);
+  } catch { /* un pont qui tombe ne doit pas emporter la conversation */ }
 
   /*
    * L'OCCASION DE DEMANDER OÙ IL EN EST — volatile par nature.

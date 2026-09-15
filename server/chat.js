@@ -710,6 +710,84 @@ ${lignes.join('\n')}`;
  * Et la phrase qu'il a écrite lui-même, telle quelle. C'est la seule chose de
  * ce bloc dont il ne peut pas contester la provenance.
  */
+/**
+ * =====================================================================
+ *  CE QUE SA MACHINE A MESURÉ AUJOURD'HUI — ET POURQUOI IL FAUT LE DIRE.
+ *
+ * L'écran affiche « levé 15:38 · 13,1 h · 211 min d'écran » depuis des mois.
+ * Le compagnon, lui, ne l'a jamais reçu : les neuf blocs de mémoire portent le
+ * journal, la grille, la carte, les prises — rien de ce que Machi Tool mesure.
+ * Résultat vécu, et c'est ce qui a déclenché ce bloc :
+ *
+ *     — je me suis levé en retard à cause de ma montre
+ *     — Tu t'es levé à quelle heure du coup ?
+ *     — normalement tu peux le savoir
+ *     — Ah non, t'as raison, si tu me l'as pas dit direct je l'ai pas.
+ *
+ * Il avait la réponse à l'écran, dans le même produit, au même instant.
+ * Redemander ce qu'on mesure déjà fait passer l'outil pour un questionnaire —
+ * et pose la question « à quoi servent les mesures, alors ».
+ *
+ * ---------------------------------------------------------------------
+ * LES TROIS SOURCES NE DISENT PAS LA MÊME CHOSE, ET C'EST TOUT L'ENJEU.
+ *
+ *   dit     — il l'a écrit lui-même. C'est un fait, on le reprend tel quel.
+ *   mesure  — un réveil relevé par la machine, ou une nuit lue dans le clavier.
+ *   estime  — la PREMIÈRE ACTIVITÉ de la machine. `jour-vecu.js` le dit en
+ *             toutes lettres : « ce n'est pas une heure de reveil et on ne la
+ *             fera jamais passer pour telle ».
+ *
+ * Les confondre casserait le garde-fou que la personne a elle-même proposé :
+ * « si c'est faux je dis que c'est faux ». Une contradiction ne vaut que si
+ * l'affirmation était honnête au départ — sinon on lui fait corriger une
+ * invention, et c'est elle qui a l'air de se tromper.
+ *
+ * ---------------------------------------------------------------------
+ * ON NE COMMENTE PAS L'HEURE. Se lever à 15 h 38 n'appelle aucune remarque,
+ * aucun « quand même », aucune question sur la nuit. Le bloc donne un fait
+ * pour que la conversation puisse continuer dessus, pas un sujet.
+ * =====================================================================
+ */
+const DIT_SOURCE = {
+  dit:    'il te l’a dit lui-même',
+  mesure: 'mesuré par sa machine',
+  estime: 'c’est la première activité de sa machine — PAS une heure de réveil'
+};
+
+export function posteBlock(poste) {
+  if (!poste) return null;
+  const l = poste.lever ?? {};
+  const c = poste.coucher ?? {};
+  const lignes = [];
+  if (l.heure) lignes.push(`levé ${l.heure} — ${DIT_SOURCE[l.source] ?? 'source inconnue'}`);
+  if (poste.sommeil_h != null) lignes.push(`dormi ${String(poste.sommeil_h).replace('.', ',')} h`);
+  if (c.heure) lignes.push(`couché ${c.heure} — ${DIT_SOURCE[c.source] ?? 'source inconnue'}`);
+  if (poste.ecran?.minutes) lignes.push(`${poste.ecran.minutes} min d’écran`);
+  if (!lignes.length) return null;
+
+  const sur = l.source === 'estime' || c.source === 'estime';
+  return `CE QUE SA MACHINE A MESURÉ AUJOURD’HUI — tu l’as déjà, tu ne le redemandes pas.
+
+${lignes.map(x => `· ${x}`).join('\n')}
+
+TU T’EN SERS, TU NE POSES PAS LA QUESTION. « Tu t’es levé à quelle heure ? » alors que
+c’est écrit ici fait passer pour un questionnaire un outil qui mesure — et lui fait se
+demander à quoi servent les mesures. Tu peux le DIRE en passant, une fois, comme un fait :
+« ah, levé à ${l.heure ?? '…'} ». Puis tu continues sur ce qu’il te disait.
+
+RIEN SUR L’HEURE ELLE-MÊME. Pas de « quand même », pas de « tu as bien dormi au moins »,
+pas de question sur la nuit. C'est un fait qui te permet de suivre, pas un sujet.${sur ? `
+
+UNE DE CES LIGNES N'EST PAS CE QU'ELLE A L'AIR D'ÊTRE. Là où il est marqué « première
+activité de sa machine », tu ne dis PAS qu’il s’est levé à cette heure — tu ne le sais pas.
+Tu peux dire que sa machine s'est allumée à ce moment-là, ou ne rien dire du tout.` : ''}
+
+S'IL TE CONTREDIT, IL A RAISON. « non c’est pas vrai », « je m’étais levé avant » : tu le
+crois immédiatement, sans discuter et sans lui demander de justifier — il était là, la
+mesure non. Tu reprends SON heure pour la suite de la conversation, et l’application
+enregistre ce qu’il vient de dire toute seule.`;
+}
+
 export function prisesBlock(prises) {
   const toutes = prises?.prises ?? [];
   /*
