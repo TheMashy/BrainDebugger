@@ -3335,35 +3335,7 @@ export const routes = {
    * dit, c'est le meme instant : le relever deux fois ne mesure pas un ecart,
    * ca mesure deux clics.
    */
-  'POST /api/releve': ({ body, userId }) => {
-    const v = Number(body?.valeur);
-    if (!Number.isFinite(v)) return { erreur: 'il manque la valeur' };
-    const fil = recentMessages(80, userId);
-    const repondus = new Set(relevesDeToi(fil.map(x => x.id), userId).map(r => Number(r.message_id)));
-
-    const spontane = body?.messageId == null;
-    const m = spontane ? fil.at(-1) : fil.find(x => Number(x.id) === Number(body.messageId));
-    if (!m) {
-      return { erreur: spontane ? 'il faut avoir dit quelque chose pour situer ce moment'
-                                : 'ce message n’est plus dans le fil' };
-    }
-    if (repondus.has(Number(m.id))) return { erreur: 'tu viens de le poser' };
-
-    if (!spontane) {
-      // Le rôle vient de `ressenti.js`, comme dans la page. Il était écrit en
-      // dur ici — et faux : la route refusait donc TOUT relevé posé sur un
-      // message, sans jamais le dire autrement que par un refus poli.
-      const dernierDuCompagnon = [...fil].reverse().find(x => x.role === DU_COMPAGNON);
-      if (!proposerLechelle(m, { dernier: Number(dernierDuCompagnon?.id) === Number(m.id), repondus }))
-        return { erreur: 'ce message ne demande pas où tu en es' };
-    }
-
-    const r = addReleve({ messageId: Number(m.id), date: jourVecu(userId), valeur: v,
-                          quoi: String(m.text).trim().slice(0, 160), source: 'toi', userId });
-    if (!r) return { erreur: 'valeur illisible' };
-    invalidate(userId);
-    return { ok: true, releve: r, messageId: Number(m.id) };
-  },
+  'POST /api/releve': ({ body, userId }) => poserCeQuIlDit(body, userId),
 
   'GET /api/lecture': async ({ userId }) => {
     /*
@@ -3983,9 +3955,90 @@ export async function retisser(body, send, userId = OWNER) {
   });
 }
 
+/**
+ * LES RELEVÉS DU FIL, DANS LA FORME QUE LA PAGE ATTEND.
+ *
+ * Trois endroits construisaient déjà ces trois champs à la main ; le flux de
+ * conversation, lui, ne les envoyait pas du tout. La page fait pourtant
+ * `new Map(data.ressentis ?? [])` sur ses événements, donc chaque échange
+ * remplaçait la table par une VIDE et effaçait de l'écran toutes les échelles
+ * déjà répondues — y compris celle qu'on venait de toucher.
+ */
+export const ressentisDuFil = (userId = OWNER, messages = null) => {
+  const ids = (messages ?? recentMessages(80, userId)).map(m => m.id);
+  return relevesDeToi(ids, userId)
+    .map(r => ({ message_id: r.message_id, valeur: r.valeur, ts: r.ts }));
+};
+
+/**
+ * POSER CE QU'IL DIT DE LUI — un seul endroit, deux appelants.
+ *
+ * La route `POST /api/releve` (il marque son humeur, et rien d'autre ne se
+ * passe) et le flux de conversation (il répond à la question posée, et le
+ * compagnon enchaîne) doivent valider EXACTEMENT la même chose. Deux copies de
+ * ces garde-fous divergeraient au premier correctif, et c'est précisément le
+ * genre d'endroit où une divergence pose un chiffre sur un message qui ne
+ * demandait rien.
+ *
+ * @returns {{erreur: string}|{ok: true, releve: object, messageId: number}}
+ */
+export function poserCeQuIlDit(body, userId = OWNER) {
+  const v = Number(body?.valeur);
+  if (!Number.isFinite(v)) return { erreur: 'il manque la valeur' };
+  const fil = recentMessages(80, userId);
+  const repondus = new Set(relevesDeToi(fil.map(x => x.id), userId).map(r => Number(r.message_id)));
+
+  const spontane = body?.messageId == null;
+  const m = spontane ? fil.at(-1) : fil.find(x => Number(x.id) === Number(body.messageId));
+  if (!m) {
+    return { erreur: spontane ? 'il faut avoir dit quelque chose pour situer ce moment'
+                              : 'ce message n’est plus dans le fil' };
+  }
+  if (repondus.has(Number(m.id))) return { erreur: 'tu viens de le poser' };
+
+  if (!spontane) {
+    // Le rôle vient de `ressenti.js`, comme dans la page. Il était écrit en
+    // dur ici — et faux : la route refusait donc TOUT relevé posé sur un
+    // message, sans jamais le dire autrement que par un refus poli.
+    const dernierDuCompagnon = [...fil].reverse().find(x => x.role === DU_COMPAGNON);
+    if (!proposerLechelle(m, { dernier: Number(dernierDuCompagnon?.id) === Number(m.id), repondus }))
+      return { erreur: 'ce message ne demande pas où tu en es' };
+  }
+
+  const r = addReleve({ messageId: Number(m.id), date: jourVecu(userId), valeur: v,
+                        quoi: String(m.text).trim().slice(0, 160), source: 'toi', userId });
+  if (!r) return { erreur: 'valeur illisible' };
+  invalidate(userId);
+  return { ok: true, releve: r, messageId: Number(m.id) };
+}
+
 export async function streamMessage(body, send, userId = OWNER) {
   const pieces = piecesDe(body);
   let text = String(body.text ?? '').trim();
+
+  /*
+   * IL RÉPOND À LA QUESTION D'UN GESTE, ET LA CONVERSATION CONTINUE.
+   *
+   * Toucher l'échelle posait un relevé et s'arrêtait là : le compagnon avait
+   * demandé « comment tu te sens ? », la réponse était enregistrée, et il n'en
+   * savait rien. Il fallait la lui RÉÉCRIRE pour qu'il enchaîne — on répondait
+   * donc deux fois à la même question, une fois du doigt et une fois au
+   * clavier. Le geste n'était pas une réponse, c'était une case à cocher avant
+   * de répondre.
+   *
+   * Le relevé se pose AVANT le message : s'il est refusé (la question n'en
+   * était pas une, le fil a bougé, le chiffre est déjà posé), rien n'est
+   * écrit et rien n'est facturé. L'inverse laisserait une bulle orpheline dans
+   * le fil et un appel au modèle payé pour rien.
+   */
+  let releve = null;
+  if (body?.ressenti) {
+    const pose = poserCeQuIlDit(body.ressenti, userId);
+    if (pose.erreur) { send('error', { error: pose.erreur }); return; }
+    releve = pose;
+    if (!text) text = `${Number(body.ressenti.valeur)}/10`;
+  }
+
   if (!text && !pieces.length) { send('error', { error: 'texte vide' }); return; }
   // Un message qui n'est QUE des pieces jointes reste un message : sans cette
   // ligne il s'enregistrerait vide, et le fil montrerait une bulle blanche.
@@ -3996,9 +4049,14 @@ export async function streamMessage(body, send, userId = OWNER) {
   noterBornesDites(text, userId);
   const date = body.date ?? jourVecu(userId);
   const messageId = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
-  noterNoteDite(text, messageId, date, userId);
+  /* PAS DEUX FOIS LE MÊME INSTANT. `noterNoteDite` lit « 3/10 » dans une
+     phrase et en fait un relevé — ce qui est exactement ce qu'on vient de
+     poser, à la main, sur la question. Le laisser tourner ici relèverait le
+     même geste deux fois : deux points au lieu d'un dans la journée, et deux
+     unités mangées au budget qui décide quand le compagnon peut redemander. */
+  if (!releve) noterNoteDite(text, messageId, date, userId);
   invalidate(userId);
-  send('user', { messages: recentMessages(80, userId) });
+  send('user', { messages: recentMessages(80, userId), ressentis: ressentisDuFil(userId) });
 
   const history = filAncre(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
   // Les pieces s'accrochent au message qu'on vient d'ecrire, pas a l'historique.
@@ -4027,6 +4085,13 @@ export async function streamMessage(body, send, userId = OWNER) {
                            r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet, r.composition ?? null);
   send('done', {
     messages: recentMessages(80, userId),
+    /* LES RELEVÉS REPARTENT AVEC LE FIL.
+       La page fait `new Map(data.ressentis ?? [])` sur ces deux événements :
+       sans le champ, elle reconstruisait une table VIDE à chaque échange et
+       toutes les échelles déjà répondues disparaissaient de l'écran jusqu'au
+       rechargement suivant. Le chiffre qu'on vient de poser s'effaçait au
+       moment même où le compagnon commençait à répondre. */
+    ressentis: ressentisDuFil(userId),
     /* Le coût de CETTE réponse, tout de suite : attendre le prochain
        chargement du fil pour l'afficher, c'est ne jamais le montrer au moment
        où il se rapporte à quelque chose qu'on vient de lire. */

@@ -1334,19 +1334,31 @@ async function poserRessentiMaintenant(valeur) {
   }
 }
 
+/*
+ * RÉPONDRE À LA QUESTION D'UN GESTE — ET IL ENCHAÎNE.
+ *
+ * Toucher l'échelle enregistrait le chiffre et s'arrêtait là. Le compagnon
+ * venait de demander « comment tu te sens ? », la réponse était en base, et il
+ * n'en savait rien : il fallait la lui RÉÉCRIRE au clavier pour qu'il
+ * réponde. On répondait donc deux fois à la même question, une fois du doigt
+ * et une fois à la main — le geste n'était pas une réponse, c'était une case à
+ * cocher avant de répondre.
+ *
+ * Le chiffre part maintenant par le même tuyau qu'un message, avec le relevé
+ * accroché : le serveur le pose sur la question, écrit « 3/10 » comme tour de
+ * parole, et le compagnon continue. Un seul geste, une seule réponse.
+ */
 async function poserRessenti(id, valeur) {
   // On l'affiche AVANT la réponse du serveur : le geste doit se voir tout de
   // suite. Si ça échoue, on retire — mieux vaut une échelle qui revient qu'un
   // chiffre affiché que personne n'a enregistré.
   RESSENTIS.set(Number(id), releve({ valeur, ts: new Date().toISOString() }));
   drawThread();
-  try {
-    const r = await api('/api/releve', { messageId: Number(id), valeur: Number(valeur) });
-    if (r?.erreur) throw new Error(r.erreur);
-  } catch (e) {
+  const ok = await send({ text: `${Number(valeur)}/10`,
+                          ressenti: { messageId: Number(id), valeur: Number(valeur) } });
+  if (!ok) {
     RESSENTIS.delete(Number(id));
     drawThread();
-    toast?.(`Ce ressenti n'a pas été enregistré — ${e.message}`);
   }
 }
 
@@ -1725,10 +1737,22 @@ function dessinerJointes() {
   </span>`).join('');
 }
 
-async function send() {
+/**
+ * ENVOYER — au clavier, ou d'un geste sur l'échelle.
+ *
+ * `force` est le second chemin : `{ text, ressenti }`. Il ne lit pas le champ
+ * de saisie et ne le vide pas — quelqu'un peut être en train d'écrire une
+ * phrase pendant qu'il touche l'échelle, et lui effacer sous les doigts serait
+ * la punir d'avoir répondu.
+ *
+ * Rend `true` si le tour est allé au bout : l'appelant peut alors défaire son
+ * affichage optimiste si le serveur a refusé.
+ */
+async function send(force = null) {
   const input = $('#input');
-  let text = input.value.trim();
-  if (!text && !JOINTES.length) return;
+  let text = force ? String(force.text ?? '') : input.value.trim();
+  if (!force && !text && !JOINTES.length) return false;
+  let echoue = false;
 
   /*
    * Le texte des fichiers texte est COLLE au message.
@@ -1738,18 +1762,19 @@ async function send() {
    * nom de fichier. Les fichiers texte n'ont aucune raison d'etre traites comme
    * des pieces : ce sont des mots, et ce produit garde les mots.
    */
-  const textes = JOINTES.filter(p => p.media === 'texte');
+  const textes = force ? [] : JOINTES.filter(p => p.media === 'texte');
   if (textes.length) {
     text = [text, ...textes.map(p => `\n\n— ${p.nom} —\n${p.texte}`)].join('').trim();
   }
-  const pieces = JOINTES.filter(p => p.media !== 'texte')
+  const pieces = force ? [] : JOINTES.filter(p => p.media !== 'texte')
     .map(p => ({ nom: p.nom, media: p.media, donnees: p.donnees }));
   const noms = pieces.map(p => p.nom);
-  JOINTES = [];
-  dessinerJointes();
-
-  input.value = '';
-  input.style.height = 'auto';
+  if (!force) {
+    JOINTES = [];
+    dessinerJointes();
+    input.value = '';
+    input.style.height = 'auto';
+  }
   $('#send').disabled = true;
   PetTalk.stop();
 
@@ -1774,12 +1799,12 @@ async function send() {
        * de la page — et un message ecrit a 9 h se rangerait dans la soiree de
        * la veille. Le serveur renvoie celle qu'il a retenue, dans `done`.
        */
-      body: JSON.stringify({ text, pieces })
+      body: JSON.stringify({ text, pieces, ressenti: force?.ressenti ?? null })
     });
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
     await readSSE(res, (ev, data) => {
-      if (ev === 'error') { toast(data.error); return; }
+      if (ev === 'error') { echoue = true; toast(data.error); return; }
 
       if (ev === 'user') {
         S.messages = data.messages;
@@ -1893,12 +1918,16 @@ async function send() {
   } catch (err) {
     PetTalk.stop();
     EN_COURS = null;
+    echoue = true;
     toast(String(err.message));
   } finally {
     const b = $('#send');
     if (b) b.disabled = false;
-    $('#input')?.focus();
+    // On ne reprend pas le curseur quand la réponse est partie d'un geste : la
+    // personne n'était pas dans le champ, l'y projeter ferait sauter la vue.
+    if (!force) $('#input')?.focus();
   }
+  return !echoue;
 }
 
 /*
