@@ -12,7 +12,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { occasionDeDemander, proposerNoteBlock, FREINS } from '../server/proposer-note.js';
+import { occasionDeDemander, proposerNoteBlock, demandesDuFil, FREINS } from '../server/proposer-note.js';
 
 const T0 = Date.parse('2026-09-08T21:00:00.000Z');
 const msg = (min, texte, role = 'user') => ({
@@ -182,4 +182,110 @@ test('desserrés, mais pas ouverts : les freins gardent des valeurs qui veulent 
   assert.ok(FREINS.par_jour <= 6, 'au-delà, ce n’est plus un relevé, c’est un suivi horaire');
   assert.ok(FREINS.depuis_dernier_ms >= 30 * 60 * 1000);
   assert.ok(FREINS.pan_sans_releve_ms >= 30 * 60 * 1000);
+});
+
+/* ---------------------------------------------------------------------
+ * CE QUI COMPTE, C'EST LA QUESTION POSÉE — PAS LA RÉPONSE OBTENUE.
+ *
+ * Tous les freins comptaient des RELEVÉS, et un relevé n'existe que si la
+ * personne TOUCHE l'échelle. Répondre en mots n'en pose aucun : les freins ne
+ * freinaient rien dans le seul cas qui compte, et le pan — qui démarrait au
+ * dernier relevé, sinon au premier mot de la soirée — ne faisait que grandir.
+ * Passé quarante-cinq minutes, l'occasion se présentait À CHAQUE TOUR.
+ * --------------------------------------------------------------------- */
+
+/* La question telle qu'elle est posée à l'écran, celle qui fait apparaître
+   l'échelle. Si elle cessait d'être reconnue, les tests ci-dessous le diraient. */
+const DEMANDE = 'Ça colle avec ce que tu décrivais déjà. Comment tu te sens là, maintenant ?';
+
+test('la question est bien reconnue comme une demande', () => {
+  assert.deepEqual(demandesDuFil([msg(0, CALME), msg(1, DEMANDE, 'pet'), msg(2, CALME)])
+    .map(d => d.id), [1], 'sans ça, tous les freins qui suivent ne freinent rien');
+});
+
+test('LE CAS DE L’ÉCRAN : il demande, on répond en mots, il redemande', () => {
+  /*
+   * Deux « comment tu te sens, sur 10 ? » de suite, séparés par une réponse
+   * écrite. Aucun relevé n'est posé — la personne n'a pas touché l'échelle —
+   * donc l'ancien pan partait du premier mot de la soirée et avait déjà
+   * dépassé les quarante-cinq minutes : l'occasion se représentait au tour
+   * d'après, et à tous les suivants.
+   */
+  const fil = [msg(0, CALME), msg(46, DEMANDE, 'pet'), msg(47, CALME), msg(48, CALME)];
+  const o = occasionDeDemander(fil, [], T0 + 49 * 60000);
+  assert.equal(o.demander, false, 'demander, c’est avoir mesuré le moment');
+});
+
+test('le pan repart de la DEMANDE, pas du début de la conversation', () => {
+  /* Une heure de conversation, une question posée en cours de route : le pan
+     se compte depuis elle. Avec l'ancien départ (le premier message), il
+     valait déjà plus de quarante-cinq minutes et sonnait. */
+  const fil = [msg(0, CALME), msg(50, DEMANDE, 'pet'), msg(51, CALME), msg(70, CALME)];
+  const o = occasionDeDemander(fil, [], T0 + 71 * 60000);
+  assert.equal(o.demander, false);
+});
+
+test('le temps rouvre : passé le délai, on peut redemander', () => {
+  const fil = [msg(0, CALME), msg(1, DEMANDE, 'pet'), msg(2, CALME), msg(60, CALME)];
+  const o = occasionDeDemander(fil, [], T0 + 61 * 60000);
+  assert.equal(o.demander, true, 'attendre un peu de temps suffit — c’est l’autre porte');
+});
+
+test('un vrai changement de discours rouvre avant le délai', () => {
+  const fil = [msg(0, CALME), msg(1, DEMANDE, 'pet'), msg(2, CALME), msg(20, SOMBRE)];
+  const o = occasionDeDemander(fil, [], T0 + 21 * 60000);
+  assert.equal(o.demander, true);
+  assert.match(o.pourquoi, /ton/);
+});
+
+test('mais pas dans la phrase qui suit la question', () => {
+  /* Sinon le ton qui bouge juste après « comment tu te sens ? » la repose
+     aussitôt — exactement le reproche fait à l'écran. */
+  const fil = [msg(0, CALME), msg(1, DEMANDE, 'pet'), msg(3, SOMBRE)];
+  const o = occasionDeDemander(fil, [], T0 + 4 * 60000);
+  assert.equal(o.demander, false);
+  assert.match(o.pourquoi, /vient de demander/);
+});
+
+test('la reprise après une coupure ne passe pas devant une question fraîche', () => {
+  /* Plus de deux heures sans que la personne écrive — donc la reprise sonne —
+     mais il l'a relancée il y a six minutes et elle vient de répondre. La
+     coupure ne recommence pas ce qui vient d'être mesuré. */
+  const fil = [msg(0, CALME), msg(130, DEMANDE, 'pet'), msg(135, CALME)];
+  const o = occasionDeDemander(fil, [], T0 + 136 * 60000);
+  assert.equal(o.demander, false, `refusé attendu, obtenu : ${o.pourquoi}`);
+});
+
+test('le compte du jour compte les QUESTIONS, pas seulement les réponses', () => {
+  /* Six questions sans une seule réponse remplissaient un compteur à zéro. */
+  const demandes = Array.from({ length: FREINS.par_jour }, (_, i) =>
+    ({ id: 1000 + i, ts: T0 - (i + 4) * 3600000 }));
+  const o = occasionDeDemander([msg(0, CALME), msg(5, CALME), msg(10, SOMBRE)], [],
+                               T0 + 11 * 60000, demandes);
+  assert.equal(o.demander, false, 'au-delà, ce n’est plus un relevé, c’est un suivi horaire');
+});
+
+test('une question à laquelle on a répondu reste UN moment, pas deux', () => {
+  /* La question laisse deux traces — elle-même, et le relevé qui lui est
+     rattaché. Les compter séparément diviserait le budget par deux. */
+  const demandes = Array.from({ length: FREINS.par_jour - 1 }, (_, i) =>
+    ({ id: 1000 + i, ts: T0 - (i + 4) * 3600000 }));
+  const releves = demandes.map(d => ({ message_id: d.id, ts: new Date(d.ts).toISOString() }));
+  const o = occasionDeDemander([msg(0, CALME), msg(5, CALME), msg(10, SOMBRE)], releves,
+                               T0 + 11 * 60000, demandes);
+  assert.equal(o.demander, true, `${FREINS.par_jour - 1} questions répondues font ${FREINS.par_jour - 1} moments`);
+});
+
+test('un relevé posé par le compagnon lui-même compte en plus', () => {
+  const demandes = Array.from({ length: FREINS.par_jour - 1 }, (_, i) =>
+    ({ id: 1000 + i, ts: T0 - (i + 4) * 3600000 }));
+  const releves = [{ message_id: 77, ts: new Date(T0 - 5 * 3600000).toISOString() }];
+  const o = occasionDeDemander([msg(0, CALME), msg(5, CALME), msg(10, SOMBRE)], releves,
+                               T0 + 11 * 60000, demandes);
+  assert.equal(o.demander, false, 'il n’est rattaché à aucune question : c’est un moment de plus');
+});
+
+test('le bloc dit de ne pas retraduire une réponse en mots', () => {
+  const b = proposerNoteBlock({ demander: true, pourquoi: 'le ton vient de changer' });
+  assert.match(b, /MOTS/, 'une phrase est une réponse — elle ne se reconvertit pas en chiffre');
 });

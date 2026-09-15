@@ -32,7 +32,7 @@ import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
 import { nuits, nuitDuJour, rythmeUtilisateur, paireEstUneNuit, MIN_NUIT } from './nuits.js';
-import { occasionDeDemander, proposerNoteBlock } from './proposer-note.js';
+import { occasionDeDemander, proposerNoteBlock, demandesDuFil } from './proposer-note.js';
 import { occasionDeDemanderConso } from './demander-conso.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
@@ -520,7 +520,15 @@ export function recentMemory(date, userId = OWNER, texte = null) {
    * poser la question pour meubler.
    */
   try {
-    const occ = occasionDeDemander(recentMessages(30, userId), relevesDuJour(today(), userId));
+    /* LES DEMANDES DU JOUR VIENNENT DE LA BASE, PAS DU FIL.
+       Les freins horaires se lisent bien sur trente messages — ils regardent
+       moins d'une heure. Le compte quotidien, non : une soirée bavarde passe
+       les trente messages, et les questions plus anciennes sortiraient du fil
+       sans jamais avoir été comptées. C'est justement le cas où quelqu'un a
+       déjà été relancé six fois. */
+    const jour = today();
+    const occ = occasionDeDemander(recentMessages(30, userId), relevesDuJour(jour, userId),
+                                   Date.now(), demandesDuFil(messagesForDate(jour, userId)));
     const bloc = proposerNoteBlock(occ);
     if (bloc) volatil.push(bloc);
   } catch { /* un signal qui échoue ne doit pas emporter la conversation */ }
