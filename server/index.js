@@ -5,8 +5,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
-         reprendreLesNuits } from './api.js';
+         reprendreLesNuits, jourVecu } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle, synchroHonoree } from './passerelle.js';
+import * as connecteur from './connecteur.js';
 import { analyser, apercuDe } from './mesures.js';
 import { oublierRythme } from './nuits.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
@@ -189,6 +190,50 @@ async function traiter(req, res) {
       // zéro, donc une date ancienne veut dire « rien n'est reparti ».
       demarre_le: DEMARRE_LE,
     });
+  }
+
+  /* ---------- le connecteur MCP : ce qu'un autre modele depose ici ----------
+   *
+   * DEVANT LE VERROU, POUR LA MEME RAISON QUE LA PASSERELLE : c'est un service
+   * qui appelle, pas un navigateur. Il porte une cle creee dans Reglages, qui
+   * n'ouvre que cette route, en ECRITURE SEULE, et qui n'est pas celle de la
+   * passerelle -- la passerelle lit, le connecteur ecrit, et on doit pouvoir
+   * fermer l'un sans eteindre l'autre.
+   *
+   * Le SDK MCP est une dependance OPTIONNELLE, comme celui d'Anthropic : sans
+   * lui, la route dit quoi installer. Un site qui ne demarre plus parce qu'une
+   * porte annexe manque serait une panne majeure pour une fonction accessoire.
+   */
+  if (url.pathname === '/mcp' || url.pathname === '/api/mcp') {
+    const userId = connecteur.proprietaireDeLaCle(connecteur.cleDeLaRequete(req, url));
+    if (!userId) {
+      // Le corps suit la forme JSON-RPC : un client MCP qui recoit du JSON
+      // maison affiche « reponse invalide » et on cherche du cote du protocole
+      // alors que c'est la cle qui manque.
+      return json(res, 401, {
+        jsonrpc: '2.0', id: null,
+        error: { code: -32001, message: 'clé absente ou inconnue',
+                 data: { indice: 'Crée-la dans Réglages › Le connecteur, '
+                               + 'puis colle-la dans les en-têtes du connecteur.' } }
+      });
+    }
+    try {
+      const corps = req.method === 'POST' ? await readBody(req) : undefined;
+      const fait = await connecteur.repondre(req, res, corps, userId, () => jourVecu(userId));
+      if (fait) return;
+      return json(res, 503, {
+        jsonrpc: '2.0', id: null,
+        error: { code: -32603, message: 'le connecteur n’est pas installé sur ce serveur',
+                 data: { indice: 'npm install @modelcontextprotocol/sdk' } }
+      });
+    } catch (err) {
+      console.error('[connecteur]', err);
+      if (res.headersSent) return res.end();
+      return json(res, 500, {
+        jsonrpc: '2.0', id: null,
+        error: { code: -32603, message: String(err.message ?? err).slice(0, 200) }
+      });
+    }
   }
 
   /* ---------- la passerelle vers une application locale ----------

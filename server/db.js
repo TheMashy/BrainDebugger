@@ -633,6 +633,12 @@ export const DEFAULT_SETTINGS = {
    * seul navigateur qui la recoit est celui de la session deja ouverte.
    */
   passerelleCle: '',
+  /* La clé du CONNECTEUR, à part de celle de la passerelle : l'une lit, l'autre
+     écrit, et fermer la porte d'écriture ne doit pas éteindre la guirlande.
+     Déclarée ici parce que `setSettings` ABANDONNE EN SILENCE toute clé qu'il
+     ne connaît pas — sans cette ligne, `poserCle` rend une clé que rien n'a
+     enregistrée, et le connecteur refuse une clé qu'on vient de lui donner. */
+  connecteurCle: '',
   // La demande de synchro déposée par le site, que Machi Tool ramasse à son
   // prochain relevé. Effacée dès qu'un digest arrive.
   demandeSynchro: null,

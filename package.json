@@ -16,6 +16,7 @@
     "cout:cache": "node tools/cout-cache.mjs"
   },
   "optionalDependencies": {
-    "@anthropic-ai/sdk": "^0.120.0"
+    "@anthropic-ai/sdk": "^0.120.0",
+    "@modelcontextprotocol/sdk": "^1.30.0"
   }
 }

@@ -36,6 +36,7 @@ import { occasionDeDemander, proposerNoteBlock, demandesDuFil } from './proposer
 import { occasionDeDemanderConso } from './demander-conso.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
+import * as connecteur from './connecteur.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
 import { sensDesLiens } from './sens.js';
 import { etats as etatsMotifs, injecterPromus, SEUILS_PROMOTION } from './promotion.js';
@@ -2750,6 +2751,25 @@ export const routes = {
   }),
   'POST /api/passerelle/cle': ({ userId }) => ({ cle: poserCle(userId) }),
   'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
+
+  /*
+   * LE CONNECTEUR — sa clé, et rien d'autre.
+   *
+   * Elle n'est rendue EN CLAIR qu'une fois, à la création. Ensuite on ne dit
+   * plus que son existence : une clé qu'on peut relire dans une page est une
+   * clé qu'un onglet laissé ouvert finit par montrer, et celle-ci autorise à
+   * écrire dans un journal intime. La reperdre coûte un clic ; la voir traîner
+   * coûte plus cher.
+   */
+  'GET /api/connecteur': ({ userId }) => ({
+    posee: connecteur.cleExiste(userId),
+    /* COMBIEN DE NOTES SONT DÉJÀ ENTRÉES PAR LÀ. Sans ce compte, une personne
+       qui a branché un connecteur ne sait pas s'il a jamais servi — et une
+       porte dont on ignore si elle s'ouvre finit par rester ouverte. */
+    notes: allCarnet(userId).filter(n => n.source === 'connecteur').length,
+  }),
+  'POST /api/connecteur/cle': ({ userId }) => ({ cle: connecteur.poserCle(userId) }),
+  'DELETE /api/connecteur/cle': ({ userId }) => { connecteur.retirerCle(userId); return { ok: true }; },
 
   /*
    * DE QUOI ALLER CHERCHER LE DIGEST DIRECTEMENT SUR LA MACHINE.
