@@ -2422,18 +2422,6 @@ async function renderYear(year) {
     if (gto) return ouvrirJour(gto.dataset.goto);
   };
 
-  /*
-   * `toggle` NE REMONTE PAS : on l'écoute à la capture, sur la vue. Sans ça,
-   * ouvrir un repli puis retirer une note le refermerait — le re-rendu relit un
-   * état que personne n'avait enregistré.
-   */
-  $('#view').addEventListener('toggle', e => {
-    const d = e.target.closest?.('[data-pli]');
-    if (!d) return;
-    if (d.dataset.pli === 'carnet') CARNET_PLI = d.open;
-    else REPERES_PLI = d.open;
-  }, true);
-
   wireFrise();
   wireDocRdv();
   wireJugerVeille();
@@ -7378,31 +7366,6 @@ async function renderSettings() {
         </p>
       </div>
         <div class="card qscard" id="qscard"><p class="faint" style="font-size:12.5px;margin:0">Quantified self…</p></div>
-        <h3>Le connecteur</h3>
-      <p class="sub">
-        Une conversation que tu tiens ailleurs — sur Claude, sur ChatGPT, sur ce que tu veux — peut
-        déposer une note dans ton carnet. Elle sera relue ici, et ta carte en tiendra compte.
-        <b>Ça écrit, ça ne lit pas</b> : rien de ton journal ne part vers le modèle à qui tu parles.
-      </p>
-      <div class="field">
-        <span>Clé</span>
-        <div class="keystate ${s.connecteurCle ? 'stored' : 'none'}" id="connState">
-          ${s.connecteurCle
-            ? `<b class="mono" id="connCle">${esc(s.connecteurCle)}</b>
-               <button class="btn" id="connRefaire" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('refaire', 11)}la remplacer</button>
-               <button class="btn" id="connRetirer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}la retirer</button>`
-            : `<b>Aucune clé</b> — aucune conversation ne peut déposer ici.
-               <button class="btn" id="connCreer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('plus', 11)}en créer une</button>`}
-        </div>
-        <p class="faint" style="font-size:11.5px;margin:8px 0 0">
-          ${/* L'adresse est ecrite ici parce que c'est ce qu'on doit recopier dans
-                les reglages du connecteur, et qu'aller la chercher ailleurs veut
-                dire ouvrir le code. */''}
-          Adresse à coller : <span class="mono">${esc(location.origin)}/mcp</span> — et la clé en
-          <span class="mono">Authorization: Bearer</span>.
-          La retirer ferme la porte tout de suite, sans toucher à la passerelle.
-        </p>
-      </div>
         <h3>L'heure</h3>
                 <p class="sub">
           « Aujourd'hui » est ta journée à toi, pas celle du serveur. Ton navigateur annonce
@@ -7414,6 +7377,50 @@ async function renderSettings() {
           Rien à régler à la main : c'est détecté tout seul, et ça suit tes voyages
           comme le changement d'heure.
         </p>` })}
+
+      ${/*
+         * LE CONNECTEUR A SON GROUPE, ET CE N'EST PAS UN RANGEMENT.
+         *
+         * Il etait sous « Ce qui te mesure », avec la passerelle et le quantified
+         * self. Deux raisons de l'en sortir, et la seconde est la vraie.
+         *
+         * Il n'y est pas a sa place : ce groupe dit ce qui MESURE quelqu'un --
+         * une montre, une balance, une guirlande qui vient lire. Le connecteur ne
+         * mesure rien : il ECRIT. Le mettre la demandait de lire trois ecrans
+         * pour comprendre dans quel sens va le fil.
+         *
+         * Et surtout : ce groupe est le plus lourd de la page -- il porte la
+         * carte du quantified self, qui se remplit apres coup et peut rendre des
+         * centaines de series. Y accrocher une chose qu'on vient regler une fois
+         * la rendait tributaire de tout ce qui peut mal se passer dedans. Un
+         * reglage qu'on ne peut pas atteindre n'existe pas.
+         */''}
+      ${groupe({ cle: 'connecteur', dessin: 'parler', titre: 'Le connecteur',
+                 etat: s.connecteurCle ? 'une clé posée' : 'aucune clé — rien ne peut déposer ici', corps: `
+        <p class="sub">
+          Une conversation que tu tiens ailleurs — sur Claude, sur ChatGPT, sur ce que tu veux — peut
+          déposer une note dans ton carnet. Elle sera relue ici, et ta carte en tiendra compte.
+          <b>Ça écrit, ça ne lit pas</b> : rien de ton journal ne part vers le modèle à qui tu parles.
+        </p>
+        <div class="field">
+          <span>Clé</span>
+          <div class="keystate ${s.connecteurCle ? 'stored' : 'none'}" id="connState">
+            ${s.connecteurCle
+              ? `<b class="mono" id="connCle">${esc(s.connecteurCle)}</b>
+                 <button class="btn" id="connRefaire" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('refaire', 11)}la remplacer</button>
+                 <button class="btn" id="connRetirer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}la retirer</button>`
+              : `<b>Aucune clé</b> — aucune conversation ne peut déposer ici.
+                 <button class="btn" id="connCreer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('plus', 11)}en créer une</button>`}
+          </div>
+          <p class="faint" style="font-size:11.5px;margin:8px 0 0">
+            ${/* L'adresse est ecrite ici parce que c'est ce qu'on doit recopier dans
+                  les reglages du connecteur, et qu'aller la chercher ailleurs veut
+                  dire ouvrir le code. */''}
+            Adresse à coller : <span class="mono">${esc(location.origin)}/mcp</span> — et la clé en
+            <span class="mono">Authorization: Bearer</span>.
+            La retirer ferme la porte tout de suite, sans toucher à la passerelle.
+          </p>
+        </div>` })}
 
       ${groupe({ cle: 'notes', dessin: 'suivi', titre: 'Comment tes notes se lisent', etat: `plancher ${s.floorMode === 'relative' ? 'référence − 3' : s.floor} · tenue ${s.sustain} jour${s.sustain > 1 ? 's' : ''}`, corps: `
         <h3>Le plancher</h3>
@@ -7689,20 +7696,6 @@ async function renderSettings() {
       finally { b.disabled = false; }
     });
   }
-
-  /*
-   * `toggle` NE REMONTE PAS : il ne bouillonne pas, donc un écouteur posé sur
-   * la vue ne le verrait jamais. On écoute donc en CAPTURE, une fois pour tous
-   * les groupes, plutôt que d'en accrocher un par `<details>` — la vue se
-   * reconstruit, et six écouteurs à raccrocher à chaque fois sont six occasions
-   * d'en oublier un.
-   */
-  $('#view').addEventListener('toggle', e => {
-    const d = e.target.closest?.('details.rgroupe');
-    if (!d?.dataset.pli) return;
-    if (d.open) REGLAGES_OUVERTS.add(d.dataset.pli);
-    else REGLAGES_OUVERTS.delete(d.dataset.pli);
-  }, true);
 
   $('#export').addEventListener('click', async () => {
     const data = await api('/api/export');
@@ -8034,20 +8027,67 @@ async function renderBackendCfg() {
     renderSettings();
     toast('Clé retirée — l’application ne peut plus interroger le site');
   });
+  /*
+   * ON REPEINT LE BLOC, PAS LA PAGE.
+   *
+   * `renderSettings()` reconstruit l'`innerHTML` de toute la vue : les
+   * `<details>` sont détruits puis recréés, donc chaque groupe ouvert se ferme
+   * et se rouvre sous les doigts, et ce qu'on visait est ailleurs le temps du
+   * clic. Le fichier se le disait déjà ailleurs — « surtout PAS
+   * renderSettings() ici » — et la règle vaut pour un bouton qui ne change
+   * qu'une ligne.
+   *
+   * Poser une clé n'en change qu'une : celle-là. On rend donc le bloc à
+   * lui-même, et on raccroche ses trois boutons — c'est du markup neuf.
+   */
+  const peindreConnecteur = () => {
+    const el = $('#connState');
+    if (!el) return;
+    const cle = S.settings.connecteurCle;
+    el.className = `keystate ${cle ? 'stored' : 'none'}`;
+    el.innerHTML = cle
+      ? `<b class="mono" id="connCle">${esc(cle)}</b>
+         <button class="btn" id="connRefaire" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('refaire', 11)}la remplacer</button>
+         <button class="btn" id="connRetirer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}la retirer</button>`
+      : `<b>Aucune clé</b> — aucune conversation ne peut déposer ici.
+         <button class="btn" id="connCreer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('plus', 11)}en créer une</button>`;
+    // L'état sur la ligne du repli répond à « c'est réglé comment ? » sans rien
+    // ouvrir : le laisser en arrière ferait mentir le repli fermé.
+    const tete = $('details[data-pli="connecteur"] .rgetat');
+    if (tete) tete.textContent = cle ? 'une clé posée' : 'aucune clé — rien ne peut déposer ici';
+    brancherConnecteur();
+  };
+
   const poserConnecteur = async () => {
     await api('/api/connecteur/cle', {});
     S.settings = (await api('/api/state')).settings;
-    renderSettings();
+    peindreConnecteur();
     toast('Clé créée — colle-la dans les en-têtes du connecteur');
   };
-  $('#connCreer')?.addEventListener('click', poserConnecteur);
-  $('#connRefaire')?.addEventListener('click', poserConnecteur);
-  $('#connRetirer')?.addEventListener('click', async () => {
-    await fetch('/api/connecteur/cle', { method: 'DELETE', headers: enTetes() });
-    S.settings = (await api('/api/state')).settings;
-    renderSettings();
-    toast('Clé retirée — plus aucune conversation ne peut déposer ici');
-  });
+
+  function brancherConnecteur() {
+    $('#connCreer')?.addEventListener('click', poserConnecteur);
+    $('#connRefaire')?.addEventListener('click', poserConnecteur);
+    $('#connRetirer')?.addEventListener('click', async () => {
+      await fetch('/api/connecteur/cle', { method: 'DELETE', headers: enTetes() });
+      S.settings = (await api('/api/state')).settings;
+      peindreConnecteur();
+      toast('Clé retirée — plus aucune conversation ne peut déposer ici');
+    });
+    // Un clic sur la clé la copie : trente-deux caractères, et une faute de
+    // frappe dans un secret ne se voit qu'au refus.
+    $('#connCle')?.addEventListener('click', async e => {
+      try {
+        await navigator.clipboard.writeText(S.settings.connecteurCle ?? '');
+        toast('Clé copiée');
+      } catch {
+        const r = document.createRange();
+        r.selectNodeContents(e.currentTarget);
+        const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      }
+    });
+  }
+  brancherConnecteur();
 
   // Un clic sur la clé la copie : la recopier à la main, c'est trente-deux
   // caractères et une faute de frappe.
@@ -9273,6 +9313,38 @@ function wireRechercheMoi() {
   input.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(lancer, 250); });
 }
 
+/**
+ * QUI SE SOUVIENT DES REPLIS — UN SEUL ÉCOUTEUR, POSÉ UNE FOIS.
+ *
+ * `toggle` NE REMONTE PAS : il ne bouillonne pas, donc on l'écoute en CAPTURE
+ * sur la vue, plutôt que d'en accrocher un par `<details>`.
+ *
+ * IL ÉTAIT POSÉ DANS LES FONCTIONS DE RENDU, DONC À CHAQUE RENDU. `#view` n'est
+ * jamais remplacé — seul son `innerHTML` l'est — et `go()` ne défait que
+ * `onclick`, pas les écouteurs ajoutés par `addEventListener`. Ils s'empilaient
+ * donc sans fin : MESURÉ à six écouteurs après cinq allers-retours entre deux
+ * vues, et rien ne les enlève jamais. Chaque reconstruction de la vue refait
+ * naître les `<details open>`, ce qui émet un `toggle` par groupe ouvert — et
+ * chacun réveillait alors toute la pile.
+ *
+ * ET CHACUN NE RÉCLAME QUE SES PROPRES REPLIS. Celui de la vue journal disait
+ * « si ce n'est pas le carnet, ce sont les repères » : ouvrir un groupe des
+ * Réglages écrivait donc dans `REPERES_PLI`, qui n'a rien à voir. Deux vues qui
+ * se partagent un événement doivent chacune reconnaître ce qui est à elles.
+ */
+function suivreLesReplis() {
+  document.getElementById('view')?.addEventListener('toggle', e => {
+    const d = e.target.closest?.('[data-pli]');
+    const pli = d?.dataset?.pli;
+    if (!pli) return;
+    if (pli === 'carnet') { CARNET_PLI = d.open; return; }
+    if (pli === 'reperes') { REPERES_PLI = d.open; return; }
+    if (!d.classList.contains('rgroupe')) return;
+    if (d.open) REGLAGES_OUVERTS.add(pli);
+    else REGLAGES_OUVERTS.delete(pli);
+  }, true);
+}
+
 const VIEWS = {
   tonight: renderTonight,
   moi: () => renderMoi(),
@@ -9462,6 +9534,8 @@ function syncAmbiance() {
 async function boot() {
   S = await api('/api/state');
   suivreSession();
+  // Une fois, ici, et plus jamais : voir `suivreLesReplis`.
+  suivreLesReplis();
   // Le fond démarre après l'état : il doit savoir quelle scène poser d'entrée,
   // sinon on voit la scène par défaut céder la place trois secondes plus tard.
   monterPet();
