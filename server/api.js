@@ -2753,13 +2753,13 @@ export const routes = {
   'DELETE /api/passerelle/cle': ({ userId }) => { retirerCle(userId); return { ok: true }; },
 
   /*
-   * LE CONNECTEUR — sa clé, et rien d'autre.
+   * LE CONNECTEUR — sa clé, et ce qui est déjà entré par là.
    *
-   * Elle n'est rendue EN CLAIR qu'une fois, à la création. Ensuite on ne dit
-   * plus que son existence : une clé qu'on peut relire dans une page est une
-   * clé qu'un onglet laissé ouvert finit par montrer, et celle-ci autorise à
-   * écrire dans un journal intime. La reperdre coûte un clic ; la voir traîner
-   * coûte plus cher.
+   * La clé se relit dans Réglages, comme celle de la passerelle : il faut
+   * pouvoir la recopier dans les réglages d'un service tiers, et une clé qu'on
+   * ne peut plus voir est une clé qu'on refait à chaque fois. `publicSettings`
+   * ne retire que la clé API ; celle-ci voyage donc avec les réglages, vers la
+   * session déjà ouverte et elle seule.
    */
   'GET /api/connecteur': ({ userId }) => ({
     posee: connecteur.cleExiste(userId),

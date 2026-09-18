@@ -7378,6 +7378,31 @@ async function renderSettings() {
         </p>
       </div>
         <div class="card qscard" id="qscard"><p class="faint" style="font-size:12.5px;margin:0">Quantified self…</p></div>
+        <h3>Le connecteur</h3>
+      <p class="sub">
+        Une conversation que tu tiens ailleurs — sur Claude, sur ChatGPT, sur ce que tu veux — peut
+        déposer une note dans ton carnet. Elle sera relue ici, et ta carte en tiendra compte.
+        <b>Ça écrit, ça ne lit pas</b> : rien de ton journal ne part vers le modèle à qui tu parles.
+      </p>
+      <div class="field">
+        <span>Clé</span>
+        <div class="keystate ${s.connecteurCle ? 'stored' : 'none'}" id="connState">
+          ${s.connecteurCle
+            ? `<b class="mono" id="connCle">${esc(s.connecteurCle)}</b>
+               <button class="btn" id="connRefaire" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('refaire', 11)}la remplacer</button>
+               <button class="btn" id="connRetirer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}la retirer</button>`
+            : `<b>Aucune clé</b> — aucune conversation ne peut déposer ici.
+               <button class="btn" id="connCreer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('plus', 11)}en créer une</button>`}
+        </div>
+        <p class="faint" style="font-size:11.5px;margin:8px 0 0">
+          ${/* L'adresse est ecrite ici parce que c'est ce qu'on doit recopier dans
+                les reglages du connecteur, et qu'aller la chercher ailleurs veut
+                dire ouvrir le code. */''}
+          Adresse à coller : <span class="mono">${esc(location.origin)}/mcp</span> — et la clé en
+          <span class="mono">Authorization: Bearer</span>.
+          La retirer ferme la porte tout de suite, sans toucher à la passerelle.
+        </p>
+      </div>
         <h3>L'heure</h3>
                 <p class="sub">
           « Aujourd'hui » est ta journée à toi, pas celle du serveur. Ton navigateur annonce
@@ -8009,6 +8034,21 @@ async function renderBackendCfg() {
     renderSettings();
     toast('Clé retirée — l’application ne peut plus interroger le site');
   });
+  const poserConnecteur = async () => {
+    await api('/api/connecteur/cle', {});
+    S.settings = (await api('/api/state')).settings;
+    renderSettings();
+    toast('Clé créée — colle-la dans les en-têtes du connecteur');
+  };
+  $('#connCreer')?.addEventListener('click', poserConnecteur);
+  $('#connRefaire')?.addEventListener('click', poserConnecteur);
+  $('#connRetirer')?.addEventListener('click', async () => {
+    await fetch('/api/connecteur/cle', { method: 'DELETE', headers: enTetes() });
+    S.settings = (await api('/api/state')).settings;
+    renderSettings();
+    toast('Clé retirée — plus aucune conversation ne peut déposer ici');
+  });
+
   // Un clic sur la clé la copie : la recopier à la main, c'est trente-deux
   // caractères et une faute de frappe.
   $('#passCle')?.addEventListener('click', async e => {
