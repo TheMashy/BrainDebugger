@@ -204,17 +204,29 @@ async function traiter(req, res) {
    * lui, la route dit quoi installer. Un site qui ne demarre plus parce qu'une
    * porte annexe manque serait une panne majeure pour une fonction accessoire.
    */
-  if (url.pathname === '/mcp' || url.pathname === '/api/mcp') {
+  if (connecteur.CHEMIN.test(url.pathname)) {
     const userId = connecteur.proprietaireDeLaCle(connecteur.cleDeLaRequete(req, url));
     if (!userId) {
-      // Le corps suit la forme JSON-RPC : un client MCP qui recoit du JSON
-      // maison affiche « reponse invalide » et on cherche du cote du protocole
-      // alors que c'est la cle qui manque.
-      return json(res, 401, {
+      /*
+       * SURTOUT PAS 401 — C'EST LE MOT QUI DÉCLENCHE L'OAUTH.
+       *
+       * Dans le contrat MCP, un 401 ne veut pas dire « ta clé est fausse », il
+       * veut dire « va chercher de quoi t'authentifier ». Claude.ai l'a pris au
+       * mot : il est parti en découverte OAuth, a tenté de s'inscrire tout seul
+       * auprès d'un service qui n'existe pas, et a rendu « Impossible de
+       * s'inscrire auprès du service de connexion ». Le message parlait
+       * d'OAuth ; le vrai défaut était une clé qui n'était pas arrivée.
+       *
+       * 404 est à la fois plus juste et plus sûr : sans la bonne clé, cette
+       * adresse n'existe pas. Aucun client n'en fait une invitation à
+       * s'inscrire, et on ne dit pas non plus à un inconnu qu'il a trouvé une
+       * porte — seulement qu'il n'y en a pas.
+       */
+      return json(res, 404, {
         jsonrpc: '2.0', id: null,
-        error: { code: -32001, message: 'clé absente ou inconnue',
-                 data: { indice: 'Crée-la dans Réglages › Le connecteur, '
-                               + 'puis colle-la dans les en-têtes du connecteur.' } }
+        error: { code: -32601, message: 'aucun connecteur à cette adresse',
+                 data: { indice: 'L’adresse finit par ta clé : /mcp/TA-CLÉ. '
+                               + 'Crée-la dans Réglages › Le connecteur.' } }
       });
     }
     try {

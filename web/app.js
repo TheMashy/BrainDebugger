@@ -7459,14 +7459,29 @@ async function peindreReglages() {
               : `<b>Aucune clé</b> — aucune conversation ne peut déposer ici.
                  <button class="btn" id="connCreer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('plus', 11)}en créer une</button>`}
           </div>
-          <p class="faint" style="font-size:11.5px;margin:8px 0 0">
-            ${/* L'adresse est ecrite ici parce que c'est ce qu'on doit recopier dans
-                  les reglages du connecteur, et qu'aller la chercher ailleurs veut
-                  dire ouvrir le code. */''}
-            Adresse à coller : <span class="mono">${esc(location.origin)}/mcp</span> — et la clé en
-            <span class="mono">Authorization: Bearer</span>.
-            La retirer ferme la porte tout de suite, sans toucher à la passerelle.
-          </p>
+          ${/*
+             * L'ADRESSE PORTE LA CLÉ, ET C'EST TOUT CE QU'ON COLLE.
+             *
+             * Le premier essai séparait les deux — l'adresse ici, la clé dans un
+             * en-tête. Sans en-tête, le serveur rendait 401 ; or 401 dans le
+             * contrat MCP ne veut pas dire « clé fausse » mais « va
+             * t'authentifier ». Claude.ai est parti en découverte OAuth et a
+             * rendu « Impossible de s'inscrire auprès du service de connexion ».
+             * Un champ à remplir de moins, et plus de dialogue à avoir.
+             */''}
+          <div class="field" id="connUrl" style="margin-top:12px">
+            <span>Adresse à coller</span>
+            <div class="keystate ${s.connecteurCle ? 'stored' : 'none'}">
+              ${s.connecteurCle
+                ? `<b class="mono" id="connLien">${esc(location.origin)}/mcp/${esc(s.connecteurCle)}</b>`
+                : '<b>Crée une clé, et l’adresse apparaît.</b>'}
+            </div>
+            <p class="faint" style="font-size:11.5px;margin:8px 0 0">
+              <b>Cette adresse est un secret</b> : elle porte la clé, donc quiconque l'a peut
+              écrire dans ton carnet. Elle ne se colle que dans les réglages de ton connecteur.
+              La remplacer invalide l'ancienne sur-le-champ, sans toucher à la passerelle.
+            </p>
+          </div>
         </div>` })}
 
       ${groupe({ cle: 'notes', dessin: 'suivi', titre: 'Comment tes notes se lisent', etat: `plancher ${s.floorMode === 'relative' ? 'référence − 3' : s.floor} · tenue ${s.sustain} jour${s.sustain > 1 ? 's' : ''}`, corps: `
@@ -8098,6 +8113,15 @@ async function renderBackendCfg() {
          <button class="btn" id="connRetirer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}la retirer</button>`
       : `<b>Aucune clé</b> — aucune conversation ne peut déposer ici.
          <button class="btn" id="connCreer" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('plus', 11)}en créer une</button>`;
+    // L'adresse porte la clé : la laisser en arrière donnerait à recopier une
+    // adresse que le serveur vient de refuser.
+    const lien = $('#connUrl .keystate');
+    if (lien) {
+      lien.className = `keystate ${cle ? 'stored' : 'none'}`;
+      lien.innerHTML = cle
+        ? `<b class="mono" id="connLien">${esc(location.origin)}/mcp/${esc(cle)}</b>`
+        : '<b>Crée une clé, et l’adresse apparaît.</b>';
+    }
     // L'état sur la ligne du repli répond à « c'est réglé comment ? » sans rien
     // ouvrir : le laisser en arrière ferait mentir le repli fermé.
     const tete = $('details[data-pli="connecteur"] .rgetat');
@@ -8121,18 +8145,18 @@ async function renderBackendCfg() {
       peindreConnecteur();
       toast('Clé retirée — plus aucune conversation ne peut déposer ici');
     });
-    // Un clic sur la clé la copie : trente-deux caractères, et une faute de
-    // frappe dans un secret ne se voit qu'au refus.
-    $('#connCle')?.addEventListener('click', async e => {
-      try {
-        await navigator.clipboard.writeText(S.settings.connecteurCle ?? '');
-        toast('Clé copiée');
-      } catch {
+    // Un clic copie : trente-deux caractères, et une faute de frappe dans un
+    // secret ne se voit qu'au refus. L'adresse d'abord — c'est elle qu'on colle.
+    const copier = (sel, quoi, dit) => $(sel)?.addEventListener('click', async e => {
+      try { await navigator.clipboard.writeText(quoi()); toast(dit); }
+      catch {
         const r = document.createRange();
         r.selectNodeContents(e.currentTarget);
-        const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        const s2 = getSelection(); s2.removeAllRanges(); s2.addRange(r);
       }
     });
+    copier('#connLien', () => `${location.origin}/mcp/${S.settings.connecteurCle ?? ''}`, 'Adresse copiée');
+    copier('#connCle', () => S.settings.connecteurCle ?? '', 'Clé copiée');
   }
   brancherConnecteur();
 

@@ -68,15 +68,37 @@ export function memeCle(a, b) {
 }
 
 /**
- * LA CLÉ PRÉSENTÉE. En-tête d'autorisation d'abord — c'est ce que les clients
- * MCP savent envoyer. Le paramètre d'URL reste accepté parce que certains
- * réglages de connecteur ne proposent que de coller une adresse ; il vaut moins
- * (une URL se retrouve dans les journaux), et l'écran le dit.
+ * LES ADRESSES DU CONNECTEUR. `/mcp`, et `/mcp/<clé>`.
+ *
+ * La seconde existe parce que le premier essai a échoué sur exactement ça :
+ * sans clé, le serveur rendait 401, et 401 dans le contrat MCP ne veut pas dire
+ * « clé fausse » mais « va t'authentifier ». Claude.ai est donc parti en
+ * découverte OAuth et a rendu « Impossible de s'inscrire auprès du service de
+ * connexion ».
+ *
+ * L'ADRESSE EST LE SECRET, et c'est la forme que ces réglages attendent : leur
+ * propre option s'appelle « pas de connexion — quiconque a l'adresse peut s'en
+ * servir ». On la leur donne littéralement.
+ */
+export const CHEMIN = /^\/(?:api\/)?mcp(?:\/([A-Za-z0-9_-]{16,64}))?\/?$/;
+
+/**
+ * LA CLÉ PRÉSENTÉE, D'OÙ QU'ELLE VIENNE.
+ *
+ * Le CHEMIN d'abord : c'est le seul moyen qui marche partout, parce qu'il ne
+ * demande rien d'autre que de coller une adresse. L'en-tête ensuite, pour les
+ * clients qui savent en poser un ; le paramètre d'URL en dernier.
+ *
+ * CE QUE ÇA COÛTE, ET POURQUOI ON LE PAIE. Une clé dans une adresse se retrouve
+ * dans les journaux de qui la relaie. Ce serveur n'écrit aucun journal d'accès,
+ * et la clé se remplace en un clic — mais l'écran doit le dire, parce que
+ * coller cette adresse quelque part, c'est donner le droit d'écrire.
  */
 export function cleDeLaRequete(req, url) {
   const h = req?.headers ?? {};
+  const duChemin = CHEMIN.exec(url?.pathname ?? '')?.[1];
   const bearer = /^Bearer\s+(.+)$/i.exec(String(h.authorization ?? ''));
-  return (bearer?.[1] ?? h['x-connecteur-cle']
+  return (duChemin ?? bearer?.[1] ?? h['x-connecteur-cle']
           ?? url?.searchParams?.get('cle') ?? '').toString().trim() || null;
 }
 

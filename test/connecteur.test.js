@@ -10,7 +10,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -121,4 +121,65 @@ test('ÇA ÉCRIT, ÇA NE LIT PAS — et c’est une décision, pas une étape', 
     throw e;
   }
   assert.deepEqual(outils, ['noter'], `un outil de plus est apparu : ${outils.join(', ')}`);
+});
+
+/* ---------------------------------------------------------------------
+ * 401 EST LE MOT QUI DÉCLENCHE L'OAUTH.
+ *
+ * Dans le contrat MCP, un 401 ne veut pas dire « ta clé est fausse », il veut
+ * dire « va chercher de quoi t'authentifier ». Claude.ai l'a pris au mot : il
+ * est parti en découverte OAuth, a tenté de s'inscrire auprès d'un service qui
+ * n'existe pas, et a rendu « Impossible de s'inscrire auprès du service de
+ * connexion ». Le message parlait d'OAuth ; le vrai défaut était une clé qui
+ * n'était jamais arrivée.
+ *
+ * La clé voyage donc DANS L'ADRESSE — c'est ce que ces réglages appellent
+ * « pas de connexion : quiconque a l'adresse peut s'en servir » — et une
+ * adresse sans clé valable rend 404 : elle n'existe pas, ce qui est vrai et
+ * n'invite personne à s'inscrire.
+ * --------------------------------------------------------------------- */
+
+test('l’adresse porte la clé', () => {
+  const cle = 'abcdefghijklmnop0123';
+  assert.equal(C.CHEMIN.exec('/mcp/' + cle)?.[1], cle);
+  assert.equal(C.CHEMIN.exec('/api/mcp/' + cle)?.[1], cle);
+  assert.equal(C.cleDeLaRequete({ headers: {} }, { pathname: '/mcp/' + cle }), cle);
+});
+
+test('le chemin reconnaît ce qu’il doit, et rien d’autre', () => {
+  for (const bon of ['/mcp', '/mcp/', '/api/mcp', '/mcp/abcdefghijklmnop0123'])
+    assert.ok(C.CHEMIN.test(bon), `« ${bon} » devrait être une adresse du connecteur`);
+  for (const mauvais of ['/mcpx', '/mcp/a/b', '/mcp/court', '/api/mcpx', '/mcp/avec espace'])
+    assert.ok(!C.CHEMIN.test(mauvais), `« ${mauvais} » ne devrait pas en être une`);
+});
+
+test('le chemin l’emporte sur l’en-tête', () => {
+  /* Si les deux sont là et se contredisent, c'est l'adresse qui a été collée
+     dans le connecteur : c'est elle qui dit de qui il s'agit. */
+  const cle = 'zzzzzzzzzzzzzzzz9999';
+  assert.equal(
+    C.cleDeLaRequete({ headers: { authorization: 'Bearer autre-chose-encore' } },
+                     { pathname: '/mcp/' + cle }), cle);
+});
+
+test('l’en-tête marche encore, pour les clients qui savent en poser un', () => {
+  assert.equal(C.cleDeLaRequete({ headers: { authorization: 'Bearer xyz' } },
+                                { pathname: '/mcp' }), 'xyz');
+});
+
+test('JAMAIS 401 sur une adresse sans clé — c’est ce qui a cassé la connexion', () => {
+  /*
+   * Ce test lit le CODE de la route, pas une réponse : le statut se décide là,
+   * et c'est la seule ligne qui empêche un client MCP de partir en OAuth.
+   * Si quelqu'un la repasse à 401 un jour, le connecteur cessera de se
+   * connecter sans qu'aucune requête n'échoue — le symptôme sera un message
+   * d'inscription, à trois écrans de la cause.
+   */
+  const index = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+  const debut = index.indexOf('connecteur.CHEMIN.test(url.pathname)');
+  assert.ok(debut > 0, 'la route du connecteur est introuvable');
+  const bloc = index.slice(debut, index.indexOf('la passerelle vers une application locale', debut));
+  assert.ok(bloc.includes('return json(res, 404,'), 'le refus doit être un 404');
+  assert.ok(!/return json\(res, 401,/.test(bloc),
+    '401 veut dire « va t’authentifier » dans le contrat MCP, pas « clé fausse »');
 });
