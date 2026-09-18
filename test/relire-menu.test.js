@@ -21,8 +21,9 @@ const finCarte = app.indexOf('async function lancerLecture(', debutCarte);
 assert.ok(debutCarte > 0 && finCarte > debutCarte, 'le rendu de Ma carte est introuvable — repères déplacés ?');
 const carte = sansCommentaires(app.slice(debutCarte, finCarte));
 
-const debutReglages = app.indexOf('async function renderSettings()');
-assert.ok(debutReglages > 0, 'renderSettings est introuvable');
+const debutReglages = app.indexOf('async function peindreReglages()');
+assert.ok(debutReglages > 0, 'peindreReglages est introuvable — c’est le corps du panneau, '
+  + '`renderSettings` n’est plus que le garde qui coalesce les rendus');
 const reglages = sansCommentaires(app.slice(debutReglages, debutReglages + 60000));
 
 test('Ma carte ne propose qu’une action : « relire »', () => {

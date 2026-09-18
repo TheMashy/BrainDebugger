@@ -19,8 +19,9 @@ const app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../web/style.css', import.meta.url), 'utf8');
 const sansCommentaires = t => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
 
-const debut = app.indexOf('async function renderSettings()');
-assert.ok(debut > 0, 'renderSettings est introuvable');
+const debut = app.indexOf('async function peindreReglages()');
+assert.ok(debut > 0, 'peindreReglages est introuvable — c’est le corps du panneau, '
+  + '`renderSettings` n’est plus que le garde qui coalesce les rendus');
 const fin = app.indexOf('\nasync function montrerFuseau()', debut);
 assert.ok(fin > debut, 'la fin du panneau des réglages est introuvable');
 const reglages = sansCommentaires(app.slice(debut, fin));

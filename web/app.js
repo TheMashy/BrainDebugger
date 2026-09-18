@@ -7243,7 +7243,54 @@ function poidsMemoireDit() {
 
 const REGLAGES_OUVERTS = new Set();
 
-async function renderSettings() {
+/*
+ * DEUX PLACEHOLDERS FIGÉS, C'EST UNE VUE QUI SE REFAIT TROP VITE.
+ *
+ * « Quantified self… » et « vérification… » sont les textes d'attente que
+ * `peindreQS` et `montrerFuseau` remplacent quand leur requête revient. Les
+ * voir tous les deux à l'écran ne veut pas dire que les requêtes ont échoué —
+ * elles écrivent alors un message d'erreur — mais que le `innerHTML` de la vue
+ * a été REFAIT avant leur retour : le contenu arrive dans un nœud déjà
+ * détaché, et ce qu'on regarde est un placeholder tout neuf. C'est la
+ * signature d'un rendu en boucle, et c'est ce qu'on voyait à l'écran.
+ *
+ * Deux réponses ici, et une troisième plus bas (la mémoire des remplissages).
+ *
+ * 1. ON COALESCE. Rendre deux fois dans la même image ne montre rien de plus
+ *    que rendre une fois : les appels rapprochés se fondent en un seul, joué à
+ *    la prochaine image. Ça ne guérit pas un appelant qui s'emballe, ça
+ *    l'empêche de rendre l'écran inutilisable.
+ *
+ * 2. ON LE DIT. Un rendu qui se répète est un défaut, pas un régime : au-delà
+ *    du seuil, on écrit une fois dans la console QUI appelle. Sans cette pile,
+ *    « ça clignote » ne se diagnostique pas — il a fallu monter un décor, 400
+ *    mesures et un observateur pour ne PAS le reproduire.
+ */
+const RENDU = { demande: false, quand: [], dit: false };
+const RENDUS_MAX = 6;          // par fenêtre
+const RENDUS_FENETRE = 2000;   // ms
+
+function renderSettings() {
+  const pile = new Error().stack;
+  if (RENDU.demande) return RENDU.demande;
+  RENDU.demande = new Promise(resolve => {
+    requestAnimationFrame(async () => {
+      RENDU.demande = false;
+      const t = Date.now();
+      RENDU.quand = RENDU.quand.filter(x => t - x < RENDUS_FENETRE);
+      RENDU.quand.push(t);
+      if (RENDU.quand.length > RENDUS_MAX && !RENDU.dit) {
+        RENDU.dit = true;
+        console.warn(`[réglages] ${RENDU.quand.length} rendus en ${RENDUS_FENETRE} ms — `
+                   + 'quelque chose rappelle renderSettings() en boucle. Dernier appelant :\n' + pile);
+      }
+      try { await peindreReglages(); } finally { resolve(); }
+    });
+  });
+  return RENDU.demande;
+}
+
+async function peindreReglages() {
   const s = S.settings;
 
   /*
@@ -8106,11 +8153,26 @@ async function renderBackendCfg() {
    * arrive donc en différé, et la page ne l'attend pas pour s'afficher.
    */
   const peindreQS = async () => {
-    const carte = $('#qscard');
+    let carte = $('#qscard');
     if (!carte) return;
+    // Ce qu'on savait déjà, tout de suite : un rendu qui suit ne doit pas
+    // remettre le texte d'attente pour une réponse qu'on a en main.
+    if (QS_VU) { carte.innerHTML = qsMarkup(QS_VU); brancherQS(carte); }
     try {
       const qs = await api('/api/qs');
+      QS_VU = qs;
+      // Le nœud a pu être remplacé pendant l'attente : on repeint celui qui est
+      // À L'ÉCRAN. Écrire dans un orphelin laisse le placeholder sous les yeux.
+      carte = $('#qscard') ?? carte;
       carte.innerHTML = qsMarkup(qs);
+      brancherQS(carte);
+    } catch (err) {
+      ($('#qscard') ?? carte).innerHTML = `<h2>${ico('antenne', 15)}Quantified self</h2>
+        <p class="warn" style="font-size:12.5px;margin:0">${esc(err.message)}</p>`;
+    }
+  };
+
+  function brancherQS(carte) {
       carte.querySelectorAll('[data-qsvue]').forEach(b => b.addEventListener('click', () => {
         QSVUE = b.dataset.qsvue;
         peindreQS();
@@ -8127,11 +8189,7 @@ async function renderBackendCfg() {
         await api('/api/qs/journal/vider', {});
         peindreQS();
       });
-    } catch (err) {
-      carte.innerHTML = `<h2>${ico('antenne', 15)}Quantified self</h2>
-        <p class="warn" style="font-size:12.5px;margin:0">${esc(err.message)}</p>`;
-    }
-  };
+  }
   peindreQS();
 
   $('[data-lire-tout]')?.addEventListener('click', async e => {
@@ -8177,9 +8235,17 @@ async function renderBackendCfg() {
  * quelle case de la grille tombe une note. On tolere une minute d'ecart --
  * l'aller-retour reseau peut tomber pile sur un changement de minute.
  */
+/* Ce que la dernière requête a rendu. Un rendu qui suit repeint AVEC, au lieu
+   de remettre le texte d'attente : on ne fait pas patienter quelqu'un pour une
+   réponse qu'on a déjà. Voir le garde de `renderSettings`. */
+let TEMPS_VU = null;
+/* Idem pour l'inventaire du quantified self, qui est le plus long à venir. */
+let QS_VU = null;
+
 async function montrerFuseau() {
   const el = $('#fuseau');
   if (!el) return;
+  if (TEMPS_VU) peindreFuseau(el, TEMPS_VU);
   try {
     const t = await api('/api/temps');
     const ici = new Date();
@@ -8188,16 +8254,32 @@ async function montrerFuseau() {
       (Number(t.heure.slice(0, 2)) * 60 + Number(t.heure.slice(3))) -
       (ici.getHours() * 60 + ici.getMinutes()));
     const ok = Math.min(ecart, 1440 - ecart) <= 1;
-    el.innerHTML = `
-      <span class="horloge">${esc(t.heure)}</span>
-      <span>chez le serveur · <b>${esc(t.zone)}</b> ${esc(t.decalage)}</span>
-      <span>${hhmm} ici · <b>${esc(FUSEAU || 'fuseau inconnu')}</b></span>
-      <span class="verdict ${ok ? 'ok' : 'ko'}">${ok
-        ? '✓ à ton heure'
-        : "⚠ le serveur n'est pas à ton heure"}</span>`;
+    TEMPS_VU = t;
+    /* Le nœud a pu être remplacé pendant l'attente : on repeint CELUI QUI EST
+       À L'ÉCRAN, pas celui qu'on tenait au départ. Écrire dans un orphelin
+       laisse le texte d'attente sous les yeux et n'avertit de rien. */
+    peindreFuseau($('#fuseau') ?? el, t, hhmm, ok);
   } catch {
-    el.innerHTML = '<span>l\'heure du serveur est injoignable</span>';
+    ($('#fuseau') ?? el).innerHTML = '<span>l\'heure du serveur est injoignable</span>';
   }
+}
+
+function peindreFuseau(el, t, hhmm = null, ok = null) {
+  if (!el) return;
+  if (hhmm === null) {
+    const ici = new Date();
+    hhmm = `${String(ici.getHours()).padStart(2, '0')}:${String(ici.getMinutes()).padStart(2, '0')}`;
+    const ecart = Math.abs((Number(t.heure.slice(0, 2)) * 60 + Number(t.heure.slice(3)))
+                         - (ici.getHours() * 60 + ici.getMinutes()));
+    ok = Math.min(ecart, 1440 - ecart) <= 1;
+  }
+  el.innerHTML = `
+    <span class="horloge">${esc(t.heure)}</span>
+    <span>chez le serveur · <b>${esc(t.zone)}</b> ${esc(t.decalage)}</span>
+    <span>${hhmm} ici · <b>${esc(FUSEAU || 'fuseau inconnu')}</b></span>
+    <span class="verdict ${ok ? 'ok' : 'ko'}">${ok
+      ? '✓ à ton heure'
+      : "⚠ le serveur n'est pas à ton heure"}</span>`;
 }
 
 /* --------- import d'un historique tableur --------- */
