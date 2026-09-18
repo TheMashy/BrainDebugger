@@ -4789,3 +4789,19 @@ details.jpecol .jpetop { margin-top: 5px; }
 @media (prefers-reduced-motion: reduce) { .cout { transition: none; } }
 
 @media (prefers-reduced-motion: reduce) { .rcran { transition: none; } }
+
+/* ==================================================================
+   UN ÉCHANGE VENU D'AILLEURS.
+   Versé dans le fil depuis une conversation tenue hors de l'application.
+   La marque est sur les DEUX bulles — la sienne comprise : ce qui s'est
+   passé ailleurs, c'est l'échange, pas seulement la réponse. Elle se lit
+   sans crier : un liseré et un nom, pas une étiquette de couleur.
+   ================================================================== */
+.msg.dehors { border-left: 2px solid var(--accent-2, #6aa8e8); }
+.msg.dehors.user { border-left: 0; border-right: 2px solid var(--accent-2, #6aa8e8); }
+.venu {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 7px;
+  font: 500 10.5px/1 var(--mono, ui-monospace, monospace);
+  letter-spacing: .04em; color: var(--ink-faint); opacity: .85;
+}
+.venu svg { opacity: .8; }

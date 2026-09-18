@@ -470,6 +470,17 @@ for (const [table, colonne, decl] of [
   ['motifs', 'promu', 'INTEGER NOT NULL DEFAULT 0'],
   ['motifs', 'promu_le', 'TEXT'],
   ['motifs', 'ecarte_le', 'TEXT'],
+  /*
+   * PAR OU CE MESSAGE EST ENTRE, quand ce n'est pas par ici.
+   *
+   * Une conversation tenue ailleurs peut etre versee dans le fil. Elle y a sa
+   * place — ce sont ses mots a elle, ecrits a la main, juste dans une autre
+   * fenetre — mais elle ne doit pas se lire comme un echange avec le compagnon
+   * d'ici. `via` porte le nom du modele d'en face (« Claude Opus 4.5 »), et
+   * c'est ce que la bulle montre. Vide pour tout ce qui vient d'ici, donc
+   * invisible pour un journal qui n'a jamais rien verse.
+   */
+  ['messages', 'via', 'TEXT'],
 ]) {
   try {
     const a = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -835,11 +846,12 @@ export function normaliserTs(ts) {
   return s;
 }
 
-export function addMessage({ ts, date, source = 'web', role, text, reflexion = null, userId = OWNER }) {
+export function addMessage({ ts, date, source = 'web', role, text, reflexion = null,
+                             via = null, userId = OWNER }) {
   ts = normaliserTs(ts);
   const info = db.prepare(
-    'INSERT INTO messages(user_id, ts, date, source, role, text, reflexion) VALUES(?,?,?,?,?,?,?)'
-  ).run(userId, ts, date, source, role, text, reflexion || null);
+    'INSERT INTO messages(user_id, ts, date, source, role, text, reflexion, via) VALUES(?,?,?,?,?,?,?,?)'
+  ).run(userId, ts, date, source, role, text, reflexion || null, via || null);
   if (role === 'user') rebuildEntryText(date, userId);
   return Number(info.lastInsertRowid);
 }
@@ -916,8 +928,8 @@ export function rembobiner(id, userId = OWNER) {
 export function recentMessages(limit = 80, userId = OWNER) {
   const since = getSettings(userId).chatSince;
   const rows = since
-    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
-    : db.prepare('SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
+    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion, via FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
+    : db.prepare('SELECT id, ts, date, source, role, text, reflexion, via FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
   return rows.reverse();
 }
 
@@ -951,7 +963,7 @@ export function filAncre(limite = 24, userId = OWNER, pas = FIL_PAS) {
   const n = db.prepare(`SELECT COUNT(*) c FROM messages WHERE ${where}`).get(...args).c;
   const debut = n <= limite ? 0 : Math.floor((n - limite) / pas) * pas;
   const rows = db.prepare(
-    `SELECT id, ts, date, source, role, text, reflexion FROM messages WHERE ${where}
+    `SELECT id, ts, date, source, role, text, reflexion, via FROM messages WHERE ${where}
      ORDER BY ts ASC, id ASC LIMIT ? OFFSET ?`
   ).all(...args, n - debut, debut);
   while (rows.length && rows[0].role !== 'user') rows.shift();
@@ -966,7 +978,7 @@ export const joursEcrits = (userId = OWNER) => db.prepare(
 
 export function messagesForDate(date, userId = OWNER) {
   return db.prepare(
-    'SELECT id, ts, source, role, text FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
+    'SELECT id, ts, source, role, text, via FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
   ).all(userId, date);
 }
 

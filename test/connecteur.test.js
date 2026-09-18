@@ -17,6 +17,7 @@ import { join } from 'node:path';
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-conn-')), 'test.db');
 const db = await import('../server/db.js');
 const { OWNER, allCarnet, recentMessages, getSettings } = db;
+const { DU_COMPAGNON } = await import('../web/ressenti.js');
 const C = await import('../server/connecteur.js');
 const P = await import('../server/passerelle.js');
 
@@ -120,7 +121,10 @@ test('ÇA ÉCRIT, ÇA NE LIT PAS — et c’est une décision, pas une étape', 
     if (/Cannot find package/.test(String(e.message))) return;   // SDK absent : rien à tenir
     throw e;
   }
-  assert.deepEqual(outils, ['noter'], `un outil de plus est apparu : ${outils.join(', ')}`);
+  assert.deepEqual(outils.sort(), ['noter', 'verser'],
+    `la liste des outils a changé : ${outils.join(', ')}. Les deux ÉCRIVENT ; `
+  + 'si un outil de lecture est apparu, il envoie le journal de quelqu’un au '
+  + 'serveur du modèle à qui il parle — et ça se décide, ça ne se glisse pas.');
 });
 
 /* ---------------------------------------------------------------------
@@ -182,4 +186,74 @@ test('JAMAIS 401 sur une adresse sans clé — c’est ce qui a cassé la connex
   assert.ok(bloc.includes('return json(res, 404,'), 'le refus doit être un 404');
   assert.ok(!/return json\(res, 401,/.test(bloc),
     '401 veut dire « va t’authentifier » dans le contrat MCP, pas « clé fausse »');
+});
+
+/* ---------------------------------------------------------------------
+ * VERSER LA CONVERSATION ELLE-MÊME, PAS SEULEMENT UNE NOTE.
+ *
+ * La note va au carnet ; l'échange va DANS LE FIL. Ce n'est pas la même place
+ * et ce n'est pas le même geste : une note est ce qu'on a retenu, un échange
+ * est ce qui s'est dit.
+ * --------------------------------------------------------------------- */
+
+test('un échange versé entre dans le FIL, pas dans le carnet', () => {
+  const avantCarnet = allCarnet(OWNER).length;
+  const r = C.verserEchange({ dit: 'j’ai encore repoussé le rendez-vous',
+                              repondu: 'Qu’est-ce qui te retient, à ton avis ?',
+                              via: 'Claude Opus 4.5' }, OWNER, JOUR);
+  assert.equal(r.ok, true);
+  assert.equal(r.poses.length, 2, 'sa phrase ET la réponse');
+  assert.equal(allCarnet(OWNER).length, avantCarnet, 'ce n’est pas une note');
+  const fil = recentMessages(4, OWNER);
+  assert.equal(fil.at(-2).text, 'j’ai encore repoussé le rendez-vous');
+  assert.equal(fil.at(-1).text, 'Qu’est-ce qui te retient, à ton avis ?');
+  assert.equal(fil.at(-1).role, DU_COMPAGNON);
+});
+
+test('les DEUX bulles disent d’où elles viennent', () => {
+  /* Sans la marque, on relit six mois plus tard une réponse du compagnon qu'il
+     n'a jamais écrite — et une carte bâtie là-dessus attribue à ce produit des
+     phrases qui ne sont pas les siennes. Sur les deux, parce que ce qui s'est
+     passé ailleurs c'est l'ÉCHANGE, pas seulement la réponse. */
+  C.verserEchange({ dit: 'coucou-marque', repondu: 'salut-marque', via: 'Claude Opus 4.5' },
+                 OWNER, JOUR);
+  /* On retrouve les bulles PAR LEUR TEXTE : lire « les deux dernières » passait
+     au vert en regardant l'échange d'avant, donc ne prouvait rien. */
+  const fil = recentMessages(8, OWNER);
+  const sienne = fil.find(m => m.text === 'coucou-marque');
+  const reponse = fil.find(m => m.text === 'salut-marque');
+  assert.equal(sienne?.via, 'Claude Opus 4.5', 'sa bulle ne dit pas d’où vient l’échange');
+  assert.equal(reponse?.via, 'Claude Opus 4.5', 'la réponse ne dit pas d’où elle vient');
+});
+
+test('l’ordre du fil est tenu : sa phrase, puis la réponse', () => {
+  /* Deux horodatages identiques laisseraient l'ordre au tri secondaire. */
+  C.verserEchange({ dit: 'un', repondu: 'deux' }, OWNER, JOUR);
+  const [a, b] = recentMessages(2, OWNER);
+  assert.ok(Date.parse(b.ts) > Date.parse(a.ts), 'la réponse doit venir après');
+});
+
+test('sans réponse, on verse quand même ce qu’elle a dit', () => {
+  const r = C.verserEchange({ dit: 'je note juste ça' }, OWNER, JOUR);
+  assert.equal(r.poses.length, 1);
+});
+
+test('rien à verser, ou un tour trop long', () => {
+  assert.match(C.verserEchange({ dit: '  ' }, OWNER, JOUR).erreur, /rien à verser/);
+  const trop = 'a'.repeat(C.TOUR_MAX + 1);
+  assert.match(C.verserEchange({ dit: trop }, OWNER, JOUR).erreur, /au plus/);
+  assert.match(C.verserEchange({ dit: 'ok', repondu: trop }, OWNER, JOUR).erreur, /au plus/);
+});
+
+test('les deux outils sont là, et tous deux écrivent', async () => {
+  let outils;
+  try {
+    const s = await C.serveurPour(OWNER, JOUR);
+    outils = Object.keys(s._registeredTools ?? {}).sort();
+  } catch (e) {
+    if (/Cannot find package/.test(String(e.message))) return;
+    throw e;
+  }
+  assert.deepEqual(outils, ['noter', 'verser'],
+    `la liste a changé : ${outils.join(', ')} — un outil de LECTURE ne doit jamais y entrer`);
 });

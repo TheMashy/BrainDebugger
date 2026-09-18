@@ -46,7 +46,7 @@
  * =====================================================================
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { db, setSettings, getSettings, addCarnet, OWNER } from './db.js';
+import { db, setSettings, getSettings, addCarnet, addMessage, OWNER } from './db.js';
 
 /** Le nom sous lequel les notes arrivent, quand le client ne se nomme pas. */
 const SOURCE_PAR_DEFAUT = 'connecteur';
@@ -177,6 +177,58 @@ export function poserNote({ texte, quand = null, source = null }, userId = OWNER
 }
 
 /* --------------------------------------------------------------------------
+   VERSER UN ÉCHANGE DANS LE FIL
+   -------------------------------------------------------------------------- */
+
+/** Ce qu'un tour de parole peut peser. Au-delà, ce n'est plus un échange. */
+export const TOUR_MAX = 12000;
+
+/**
+ * VERSER UN ÉCHANGE TENU AILLEURS DANS « PARLER ».
+ *
+ * La note va au carnet ; l'échange, lui, va DANS LE FIL. Ce n'est pas le même
+ * geste et ce n'est pas la même place : une note est ce qu'on a retenu, un
+ * échange est ce qui s'est dit. Les relire au même endroit qu'ici est tout
+ * l'intérêt — le compagnon les a dans sa mémoire, la recherche les trouve, la
+ * carte les compte.
+ *
+ * ET CE SONT BIEN SES MOTS. Une journée où quelqu'un a écrit trois pages à un
+ * modèle est une journée écrite : elle doit compter comme telle, sinon la
+ * carte lit un silence là où il y a eu une conversation. C'est la différence
+ * avec le carnet, qui range ce qui vient d'ailleurs SANS jamais transformer
+ * une journée en journée écrite.
+ *
+ * `via` dit d'où ça vient, et c'est ce que la bulle montre. Sans lui, un
+ * échange versé se lirait comme un échange avec le compagnon d'ici — et une
+ * carte bâtie là-dessus attribuerait à ce produit des phrases qu'il n'a jamais
+ * écrites.
+ */
+export function verserEchange({ dit, repondu = null, via = null, quand = null },
+                              userId = OWNER, jourDefaut) {
+  const d = String(dit ?? '').trim();
+  if (!d) return { erreur: 'il n’y a rien à verser — `dit` est ce que la personne a écrit' };
+  const r = String(repondu ?? '').trim();
+  if (d.length > TOUR_MAX || r.length > TOUR_MAX) {
+    return { erreur: `un tour de parole fait ${TOUR_MAX} signes au plus — verse échange par `
+                   + 'échange, pas la conversation entière d’un coup' };
+  }
+  const jour = jourDeLaNote(quand, jourDefaut);
+  const nom = String(via ?? '').trim().slice(0, 40) || 'un autre modèle';
+  const poses = [];
+  /* L'ORDRE, ET LES HORODATAGES. Le fil se lit dans le temps : sa phrase
+     d'abord, la réponse ensuite. Deux `ts` identiques laisseraient l'ordre au
+     hasard du tri secondaire. */
+  const t0 = new Date();
+  poses.push(addMessage({ ts: t0.toISOString(), date: jour, source: 'connecteur',
+                          role: 'user', text: d, via: nom, userId }));
+  if (r) {
+    poses.push(addMessage({ ts: new Date(t0.getTime() + 1000).toISOString(), date: jour,
+                            source: 'connecteur', role: 'pet', text: r, via: nom, userId }));
+  }
+  return { ok: true, jour, poses };
+}
+
+/* --------------------------------------------------------------------------
    LE SERVEUR MCP
    -------------------------------------------------------------------------- */
 
@@ -194,7 +246,27 @@ QUAND L'APPELER. Quand elle te le demande (« note ça », « garde ça »), ou 
 
 CE QUE TU ÉCRIS. SES mots quand tu les as, une phrase simple sinon. Une note = une chose. Ne recopie pas la conversation, ne la résume pas d'office, n'écris jamais ce qu'elle n'a pas dit — c'est son journal, pas ton compte rendu. Si tu hésites, propose-lui la note avant de l'écrire.
 
-QUAND NE PAS L'APPELER. À chaque message. Plusieurs fois pour la même chose. Pour noter ce que TOI tu as dit.`;
+QUAND NE PAS L'APPELER. À chaque message. Plusieurs fois pour la même chose. Pour noter ce que TOI tu as dit.
+
+Si tu veux verser la CONVERSATION elle-même dans son journal plutôt qu'une note, utilise l'outil « verser ».`;
+
+/**
+ * L'AUTRE OUTIL, ET IL DIT SURTOUT QUAND S'ARRÊTER.
+ *
+ * Verser un échange met les mots de quelqu'un dans son journal intime, à la
+ * date du jour, là où il les relira et où sa carte les comptera. Ça ne se fait
+ * pas d'office : c'est à lui de le demander, et la consigne doit être plus
+ * claire là-dessus que sur n'importe quoi d'autre.
+ */
+export const DESCRIPTION_VERSER = `Verse cet échange dans le fil « Parler » du journal personnel de la personne (l'application s'appelle BrainDebugger). Il y apparaîtra à sa date, marqué comme venant d'ici — ses mots d'un côté, ta réponse de l'autre.
+
+QUAND L'APPELER. Quand elle demande que la conversation soit suivie, synchronisée, versée ou gardée dans son journal. Si elle l'a demandé une fois pour cette conversation, continue à chaque échange qui suit, sans le redemander.
+
+CE QUE TU ENVOIES. \`dit\` = ce qu'ELLE vient d'écrire, mot pour mot, sans le résumer ni le corriger. \`repondu\` = ce que TU viens de répondre, mot pour mot. \`via\` = le nom du modèle que tu es, par exemple « Claude Opus 4.5 » — c'est ce que sa bulle affichera, pour qu'elle sache en relisant que cet échange n'a pas eu lieu dans son application.
+
+UN ÉCHANGE À LA FOIS, après l'avoir écrit. Pas la conversation entière d'un coup, pas un résumé, pas ce qu'elle n'a pas dit.
+
+QUAND NE PAS L'APPELER. Tant qu'elle ne l'a pas demandé. C'est son journal intime : y verser une conversation sans qu'elle l'ait voulu est la seule erreur qui ne se rattrape pas.`;
 
 /**
  * Le serveur, construit à la demande pour UN journal.
@@ -209,7 +281,9 @@ export async function serveurPour(userId, jourDefaut) {
 
   const s = new McpServer({ name: 'braindebugger', version: '1' },
                           { instructions: 'Le journal personnel de la personne à qui tu parles. '
-                                        + 'Tu peux y déposer une note ; tu ne peux rien y lire.' });
+                                        + 'Deux outils, tous deux en écriture : `noter` y dépose une '
+                                        + 'note, `verser` y met la conversation elle-même. Tu ne '
+                                        + 'peux RIEN y lire.' });
 
   s.registerTool('noter', {
     title: 'Noter dans le journal',
@@ -228,6 +302,26 @@ export async function serveurPour(userId, jourDefaut) {
     }
     return { content: [{ type: 'text',
       text: `Noté dans son journal, à la journée du ${r.note.jour}.` }] };
+  });
+
+  s.registerTool('verser', {
+    title: 'Verser cet échange dans le journal',
+    description: DESCRIPTION_VERSER,
+    inputSchema: {
+      dit: z.string().describe('Ce qu’elle vient d’écrire, mot pour mot.'),
+      repondu: z.string().optional().describe('Ce que tu viens de répondre, mot pour mot.'),
+      via: z.string().optional()
+        .describe('Le modèle que tu es — « Claude Opus 4.5 ». C’est ce que sa bulle affiche.'),
+      quand: z.string().optional()
+        .describe('La journée, AAAA-MM-JJ. Omets-la pour aujourd’hui — le journal sait '
+                + 'quand sa journée commence, pas toi.'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  }, async ({ dit, repondu, via, quand }) => {
+    const r = verserEchange({ dit, repondu, via, quand }, userId, jourDefaut);
+    if (r.erreur) return { isError: true, content: [{ type: 'text', text: r.erreur }] };
+    return { content: [{ type: 'text',
+      text: `Versé dans son fil, à la journée du ${r.jour}.` }] };
   });
 
   return s;

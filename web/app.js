@@ -1123,11 +1123,28 @@ function drawThread() {
               ? `<span class="mvues">${x.vues}<small>×</small></span>` : ''}</button>`;
         }).join('')}</span>`
       : '';
-    return sep + silence + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}"${teinte} data-id="${m.id ?? ''}"
+    /*
+     * D'OÙ VIENT CET ÉCHANGE, QUAND IL NE VIENT PAS D'ICI.
+     *
+     * Une conversation tenue ailleurs peut être versée dans ce fil. Ses mots y
+     * ont leur place — elle les a écrits, juste dans une autre fenêtre — mais
+     * sans marque, on relit six mois plus tard une réponse du compagnon qu'il
+     * n'a jamais écrite, et une carte bâtie là-dessus attribue à ce produit des
+     * phrases qui ne sont pas les siennes.
+     *
+     * La marque est SUR LES DEUX bulles, la sienne comprise : ce qui s'est
+     * passé ailleurs, c'est l'échange, pas seulement la réponse.
+     */
+    const dehors = m.via
+      ? `<span class="venu" title="Échange tenu hors de l’application, versé ici par ${esc(m.via)}"
+           >${ico('parler', 11)}${esc(m.via)}</span>`
+      : '';
+    return sep + silence + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}${
+      m.via ? ' dehors' : ''}"${teinte} data-id="${m.id ?? ''}"
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }${reflexionMarkup(m)}<span class="tx">${esc(
         m.role === 'pet' ? sansMarqueur(m.text) : m.text
-      )}</span>${marque}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
+      )}</span>${marque}${dehors}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
