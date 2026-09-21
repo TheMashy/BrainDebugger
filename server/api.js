@@ -1417,11 +1417,26 @@ export function posteDuJour(date, userId = OWNER) {
   const th = thWeb ?? dig?.temps_par_theme_s ?? {};
   const parTitre = dig?.titres_par_theme ?? {};
   const parSous = dig?.temps_par_sous_theme_web_s ?? {};
-  const lieux = Object.entries(dig?.temps_par_lieu_web_s ?? {})
+  const minutes = src => Object.entries(src ?? {})
     .filter(([, v]) => typeof v === 'number' && v > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }))
     .filter(x => x.min >= 1);
+  const lieux = minutes(dig?.temps_par_lieu_web_s);
+  /*
+   * ET LE DERNIER PALIER : LE SITE, ET RIEN DE PLUS.
+   *
+   * « irontide », « e621 », « the registry of trades » n'ont pas de type —
+   * mais ils ont un NOM, et c'est Machi Tool qui l'a trouvé. Les compter
+   * « rien ne classe » jetait 17 % d'une vraie journée qu'on pouvait citer :
+   * un nom trouvé puis jeté est pire qu'un nom qu'on n'a pas.
+   *
+   * À PART DES LIEUX, ET PAS PAR PRUDENCE. « forum » est une catégorie,
+   * « irontide » est un nom propre ; les mettre dans la même liste ferait
+   * croire à une taxonomie où il y aurait « irontide ». Machi Tool en écarte
+   * déjà « autre », qui est le mot qu'il écrit quand il n'a PAS trouvé de nom.
+   */
+  const sites = minutes(dig?.temps_par_site_seul_s);
   const themes = Object.entries(th)
     .filter(([, v]) => typeof v === 'number' && v > 0)
     .sort((a, b) => b[1] - a[1])
@@ -1448,7 +1463,8 @@ export function posteDuJour(date, userId = OWNER) {
     // « web » ou « ecran » : le total auquel les minutes ci-dessus se
     // rapportent. Les lieux, eux, sont toujours le navigateur.
     themes_sur: themes.length ? (thWeb ? 'web' : 'ecran') : null,
-    lieux: lieux.length ? lieux : null
+    lieux: lieux.length ? lieux : null,
+    sites: sites.length ? sites : null
   } : null;
   const lever = bornerLever();
   /*

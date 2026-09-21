@@ -6555,7 +6555,22 @@ function posteMarkup(p, synchro) {
      * thème pour montrer les lieux aurait laissé l'écran aussi vide qu'avant.
      */
     const lx = p.ecran?.lieux ?? [];
-    if (!th.length && !lx.length) return '';
+    /*
+     * ET LE DERNIER PALIER : LE SITE, ET RIEN DE PLUS.
+     *
+     * Trois degrés de ce qu'on sait, du plus au moins : de quoi ça parlait,
+     * où c'était, et — faute des deux — le nom du site. « irontide », « e621 »,
+     * « the registry of trades » n'ont pas de type, mais ils ont un nom, et
+     * c'est nous qui l'avons trouvé. Sur une vraie journée ils faisaient 17 %
+     * comptés comme « rien ne classe » : un nom trouvé puis jeté est pire
+     * qu'un nom qu'on n'a pas.
+     *
+     * Chaque degré est plus pâle que le précédent, et la légende le DIT — le
+     * dégradé seul ne se lit pas pour tout le monde, et surtout il ne dit pas
+     * ce qui manque à chaque étage.
+     */
+    const st = p.ecran?.sites ?? [];
+    if (!th.length && !lx.length && !st.length) return '';
     /*
      * ET SUR QUEL TOTAL, ce qui décidait à lui seul du chiffre affiché.
      *
@@ -6581,15 +6596,19 @@ function posteMarkup(p, synchro) {
     const base = surWeb ? (p.ecran?.web_min ?? 0) : ecranTotal;
     const classe = th.reduce((n, x) => n + x.min, 0);
     const situe = lx.reduce((n, x) => n + x.min, 0);
-    if (!base || !(classe + situe)) return '';
+    const nomme = st.reduce((n, x) => n + x.min, 0);
+    if (!base || !(classe + situe + nomme)) return '';
     const pct = m => (100 * m / base);
     const seg = x => `<span class="jrseg" style="width:${pct(x.min).toFixed(2)}%;background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"
         data-tip="${esc(`${x.nom} · ${x.min} min · ${Math.round(pct(x.min))} % de ton écran`)}"></span>`;
     const segLieu = x => `<span class="jrseg jrlieu" style="width:${pct(x.min).toFixed(2)}%"
         data-tip="${esc(`${NOM_LIEU[x.nom] ?? x.nom} · ${x.min} min · on sait où, pas de quoi ça parlait`)}"></span>`;
-    const reste = base - classe - situe;
+    const segSite = x => `<span class="jrseg jrsite" style="width:${pct(x.min).toFixed(2)}%"
+        data-tip="${esc(`${x.nom} · ${x.min} min · on ne sait que le site`)}"></span>`;
+    const reste = base - classe - situe - nomme;
     return `<div class="jrepart jrthemes">
-      <div class="jrbarre">${th.map(seg).join('')}${lx.map(segLieu).join('')}</div>
+      <div class="jrbarre">${th.map(seg).join('')}${lx.map(segLieu).join('')}${
+        st.map(segSite).join('')}</div>
       <div class="jrpied">
         ${/* LE TOTAL, ÉCRIT. La barre du dessus compte l'écran entier, celle-ci
               le navigateur seul : sans ce repère, deux barres de largeurs
@@ -6643,7 +6662,13 @@ function posteMarkup(p, synchro) {
             <span class="jrnom">${esc(NOM_LIEU[x.nom] ?? x.nom)}</span>
             <span class="mono faint">${x.min} min</span></li>`).join('')}
         </ul>` : ''}
-        ${reste >= 1 ? `<span class="faint jrreste">${Math.round(pct(reste))} % que rien ne classe</span>` : ''}
+        ${st.length ? `<ul class="jrleg jrleglieux jrlegsites">
+          <li class="jrlieutitre">${Math.round(pct(nomme))} % dont on ne sait que le site</li>
+          ${st.slice(0, 6).map(x => `<li><i class="jrsitep"></i>
+            <span class="jrnom">${esc(x.nom)}</span>
+            <span class="mono faint">${x.min} min</span></li>`).join('')}
+        </ul>` : ''}
+        ${reste >= 1 ? `<span class="faint jrreste">${Math.round(pct(reste))} % qui n’a même pas de nom</span>` : ''}
       </div>
     </div>`;
   };

@@ -96,6 +96,63 @@ test('une minute effleurée ne fait pas une ligne', () => {
     'vingt secondes de boutique ne disent rien de la journée');
 });
 
+/* ====== LE DERNIER PALIER : LE SITE, ET RIEN DE PLUS ====== */
+/*
+ * Sur une vraie journée, 17 % du navigateur étaient comptés « rien ne
+ * classe » alors qu'on pouvait les citer : irontide, e621, braindebugger,
+ * the registry of trades. Pas de type — mais un NOM, et c'est nous qui
+ * l'avons trouvé. Un nom trouvé puis jeté est pire qu'un nom qu'on n'a pas.
+ */
+test('un site sans type remonte SOUS SON NOM', () => {
+  const p = poser('2026-05-09', {
+    temps_par_contexte_s: { 'web:irontide': 1200, 'web:youtube': 1200 },
+    temps_par_lieu_web_s: { video: 1200 },
+    temps_par_site_seul_s: { irontide: 1200 },
+  });
+  assert.deepEqual(p.ecran.sites, [{ nom: 'irontide', min: 20 }]);
+  assert.deepEqual(p.ecran.lieux, [{ nom: 'video', min: 20 }]);
+});
+
+test('UN NOM PROPRE N’ENTRE PAS DANS LA LISTE DES CATÉGORIES', () => {
+  /*
+   * « forum » est une catégorie, « irontide » est un nom propre. Les mettre
+   * dans la même liste ferait croire à une taxonomie où il y aurait
+   * « irontide » — et c'est exactement la confusion que ces champs séparés
+   * existent pour empêcher.
+   */
+  const p = poser('2026-05-10', {
+    temps_par_contexte_s: { 'web:irontide': 1200 },
+    temps_par_site_seul_s: { irontide: 1200 },
+  });
+  assert.equal(p.ecran.lieux, null);
+  assert.deepEqual(p.ecran.sites.map(x => x.nom), ['irontide']);
+});
+
+test('aucun site nu : le champ reste null', () => {
+  const p = poser('2026-05-11', {
+    temps_par_contexte_s: { 'web:youtube': 1200 },
+    temps_par_lieu_web_s: { video: 1200 },
+  });
+  assert.equal(p.ecran.sites, null);
+});
+
+test('LES TROIS PALIERS NE SE RECOUVRENT PAS', () => {
+  /*
+   * Le compte qui rendrait tout faux : additionnés, ils ne peuvent pas
+   * dépasser le navigateur, sinon la journée durerait plus qu'elle n'a duré.
+   */
+  const p = poser('2026-05-12', {
+    temps_par_contexte_s: { 'web:youtube': 3600, 'web:irontide': 1200, 'web:reddit': 1200 },
+    temps_par_theme_web_s: { guerre: 1200 },
+    temps_par_lieu_web_s: { video: 2400, forum: 1200 },
+    temps_par_site_seul_s: { irontide: 1200 },
+  });
+  const somme = [p.ecran.themes, p.ecran.lieux, p.ecran.sites]
+    .flat().reduce((n, x) => n + x.min, 0);
+  assert.ok(somme <= p.ecran.web_min,
+    `${somme} min classées dépassent ${p.ecran.web_min} min de navigateur`);
+});
+
 /* ============ ET SUR QUEL TOTAL CES MINUTES SE COMPTENT ============ */
 /*
  * LE CHIFFRE QUI A DÉCLENCHÉ LA QUESTION. « 88 % que rien ne classe »,
@@ -157,9 +214,11 @@ test('LA BARRE S’AFFICHE SANS UN SEUL SUJET', () => {
   /*
    * Le cas fréquent, et celui qui a motivé tout l'exercice : sur les onze
    * onglets relevés, neuf n'avaient pas de sujet. `if (!th?.length) return ''`
-   * laissait l'écran exactement aussi vide qu'avant.
+   * laissait l'écran exactement aussi vide qu'avant. La garde a depuis gagné
+   * un palier : une journée faite QUE de sites nus est le même cas, et c'est
+   * elle qui a le plus besoin qu'on lui dise ce qu'on sait.
    */
-  assert.match(barre, /if \(!th\.length && !lx\.length\) return ''/);
+  assert.match(barre, /if \(!th\.length && !lx\.length && !st\.length\) return ''/);
   assert.equal(/if \(!th\?\.length\) return ''/.test(barre), false,
     'un jour sans sujet perdrait ses lieux avec lui');
 });
@@ -214,4 +273,26 @@ test('LE TOTAL EST ÉCRIT SOUS LA BARRE', () => {
    */
   assert.match(barre, /heure\(base \+ ' min'\)/);
   assert.match(barre, /surWeb \? 'de navigateur' : 'd’écran'/);
+});
+
+test('LE SITE NU A SON PROPRE ÉTAGE DANS LA BARRE', () => {
+  assert.match(barre, /const st = p\.ecran\?\.sites \?\? \[\]/);
+  assert.match(barre, /const reste = base - classe - situe - nomme/);
+  assert.match(barre, /dont on ne sait que le site/);
+});
+
+
+test('un segment de site n’emprunte AUCUNE couleur de sujet', () => {
+  const seg = barre.slice(barre.indexOf('const segSite ='), barre.indexOf('const reste ='));
+  assert.equal(/TEINTE_THEME/.test(seg), false);
+  assert.match(seg, /class="jrseg jrsite"/);
+});
+
+test('CE QUI RESTE NE PRÉTEND PLUS ÊTRE UN CLASSEMENT RATÉ', () => {
+  /*
+   * « que rien ne classe » sur du temps dont on connaît le site était faux.
+   * Ce qui reste maintenant n'a vraiment pas de nom — Machi Tool écarte déjà
+   * « autre », le mot qu'il écrit quand il n'a rien trouvé.
+   */
+  assert.match(barre, /qui n’a même pas de nom/);
 });

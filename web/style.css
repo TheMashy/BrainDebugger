@@ -3714,6 +3714,20 @@ table.grid td.cell.abascule { cursor: pointer; }
 .jrleglieux { margin-top: 2px; }
 .jrlieutitre { width: 100%; font-size: 10.5px; color: var(--ink-faint);
                 letter-spacing: .02em; }
+/* LE TROISIEME DEGRÉ : le site, et rien de plus. Plus pâle que le lieu, qui
+   est déjà plus pâle que le sujet — mais le dégradé ne porte pas le sens tout
+   seul : la ligne de légende dit à chaque étage ce qui manque. */
+.jrseg.jrsite {
+  background-color: var(--ink-faint);
+  background-image: repeating-linear-gradient(135deg,
+    rgba(255, 255, 255, .16) 0 1px, transparent 1px 5px);
+  opacity: .32;
+}
+.jrlegsites .jrlieutitre { opacity: .8; }
+.jrleg i.jrsitep {
+  background-color: var(--ink-faint); opacity: .45;
+  border-radius: 50%;
+}
 .jrleg i.jrlieup {
   background-color: var(--ink-faint);
   background-image: repeating-linear-gradient(135deg,
