@@ -1385,9 +1385,33 @@ export function posteDuJour(date, userId = OWNER) {
    * L'écran doit donc les montrer comme une précision sur une part, jamais
    * comme une découpe complète — sinon la barre mentirait par construction.
    */
+  /*
+   * ET QUAND LE TITRE NE DIT PAS DE QUOI IL PARLE : OÙ C'ÉTAIT.
+   *
+   * « 95 % que rien ne classe », disait la barre. En relisant les onglets
+   * derrière ce chiffre, ce ne sont pas des mots-clés qui manquaient : la
+   * moitié n'avaient aucun sujet à trouver. « youtube », « x », « google »,
+   * « reddit - the heart of the internet » sont des pages d'accueil. On sait
+   * OÙ c'était, on ne sait pas de quoi ça parlait.
+   *
+   * UN CHAMP À PART, ET C'EST TOUT L'INTÉRÊT. Rangé parmi les sujets, « video »
+   * se lirait « on sait ce que tu regardais » alors qu'on sait seulement sur
+   * quel site tu étais — et ferait exactement ce pour quoi « video » et
+   * « social » avaient été retirés des thèmes : rafler ce que les familles
+   * précises n'avaient pas pris. Machi Tool ne le remplit d'ailleurs que
+   * lorsque aucun sujet n'a répondu ; les deux ne se recouvrent jamais.
+   *
+   * L'écran doit donc le montrer comme une PRÉCISION SUR CE QU'ON IGNORE, pas
+   * comme un sujet de plus.
+   */
   const th = dig?.temps_par_theme_web_s ?? dig?.temps_par_theme_s ?? {};
   const parTitre = dig?.titres_par_theme ?? {};
   const parSous = dig?.temps_par_sous_theme_web_s ?? {};
+  const lieux = Object.entries(dig?.temps_par_lieu_web_s ?? {})
+    .filter(([, v]) => typeof v === 'number' && v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }))
+    .filter(x => x.min >= 1);
   const themes = Object.entries(th)
     .filter(([, v]) => typeof v === 'number' && v > 0)
     .sort((a, b) => b[1] - a[1])
@@ -1410,7 +1434,8 @@ export function posteDuJour(date, userId = OWNER) {
   const ecran = (appS || webS) ? {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
     top_app: top(apps), top_web: top(webs, 'web:'),
-    themes: themes.length ? themes : null
+    themes: themes.length ? themes : null,
+    lieux: lieux.length ? lieux : null
   } : null;
   const lever = bornerLever();
   /*

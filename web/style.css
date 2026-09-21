@@ -3698,6 +3698,28 @@ table.grid td.cell.abascule { cursor: pointer; }
 }
 .jrsousl li { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
 .jrsousl .jrt { color: var(--ink); }
+
+/* OÙ C'ÉTAIT, QUAND LE TITRE NE DIT PAS DE QUOI IL PARLE.
+   Pas une teinte de la palette des sujets : un gris hachuré, le même pour tous.
+   La hachure porte le sens — « on sait où, pas de quoi » — et elle le porte
+   sans légende, là où une couleur de plus se serait lue comme un sujet de plus.
+   Le sens ne tient donc PAS à la couleur seule : la ligne qui les précède le
+   dit en toutes lettres, pour qui ne distingue pas le gris du reste. */
+.jrseg.jrlieu {
+  background-color: var(--ink-faint);
+  background-image: repeating-linear-gradient(135deg,
+    rgba(255, 255, 255, .28) 0 2px, transparent 2px 4px);
+  opacity: .55;
+}
+.jrleglieux { margin-top: 2px; }
+.jrlieutitre { width: 100%; font-size: 10.5px; color: var(--ink-faint);
+                letter-spacing: .02em; }
+.jrleg i.jrlieup {
+  background-color: var(--ink-faint);
+  background-image: repeating-linear-gradient(135deg,
+    rgba(255, 255, 255, .3) 0 1.5px, transparent 1.5px 3px);
+  opacity: .7;
+}
 /* Ce que rien n'affine n'est pas une sous-catégorie : il ne prend pas sa
    couleur, et il est nommé pour ce qu'il est. Sans lui, deux sous-catégories
    sur cinq se liraient comme la totalité du sujet. */

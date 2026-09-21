@@ -6446,6 +6446,22 @@ function posteMarkup(p, synchro) {
     humour: '#e8c547', voyage: '#4fa3c7', adulte: '#7a5c8d', actu: '#b0a58a',
     achat: '#7f8fa6', argent: '#6b9e78', dev: '#5b7fd4'
   };
+  /*
+   * LES LIEUX N'ONT PAS DE TEINTE, ET C'EST VOLONTAIRE.
+   *
+   * Leur donner une couleur de la palette des sujets les ferait lire comme des
+   * sujets — c'est-à-dire exactement le contraire de ce qu'ils disent. Ils
+   * partagent tous le même gris hachuré : « on sait où, pas de quoi ».
+   *
+   * Ici, seulement de quoi les écrire en français. Les mots viennent de Machi
+   * Tool sans accents (ils voyagent dans un digest), et « reseau » affiché tel
+   * quel dans une légende a l'air d'une erreur.
+   */
+  const NOM_LIEU = {
+    video: 'vidéo', reseau: 'réseau social', forum: 'forum', recherche: 'recherche',
+    boutique: 'boutique', encyclo: 'encyclopédie', messagerie: 'messagerie',
+    courrier: 'courrier', accueil: 'page d’accueil'
+  };
   const repartition = () => {
     const total = (p.ecran?.app_min ?? 0) + (p.ecran?.web_min ?? 0);
     if (!total) return '';
@@ -6519,17 +6535,39 @@ function posteMarkup(p, synchro) {
    * jusqu'au bord.
    */
   const barreThemes = () => {
-    const th = p.ecran?.themes ?? null;
-    if (!th?.length) return '';
+    const th = p.ecran?.themes ?? [];
+    /*
+     * ET OÙ C'ÉTAIT, QUAND LE TITRE NE DIT PAS DE QUOI IL PARLE.
+     *
+     * « 95 % que rien ne classe », disait la ligne du bas. En relisant les
+     * onglets derrière ce chiffre, il n'y manquait pas des mots-clés : la
+     * moitié n'avaient aucun sujet à trouver. « youtube », « x », « google »
+     * sont des pages d'accueil. On sait OÙ c'était, pas de quoi ça parlait.
+     *
+     * CES MINUTES-LÀ NE SONT PAS DES SUJETS, ET LA BARRE NE DOIT PAS LES
+     * MONTRER COMME TELS. Elles ne prennent donc pas de couleur de sujet :
+     * segments hachurés, en gris, à la suite — et dans la légende, sous une
+     * ligne qui dit ce qu'on en sait exactement. Rangées parmi les sujets,
+     * elles rafleraient la barre en racontant qu'on sait ce qui a été regardé.
+     *
+     * LA BARRE S'AFFICHE MÊME SANS UN SEUL SUJET, et c'est le cas fréquent :
+     * sur les onze onglets relevés, neuf n'avaient pas de sujet. Exiger un
+     * thème pour montrer les lieux aurait laissé l'écran aussi vide qu'avant.
+     */
+    const lx = p.ecran?.lieux ?? [];
+    if (!th.length && !lx.length) return '';
     const ecranTotal = (p.ecran?.app_min ?? 0) + (p.ecran?.web_min ?? 0);
     const classe = th.reduce((n, x) => n + x.min, 0);
-    if (!ecranTotal || !classe) return '';
+    const situe = lx.reduce((n, x) => n + x.min, 0);
+    if (!ecranTotal || !(classe + situe)) return '';
     const pct = m => (100 * m / ecranTotal);
     const seg = x => `<span class="jrseg" style="width:${pct(x.min).toFixed(2)}%;background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"
         data-tip="${esc(`${x.nom} · ${x.min} min · ${Math.round(pct(x.min))} % de ton écran`)}"></span>`;
-    const reste = ecranTotal - classe;
+    const segLieu = x => `<span class="jrseg jrlieu" style="width:${pct(x.min).toFixed(2)}%"
+        data-tip="${esc(`${NOM_LIEU[x.nom] ?? x.nom} · ${x.min} min · on sait où, pas de quoi ça parlait`)}"></span>`;
+    const reste = ecranTotal - classe - situe;
     return `<div class="jrepart jrthemes">
-      <div class="jrbarre">${th.map(seg).join('')}</div>
+      <div class="jrbarre">${th.map(seg).join('')}${lx.map(segLieu).join('')}</div>
       <div class="jrpied">
         ${/*
             LA LÉGENDE S'OUVRE SUR CE QUI A ÉTÉ REGARDÉ. Un sujet sans ses titres
@@ -6572,6 +6610,12 @@ function posteMarkup(p, synchro) {
             </li>`).join('')}</ol>
           </details></li>`;
         }).join('')}</ul>
+        ${lx.length ? `<ul class="jrleg jrleglieux">
+          <li class="jrlieutitre">${Math.round(pct(situe))} % dont on sait seulement l’endroit</li>
+          ${lx.slice(0, 6).map(x => `<li><i class="jrlieup"></i>
+            <span class="jrnom">${esc(NOM_LIEU[x.nom] ?? x.nom)}</span>
+            <span class="mono faint">${x.min} min</span></li>`).join('')}
+        </ul>` : ''}
         ${reste >= 1 ? `<span class="faint jrreste">${Math.round(pct(reste))} % que rien ne classe</span>` : ''}
       </div>
     </div>`;
