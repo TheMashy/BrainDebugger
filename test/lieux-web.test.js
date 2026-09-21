@@ -96,6 +96,48 @@ test('une minute effleurée ne fait pas une ligne', () => {
     'vingt secondes de boutique ne disent rien de la journée');
 });
 
+/* ============ ET SUR QUEL TOTAL CES MINUTES SE COMPTENT ============ */
+/*
+ * LE CHIFFRE QUI A DÉCLENCHÉ LA QUESTION. « 88 % que rien ne classe »,
+ * disait l'écran. Mesuré sur une vraie journée : 58 % de cet écran était FL
+ * Studio, Premiere et Discord — des APPLICATIONS, que deux champs « web » ne
+ * classeront jamais, et qui sont nommées une par une dans la barre juste
+ * au-dessus. La barre divisait par l'écran entier ; elle ne mesure que le
+ * navigateur. Sur cette journée : 87 % → 71 % rien qu'en corrigeant ça.
+ */
+test('le digest dit à quel total ses thèmes appartiennent', () => {
+  const p = poser('2026-05-06', {
+    temps_par_contexte_s: { 'web:youtube': 3600, blender: 7200 },
+    temps_par_theme_web_s: { guerre: 1200 },
+  });
+  assert.equal(p.ecran.themes_sur, 'web');
+});
+
+test('UNE VIEILLE JOURNÉE garde son propre total', () => {
+  /*
+   * `temps_par_theme_web_s` n'a pas toujours existé. Les journées d'avant
+   * n'ont que `temps_par_theme_s`, qui MÊLE les applications — les compter
+   * sur le navigateur seul ferait dépasser 100 % et la barre mentirait dans
+   * l'autre sens.
+   */
+  const p = poser('2026-05-07', {
+    temps_par_contexte_s: { 'web:youtube': 1200, blender: 7200 },
+    temps_par_theme_s: { creation: 7200, guerre: 1200 },
+  });
+  assert.equal(p.ecran.themes_sur, 'ecran');
+  const classe = p.ecran.themes.reduce((n, x) => n + x.min, 0);
+  assert.ok(classe > p.ecran.web_min,
+    'la fixture ne prouve rien si les thèmes tiennent déjà dans le navigateur');
+});
+
+test('AUCUN THÈME : pas de total à annoncer', () => {
+  const p = poser('2026-05-08', {
+    temps_par_contexte_s: { 'web:youtube': 3600 },
+    temps_par_lieu_web_s: { video: 3600 },
+  });
+  assert.equal(p.ecran.themes_sur, null);
+});
+
 /* ===================== ET CE QUE L'ÉCRAN EN FAIT ===================== */
 /*
  * Vérifié une fois dans un vrai navigateur sur une journée semée : quatre
@@ -148,5 +190,28 @@ test('« % que rien ne classe » NE COMPTE PLUS CE QU’ON VIENT DE SITUER', () 
    * les lieux à côté serait pire qu'avant : l'écran se contredirait lui-même,
    * et le plus gros chiffre gagnerait.
    */
-  assert.match(barre, /const reste = ecranTotal - classe - situe/);
+  assert.match(barre, /const reste = base - classe - situe/);
+});
+
+test('LA BARRE SE COMPTE SUR LE NAVIGATEUR, PAS SUR L’ÉCRAN', () => {
+  /*
+   * Sans ça, les applications — 58 % de la journée mesurée — tombaient dans
+   * « rien ne classe » alors qu'elles sont nommées au-dessus. Le plus gros
+   * chiffre de l'écran disait « on ne sait rien » d'un temps connu.
+   */
+  assert.match(barre, /const base = surWeb \? \(p\.ecran\?\.web_min \?\? 0\) : ecranTotal/);
+  assert.match(barre, /const pct = m => \(100 \* m \/ base\)/);
+  assert.match(barre, /const reste = base - classe - situe/);
+  assert.equal(/100 \* m \/ ecranTotal/.test(barre), false,
+    'un pourcentage de la barre se compte encore sur l’écran entier');
+});
+
+test('LE TOTAL EST ÉCRIT SOUS LA BARRE', () => {
+  /*
+   * Deux barres l'une sous l'autre qui ne se comptent pas sur la même chose
+   * doivent le dire : sinon la plus courte se lit comme un manque, et c'est
+   * exactement la lecture qu'on vient de corriger.
+   */
+  assert.match(barre, /heure\(base \+ ' min'\)/);
+  assert.match(barre, /surWeb \? 'de navigateur' : 'd’écran'/);
 });

@@ -1404,7 +1404,17 @@ export function posteDuJour(date, userId = OWNER) {
    * L'écran doit donc le montrer comme une PRÉCISION SUR CE QU'ON IGNORE, pas
    * comme un sujet de plus.
    */
-  const th = dig?.temps_par_theme_web_s ?? dig?.temps_par_theme_s ?? {};
+  /*
+   * ET SUR QUEL TOTAL CES MINUTES SE COMPTENT, dit plutôt que deviné.
+   *
+   * `temps_par_theme_web_s` est le NAVIGATEUR SEUL, par décision — une heure
+   * passée DANS Blender et une heure de tuto Blender ne sont pas la même
+   * heure. Le repli sur `temps_par_theme_s`, lui, mêle les applications : il
+   * ne sert qu'aux journées d'avant ce champ, et il ne se compte pas sur le
+   * même total. Sans le dire, l'écran divisait les deux par l'écran entier.
+   */
+  const thWeb = dig?.temps_par_theme_web_s;
+  const th = thWeb ?? dig?.temps_par_theme_s ?? {};
   const parTitre = dig?.titres_par_theme ?? {};
   const parSous = dig?.temps_par_sous_theme_web_s ?? {};
   const lieux = Object.entries(dig?.temps_par_lieu_web_s ?? {})
@@ -1435,6 +1445,9 @@ export function posteDuJour(date, userId = OWNER) {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
     top_app: top(apps), top_web: top(webs, 'web:'),
     themes: themes.length ? themes : null,
+    // « web » ou « ecran » : le total auquel les minutes ci-dessus se
+    // rapportent. Les lieux, eux, sont toujours le navigateur.
+    themes_sur: themes.length ? (thWeb ? 'web' : 'ecran') : null,
     lieux: lieux.length ? lieux : null
   } : null;
   const lever = bornerLever();

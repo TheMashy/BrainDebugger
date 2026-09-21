@@ -6556,19 +6556,46 @@ function posteMarkup(p, synchro) {
      */
     const lx = p.ecran?.lieux ?? [];
     if (!th.length && !lx.length) return '';
+    /*
+     * ET SUR QUEL TOTAL, ce qui décidait à lui seul du chiffre affiché.
+     *
+     * Cette barre divisait par l'ÉCRAN ENTIER, applications comprises, alors
+     * que ses deux champs sont le NAVIGATEUR SEUL, par décision — une heure
+     * passée DANS Blender et une heure de tuto Blender ne sont pas la même
+     * heure. Mesuré sur une vraie journée : 58 % de l'écran était FL Studio,
+     * Premiere et Discord. Ces 58 % ne pouvaient structurellement jamais être
+     * classés par un champ « web », et la ligne du bas les annonçait comme
+     * « rien ne classe » — alors qu'ils sont nommés, un par un, dans la barre
+     * juste au-dessus. Le plus gros chiffre de l'écran disait « on ne sait
+     * rien » d'un temps qu'on connaissait précisément.
+     *
+     * Le total est donc celui auquel ces minutes appartiennent, et il est
+     * ÉCRIT sous la barre : deux barres côte à côte qui ne se comptent pas sur
+     * la même chose doivent le dire, sinon la plus courte se lit comme un
+     * manque. Les vieilles journées, dont les thèmes mêlent les applications
+     * (`themes_sur === 'ecran'`), gardent l'écran entier — c'est bien leur
+     * total à elles, et elles n'ont pas de lieux de toute façon.
+     */
+    const surWeb = p.ecran?.themes_sur !== 'ecran';
     const ecranTotal = (p.ecran?.app_min ?? 0) + (p.ecran?.web_min ?? 0);
+    const base = surWeb ? (p.ecran?.web_min ?? 0) : ecranTotal;
     const classe = th.reduce((n, x) => n + x.min, 0);
     const situe = lx.reduce((n, x) => n + x.min, 0);
-    if (!ecranTotal || !(classe + situe)) return '';
-    const pct = m => (100 * m / ecranTotal);
+    if (!base || !(classe + situe)) return '';
+    const pct = m => (100 * m / base);
     const seg = x => `<span class="jrseg" style="width:${pct(x.min).toFixed(2)}%;background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"
         data-tip="${esc(`${x.nom} · ${x.min} min · ${Math.round(pct(x.min))} % de ton écran`)}"></span>`;
     const segLieu = x => `<span class="jrseg jrlieu" style="width:${pct(x.min).toFixed(2)}%"
         data-tip="${esc(`${NOM_LIEU[x.nom] ?? x.nom} · ${x.min} min · on sait où, pas de quoi ça parlait`)}"></span>`;
-    const reste = ecranTotal - classe - situe;
+    const reste = base - classe - situe;
     return `<div class="jrepart jrthemes">
       <div class="jrbarre">${th.map(seg).join('')}${lx.map(segLieu).join('')}</div>
       <div class="jrpied">
+        ${/* LE TOTAL, ÉCRIT. La barre du dessus compte l'écran entier, celle-ci
+              le navigateur seul : sans ce repère, deux barres de largeurs
+              différentes se lisent comme deux parts du même tout. */''}
+        <span class="jpetete">${ico('globe', 12)}${heure(base + ' min')} <span class="faint">${
+          surWeb ? 'de navigateur' : 'd’écran'}</span></span>
         ${/*
             LA LÉGENDE S'OUVRE SUR CE QUI A ÉTÉ REGARDÉ. Un sujet sans ses titres
             est un verdict : « 40 min de guerre », et débrouille-toi. Avec eux,
