@@ -3099,26 +3099,26 @@ export const routes = {
        * c'est passé, à quel rythme — et le brut reste derrière le clic, entier,
        * pour qui veut vérifier.
        */
-      activite: activiteJours(userId, 60).map(j => {
-        const duJour = mesuresDuJour(j.date, userId);
-        const resume = resumeDuJour(duJour);
-        /*
-         * LE DIGEST PART LU, EN PLUS DE PARTIR BRUT.
-         *
-         * Brut, un vrai digest fait vingt lignes dont quatorze sont des titres
-         * de pages : tout est la et rien ne se lit. `lu` dit la meme chose
-         * regroupee -- les titres deviennent une ligne « navigateur, 14 pages,
-         * les deux plus longues » -- et le brut reste, entier, pour verifier.
-         */
-        if (j.digest && typeof j.digest === 'object') {
-          return { date: j.date, recu_le: j.recu_le, digest: j.digest, brut: null,
-                   resume, lu: lireDigest(j.digest) };
-        }
-        let digest = null;
-        try { digest = JSON.parse(j.digest); } catch { /* illisible : on le dira */ }
-        return { date: j.date, recu_le: j.recu_le, digest, brut: digest ? null : String(j.digest),
-                 resume, lu: lireDigest(digest) };
-      })
+      /*
+       * LA LISTE EST LEGERE. LE POIDS NE PART QUE POUR LE JOUR REGARDE.
+       *
+       * Elle portait, pour CHACUNE des soixante journees, le digest brut ET sa
+       * version lue : 11 Ko + 32 Ko par jour, 2,7 Mo au chargement de la page.
+       * La page n'en lisait rien -- elle compte la longueur de cette liste, et
+       * rien d'autre. Le brut et le lu qu'elle affiche viennent de
+       * `jourActivite`, plus bas, qui ne concerne QUE le jour ouvert.
+       *
+       * Deux megaoctets et demi traverses et jetes a chaque ouverture, pour
+       * calculer un nombre. Sur une connexion lente c'est une page qui ne
+       * s'ouvre pas ; rechargee en boucle, c'est un onglet qui meurt.
+       *
+       * ET « lu » EST PLUS GROS QUE LE BRUT, ce qui dit qu'il ne resume rien :
+       * 32 Ko contre 11. Il est ecrit pour etre lu par un humain sur UNE
+       * journee -- ce qu'il fait tres bien -- pas pour partir soixante fois.
+       */
+      activite: activiteJours(userId, 60).map(j => ({
+        date: j.date, recu_le: j.recu_le, resume: resumeDuJour(mesuresDuJour(j.date, userId))
+      }))
     };
   },
 

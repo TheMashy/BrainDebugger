@@ -125,14 +125,18 @@ test('la fenêtre est bornée des deux côtés', () => {
 });
 
 /*
- * LE DIGEST PART LU, PAS SEULEMENT BRUT.
+ * LE DIGEST PART LU, PAS SEULEMENT BRUT — MAIS POUR LE JOUR OUVERT SEULEMENT.
  *
  * Un vrai digest fait vingt lignes dont quatorze sont des titres de pages :
  * tout est là et rien ne se lit. La route porte donc `lu` à côté de `digest` —
  * l'un pour la page, l'autre pour vérifier.
+ *
+ * Ces deux-là partaient pour CHACUNE des soixante journées de la liste :
+ * 43 Ko par jour, 2,7 Mo à l'ouverture, dont la page ne lisait rien. Ils ne
+ * partent plus que sous `jourActivite`, qui est ce que la page affiche.
  */
-test('chaque journée d’activité part avec son digest LU', () => {
-  const j = lire().activite[0];
+test('la journée OUVERTE part avec son digest LU', () => {
+  const j = lire().jourActivite;
   assert.ok(j.lu, 'la lecture du digest manque');
   assert.equal(j.lu.champs, 2, 'deux champs dans ce digest de test');
   assert.deepEqual(j.lu.familles, [], 'deux clés ne font pas une famille');
@@ -147,7 +151,7 @@ test('les titres de pages se replient en une famille, sans rien perdre', () => {
   d.trous = 3;
   poserActiviteJour(OWNER, AUJ, d);
 
-  const j = lire().activite[0];
+  const j = lire().jourActivite;
   assert.equal(j.date, AUJ);
   const [web] = j.lu.familles;
   assert.equal(web.nom, 'web');
@@ -274,4 +278,59 @@ test('la synchro dit quand la machine a parlé pour la dernière fois', () => {
    * un historique parfaitement couvert jusqu'à avant-hier.
    */
   assert.ok('dernierJour' in r.synchro);
+});
+
+
+/*
+ * ET LA LISTE RESTE LEGERE.
+ *
+ * MESURE, PAS PRINCIPE : sur quatre-vingt-dix journées réelles, la route
+ * renvoyait 2,72 Mo. Chaque journée y portait son digest brut (11 Ko) et sa
+ * version lue (32 Ko) — et la page ne lit de cette liste que sa LONGUEUR. Deux
+ * mégaoctets et demi traversés et jetés à chaque ouverture, pour calculer un
+ * nombre. Après : 0,05 Mo.
+ *
+ * Une page qui met dix secondes à s'ouvrir est déjà un défaut. Rechargée en
+ * boucle, c'est un onglet qui meurt — et c'est comme ça que ça s'est vu.
+ */
+test('AUCUNE JOURNÉE DE LA LISTE NE PORTE UN DIGEST', () => {
+  const d = lire(90);
+  assert.ok(d.activite.length >= 2, 'une liste d’une seule journée ne prouve rien');
+  for (const j of d.activite) {
+    assert.equal(j.digest, undefined, `${j.date} porte encore son digest`);
+    assert.equal(j.lu, undefined, `${j.date} porte encore sa lecture`);
+    assert.equal(j.brut, undefined, `${j.date} porte encore son brut`);
+  }
+  // Ce dont la page se sert, lui, reste.
+  assert.ok(d.activite[0].date);
+  assert.ok('resume' in d.activite[0]);
+});
+
+test('LE POIDS DE LA ROUTE EST BORNE, SUR DES JOURNEES REALISTES', () => {
+  /*
+   * Une garde chiffrée, parce qu'un champ lourd rajouté « juste pour voir » ne
+   * se voit pas dans une revue de diff — il se voit sur la connexion de
+   * quelqu'un, six semaines plus tard.
+   *
+   * ET SUR DES JOURNÉES QUI PÈSENT. Les fixtures au-dessus portent des digests
+   * de deux clés : soixante d'entre elles tiennent dans 40 Ko, et la borne
+   * passerait au vert avec le défaut intact. Un vrai digest fait 11 Ko —
+   * quatorze titres de pages — et c'est celui-là qu'il faut soixante fois pour
+   * que la mesure veuille dire quelque chose.
+   */
+  for (let n = 0; n < 60; n++) {
+    const d = {};
+    for (let i = 0; i < 40; i++) d[`web:site${i}`] = 60 + i;
+    d.titres = {};
+    for (let i = 0; i < 40; i++) {
+      d.titres[`web:site${i}`] = {
+        [`un titre de page assez long pour ressembler a un vrai titre ${i}`]: 600,
+        [`un deuxieme titre, tout aussi long, sur le meme site ${i}`]: 300,
+      };
+    }
+    poserActiviteJour(OWNER, moins(n), d);
+  }
+  const taille = JSON.stringify(lire(90)).length;
+  assert.ok(taille < 400000,
+    `la route renvoie ${Math.round(taille / 1024)} Ko ; avec le défaut elle en renvoyait 2 700`);
 });
