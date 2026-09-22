@@ -26,7 +26,7 @@
  * le corpus est retiree, en silence : le theme survit, la preuve fausse non.
  */
 
-import { resolveKey, repliServeur, optionsDuModele } from './chat.js';
+import { resolveKey, repliServeur, optionsDuModele, demanderOutil } from './chat.js';
 import { cueilleur } from './trouvailles.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
 import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
@@ -1266,8 +1266,9 @@ export async function clientDe(settings) {
  */
 export function requeteLecture(corpus, settings) {
   const grain = grainPour(corpus.etendue ?? 0);
+  const demande = demanderOutil(settings.anthropicModel || 'claude-opus-5-5', 'rendre_lecture');
   return {
-    model: settings.anthropicModel || 'claude-opus-5',
+    model: settings.anthropicModel || 'claude-opus-5-5',
     max_tokens: 8000,
     /*
      * PAS DE `thinking` ICI, ET C'EST LA RAISON POUR LAQUELLE LA CARTE
@@ -1294,7 +1295,7 @@ export function requeteLecture(corpus, settings) {
      * `repli: false` : l'API des lots refuse le repli serveur meme sur un
      * modele qui le porte. La lecture directe le remet elle-meme, plus bas.
      */
-    ...optionsDuModele(settings.anthropicModel || 'claude-opus-5',
+    ...optionsDuModele(settings.anthropicModel || 'claude-opus-5-5',
                        { effort: 'high', repli: false }),
     /*
      * =================================================================
@@ -1346,12 +1347,21 @@ export function requeteLecture(corpus, settings) {
      */
     system: [{ type: 'text', text: SYSTEME, cache_control: { type: 'ephemeral' } }],
     tools: [OUTIL],
-    tool_choice: { type: 'tool', name: 'rendre_lecture' },
+    /*
+     * L'OUTIL SE DEMANDE, IL NE S'IMPOSE PLUS PARTOUT.
+     *
+     * Opus 5.5 rend 400 sur `tool_choice: {type:'tool'}` -- et un 400 ici,
+     * on sait ce que ca donne : l'ecran retombe sur « Lancer la lecture »,
+     * exactement comme si rien n'avait ete lance. `demanderOutil` choisit la
+     * forme que CE modele accepte, et rend la consigne a coller quand il a
+     * fallu se rabattre sur `auto`.
+     */
+    tool_choice: demande.tool_choice,
     messages: [{
       role: 'user',
       content: [{
         type: 'text',
-        text: `${corpus.complet
+        text: `${demande.consigne}${corpus.complet
           ? 'Tout son journal, en entier cette fois — l’application a changé de façon de lire, et c’est le moment de tout relire. Les schémas se font sur l’ensemble ; ce que tu avais compris garde ses noms.'
           : 'Tout son journal, du premier jour au dernier.'} Découpe les séries par ${grain}.\n\n${corpus.texte}`,
         cache_control: { type: 'ephemeral' }
@@ -1402,7 +1412,7 @@ export async function lire(corpus, settings) {
      * exactement comme `requeteLecture` le lit, sinon la garde protegerait un
      * autre appel que celui qui part.
      */
-    ...repliServeur(settings.anthropicModel || 'claude-opus-5'),
+    ...repliServeur(settings.anthropicModel || 'claude-opus-5-5'),
     ...requeteLecture(corpus, settings)
   });
   return depouiller(res, corpus, settings);
@@ -1428,7 +1438,7 @@ export async function lire(corpus, settings) {
 export async function lireEnFlux(corpus, settings, onAvance = () => {}) {
   const client = await clientDe(settings);
   const stream = client.beta.messages.stream({
-    ...repliServeur(settings.anthropicModel || 'claude-opus-5'),
+    ...repliServeur(settings.anthropicModel || 'claude-opus-5-5'),
     ...requeteLecture(corpus, settings)
   });
 

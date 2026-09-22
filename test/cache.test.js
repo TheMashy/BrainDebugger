@@ -114,19 +114,26 @@ test('la fenêtre du fil est bornée, et la borne est un chiffre nommé', () => 
 
 /* ============ LES DEUX MODÈLES ============ */
 
-test('le compagnon et la lecture n’ont pas le même modèle par défaut', () => {
-  // Deux métiers : tenir une conversation du soir quarante fois par jour, et
-  // relire quatre ans de journal une fois par semaine.
-  assert.equal(DEFAULT_SETTINGS.anthropicModelChat, 'claude-sonnet-5');
-  assert.equal(DEFAULT_SETTINGS.anthropicModel, 'claude-opus-5');
-  assert.notEqual(DEFAULT_SETTINGS.anthropicModelChat, DEFAULT_SETTINGS.anthropicModel);
+test('le compagnon et la lecture restent DEUX réglages, même avec le même défaut', () => {
+  /*
+   * Deux métiers : tenir une conversation du soir quarante fois par jour, et
+   * relire quatre ans de journal une fois par semaine. Ils avaient deux
+   * défauts différents ; la personne a demandé Opus 5.5 pour les deux. Ce qui
+   * doit tenir n'est donc plus la différence -- c'est que les deux champs
+   * existent chacun, pour qu'on puisse redescendre le compagnon seul.
+   */
+  assert.equal(DEFAULT_SETTINGS.anthropicModelChat, 'claude-opus-5-5');
+  assert.equal(DEFAULT_SETTINGS.anthropicModel, 'claude-opus-5-5');
+  assert.ok('anthropicModelChat' in DEFAULT_SETTINGS && 'anthropicModel' in DEFAULT_SETTINGS);
 });
 
 test('changer le modèle du compagnon ne touche pas celui de la lecture', () => {
+  const avant = setSettings({}, OWNER).anthropicModel;
   const s = setSettings({ anthropicModelChat: 'claude-haiku-4-5' }, OWNER);
   assert.equal(s.anthropicModelChat, 'claude-haiku-4-5');
-  assert.equal(s.anthropicModel, 'claude-opus-5');
-  setSettings({ anthropicModelChat: 'claude-sonnet-5' }, OWNER);
+  assert.equal(s.anthropicModel, avant);
+  assert.equal(s.anthropicModel, 'claude-opus-5-5');
+  setSettings({ anthropicModelChat: 'claude-opus-5-5' }, OWNER);
 });
 
 /* ============ CE QUE ÇA COÛTE ============ */

@@ -16,6 +16,15 @@ export const DEFAULT_ALLOWANCE = Number(process.env.BD_TOKEN_ALLOWANCE ?? 500_00
 
 /** Tarifs publics, en dollars par million de jetons. Sert au suivi cote operateur. */
 export const PRICES = {
+  /*
+   * Opus 5.5 coute MOINS que la generation d'avant : 4/20 contre 5/25. La
+   * ligne compte, parce que le defaut du produit vient de passer dessus -- et
+   * qu'un modele absent de cette table est facture au tarif d'Opus 5 par le
+   * `?? PRICES['claude-opus-5']` plus bas. La jauge aurait donc affiche 25 %
+   * de trop sans rien dire, sur le seul chiffre qui sert a decider si ce
+   * produit coute trop cher.
+   */
+  'claude-opus-5-5': { in: 4,  out: 20 },
   'claude-opus-5':   { in: 5,  out: 25 },
   'claude-sonnet-5': { in: 2,  out: 10 },
   'claude-haiku-4-5':{ in: 1,  out: 5 }

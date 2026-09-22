@@ -568,11 +568,21 @@ export const DEFAULT_SETTINGS = {
    *
    * `anthropicModelChat` sert le COMPAGNON : tenir une conversation du soir.
    * Ca demande de la justesse et de la vitesse, pas la meme profondeur -- et
-   * ca tourne quarante fois par jour. Sonnet 5 par defaut : deux fois et demie
-   * moins cher en entree, deux fois et demie en sortie.
+   * ca tourne quarante fois par jour.
+   *
+   * LES DEUX SUR OPUS 5.5, A LA DEMANDE DE LA PERSONNE. Le compagnon etait sur
+   * Sonnet 5 pour la facture ; Opus 5.5 est a 4 $ / 20 $ le million contre
+   * 5 $ / 25 $ pour Opus 5, donc moins cher que la generation d'avant -- mais
+   * toujours le double de Sonnet 5 (2 $ / 10 $). La jauge de Reglages dit ce
+   * que ca coute, et le menu laisse revenir en arriere en un clic.
+   *
+   * CE QU'IL FAUT SAVOIR DE CE MODELE, parce que ca a change le code : sa
+   * reflexion ne s'eteint pas (`coupe: 'jamais'` dans la table des capacites)
+   * et il refuse qu'on lui impose un outil -- d'ou `demanderOutil`, qui sert
+   * la lecture de fond et le juge de veille.
    */
-  anthropicModel: 'claude-opus-5',
-  anthropicModelChat: 'claude-sonnet-5',
+  anthropicModel: 'claude-opus-5-5',
+  anthropicModelChat: 'claude-opus-5-5',
   /*
    * LA LECTURE DE FOND PART EN LOT, A MOITIE PRIX.
    *

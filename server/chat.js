@@ -1311,7 +1311,7 @@ export function explainApiError(err, source) {
 /** Test de la clé sans consommer de jetons : on interroge l'API des modèles. */
 export async function testKey(settings) {
   const { client, source } = await anthropicClient(settings);
-  const model = settings.anthropicModel || 'claude-opus-5';
+  const model = settings.anthropicModel || 'claude-opus-5-5';
   try {
     const m = await client.models.retrieve(model);
     return { ok: true, source, model: m.id, displayName: m.display_name ?? m.id };
@@ -1393,9 +1393,24 @@ export async function testKey(settings) {
  * Le menu de Reglages s'arrete a `high` ; si un jour il monte plus haut, la
  * garde de `optionsDuModele` est ce qui empeche le 400.
  */
+/*
+ * `outilForce` : CE MODELE ACCEPTE-T-IL QU'ON LUI IMPOSE UN OUTIL.
+ *
+ * `tool_choice: {type:'tool'}` rend 400 sur Opus 5.5 (comme sur Fable 5.1) :
+ * « tool_choice: type "tool" and "any" are not supported for this model ».
+ * Or la lecture de fond et le juge de veille forcent tous les deux, parce
+ * qu'ils veulent une structure et rien d'autre.
+ *
+ * Le defaut est VRAI -- c'est le comportement de tous les modeles d'avant, et
+ * un modele absent de cette table doit rester servi comme avant. Seul celui
+ * qui refuse le declare.
+ */
 export const CAPACITES = {
-  'claude-fable-5':    { pense: true, effort: true, repli: true, coupe: 'omettre' },
+  'claude-fable-5':    { pense: true, effort: true, repli: true, coupe: 'omettre', outilForce: false },
   'claude-mythos-5':   { pense: true, effort: true, repli: true, coupe: 'omettre' },
+  // Opus 5.5 : la reflexion ne s'eteint PAS (`disabled` et `budget_tokens`
+  // rendent 400 a tous les efforts), et l'outil force est refuse.
+  'claude-opus-5-5':   { pense: true, effort: true, repli: true, coupe: 'jamais', outilForce: false },
   'claude-opus-5':     { pense: true, effort: true, repli: true, coupe: 'explicite' },
   'claude-opus-4-8':   { pense: true, effort: true, coupe: 'explicite' },
   'claude-opus-4-7':   { pense: true, effort: true, coupe: 'explicite' },
@@ -1432,7 +1447,15 @@ export function optionsDuModele(model, { effort = null, repli = true, pense = tr
      * jetons, un 400 coute toutes les conversations. C'est la meme asymetrie
      * qui decide le reste de cette table.
      */
-    const coupable = !pense && c.coupe && !EFFORTS_SANS_COUPURE.has(effort);
+    /*
+     * `coupe: 'jamais'` : ON NE DEMANDE MEME PAS. Sur Opus 5.5 la reflexion
+     * est toujours active -- `disabled` ET `budget_tokens` rendent 400 a tous
+     * les niveaux d'effort. Le seul levier est l'effort, et `pense: false` n'a
+     * plus d'endroit ou s'appliquer : on envoie `adaptive` et on laisse
+     * l'appelant baisser l'effort s'il veut aller vite.
+     */
+    const coupable = !pense && c.coupe && c.coupe !== 'jamais'
+                     && !EFFORTS_SANS_COUPURE.has(effort);
     if (!coupable) out.thinking = { type: 'adaptive' };
     else if (c.coupe === 'explicite') out.thinking = { type: 'disabled' };
     // `coupe: 'omettre'` : rien du tout, c'est l'absence qui eteint.
@@ -1445,6 +1468,39 @@ export function optionsDuModele(model, { effort = null, repli = true, pense = tr
   return out;
 }
 
+/**
+ * DEMANDER UN OUTIL PRECIS, D'UNE FACON QUE CE MODELE-LA ACCEPTE.
+ *
+ * Deux endroits du produit veulent une STRUCTURE et rien d'autre : la lecture
+ * de fond et le juge de veille. Ils forcaient l'outil. Opus 5.5 rend 400 sur
+ * ce forcage -- et un 400 sur la lecture de fond, on sait ce que ca donne :
+ * l'ecran retombe sur « Lancer la lecture », exactement comme si rien n'avait
+ * ete lance. La panne est invisible.
+ *
+ * Quand le modele refuse le forcage, on demande donc `auto` et on le dit dans
+ * la consigne. `auto` NE GARANTIT PAS l'appel -- mais les deux appelants
+ * verifient deja qu'un `tool_use` est revenu et levent sinon ; c'est la
+ * garde que la migration demande, et elle existait avant elle.
+ *
+ * ON NE MET PAS `strict: true`. Il exige `additionalProperties: false` sur
+ * tout le schema, et ces deux schemas-la sont profonds : l'ajouter en bloc
+ * serait un changement non teste sur le chemin le plus fragile du produit.
+ * Les deux appelants valident deja ce qu'ils recoivent, champ par champ.
+ *
+ * @returns {{tool_choice: object, consigne: string}} `consigne` est un PREFIXE
+ *   deja ponctue, a coller devant le texte utilisateur tel quel. Il est vide
+ *   quand le forcage a marche : il n'y a alors rien a expliquer au modele.
+ */
+export function demanderOutil(model, nom) {
+  if (capacitesDe(model).outilForce !== false) {
+    return { tool_choice: { type: 'tool', name: nom }, consigne: '' };
+  }
+  return {
+    tool_choice: { type: 'auto' },
+    consigne: `Réponds en appelant l’outil « ${nom} », et uniquement par lui.\n\n`
+  };
+}
+
 export const MODELES_AVEC_REPLI = Object.keys(CAPACITES).filter(m => CAPACITES[m].repli);
 
 /** Les deux champs du repli serveur, ou rien du tout. A etaler dans la requete. */
@@ -1453,11 +1509,17 @@ export const repliServeur = model =>
     ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }
     : {};
 
+/*
+ * `penseToujours` part vers Reglages : sur ces modeles, le bouton « répond
+ * d'un trait » n'a plus rien a eteindre, et l'ecran doit le dire au lieu de
+ * promettre une economie qui n'arrive pas.
+ */
 export const ANTHROPIC_MODELS = [
-  { id: 'claude-opus-5',   label: 'Opus 5',   note: 'le plus capable' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'le plus capable, et moins cher qu’Opus 5' },
+  { id: 'claude-opus-5',   label: 'Opus 5',   note: 'la génération d’avant' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'plus rapide, moins cher' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'le plus rapide' }
-];
+].map(m => ({ ...m, penseToujours: capacitesDe(m.id).coupe === 'jamais' }));
 
 /**
  * Repond en streamant les fragments de texte au fur et a mesure.
@@ -1660,6 +1722,9 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
     return true;
   };
 
+  const optionsCompagnon = optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5',
+                                           { effort: s.anthropicEffort || 'low', pense: !!s.chatPensee });
+
   // Combien d'appels cette réponse a demandés. Un tour d'outil en relance un,
   // et la dépense d'un échange est leur somme -- sans ce compte, un prompt qui
   // a l'air énorme n'est parfois qu'un prompt envoyé trois fois.
@@ -1672,8 +1737,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
         // Repli serveur, MAIS SEULEMENT SI LE MODELE LE CONNAIT. Voir
         // `repliServeur` : demande a un modele qui ne le porte pas, il rend 400
         // et fait tomber tout le compagnon.
-        ...optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5',
-                           { effort: s.anthropicEffort || 'low', pense: !!s.chatPensee }),
+        ...optionsCompagnon,
         /*
          * LE COMPAGNON ET LA LECTURE N'ONT PAS BESOIN DE LA MEME TETE.
          *
@@ -1689,7 +1753,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
          * `anthropicModel`. Deux reglages, parce que c'est deux metiers.
          */
         model: s.anthropicModelChat || 'claude-sonnet-5',
-        max_tokens: 2048,
+        max_tokens: plafondDuCompagnon(optionsCompagnon),
         /* `thinking` et `output_config` sont montes par `optionsDuModele`
            ci-dessus : ils n'existent pas sur tous les modeles du menu. */
         /*
@@ -1813,6 +1877,24 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
            pensee: pensee.trim(), backend: 'anthropic', model: final?.model, faits, usage,
            composition: { ...composition, appels: appelsApi } };
 }
+
+/*
+ * LA REFLEXION ET LA REPONSE PARTAGENT LE MEME PLAFOND.
+ *
+ * `max_tokens` borne les deux ENSEMBLE. Le compagnon tenait sur 2048 parce que
+ * sa reflexion etait eteinte par defaut : tout allait a ce qui s'affiche. Sur
+ * Opus 5.5 elle ne s'eteint plus, et 2048 partages rendaient des reponses
+ * coupees -- rattrapees par `jusquAuPoint`, donc raccourcies sans que
+ * personne le voie.
+ *
+ * Un plafond n'est pas une depense : on ne paie que ce qui est ecrit. Le
+ * relever quand une reflexion part ne coute rien de plus que la reflexion
+ * elle-meme, et rend a la reponse la place qu'elle avait.
+ */
+export const PLAFOND_SANS_REFLEXION = 2048;
+export const PLAFOND_AVEC_REFLEXION = 8192;
+export const plafondDuCompagnon = options =>
+  options?.thinking?.type === 'adaptive' ? PLAFOND_AVEC_REFLEXION : PLAFOND_SANS_REFLEXION;
 
 /** Le texte jusqu'à sa dernière fin de phrase, ou tel quel s'il n'en a aucune. */
 export function jusquAuPoint(t) {

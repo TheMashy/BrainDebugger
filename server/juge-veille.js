@@ -61,6 +61,8 @@ export const SENS_VERDICT = {
   autre:    'ni l’un ni l’autre — une négation, une hypothèse, quelqu’un d’autre'
 };
 
+import { demanderOutil } from './chat.js';
+
 export const CONSIGNE = `Tu relis UN passage d'un journal intime qu'un détecteur de mots a signalé.
 
 Ta seule question : à ce moment-là, est-ce que ça se passait ?
@@ -215,13 +217,19 @@ export function motifsQuiTiennent(passage, verdicts = null) {
  * moitié prix par-dessus.
  */
 export function requeteJugement(passage, settings = {}) {
+  const demande = demanderOutil(settings.anthropicModelVeille || 'claude-sonnet-5', OUTIL_VERDICT.name);
   return {
     model: settings.anthropicModelVeille || 'claude-sonnet-5',
     max_tokens: 400,
     system: [{ type: 'text', text: CONSIGNE, cache_control: { type: 'ephemeral' } }],
     tools: [OUTIL_VERDICT],
-    tool_choice: { type: 'tool', name: OUTIL_VERDICT.name },
-    messages: [{ role: 'user', content: [{ type: 'text', text: texteDuPassage({
+    /*
+     * MEME PRECAUTION QUE POUR LA LECTURE : Reglages laisse choisir ce
+     * modele-la aussi, et certains refusent qu'on leur impose un outil (400).
+     * Son defaut ne bouge pas -- c'est la garde qui bouge.
+     */
+    tool_choice: demande.tool_choice,
+    messages: [{ role: 'user', content: [{ type: 'text', text: demande.consigne + texteDuPassage({
       date: passage.date, avant: passage.avant, message: passage.texte, apres: passage.apres
     }) }] }]
   };

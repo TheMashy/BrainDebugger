@@ -7470,7 +7470,8 @@ async function peindreReglages() {
    * réglage d'urgence. Il reste en haut, entier, avec son raccourci.
    * ==================================================================
    */
-  const MODELES = { 'claude-opus-5': 'Opus 5', 'claude-sonnet-5': 'Sonnet 5', 'claude-haiku-4-5': 'Haiku 4.5' };
+  const MODELES = { 'claude-opus-5-5': 'Opus 5.5', 'claude-opus-5': 'Opus 5',
+                    'claude-sonnet-5': 'Sonnet 5', 'claude-haiku-4-5': 'Haiku 4.5' };
   const etatModele = s.chatBackend === 'anthropic'
     ? `Claude ${MODELES[s.anthropicModelChat] ?? s.anthropicModelChat ?? ''}`.trim()
     : s.chatBackend === 'ollama' ? 'Ollama, sur cette machine' : 'hors-ligne, relances scriptées';
@@ -8076,7 +8077,16 @@ async function renderBackendCfg() {
             sortie, et la sortie fait la quasi-totalité de la facture d'une
             soirée. Il est ici, à côté du modèle, parce que c'est la même
             question posée deux fois : combien on met dans une phrase. */''}
-      ${segment('chatPensee', 'Sa façon de répondre', PENSEES, s.chatPensee, { bool: true })}
+      ${/* Sur un modèle dont la réflexion ne s'éteint pas, le choix n'existe
+            plus : on le dit, plutôt que d'afficher un bouton qui promet une
+            économie qu'il ne fait pas. Le réglage reste en base, intact, pour
+            le jour où l'on revient à un modèle qui l'entend. */''}
+      ${info.models.find(m => m.id === s.anthropicModelChat)?.penseToujours
+        ? `<div class="field"><span>Sa façon de répondre</span>
+             <p class="faint" style="font-size:12px;margin:4px 0 0">Il réfléchit toujours avant de répondre :
+             ce modèle ne permet pas de l’éteindre. C’est l’effort, juste au-dessus, qui règle combien
+             — et donc ce que ça coûte.</p></div>`
+        : segment('chatPensee', 'Sa façon de répondre', PENSEES, s.chatPensee, { bool: true })}
     </div>
     <div class="field">
       <span>Clé API</span>
