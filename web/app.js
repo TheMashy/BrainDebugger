@@ -66,7 +66,23 @@ async function api(path, body, methode = 'POST') {
   // session expirée ou déconnexion : on repasse par le verrou au lieu
   // d'empiler des erreurs dans la console
   if (res.status === 401) { location.href = '/login'; throw new Error('session expirée'); }
-  const j = await res.json();
+  /*
+   * UNE PAGE D'ERREUR N'EST PAS DU JSON, ET « Unexpected token '<' » NE DIT PAS
+   * LAQUELLE.
+   *
+   * Un 502 de l'hébergeur pendant un redéploiement, un 500, une passerelle qui
+   * coupe : la réponse est du HTML. `res.json()` lève alors une erreur de
+   * SYNTAXE, et l'appelant reçoit ça à la place de la seule chose utile — le
+   * code HTTP. On lit donc le texte, et on dit ce qui s'est passé.
+   */
+  const texte = await res.text();
+  let j;
+  try { j = JSON.parse(texte); }
+  catch {
+    throw new Error(res.ok
+      ? `réponse illisible de ${path}`
+      : `le serveur a répondu ${res.status} sur ${path}`);
+  }
   if (j.error) throw new Error(j.error);
   return j;
 }
@@ -9798,7 +9814,37 @@ async function boot() {
   go('tonight');
 }
 
-boot();
+/*
+ * UN ÉCRAN NOIR NE DIT RIEN, ET C'EST LE PIRE DES ÉTATS.
+ *
+ * `boot` est une suite d'`await` qui commence par `/api/state`. La première
+ * qui lève saute tout le reste : les icônes de la barre ne sont jamais
+ * dessinées — elles sont vides dans le HTML, c'est le démarrage qui les
+ * remplit — `go()` n'est jamais appelé, et il reste une page noire avec le nom
+ * du produit et rien à cliquer.
+ *
+ * VU EN VRAI, et impossible à diagnostiquer de l'extérieur : une application
+ * qu'on croit plantée alors qu'une seule requête n'a pas répondu. La console
+ * portait l'erreur, mais il faut savoir l'ouvrir — et surtout savoir qu'il y a
+ * quelque chose à y chercher.
+ *
+ * Elle dit donc maintenant ce qui s'est passé, elle dessine quand même la
+ * barre pour qu'on puisse aller ailleurs, et elle propose de réessayer.
+ */
+boot().catch(err => {
+  try { monterNav(); } catch { /* même la barre peut manquer : on continue */ }
+  const quoi = esc(err?.message || String(err));
+  const v = $('#view');
+  if (v) v.innerHTML = `<div class="card">
+    <h2>Le démarrage n'a pas abouti</h2>
+    <p class="sub">${quoi}</p>
+    <p class="sub">Tes journées ne sont pas perdues : c'est l'écran qui n'a pas
+      pu se construire, pas le journal. Si ça se répète, l'erreur ci-dessus est
+      exactement ce qu'il faut rapporter.</p>
+    <p><button class="btn" onclick="location.reload()">Réessayer</button></p>
+  </div>`;
+  console.error('démarrage interrompu :', err);
+});
 
 
 /* ==========================================================================
