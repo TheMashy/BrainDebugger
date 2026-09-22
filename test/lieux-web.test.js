@@ -96,6 +96,59 @@ test('une minute effleurée ne fait pas une ligne', () => {
     'vingt secondes de boutique ne disent rien de la journée');
 });
 
+/* ============ ET CE QU'IL Y AVAIT DANS LE LIEU ============ */
+/*
+ * « vidéo · 97 min » dit OÙ, et laisse la question entière : de quoi il
+ * s'agissait. Les titres étaient déjà sur le disque, accrochés à rien.
+ * « forum · 60 min » ne dit rien ; « reddit - the heart of the internet ·
+ * 48 min » dit qu'on scrollait le fil — ce n'est pas un sujet, et c'est
+ * quand même la réponse.
+ */
+test('les titres remontent DERRIÈRE leur lieu', () => {
+  const p = poser('2026-06-01', {
+    temps_par_contexte_s: { 'web:reddit': 3480 },
+    temps_par_lieu_web_s: { forum: 3480 },
+    // LE PLUS COURT EN PREMIER DANS LA FIXTURE : sinon l'ordre des clés suffit
+    // et le tri n'est jamais exercé — un mutant qui le retire passe vert.
+    titres_par_lieu: { forum: { 'un fil ouvert dix minutes': 600,
+                                'reddit - the heart of the internet': 2880 } },
+  });
+  const f = p.ecran.lieux.find(x => x.nom === 'forum');
+  assert.equal(f.min, 58);
+  assert.deepEqual(f.titres, [
+    { titre: 'reddit - the heart of the internet', min: 48 },
+    { titre: 'un fil ouvert dix minutes', min: 10 },
+  ]);
+});
+
+test('UN LIEU SANS TITRES GARDÉS RESTE UN CHIFFRE', () => {
+  /*
+   * Machi Tool ne garde les titres que si la personne l'a demandé. Sans eux,
+   * la ligne ne s'ouvre pas — on ne fait pas semblant d'avoir une donnée
+   * qu'on n'a pas, et une ligne qui s'ouvre sur du vide est pire que pas de
+   * poignée du tout.
+   */
+  const p = poser('2026-06-02', {
+    temps_par_contexte_s: { 'web:youtube': 2400 },
+    temps_par_lieu_web_s: { video: 2400 },
+  });
+  assert.equal(p.ecran.lieux[0].titres, undefined);
+});
+
+test('un titre effleuré ne fait pas une ligne', () => {
+  /*
+   * Machi Tool a déjà un plancher de trente secondes à l'émission ; celui-ci
+   * est celui de l'écran, et il protège d'un digest venu d'une autre version.
+   * Une ligne « 0 min » n'apprend rien et pousse les vraies vers le bas.
+   */
+  const p = poser('2026-06-03', {
+    temps_par_contexte_s: { 'web:youtube': 2400 },
+    temps_par_lieu_web_s: { video: 2400 },
+    titres_par_lieu: { video: { 'un long moment': 2360, 'trois secondes': 20 } },
+  });
+  assert.deepEqual(p.ecran.lieux[0].titres.map(t => t.titre), ['un long moment']);
+});
+
 /* ====== LE DERNIER PALIER : LE SITE, ET RIEN DE PLUS ====== */
 /*
  * Sur une vraie journée, 17 % du navigateur étaient comptés « rien ne
@@ -295,4 +348,12 @@ test('CE QUI RESTE NE PRÉTEND PLUS ÊTRE UN CLASSEMENT RATÉ', () => {
    * « autre », le mot qu'il écrit quand il n'a rien trouvé.
    */
   assert.match(barre, /qui n’a même pas de nom/);
+});
+
+test('LA LÉGENDE DES LIEUX S’OUVRE, COMME CELLE DES SUJETS', () => {
+  const bloc = barre.slice(barre.indexOf('jrleglieux'), barre.indexOf('jrlegsites'));
+  assert.match(bloc, /if \(!x\.titres\?\.length\) return `<li>\$\{puce\}<\/li>`/,
+    'un lieu sans titres doit rester une ligne simple');
+  assert.match(bloc, /<details>/);
+  assert.match(bloc, /x\.titres\.slice\(0, 10\)/);
 });
