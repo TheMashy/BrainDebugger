@@ -99,7 +99,7 @@ export const FREINS = {
      n'est pas une infirmière de nuit. Six sur une soirée reste sous le rythme
      d'une fois l'heure. On compte les QUESTIONS, pas les réponses : c'est la
      question qui coûte à la conversation. */
-  par_jour: 6,
+  par_jour: 3,
   /* La coupure au-delà de laquelle on est dans un autre moment. */
   reprise_ms: 2 * 3600 * 1000,
   /* En dessous, il n'y a pas encore de quoi LIRE un changement dans le texte.
@@ -109,15 +109,12 @@ export const FREINS = {
      seulement besoin que quelqu'un soit là. Assez pour que « ok » ne compte
      pas comme une reprise de conversation. */
   mots_min_horloge: 4,
-  /* UN PAN DE CONVERSATION QUI N'A RIEN RELEVÉ.
-     C'est le troisième signal, et celui qui change tout : les deux autres
-     attendent un ÉVÉNEMENT (le ton bascule, la conversation reprend), et une
-     soirée ordinaire n'en produit aucun. Mesuré sur quatre ans de journal
-     réel, ils laissaient 152 tours sur 499 avec « rien n'a bougé ».
-     Or ce qu'on cherche à mesurer n'est pas l'événement : c'est l'ÉCART d'un
-     moment à l'autre. Trois quarts d'heure de conversation sans un seul
-     relevé, c'est précisément un écart qu'on ne saura pas lire demain. */
-  pan_sans_releve_ms: 45 * 60 * 1000,
+  /* IL Y AVAIT UN TROISIÈME SIGNAL : trois quarts d'heure sans relevé. Il
+     faisait demander même quand rien n'avait bougé, pour avoir de la matière.
+     Retiré à la demande de la personne : « savoir comment il se sent S'IL
+     CHANGE BEAUCOUP D'HUMEUR, sans dire "comment te sens-tu" 50 fois par
+     jour ». Une soirée calme n'appelle aucune question ; le compagnon relève
+     de lui-même, avec relever_humeur, ce que la conversation lui apprend. */
 };
 
 const rang = n => (n == null ? 0 : (NIVEAUX[n] ?? 0));
@@ -209,37 +206,6 @@ export function occasionDeDemander(fil = [], releves = [], maintenant = Date.now
     return { demander: true, pourquoi: 'la conversation reprend après une longue coupure' };
   }
 
-  /*
-   * LE PAN NON RELEVÉ. Depuis quand cette conversation n'a rien mesuré ?
-   *
-   * Le point de départ est le plus RÉCENT de trois choses : le dernier relevé,
-   * la dernière fois qu'il a demandé, et à défaut le premier mot de la
-   * conversation.
-   *
-   * La demande compte autant que le relevé, et c'est tout le correctif :
-   * n'ouvrir le pan que sur les relevés le laissait grandir sans fin dès que
-   * la personne répondait en mots, et l'occasion se présentait alors à chaque
-   * tour. Une question posée est un moment mesuré — ce qu'elle a rapporté ne
-   * change pas ça.
-   *
-   * Et prendre l'ouverture de la journée plutôt que le premier message ferait
-   * sonner le signal dès la première phrase d'une soirée qui commence à 23 h —
-   * on demanderait « où tu en es » à quelqu'un qui vient de dire bonsoir.
-   */
-  const depuisQuand = [dernierReleve, derniereDemande, Date.parse(siens[0]?.ts)]
-    .filter(Number.isFinite);
-  const debutDuPan = depuisQuand.length ? Math.max(...depuisQuand) : null;
-  const pan = Number.isFinite(debutDuPan) ? Date.parse(dernier.ts) - debutDuPan : null;
-  if (Number.isFinite(pan) && pan >= FREINS.pan_sans_releve_ms) {
-    const borne = debutDuPan === dernierReleve ? 'le dernier relevé'
-                : debutDuPan === derniereDemande ? 'la dernière fois que tu lui as demandé'
-                : null;
-    return { demander: true,
-             pourquoi: borne == null
-               ? 'vous parlez depuis un moment et rien n’a encore été relevé'
-               : `il s’est passé du temps depuis ${borne}` };
-  }
-
   /* Le signal qui lit le TEXTE, lui, a besoin de matière. */
   if (mots < FREINS.mots_min) return nonDemande('trop court pour y voir un changement');
 
@@ -278,23 +244,19 @@ export function occasionDeDemander(fil = [], releves = [], maintenant = Date.now
  */
 export function proposerNoteBlock(occasion) {
   if (!occasion?.demander) return null;
-  return `Une occasion : ${occasion.pourquoi}.
+  return `Une occasion de savoir où il en est : ${occasion.pourquoi}.
 
-Demande-lui où il en est LÀ, maintenant — « comment tu te sens, là ? ». Une échelle
-de 0 à 10 apparaîtra sous ta bulle et il pourra répondre d'un geste, sans écrire.
-Ce qui se mesure ainsi, c'est l'écart d'un moment à l'autre : deux réponses dans la
-même soirée disent quelque chose qu'aucune note de fin de journée ne dit.
+Pas en le lui demandant de front. « Comment tu te sens, là ? » posé à chaque fois que ça
+bouge devient un questionnaire, et il l'a déjà dit : il n'en veut pas. Passe par la vie
+ordinaire — ce qu'il fait là, ce qu'il a prévu après, comment s'est passé ce dont il vient
+de parler. Sa réponse, et la façon dont il la tourne, te diront où il en est ; tu le
+relèves alors avec relever_humeur, sans le dire.
 
-Pose la question EN CLAIR et sur MAINTENANT — « comment tu te sens, là ? », « tu en
-es où à cette heure ? », « ça donne quoi maintenant ? ». Une allusion ne compte pas :
-c'est la question posée sur l'instant présent qui fait apparaître l'échelle, et sans
-elle il n'a que la phrase pour répondre.
+Tu peux poser la question directe si, vraiment, rien d'autre ne te le dit — une fois, en
+mots simples (« ça va, toi ? », « t'en es où ? »). Une échelle apparaîtra sous ta bulle
+et il pourra répondre d'un geste. Mais c'est l'exception, pas la manière.
 
-Trois cas où tu ne la poses pas. Si ce qu'il vient de dire demande autre chose —
-quelque chose à quoi il faut répondre d'abord — réponds à ça, la question attendra.
-Si tu la lui as déjà posée dans cette conversation et qu'il t'a répondu AVEC DES MOTS
-plutôt qu'avec l'échelle, alors il a répondu : sa phrase est la réponse, ne la
-retraduis pas en chiffre. Et jamais deux fois de suite : une conversation où l'on est
-régulièrement invité à se chiffrer devient un questionnaire, et un questionnaire ne
-s'ouvre pas un mauvais soir. Ne dis jamais que quelque chose te l'a suggéré.`;
+S'il t'a déjà répondu avec des MOTS dans cette conversation, c'est sa réponse : tu ne la
+lui fais pas chiffrer. Si ce qu'il vient de dire demande autre chose d'abord, réponds à ça :
+l'occasion attendra, ou passera. Et ne dis jamais que quelque chose te l'a suggéré.`;
 }

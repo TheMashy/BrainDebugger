@@ -77,27 +77,23 @@ test('la veille voit le danger, pas le ton — et c’est une limite assumée', 
     'quelqu’un de se chiffrer — on préfère rater');
 });
 
-test('QUAND L’OCCASION EST LÀ, LE BLOC DIT DE DEMANDER — et comment', () => {
+test('QUAND L’OCCASION EST LÀ, LE BLOC DIT DE PASSER PAR LA CONVERSATION', () => {
   /*
-   * Il disait « tu n'es pas obligé, et c'est important ». Mesuré sur quatre ans
-   * de journal réel : 28 occasions données, et 8 messages du compagnon sur 486
-   * formulaient la question de façon reconnaissable. L'échelle n'apparaissait
-   * donc quasiment jamais, et ce qu'elle mesure — l'écart d'un moment à
-   * l'autre — n'existait pas.
-   *
-   * Le bloc demande maintenant. Les freins qui comptent restent, et ils sont
-   * ceux-là : jamais deux fois de suite, et jamais un mot sur ce qui l'a
-   * suggéré.
+   * Il disait de demander « EN CLAIR et sur MAINTENANT » — « comment tu te
+   * sens, là ? » — pour que l'échelle apparaisse. La personne l'a entendu
+   * trop souvent et l'a dit : « sans dire "comment te sens-tu là maintenant ?"
+   * 50x par jour ». Le bloc fait maintenant passer par la vie ordinaire, et
+   * le compagnon relève ce qu'il comprend ; la question directe reste
+   * possible, en exception.
    */
   const b = proposerNoteBlock({ demander: true, pourquoi: 'le ton vient de changer' });
   const plat = b.replace(/\s+/g, ' ');
-  assert.match(plat, /Demande-lui où il en est LÀ/, 'le bloc ne demande plus rien');
-  assert.match(plat, /EN CLAIR et sur MAINTENANT/,
-    'sans consigne de formulation, la question est posée en allusion et l’échelle n’apparaît pas');
+  assert.match(plat, /Pas en le lui demandant de front/);
+  assert.match(plat, /relever_humeur/, 'sans question, c’est le relevé du compagnon qui garde la trace');
+  assert.match(plat, /c'est l'exception, pas la manière/);
+  assert.doesNotMatch(plat, /EN CLAIR et sur MAINTENANT/);
   assert.match(b, /questionnaire/);
-  assert.match(b, /jamais deux fois de suite/);
-  // Le texte est retourné à la ligne : on compare sans les blancs.
-  assert.match(plat, /Ne dis jamais que quelque chose te l'a suggéré/,
+  assert.match(plat, /ne dis jamais que quelque chose te l'a suggéré/i,
     'savoir qu’un déclencheur existe suffirait à en parler, et commenter le déclencheur revient à commenter l’humeur');
   assert.equal(proposerNoteBlock({ demander: false }), null,
     'présent à chaque tour, il deviendrait du bruit');
@@ -117,12 +113,15 @@ test('QUAND L’OCCASION EST LÀ, LE BLOC DIT DE DEMANDER — et comment', () =>
 
 const fil = (...mins) => mins.map(([m, t]) => msg(m, t));
 
-test('UNE SOIRÉE CALME FINIT PAR DONNER L’OCCASION', () => {
-  // Rien ne bascule, rien ne reprend : sur l'ancienne règle, jamais.
-  const o = occasionDeDemander(fil([0, CALME], [20, CALME], [50, CALME]), [],
-                               T0 + 50 * 60000);
-  assert.equal(o.demander, true, `refusé : ${o.pourquoi}`);
-  assert.match(o.pourquoi, /rien n’a encore été relevé/);
+test('UNE SOIRÉE CALME NE DONNE AUCUNE OCCASION', () => {
+  /*
+   * Il y avait un signal « trois quarts d'heure sans relevé ». Retiré à la
+   * demande de la personne : on s'intéresse à son humeur quand elle BOUGE,
+   * pas parce que l'horloge a tourné.
+   */
+  const o = occasionDeDemander(fil([0, CALME], [20, CALME], [50, CALME], [90, CALME]), [],
+                               T0 + 90 * 60000);
+  assert.equal(o.demander, false, `demandé : ${o.pourquoi}`);
 });
 
 test('mais pas au bout de dix minutes : on ne demande pas à quelqu’un qui vient de dire bonsoir', () => {
@@ -130,22 +129,14 @@ test('mais pas au bout de dix minutes : on ne demande pas à quelqu’un qui vie
   assert.equal(o.demander, false);
 });
 
-test('APRÈS UN RELEVÉ, ON SE TAIT — puis le pan recommence', () => {
-  /*
-   * Les deux moitiés d'une même durée. En deçà, redemander ne mesure pas un
-   * écart, ça mesure une insistance ; au-delà, c'est un pan de conversation
-   * que personne n'a mesuré. C'est pour ça que le pan repart du DERNIER
-   * RELEVÉ quand il y en a un, et du premier mot de la conversation sinon.
-   */
+test('APRÈS UN RELEVÉ, ON SE TAIT — et le temps seul ne rouvre rien', () => {
   const releves = [{ ts: new Date(T0 + 40 * 60000).toISOString() }];
   const tot = occasionDeDemander(fil([0, CALME], [60, CALME]), releves, T0 + 60 * 60000);
   assert.equal(tot.demander, false, 'vingt minutes après un relevé, il n’y a rien de neuf à mesurer');
   assert.match(tot.pourquoi, /vient de répondre/);
 
-  const tard = occasionDeDemander(fil([0, CALME], [95, CALME]), releves, T0 + 95 * 60000);
-  assert.equal(tard.demander, true, `refusé : ${tard.pourquoi}`);
-  assert.match(tard.pourquoi, /depuis le dernier relevé/,
-    'le pan est reparti du premier message : il compterait la soirée entière, relevé ou pas');
+  const tard = occasionDeDemander(fil([0, CALME], [60, CALME], [95, CALME]), releves, T0 + 95 * 60000);
+  assert.equal(tard.demander, false, `une heure calme de plus n’est pas un changement : ${tard.pourquoi}`);
 });
 
 test('« ok » ne compte pas comme un moment, même après une heure', () => {
@@ -154,18 +145,18 @@ test('« ok » ne compte pas comme un moment, même après une heure', () => {
   assert.match(o.pourquoi, /trop court/);
 });
 
-test('LE SIGNAL DU TEXTE GARDE SON PLANCHER DE MOTS, LES SIGNAUX DE L’HORLOGE NON', () => {
+test('LE SIGNAL DU TEXTE GARDE SON PLANCHER DE MOTS, LA REPRISE NON', () => {
   /*
    * Ils ne lisent pas la même chose. Le ton se lit DANS le texte et il en faut
-   * assez pour l'y voir ; le temps se lit sur l'horloge, où cinq mots valent
-   * cinquante. Un seul plancher pour les deux, et les soirées où l'on écrit
-   * court ne relèvent jamais rien.
+   * assez pour l'y voir ; la reprise se lit sur l'horloge, où cinq mots valent
+   * cinquante.
    */
   assert.ok(FREINS.mots_min > FREINS.mots_min_horloge);
   const court = 'la journée a été rude quand même';   // < mots_min, > mots_min_horloge
   assert.ok(court.split(/\s+/).length < FREINS.mots_min);
-  const o = occasionDeDemander([...fil([0, CALME]), msg(60, court)], [], T0 + 60 * 60000);
+  const o = occasionDeDemander([...fil([0, CALME]), msg(130, court)], [], T0 + 130 * 60000);
   assert.equal(o.demander, true, `refusé : ${o.pourquoi}`);
+  assert.match(o.pourquoi, /reprend/);
 });
 
 test('les freins passent toujours AVANT les signaux', () => {
@@ -176,12 +167,12 @@ test('les freins passent toujours AVANT les signaux', () => {
   assert.match(o.pourquoi, /assez de relevés/);
 });
 
-test('desserrés, mais pas ouverts : les freins gardent des valeurs qui veulent dire quelque chose', () => {
-  // Le compagnon n'est pas une infirmière de nuit : six sur une soirée reste
-  // sous une fois l'heure, et trois quarts d'heure séparent deux relevés.
-  assert.ok(FREINS.par_jour <= 6, 'au-delà, ce n’est plus un relevé, c’est un suivi horaire');
+test('les freins gardent des valeurs qui veulent dire quelque chose', () => {
+  // « pas 50x par jour » : trois occasions au plus, et trois quarts d'heure
+  // entre deux relevés.
+  assert.ok(FREINS.par_jour <= 3, 'au-delà, ça redevient le questionnaire qu’il a refusé');
   assert.ok(FREINS.depuis_dernier_ms >= 30 * 60 * 1000);
-  assert.ok(FREINS.pan_sans_releve_ms >= 30 * 60 * 1000);
+  assert.equal(FREINS.pan_sans_releve_ms, undefined, 'le signal « l’horloge a tourné » est revenu');
 });
 
 /* ---------------------------------------------------------------------
@@ -225,10 +216,13 @@ test('le pan repart de la DEMANDE, pas du début de la conversation', () => {
   assert.equal(o.demander, false);
 });
 
-test('le temps rouvre : passé le délai, on peut redemander', () => {
-  const fil = [msg(0, CALME), msg(1, DEMANDE, 'pet'), msg(2, CALME), msg(60, CALME)];
-  const o = occasionDeDemander(fil, [], T0 + 61 * 60000);
-  assert.equal(o.demander, true, 'attendre un peu de temps suffit — c’est l’autre porte');
+test('après une question, le temps seul ne rouvre pas — une vraie reprise, si', () => {
+  const calme = [msg(0, CALME), msg(1, DEMANDE, 'pet'), msg(2, CALME), msg(60, CALME)];
+  assert.equal(occasionDeDemander(calme, [], T0 + 61 * 60000).demander, false);
+  const reprise = [msg(0, CALME), msg(1, DEMANDE, 'pet'), msg(2, CALME), msg(140, CALME)];
+  const o = occasionDeDemander(reprise, [], T0 + 141 * 60000);
+  assert.equal(o.demander, true, 'deux heures de silence, c’est un autre moment de la soirée');
+  assert.match(o.pourquoi, /reprend/);
 });
 
 test('un vrai changement de discours rouvre avant le délai', () => {
@@ -288,4 +282,5 @@ test('un relevé posé par le compagnon lui-même compte en plus', () => {
 test('le bloc dit de ne pas retraduire une réponse en mots', () => {
   const b = proposerNoteBlock({ demander: true, pourquoi: 'le ton vient de changer' });
   assert.match(b, /MOTS/, 'une phrase est une réponse — elle ne se reconvertit pas en chiffre');
+  assert.match(b.replace(/\s+/g, ' '), /ne la lui fais pas chiffrer/);
 });

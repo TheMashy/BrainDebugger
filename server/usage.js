@@ -24,7 +24,10 @@ export const PRICES = {
    * de trop sans rien dire, sur le seul chiffre qui sert a decider si ce
    * produit coute trop cher.
    */
-  'claude-opus-5-5': { in: 4,  out: 20 },
+  // `lu` : sur ce modele, relire le cache coute 5 % de l'entree, pas 10 %.
+  // Sans ce champ, la jauge comptait double tout ce que la conversation relit
+  // -- c'est-a-dire l'essentiel de chaque message.
+  'claude-opus-5-5': { in: 4,  out: 20, lu: 0.05 },
   'claude-opus-5':   { in: 5,  out: 25 },
   'claude-sonnet-5': { in: 2,  out: 10 },
   'claude-haiku-4-5':{ in: 1,  out: 5 }
@@ -90,7 +93,7 @@ export function coutsParMessage(ids, userId) {
   for (const r of lignes) {
     const p = PRICES[r.model];
     const dollars = p == null ? null
-      : ((r.i + r.ce * ECRITURE_CACHE + r.cl * LECTURE_CACHE) * p.in + r.o * p.out) / 1e6;
+      : ((r.i + r.ce * ECRITURE_CACHE + r.cl * (p.lu ?? LECTURE_CACHE)) * p.in + r.o * p.out) / 1e6;
     const deja = out.get(Number(r.message_id));
     let composition = null;
     try { composition = r.composition ? JSON.parse(r.composition) : null; } catch { /* illisible */ }
@@ -168,7 +171,7 @@ export function usageFor(userId) {
   `).all(userId, month).reduce((sum, r) => {
     const p = PRICES[r.model] ?? PRICES['claude-opus-5'];
     return sum + (r.i / 1e6) * p.in + (r.o / 1e6) * p.out
-               + (r.cl / 1e6) * p.in * LECTURE_CACHE
+               + (r.cl / 1e6) * p.in * (p.lu ?? LECTURE_CACHE)
                + (r.ce / 1e6) * p.in * ECRITURE_CACHE;
   }, 0);
 
@@ -243,7 +246,7 @@ export function echangesDe(lignes, trou = TROU_ECHANGE) {
     cour.traverses += r.input_tokens + r.output_tokens
                     + (r.cache_read_tokens ?? 0) + (r.cache_write_tokens ?? 0);
     cour.cout += (r.input_tokens / 1e6) * p.in + (r.output_tokens / 1e6) * p.out
-               + ((r.cache_read_tokens ?? 0) / 1e6) * p.in * LECTURE_CACHE
+               + ((r.cache_read_tokens ?? 0) / 1e6) * p.in * (p.lu ?? LECTURE_CACHE)
                + ((r.cache_write_tokens ?? 0) / 1e6) * p.in * ECRITURE_CACHE;
     dernier = t;
   }
@@ -409,7 +412,7 @@ export function serieUsage(userId, grain = 'jour') {
     e.entree += r.input_tokens + r.cache_read_tokens + r.cache_write_tokens;
     const p = PRICES[r.model] ?? PRICES['claude-opus-5'];
     e.cout += (r.input_tokens / 1e6) * p.in + (r.output_tokens / 1e6) * p.out
-            + (r.cache_read_tokens / 1e6) * p.in * LECTURE_CACHE
+            + (r.cache_read_tokens / 1e6) * p.in * (p.lu ?? LECTURE_CACHE)
             + (r.cache_write_tokens / 1e6) * p.in * ECRITURE_CACHE;
   }
 

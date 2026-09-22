@@ -32,7 +32,8 @@ test('la consigne interdit de recopier le marqueur', () => {
   // Un compagnon qui préfixe ses réponses de l'heure a l'air d'un journal
   // système, pas de quelqu'un.
   assert.match(SYSTEM_PROMPT, /ne le recopies jamais/);
-  assert.match(SYSTEM_PROMPT, /tu ne sais pas s'il dormait/);
+  // Entre deux messages il ne sait pas ce qui s'est passé, et ne l'invente pas.
+  assert.match(SYSTEM_PROMPT, /tu ne sais pas ce qu'il a fait — tu ne l'inventes pas/);
 });
 
 /* ------------------------------------------------------------------------

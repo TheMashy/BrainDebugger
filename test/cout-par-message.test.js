@@ -152,3 +152,17 @@ test('…et elle bouge dès que la mémoire bouge — sinon la mesure ne sert à
   const b = tour('MEM ET UN MOT DE PLUS', 'é', 'x').composition;
   assert.notEqual(a.tete, b.tete, 'une mémoire qui change ne se voit pas : l’instrument est aveugle');
 });
+
+test('SUR OPUS 5.5, RELIRE LE CACHE COÛTE 5 %, PAS 10 %', () => {
+  /*
+   * Le tarif de relecture n'est pas le même partout : Opus 5.5 facture 0,05×
+   * l'entrée. Au taux commun, la pastille sous chaque réponse comptait double
+   * l'essentiel de ce que coûte un message — la conversation relue.
+   */
+  record(U, 'claude-opus-5-5', 100, 200, 50000, 0, 'chat', 21);
+  const c = coutsParMessage([21], U).get(21);
+  const p = PRICES['claude-opus-5-5'];
+  assert.equal(p.lu, 0.05);
+  const attendu = ((100 + 50000 * 0.05) * p.in + 200 * p.out) / 1e6;
+  assert.ok(Math.abs(c.dollars - attendu) < 1e-12, `${c.dollars} au lieu de ${attendu}`);
+});

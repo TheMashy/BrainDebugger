@@ -68,9 +68,11 @@ test('LA CONSIGNE EST DE LE DIRE, PAS DE LE DEMANDER', () => {
   const b = posteBlock(POSTE());
   assert.match(b, /tu ne le redemandes pas/);
   assert.match(b, /TU NE POSES PAS LA QUESTION/);
-  // Et l'heure est reprise dans l'exemple : une consigne sans le chiffre
-  // laisserait le modèle inventer une formulation qui redemande.
-  assert.match(b, /levé à 15:38/);
+  // Mais il ne la RÉCITE pas : « ah, levé à 15:38 » donné en exemple était
+  // recopié tel quel, et une heure à la minute sonne comme un relevé, pas
+  // comme un ami. La personne l'a demandé en toutes lettres.
+  assert.doesNotMatch(b, /levé à 15:38/);
+  assert.match(b, /pas à la minute/);
 });
 
 test('LA CONTRADICTION DE LA PERSONNE L’EMPORTE, SANS DISCUSSION', () => {
