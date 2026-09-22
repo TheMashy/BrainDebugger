@@ -53,7 +53,7 @@ test('la crise garde sa façon à elle de demander pourquoi', () => {
   // ce qui s'est passé EST la consigne, et elle ne doit pas être emportée.
   const p = plat(SYSTEM_PROMPT);
   assert.match(p, /En crise, c'est autre chose/);
-  assert.match(p, /DEMANDER POURQUOI/);
+  assert.match(p, /est-ce que tu penses à te tuer/);
   assert.match(p, /3114/);
 });
 

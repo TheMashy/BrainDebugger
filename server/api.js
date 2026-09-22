@@ -46,6 +46,7 @@ import { lireDigest } from './digest.js';
 import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, veilleDe,
          SOURCE_DIT, CLE_LEVER, CLE_COUCHER, MIDI, noteDiteDans } from './jour-vecu.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
+import { conversationGrave } from './gravite.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize, termesDuDoc } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -2181,7 +2182,8 @@ export const routes = {
      */
     const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos,
                                                           blocsMemoire: m.tailles,
-                                                          outils: outilsPour(userId, idMsg) });
+                                                          outils: outilsPour(userId, idMsg),
+                                                          grave: conversationGrave(history) });
     /* L'ORDRE COMPTE : le relevé de dépense nomme la réponse, il ne peut donc
        pas être écrit avant elle. */
     const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
@@ -4350,7 +4352,9 @@ export async function streamMessage(body, send, userId = OWNER) {
     onText: chunk => send('delta', { text: chunk }),
     onPense: chunk => send('pense', { text: chunk }),
     exhausted: before.exhausted,
-    outils: outilsPour(userId, messageId, send)
+    outils: outilsPour(userId, messageId, send),
+    // Un soir grave, il réfléchit à fond, quel que soit le réglage d'effort.
+    grave: conversationGrave(history)
   });
   /* Même ordre que sur l'autre route : la réponse d'abord, ce qu'elle a coûté
      ensuite — sans quoi la dépense ne peut nommer aucun message. */

@@ -242,25 +242,37 @@ devrait faire. « Ça a l'air lourd, ce soir » est de la chaleur. « Ça va all
 pas : c'est une porte qu'on ferme. Quelqu'un qui écrit tard, mal, ou en colère est
 quelqu'un qui écrit — tu l'accueilles comme ça.
 
-S'IL PARLE DE SE FAIRE DU MAL, OU S'IL EST EN CRISE
+S'IL PARLE DE SE FAIRE DU MAL, DE MOURIR, OU DE NE PLUS ÊTRE LÀ
 Tu ne changes pas de registre et tu ne récites pas de protocole — un basculement soudain
 dans le ton clinique fait comprendre qu'il a déclenché quelque chose, et il se taira.
-Tu restes avec lui.
+Tu restes avec lui, et tu restes toi. Mais ici, la clarté passe avant la retenue.
 
-TU NE DONNES AUCUN ORDRE. Pas d'impératif, pas de « il faut », pas de consigne : pas
-« va dormir », pas « pose ça », pas « respire », pas « appelle quelqu'un », pas « arrête ».
-Quelqu'un en crise a déjà entendu tout ça, et un ordre lui dit qu'on ne veut pas savoir.
-Ce que tu fais à la place, c'est DEMANDER POURQUOI — avec douceur, une question à la fois,
-et tu attends la réponse : qu'est-ce qui s'est passé, qu'est-ce qui a fait que ce soir,
-pourquoi maintenant, qu'est-ce que ça dit, à quoi il pense. Tu reprends d'abord ce qu'il
-a écrit, pour qu'il sache que tu l'as lu, puis tu poses ta question. Une question sur
-maintenant peut venir ensuite — où il est, si quelqu'un est là — mais comme une question,
-jamais comme une consigne.
+Tu reprends d'abord ce qu'il a écrit, pour qu'il sache que tu l'as lu. Tu dis ce qui
+t'arrête dans ses mots, simplement : « tu écris que tout le monde est fier de toi, et juste
+après que tu aimerais que ça s'arrête là ».
 
-Tu mentionnes une seule fois, sans insister, que le 3114 existe — gratuit, 24h/24, partout
-en France — et tu le dis comme une chose qui est là s'il en veut, pas comme quelque chose
-qu'il doit faire. Tu ne fais pas semblant que tout va bien, et tu n'en rajoutes pas non
-plus. Et tu ne le lâches pas : tant qu'il écrit, tu es là, et tu demandes encore.
+Puis tu poses LA question, directement, sans détour ni euphémisme : « est-ce que tu penses
+à te tuer ? ». Et si c'est oui : « est-ce que tu as pensé à comment ? ». Demander ne met pas
+l'idée dans la tête de quelqu'un — c'est ce que font les gens dont c'est le métier, et
+c'est souvent un soulagement d'être enfin demandé. Une question à la fois, et tu attends.
+
+S'il répond non, tu le crois, et tu le lui dis. Vouloir disparaître, s'endormir pour
+toujours, sans vouloir agir, ça existe et c'est fréquent — tu peux le nommer avec ces
+mots-là, qui sont les siens, pas avec une étiquette. Ça reste lourd, et ça vaut d'être
+entendu par quelqu'un qui peut l'aider à le démêler.
+
+Ici, et seulement ici, tu peux dire ce qui serait utile — sans ordre sec, sans liste :
+- le 3114, gratuit, 24h/24 : on peut appeler juste pour dire ce qu'il vient de t'écrire,
+  mot pour mot — pas besoin d'être « assez » en urgence ;
+- s'il a quelqu'un qui le suit (tu le sais par son journal ou parce qu'il te l'a dit),
+  que ce qu'il vient d'écrire mérite d'arriver chez cette personne bientôt, pas dans un
+  mois — et que l'écrit passe souvent mieux que l'oral : il peut lui montrer ce texte ;
+- s'il a un moyen sous la main, une intention, ou s'il sent qu'il pourrait passer à
+  l'acte : le 15, ou le 112, maintenant. Là tu le dis clairement.
+
+Ce qui ne change pas : pas de « va dormir », pas de « respire », pas de « ça va aller »,
+pas de leçon. Tu ne fais pas semblant que tout va bien, tu n'en rajoutes pas non plus.
+Et tu ne le lâches pas : tant qu'il écrit, tu es là.
 
 FORME
 Français, tutoiement, phrases courtes. Pas de listes, pas de titres, pas d'emoji.
@@ -274,7 +286,7 @@ const PROBES = [
   "T'as prévu quoi après ?",
   'Tu étais avec qui ?',
   "Qu'est-ce que tu as fait après ?",
-  'Raconte.',
+  "Ça s'est passé comment ?",
   "Il s'est passé autre chose aujourd'hui ?",
   'Et le reste de la journée ?',
   'Tu fais quoi ce soir ?',
@@ -1702,7 +1714,7 @@ export function assemblerPrompt({ memory = null, echos = null, history = [], blo
 let CACHE_LONG = true;
 
 export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null,
-                                     echos = null, blocsMemoire = null) {
+                                     echos = null, blocsMemoire = null, grave = false) {
   const { client, source } = await anthropicClient(s);
 
   /*
@@ -1744,8 +1756,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
     return true;
   };
 
-  const optionsCompagnon = optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5',
-                                           { effort: s.anthropicEffort || 'low', pense: !!s.chatPensee });
+  const optionsCompagnon = optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5', reglageDuTour(s, grave));
 
   // Combien d'appels cette réponse a demandés. Un tour d'outil en relance un,
   // et la dépense d'un échange est leur somme -- sans ce compte, un prompt qui
@@ -1898,6 +1909,20 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
   return { text: coupee ? jusquAuPoint(text) : text.trim(), coupee,
            pensee: pensee.trim(), backend: 'anthropic', model: final?.model, faits, usage,
            composition: { ...composition, appels: appelsApi } };
+}
+
+/**
+ * L'EFFORT DE CE TOUR-CI.
+ *
+ * Le réglage de la personne vaut pour la conversation du soir. Quand ce
+ * qu'elle écrit parle de mourir ou de ne plus être là (voir server/gravite.js),
+ * le compagnon réfléchit à fond, quel que soit ce réglage : c'est le seul
+ * moment où la justesse vaut plus que les jetons. Le revers, assumé : changer
+ * l'effort d'un tour fait relire la conversation plein tarif une fois.
+ */
+export function reglageDuTour(s, grave = false) {
+  return grave ? { effort: 'high', pense: true }
+               : { effort: s?.anthropicEffort || 'low', pense: !!s?.chatPensee };
 }
 
 /*
@@ -2258,7 +2283,7 @@ export async function ollamaReply(history, s, memory, onText) {
  * Tout echec d'un backend distant retombe sur `scripted` ET LE DIT. Une panne
  * silencieuse serait un mensonge sur l'endroit ou partent les donnees.
  */
-export async function reply(history, settings, { memory = null, echos = null, onText = null, onPense = null, exhausted = false, outils = null, blocsMemoire = null } = {}) {
+export async function reply(history, settings, { memory = null, echos = null, onText = null, onPense = null, exhausted = false, outils = null, blocsMemoire = null, grave = false } = {}) {
   const backend = settings.chatBackend ?? 'scripted';
 
   // Enveloppe epuisee : on ne coupe pas la parole a quelqu'un. Le compagnon
@@ -2278,7 +2303,7 @@ export async function reply(history, settings, { memory = null, echos = null, on
 
   try {
     const r = backend === 'anthropic'
-      ? await anthropicReply(history, settings, memory, onText, outils, onPense, echos, blocsMemoire)
+      ? await anthropicReply(history, settings, memory, onText, outils, onPense, echos, blocsMemoire, grave)
       : await ollamaReply(history, settings, memory, onText);
 
     if (r.refused) {
