@@ -1267,9 +1267,24 @@ export async function clientDe(settings) {
 export function requeteLecture(corpus, settings) {
   const grain = grainPour(corpus.etendue ?? 0);
   const demande = demanderOutil(settings.anthropicModel || 'claude-opus-5-5', 'rendre_lecture');
+  const options = optionsDuModele(settings.anthropicModel || 'claude-opus-5-5',
+                                  { effort: 'high', repli: false });
   return {
     model: settings.anthropicModel || 'claude-opus-5-5',
-    max_tokens: 8000,
+    /*
+     * LA REFLEXION ET LA CARTE PARTAGENT CE PLAFOND.
+     *
+     * 8000 suffisaient a Opus 5. Opus 5.5 reflechit davantage au meme effort,
+     * et sa reflexion ne s'eteint pas : elle mangeait le plafond, l'appel
+     * d'outil partait coupe au milieu de son JSON, la validation le vidait, et
+     * l'ecran disait « le modele n'a rien rendu » -- 812 signes visibles, le
+     * reste parti dans une reflexion qu'on ne voit pas.
+     *
+     * Un plafond ne se paie pas : on ne paie que ce qui est ecrit. Les deux
+     * appels directs passent en flux, ce qui leve la limite du SDK sur les
+     * appels non streames (au-dela d'environ 21 000 jetons, il refuse).
+     */
+    max_tokens: options.thinking ? PLAFOND_LECTURE_PENSEE : PLAFOND_LECTURE,
     /*
      * PAS DE `thinking` ICI, ET C'EST LA RAISON POUR LAQUELLE LA CARTE
      * N'APPARAISSAIT PAS.
@@ -1295,8 +1310,7 @@ export function requeteLecture(corpus, settings) {
      * `repli: false` : l'API des lots refuse le repli serveur meme sur un
      * modele qui le porte. La lecture directe le remet elle-meme, plus bas.
      */
-    ...optionsDuModele(settings.anthropicModel || 'claude-opus-5-5',
-                       { effort: 'high', repli: false }),
+    ...options,
     /*
      * =================================================================
      * LE CACHE, ET POURQUOI IL EST ICI PLUTOT QU'AILLEURS.
@@ -1370,38 +1384,77 @@ export function requeteLecture(corpus, settings) {
   };
 }
 
+export const PLAFOND_LECTURE = 8000;
+export const PLAFOND_LECTURE_PENSEE = 32000;
+
+/*
+ * POURQUOI LA LECTURE N'A PAS ABOUTI, DIT EN CLAIR.
+ *
+ * `stop_reason` n'etait lu nulle part. Une carte coupee au plafond passait
+ * donc la validation a moitie vide, et l'ecran disait « le modele n'a rien
+ * rendu » -- vrai, mais sans la cause, et la cause change ce qu'il faut faire.
+ *
+ * Ces echecs sont `lotFini` : la reponse d'un lot ne changera pas en la
+ * relevant une deuxieme fois. Et ils portent l'usage, parce que ces jetons-la
+ * ont ete payes : la jauge doit les compter meme quand la carte n'arrive pas.
+ */
+function echecDeLecture(res, message) {
+  const e = new Error(message);
+  e.lotFini = true;
+  e.stopReason = res?.stop_reason ?? null;
+  e.usage = usageDe(res);
+  e.modele = res?.model ?? null;
+  return e;
+}
+
+function usageDe(res) {
+  const u = res?.usage ?? {};
+  /*
+   * LES TROIS SORTES DE JETONS D'ENTREE, SEPAREES.
+   *
+   * Elles etaient additionnees ici, ce qui etait juste tant que la lecture
+   * n'avait pas de cache : `input_tokens` seul aurait sous-compte l'enveloppe.
+   * Maintenant qu'elle en a un, les additionner ferait facturer a plein tarif
+   * des jetons relus qui coutent un dixieme -- la jauge dirait que le cache
+   * n'a rien change, et c'est exactement l'inverse de ce qu'on veut voir.
+   *
+   * `usage.js` recompose : l'enveloppe compte les trois (un jeton relu est un
+   * jeton lu), le prix les distingue.
+   */
+  return {
+    input: u.input_tokens ?? 0,
+    output: u.output_tokens ?? 0,
+    cacheLu: u.cache_read_input_tokens ?? 0,
+    cacheEcrit: u.cache_creation_input_tokens ?? 0
+  };
+}
+
 /** Ce qu'une reponse du modele devient, une fois validee contre le corpus. */
-function depouiller(res, corpus, settings) {
+export function depouiller(res, corpus, settings) {
+  if (res?.stop_reason === 'max_tokens') {
+    throw echecDeLecture(res, `La lecture a été coupée avant la fin : le modèle a atteint son plafond `
+      + `(${res?.usage?.output_tokens ?? '?'} jetons écrits, réflexion comprise). Ta carte précédente est gardée.`);
+  }
+  if (res?.stop_reason === 'refusal') {
+    throw echecDeLecture(res, "Le modèle a refusé de faire cette lecture. Ta carte précédente est gardée.");
+  }
   const appel = res?.content?.find(b => b.type === 'tool_use');
-  if (!appel) throw new Error("Le modèle n'a rien rendu d'exploitable.");
-  const u = res.usage ?? {};
+  if (!appel) {
+    throw echecDeLecture(res, "Le modèle a répondu sans rendre de carte "
+      + `(fin : ${res?.stop_reason ?? 'inconnue'}). Ta carte précédente est gardée. Réessaie.`);
+  }
   return {
     lecture: valider(appel.input, corpus.dates, corpus.comparaisons ?? [], corpus.precedente, corpus.lignes, corpus.motifsConnus ?? new Set()),
     modele: res.model ?? settings.anthropicModel,
-    /*
-     * LES TROIS SORTES DE JETONS D'ENTREE, SEPAREES.
-     *
-     * Elles etaient additionnees ici, ce qui etait juste tant que la lecture
-     * n'avait pas de cache : `input_tokens` seul aurait sous-compte l'enveloppe.
-     * Maintenant qu'elle en a un, les additionner ferait facturer a plein tarif
-     * des jetons relus qui coutent un dixieme -- la jauge dirait que le cache
-     * n'a rien change, et c'est exactement l'inverse de ce qu'on veut voir.
-     *
-     * `usage.js` recompose : l'enveloppe compte les trois (un jeton relu est un
-     * jeton lu), le prix les distingue.
-     */
-    usage: {
-      input: u.input_tokens ?? 0,
-      output: u.output_tokens ?? 0,
-      cacheLu: u.cache_read_input_tokens ?? 0,
-      cacheEcrit: u.cache_creation_input_tokens ?? 0
-    }
+    usage: usageDe(res)
   };
 }
 
 export async function lire(corpus, settings) {
   const client = await clientDe(settings);
-  const res = await client.beta.messages.create({
+  // En flux, et pas `create` : le SDK refuse un appel non streame dont le
+  // plafond depasse environ 21 000 jetons. On attend quand meme la fin.
+  const res = await client.beta.messages.stream({
     /*
      * Repli serveur : un refus sur une lecture de fond renverrait l'ecran a
      * « Lancer la lecture », sans rien dire de ce qui s'est passe.
@@ -1414,7 +1467,7 @@ export async function lire(corpus, settings) {
      */
     ...repliServeur(settings.anthropicModel || 'claude-opus-5-5'),
     ...requeteLecture(corpus, settings)
-  });
+  }).finalMessage();
   return depouiller(res, corpus, settings);
 }
 

@@ -1977,6 +1977,19 @@ export function corpusDuJournal(userId, rows = series(userId).rows,
  * lu, donc elle est dans celui d'aujourd'hui. Garder une copie de tout le corpus
  * dans les reglages pendant une heure aurait coute plus cher que le lot.
  */
+/*
+ * UNE LECTURE QUI ECHOUE A QUAND MEME ETE PAYEE.
+ *
+ * Coupee au plafond ou rendue sans carte, elle a consomme ses jetons -- une
+ * lecture coupee les consomme meme TOUS. Les oublier ferait mentir la jauge
+ * exactement le jour ou la lecture coute le plus pour rien.
+ */
+function compterLectureRatee(userId, err, s) {
+  const u = err?.usage;
+  if (!u) return;
+  recordUsage(userId, err.modele ?? s?.anthropicModel, u.input, u.output, u.cacheLu, u.cacheEcrit, 'carte');
+}
+
 async function releverLecture(userId) {
   const s = getSettings(userId);
   const lot = s.lectureLot;
@@ -2009,6 +2022,7 @@ async function releverLecture(userId) {
      * -- le garder ferait retenter le meme echec a chaque ouverture de la page.
      */
     if (err?.lotFini) {
+      compterLectureRatee(userId, err, s);
       setSettings({ lectureLot: null, lectureLotErreur: String(err.message).slice(0, 200) }, userId);
     }
     return null;
@@ -3738,7 +3752,10 @@ export const routes = {
 
     let r;
     try { r = await lire(corpus, s); }
-    catch (err) { return { error: String(err?.message ?? err).slice(0, 300) }; }
+    catch (err) {
+      compterLectureRatee(userId, err, s);
+      return { error: String(err?.message ?? err).slice(0, 300) };
+    }
     recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'carte');
     const l = setLecture({
       contenu: r.lecture, jusqu_au: ecrites.at(-1)?.date ?? null,
@@ -4167,6 +4184,7 @@ export async function retisser(body, send, userId = OWNER) {
       send('lit', { signes, pense, pourcent, comptes });
     });
   } catch (err) {
+    compterLectureRatee(userId, err, s);
     send('erreur', { error: String(err?.message ?? err).slice(0, 300) });
     return;
   }
