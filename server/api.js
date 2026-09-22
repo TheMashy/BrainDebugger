@@ -1422,22 +1422,7 @@ export function posteDuJour(date, userId = OWNER) {
     .sort((a, b) => b[1] - a[1])
     .map(([nom, s]) => ({ nom, min: Math.round(s / 60) }))
     .filter(x => x.min >= 1);
-  /*
-   * ET CE QU'IL Y AVAIT DEDANS. « vidéo · 97 min » dit OÙ, et laisse la
-   * question entière : de quoi il s'agissait. Les titres derrière rendent la
-   * mesure refutable, comme pour un sujet — mais ici ils font plus, ils
-   * répondent. « forum · 60 min » ne dit rien ; « reddit - the heart of the
-   * internet · 48 min » dit qu'on a scrollé le fil, ce qui EST la réponse,
-   * même si ce n'est pas un sujet.
-   */
-  const parLieu = dig?.titres_par_lieu ?? {};
-  const lieux = minutes(dig?.temps_par_lieu_web_s).map(x => {
-    const ts = Object.entries(parLieu[x.nom] ?? {})
-      .sort((a, b) => b[1] - a[1])
-      .map(([t, sec]) => ({ titre: String(t).slice(0, 120), min: Math.round(sec / 60) }))
-      .filter(t => t.min >= 1);
-    return ts.length ? { ...x, titres: ts } : x;
-  });
+  const lieux = minutes(dig?.temps_par_lieu_web_s);
   /*
    * ET LE DERNIER PALIER : LE SITE, ET RIEN DE PLUS.
    *

@@ -6602,8 +6602,7 @@ function posteMarkup(p, synchro) {
     const seg = x => `<span class="jrseg" style="width:${pct(x.min).toFixed(2)}%;background:${TEINTE_THEME[x.nom] ?? '#6b7280'}"
         data-tip="${esc(`${x.nom} · ${x.min} min · ${Math.round(pct(x.min))} % de ton écran`)}"></span>`;
     const segLieu = x => `<span class="jrseg jrlieu" style="width:${pct(x.min).toFixed(2)}%"
-        data-tip="${esc(`${NOM_LIEU[x.nom] ?? x.nom} · ${x.min} min · ${
-          x.titres?.length ? 'ouvre la légende pour voir ce que c’était' : 'on sait où, pas de quoi ça parlait'}`)}"></span>`;
+        data-tip="${esc(`${NOM_LIEU[x.nom] ?? x.nom} · ${x.min} min · on sait où, pas de quoi ça parlait`)}"></span>`;
     const segSite = x => `<span class="jrseg jrsite" style="width:${pct(x.min).toFixed(2)}%"
         data-tip="${esc(`${x.nom} · ${x.min} min · on ne sait que le site`)}"></span>`;
     const reste = base - classe - situe - nomme;
@@ -6657,28 +6656,11 @@ function posteMarkup(p, synchro) {
             </li>`).join('')}</ol>
           </details></li>`;
         }).join('')}</ul>
-        ${/*
-            ET CE QU'IL Y AVAIT DEDANS, derrière le même repli que pour un
-            sujet. « vidéo · 97 min » dit où, et laisse la question entière ;
-            la liste y répond — « reddit - the heart of the internet · 48 min »
-            n'est pas un sujet, c'est la page d'accueil, et ça dit quand même
-            qu'on scrollait le fil. Un lieu dont Machi Tool n'a pas gardé les
-            titres reste une ligne simple : rien à ouvrir, on ne fait pas
-            semblant d'avoir une donnée qu'on n'a pas. */''}
         ${lx.length ? `<ul class="jrleg jrleglieux">
           <li class="jrlieutitre">${Math.round(pct(situe))} % dont on sait seulement l’endroit</li>
-          ${lx.slice(0, 6).map(x => {
-            const puce = `<i class="jrlieup"></i>
-              <span class="jrnom">${esc(NOM_LIEU[x.nom] ?? x.nom)}</span>
-              <span class="mono faint">${x.min} min</span>`;
-            if (!x.titres?.length) return `<li>${puce}</li>`;
-            return `<li class="jrouvre"><details>
-              <summary>${puce}</summary>
-              <ol class="jrtitres">${x.titres.slice(0, 10).map(t => `<li>
-                <span class="jrt">${esc(t.titre)}</span><span class="mono faint">${t.min} min</span>
-              </li>`).join('')}</ol>
-            </details></li>`;
-          }).join('')}
+          ${lx.slice(0, 6).map(x => `<li><i class="jrlieup"></i>
+            <span class="jrnom">${esc(NOM_LIEU[x.nom] ?? x.nom)}</span>
+            <span class="mono faint">${x.min} min</span></li>`).join('')}
         </ul>` : ''}
         ${st.length ? `<ul class="jrleg jrleglieux jrlegsites">
           <li class="jrlieutitre">${Math.round(pct(nomme))} % dont on ne sait que le site</li>
