@@ -666,15 +666,21 @@ export const jourVecu = (userId = OWNER, quand = Date.now()) => {
  * @returns {boolean} vrai si une borne a ete posee.
  */
 export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
-  const b = bornesDitesDans(texte);
-  if (!b) return false;
-  const heure = b.heure ?? heureLocale(quand);
+  // UN MESSAGE PEUT DIRE LES DEUX : « je me suis levé tôt ... je me suis
+  // couché à minuit trente ». N'en poser qu'une jetait l'autre.
+  const bornes = bornesDitesDans(texte);
   const date = jourLocal(quand);
-  if (!heure || !date) return false;
-  poserMesure({ date, source: SOURCE_DIT, cle: b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER,
-                texte: heure, userId });
-  recalerLaNuit(date, userId);
-  return true;
+  if (!bornes.length || !date) return false;
+  let pose = false;
+  for (const b of bornes) {
+    const heure = b.heure ?? heureLocale(quand);
+    if (!heure) continue;
+    poserMesure({ date, source: SOURCE_DIT, cle: b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER,
+                  texte: heure, userId });
+    pose = true;
+  }
+  if (pose) recalerLaNuit(date, userId);
+  return pose;
 }
 
 /**
@@ -890,17 +896,20 @@ export function relireLesBornesDites(userId = OWNER) {
   // `tousMessagesUtilisateur` rend du plus récent au plus ancien : on remonte le
   // temps à l'endroit pour que le premier message d'une journée l'emporte.
   for (const msg of tousMessagesUtilisateur(userId).slice().reverse()) {
-    const b = bornesDitesDans(msg.text);
-    if (!b) continue;
+    const bornes = bornesDitesDans(msg.text);
+    if (!bornes.length) continue;
     const quand = normaliserTs(msg.ts) ?? Date.parse(`${msg.date}T12:00:00`);
-    const heure = b.heure ?? heureLocale(quand);
     const date = jourLocal(quand);
-    if (!heure || !date) continue;
-    const cle = b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER;
-    if (deja.has(`${date}|${cle}`)) continue;
-    poserMesure({ date, source: SOURCE_DIT, cle, texte: heure, userId });
-    deja.add(`${date}|${cle}`);
-    poses++;
+    if (!date) continue;
+    for (const b of bornes) {
+      const heure = b.heure ?? heureLocale(quand);
+      if (!heure) continue;
+      const cle = b.genre === 'lever' ? CLE_LEVER : CLE_COUCHER;
+      if (deja.has(`${date}|${cle}`)) continue;
+      poserMesure({ date, source: SOURCE_DIT, cle, texte: heure, userId });
+      deja.add(`${date}|${cle}`);
+      poses++;
+    }
   }
   return poses;
 }

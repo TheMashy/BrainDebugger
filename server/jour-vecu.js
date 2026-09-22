@@ -105,6 +105,19 @@ const NIE = /^\s*(ne|n[’']|pas|plus)\b/;
  * toujours » — est deja ecarte par PAS_MAINTENANT.
  */
 const COUCHER_DIT = [
+  /*
+   * LE PASSÉ, QUI MANQUAIT ENTIÈREMENT.
+   *
+   * Tous les motifs d'en dessous sont au futur ou au présent : « je vais me
+   * coucher », « bonne nuit ». Ils ont été écrits pour quelqu'un qui dit
+   * bonsoir SUR LE MOMENT — et `LEVER_DIT`, lui, a son passé depuis toujours
+   * (« je me suis levé »). L'asymétrie ne tenait à rien, sinon qu'on écrit son
+   * journal LE LENDEMAIN : « jme suis couché a minuit trente », écrit à 07:58,
+   * ne déclenchait rien. La personne avait dit l'heure, l'application ne
+   * l'entendait pas, et la nuit restait vide.
+   */
+  /\bje (me suis|suis) (couche|endormi|pieute|pionce)e?\b/,
+  /\bje suis all[eé]e? (au lit|dormir|me coucher)\b/,
   /\bje vais (me coucher|dormir|au lit|au dodo|pioncer|me pieuter|m[’']endormir)\b/,
   /\bje (me couche|vais me coucher)\b/,
   /\bbonne nuit\b/,
@@ -129,20 +142,65 @@ const LEVER_DIT = [
 /** « à 8h », « à 08:30 », « vers 7 h 15 ». Sinon null. */
 const HEURE_DITE = /\b(?:a|à|vers|depuis)\s+(\d{1,2})\s*(?:[:hH]\s*(\d{2})?)?\b/;
 
+/*
+ * ET LES HEURES QU'ON ÉCRIT EN LETTRES.
+ *
+ * `HEURE_DITE` exige des chiffres. « je me suis couché a minuit trente » n'en
+ * porte aucun : la phrase était reconnue comme un coucher et ressortait sans
+ * heure — donc sans nuit. Or minuit et midi sont les deux seules heures qu'on
+ * nomme couramment en toutes lettres, et elles ne sont ambiguës ni l'une ni
+ * l'autre.
+ *
+ * On s'arrête là, DÉLIBÉRÉMENT : « tôt », « tard », « dans la nuit » ne sont
+ * pas des heures, et leur en attribuer une serait inventer.
+ */
+const HEURE_EN_LETTRES = [
+  [/\b(?:a|à|vers)\s+minuit\s+(?:et\s+)?(?:demi|trente)\b/, '00:30'],
+  [/\b(?:a|à|vers)\s+minuit\s+et\s+quart\b/, '00:15'],
+  [/\b(?:a|à|vers)\s+minuit\b/, '00:00'],
+  [/\b(?:a|à|vers)\s+midi\s+(?:et\s+)?(?:demi|trente)\b/, '12:30'],
+  [/\b(?:a|à|vers)\s+midi\s+et\s+quart\b/, '12:15'],
+  [/\b(?:a|à|vers)\s+midi\b/, '12:00'],
+];
+
 /**
  * CE QUE CE MESSAGE DIT D'UN LEVER OU D'UN COUCHER.
  *
  * @param {string} texte
- * @returns {{genre: 'lever'|'coucher', heure: string|null} | null}
+ * @returns {Array<{genre: 'lever'|'coucher', heure: string|null}>} — vide si rien.
  *   `heure` n'est remplie que si la phrase la porte (« je me suis levé à 8h ») ;
  *   sinon c'est l'instant du message qui fait foi, et l'appelant le sait.
  */
 /* Autour du verbe reconnu, et pas plus loin : voir `trouve`. */
 const FENETRE_BORNE = 30;
 
+/** L'heure portée par ce bout de phrase, chiffrée ou en lettres. */
+function heureDans(zone) {
+  const m = HEURE_DITE.exec(zone);
+  if (m) {
+    const h = Number(m[1]), mn = Number(m[2] ?? 0);
+    if (h <= 23 && mn <= 59) return `${String(h).padStart(2, '0')}:${String(mn).padStart(2, '0')}`;
+  }
+  // Les chiffres d'abord : « à minuit, enfin 00:47 » dit bien 00:47.
+  for (const [r, hh] of HEURE_EN_LETTRES) if (r.test(zone)) return hh;
+  return null;
+}
+
+
 export function bornesDitesDans(texte) {
-  const t = norm(texte).replace(/\s+/g, ' ').trim();
-  if (!t) return null;
+  /*
+   * « JME » EST « JE ME », ET C'EST COMME ÇA QU'ON ÉCRIT LE SOIR.
+   *
+   * `norm` retire les accents et la casse, pas les contractions. « jme suis
+   * levé tôt » ne déclenchait donc NI le lever NI le coucher, alors que les
+   * deux motifs existaient — la phrase avait juste été écrite comme on parle.
+   * Deux contractions, celles qu'on a vues en vrai, et rien de plus : deviner
+   * au-delà ferait entrer des phrases qui ne disent pas ça.
+   */
+  const t = norm(texte).replace(/\s+/g, ' ').trim()
+    .replace(/\bj['’]?me\b/g, 'je me')
+    .replace(/\bchuis\b/g, 'je suis');
+  if (!t) return [];
 
   const trouve = r => {
     const m = r.exec(t);
@@ -171,18 +229,51 @@ export function bornesDitesDans(texte) {
     const fin = Math.min(t.length, m.index + m[0].length + FENETRE_BORNE);
     return !PAS_MAINTENANT.test(t.slice(deb, fin));
   };
-  const genre = LEVER_DIT.some(trouve) ? 'lever'
-              : COUCHER_DIT.some(trouve) ? 'coucher'
-              : null;
-  if (!genre) return null;
-
-  const m = HEURE_DITE.exec(t);
-  let heure = null;
-  if (m) {
-    const h = Number(m[1]), mn = Number(m[2] ?? 0);
-    if (h <= 23 && mn <= 59) heure = `${String(h).padStart(2, '0')}:${String(mn).padStart(2, '0')}`;
+  /*
+   * L'HEURE APPARTIENT AU VERBE QUI LA PORTE.
+   *
+   * « jme suis levé tôt ... jme suis couché a minuit trente » dit les DEUX, et
+   * la seule heure du message est celle du coucher. Cherchée dans le message
+   * entier, elle se collait au lever : « levé à 00:30 », un chiffre faux dans
+   * le journal de sommeil de quelqu'un — pire que pas de chiffre du tout.
+   *
+   * On cherche donc l'heure APRÈS le verbe retenu et AVANT l'autre, s'il suit.
+   * Quand les deux sont là et que l'heure est du mauvais côté, on rend le
+   * genre sans heure : l'instant du message fera foi, et l'appelant le sait.
+   */
+  const ou = liste => {
+    for (const r of liste) { const m = r.exec(t); if (m && trouve(r)) return m; }
+    return null;
+  };
+  const mLever = ou(LEVER_DIT), mCoucher = ou(COUCHER_DIT);
+  if (!mLever && !mCoucher) return [];
+  /*
+   * UN MESSAGE PEUT DIRE LES DEUX, ET C'EST MÊME LE CAS ORDINAIRE.
+   *
+   * « jme suis levé tôt aujourd'hui ... jme suis couché a minuit trente » :
+   * écrit à 07:58, il raconte la nuit qui vient de finir. N'en rendre qu'une
+   * jetait l'autre — et c'était l'heure du coucher, la seule des deux que la
+   * machine ne pouvait pas déduire toute seule.
+   */
+  const bornes = [];
+  for (const [genre, mien, autre] of [['lever', mLever, mCoucher], ['coucher', mCoucher, mLever]]) {
+    if (!mien) continue;
+    const debut = mien.index + mien[0].length;
+    const fin = autre && autre.index > debut ? autre.index : t.length;
+    /*
+     * ET L'HEURE RESTE DANS LA PROPOSITION DE SON VERBE.
+     *
+     * S'arrêter au verbe SUIVANT ne suffit pas : encore faut-il qu'il soit
+     * reconnu. « jme suis levé tôt, couché à minuit » n'a qu'un verbe connu, et
+     * « à minuit » se collait au lever — « levé à 00:00 ». Une virgule, un
+     * point, un « puis » ferment la proposition ; au-delà, l'heure parle
+     * d'autre chose.
+     */
+    const zone = t.slice(debut, fin).split(/[,;.!?]| puis | ensuite /)[0];
+    bornes.push({ genre, heure: heureDans(zone) });
   }
-  return { genre, heure };
+  return bornes;
+
 }
 
 /* ------------------------ ce que la personne se met ------------------------ */

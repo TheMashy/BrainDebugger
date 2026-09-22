@@ -16,27 +16,38 @@ import {
   MIDI, SOURCE_DIT
 } from '../server/jour-vecu.js';
 
+/*
+ * `bornesDitesDans` REND MAINTENANT TOUTES LES BORNES D'UN MESSAGE.
+ *
+ * Une phrase peut dire les deux — « je me suis levé tôt ... je me suis couché
+ * à minuit trente » — et n'en rendre qu'une jetait l'autre, justement celle
+ * que la machine ne sait pas déduire seule. Ces deux aides gardent lisibles
+ * les tests écrits quand il n'y en avait qu'une.
+ */
+const une = t => bornesDitesDans(t)[0] ?? null;
+const rien = t => bornesDitesDans(t).length === 0;
+
 const Z = 'UTC';
 const a = (d, h, m = 0) => `${d}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`;
 
 /* ------------------------------ ce qui se dit ------------------------------ */
 
 test('un coucher et un lever se reconnaissent', () => {
-  assert.equal(bornesDitesDans('bon allez je vais me coucher').genre, 'coucher');
-  assert.equal(bornesDitesDans('bonne nuit').genre, 'coucher');
-  assert.equal(bornesDitesDans('je viens de me lever').genre, 'lever');
-  assert.equal(bornesDitesDans('je suis debout').genre, 'lever');
+  assert.equal(une('bon allez je vais me coucher').genre, 'coucher');
+  assert.equal(une('bonne nuit').genre, 'coucher');
+  assert.equal(une('je viens de me lever').genre, 'lever');
+  assert.equal(une('je suis debout').genre, 'lever');
 });
 
 test('une négation collée au verbe annule la borne — mais pas un « pas » de passage', () => {
-  assert.equal(bornesDitesDans('je me couche pas'), null);
-  assert.equal(bornesDitesDans('je vais pas me coucher'), null);
+  assert.ok(rien('je me couche pas'));
+  assert.ok(rien('je vais pas me coucher'));
   /*
    * « il y a pas longtemps » n'est pas une négation du lever. Chercher « pas »
    * dans tout le message refusait cette phrase-là, qui est pourtant un lever
    * dit clairement.
    */
-  assert.equal(bornesDitesDans('je me suis levé il y a pas longtemps').genre, 'lever');
+  assert.equal(une('je me suis levé il y a pas longtemps').genre, 'lever');
 });
 
 test('une habitude ou un projet n’est PAS une borne', () => {
@@ -47,13 +58,13 @@ test('une habitude ou un projet n’est PAS une borne', () => {
     'je me couche jamais avant 2h',
     'tous les soirs je vais me coucher à pas d’heure',
     'si je me couche maintenant j’aurai 6h'
-  ]) assert.equal(bornesDitesDans(t), null, `« ${t} » ne doit pas poser de borne`);
+  ]) assert.ok(rien(t), `« ${t} » ne doit pas poser de borne`);
 });
 
 test('l’heure part avec la phrase quand elle y est', () => {
-  assert.equal(bornesDitesDans('je me suis levé à 8h').heure, '08:00');
-  assert.equal(bornesDitesDans('je me suis levé à 07:45').heure, '07:45');
-  assert.equal(bornesDitesDans('je viens de me lever').heure, null,
+  assert.equal(une('je me suis levé à 8h').heure, '08:00');
+  assert.equal(une('je me suis levé à 07:45').heure, '07:45');
+  assert.equal(une('je viens de me lever').heure, null,
     'sans heure dite, c’est l’instant du message qui fera foi');
   /*
    * Trente-quatre heures n'est pas une heure. La PHRASE dit quand meme un
@@ -61,12 +72,12 @@ test('l’heure part avec la phrase quand elle y est', () => {
    * message qui fera foi. Jeter la phrase entiere pour un chiffre mal tape
    * perdrait la seule chose qu'on avait comprise.
    */
-  assert.deepEqual(bornesDitesDans('je me suis levé à 34h'), { genre: 'lever', heure: null });
+  assert.deepEqual(une('je me suis levé à 34h'), { genre: 'lever', heure: null });
 });
 
 test('du texte vide ou hors sujet ne dit rien', () => {
   for (const t of ['', null, undefined, 'j’ai mangé des pâtes', 'le lever du soleil était beau'])
-    assert.equal(bornesDitesDans(t), null);
+    assert.ok(rien(t));
 });
 
 /*
@@ -80,9 +91,9 @@ test('du texte vide ou hors sujet ne dit rien', () => {
  * reconnues, le 16:27 revient.
  */
 test('les deux couchers vraiment écrits le 8 septembre sont reconnus', () => {
-  assert.equal(bornesDitesDans('je vais pas tarder à dormir je pense').genre, 'coucher',
+  assert.equal(une('je vais pas tarder à dormir je pense').genre, 'coucher',
     '« pas tarder à » veut dire bientôt : en français ce n’est pas une négation');
-  assert.equal(bornesDitesDans(
+  assert.equal(une(
     'j’ai l’impression de vivre comme si je n’avais plus de futur en allant au lit ' +
     '( mtn ) c’est le fond ouais ressenti avant de m’endormir 1/10 là').genre, 'coucher',
     'le « si je » est quarante caractères plus tôt, il parle d’autre chose');
@@ -91,7 +102,7 @@ test('les deux couchers vraiment écrits le 8 septembre sont reconnus', () => {
 test('les tournures qui manquaient disent un coucher', () => {
   for (const t of ['allez, dodo', 'je pars me coucher', 'j’vais m’endormir',
                    'je vais m’endormir', 'avant de dormir je voulais dire un truc'])
-    assert.equal(bornesDitesDans(t)?.genre, 'coucher', `« ${t} » est un coucher`);
+    assert.equal(une(t)?.genre, 'coucher', `« ${t} » est un coucher`);
 });
 
 /*
@@ -107,7 +118,7 @@ test('trente caractères autour du verbe suffisent à écarter ce qui n’est pa
     'hier avant de m’endormir j’ai pensé à ça',
     'faut que je pense à pas tarder à dormir',
     'je vais jamais me coucher avant 4h'
-  ]) assert.equal(bornesDitesDans(t), null, `« ${t} » ne doit pas poser de borne`);
+  ]) assert.ok(rien(t), `« ${t} » ne doit pas poser de borne`);
 });
 
 /* ----------------------------- les levers connus ----------------------------- */
@@ -312,4 +323,77 @@ test('le coucher se lit dans le plus long silence, pas dans une soirée sans éc
                'le coucher doit être la dernière phrase avant le plus long silence, pas celle d’avant');
   assert.notEqual(p.coucher.heure, '18:37', 'la soirée sans écrire a été prise pour un endormissement');
   assert.equal(p.coucher.source, 'estime');
+});
+
+
+/* ============ CE QU'ON ÉCRIT LE LENDEMAIN MATIN ============ */
+/*
+ * SUR UNE JOURNÉE RÉELLE, le 18 septembre : « jme suis levé tôt aujourd'hui
+ * 6/10 jme suis couché a minuit trente ». Écrit à 07:58, cette phrase raconte
+ * la nuit qui vient de finir — et l'application n'en entendait RIEN. La
+ * journée est restée sans durée de sommeil.
+ *
+ * Trois raisons, toutes trouvées en la testant telle quelle.
+ */
+
+test('LE PASSÉ EST UNE FAÇON DE DIRE QU’ON S’EST COUCHÉ', () => {
+  /*
+   * Tous les motifs de coucher étaient au futur ou au présent — « je vais me
+   * coucher », « bonne nuit » — écrits pour quelqu'un qui dit bonsoir SUR LE
+   * MOMENT. `LEVER_DIT`, lui, avait son passé depuis toujours. L'asymétrie ne
+   * tenait à rien, sinon qu'on écrit son journal LE LENDEMAIN.
+   */
+  assert.equal(une('je me suis couché à 23h').genre, 'coucher');
+  assert.equal(une('je me suis endormi vers 1h').genre, 'coucher');
+  assert.equal(une('je suis allé au lit à 22h30').genre, 'coucher');
+  // Et la négation continue d'annuler, au passé comme au présent.
+  assert.ok(rien('je me suis pas couché'));
+});
+
+test('« JME » EST « JE ME », ET C’EST COMME ÇA QU’ON ÉCRIT LE SOIR', () => {
+  /*
+   * `norm` retire les accents et la casse, pas les contractions. « jme suis
+   * levé » ne déclenchait donc NI le lever NI le coucher, alors que les deux
+   * motifs existaient.
+   */
+  assert.equal(une('jme suis levé à 8h').genre, 'lever');
+  assert.equal(une('j’me suis couché à 23h').genre, 'coucher');
+  assert.equal(une('chuis debout').genre, 'lever');
+});
+
+test('MINUIT ET MIDI S’ÉCRIVENT AUSSI EN LETTRES', () => {
+  /*
+   * `HEURE_DITE` exige des chiffres. « a minuit trente » n'en porte aucun : la
+   * phrase sortait reconnue mais SANS heure, donc sans nuit.
+   */
+  assert.equal(une('je me suis couché a minuit trente').heure, '00:30');
+  assert.equal(une('je me suis couché à minuit et demi').heure, '00:30');
+  assert.equal(une('je me suis couché à minuit').heure, '00:00');
+  assert.equal(une('je me suis levé à midi').heure, '12:00');
+  // ON S'ARRÊTE LÀ. « tôt », « tard », « dans la nuit » ne sont pas des heures,
+  // et leur en donner une serait inventer.
+  assert.equal(une('je me suis couché tard').heure, null);
+  assert.equal(une('je me suis levé tôt').heure, null);
+});
+
+test('UN MESSAGE QUI DIT LES DEUX REND LES DEUX', () => {
+  const b = bornesDitesDans(
+    "jme suis levé tôt aujourd'hui 6/10 jme suis couché a minuit trente " +
+    "j'avais envie de me recadrer");
+  assert.deepEqual(b, [{ genre: 'lever', heure: null },
+                       { genre: 'coucher', heure: '00:30' }]);
+});
+
+test('L’HEURE APPARTIENT AU VERBE QUI LA PORTE', () => {
+  /*
+   * LE PIÈGE, et il est pire que le silence qu'il remplace. La seule heure de
+   * la phrase du 18 est celle du coucher ; cherchée dans le message entier,
+   * elle se collait au lever — « levé à 00:30 », un chiffre faux dans le
+   * journal de sommeil de quelqu'un.
+   */
+  const [lever, coucher] = bornesDitesDans('je me suis levé à 8h puis je me suis couché à 23h');
+  assert.deepEqual(lever, { genre: 'lever', heure: '08:00' });
+  assert.deepEqual(coucher, { genre: 'coucher', heure: '23:00' });
+  // Et dans l'autre sens, où le lever n'a pas d'heure à lui.
+  assert.equal(bornesDitesDans('jme suis levé tôt, couché à minuit')[0].heure, null);
 });
