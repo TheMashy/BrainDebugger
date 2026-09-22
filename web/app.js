@@ -6416,12 +6416,33 @@ function posteMarkup(p, synchro) {
     : '';
   // LA DUREE SUR SA PROPRE LIGNE, et elle parle de la nuit qui a OUVERT la
   // journée : c'est ce qu'on cherche le matin — combien de temps j'ai dormi.
+  /*
+   * LE SOMMEIL PASSE DEVANT, ET IL EST GROS.
+   *
+   * Il était une pastille parmi les autres, de la taille du lever et du
+   * temps d'écran. Or c'est la mesure qu'on vient chercher : quelqu'un qui
+   * dort beaucoup le sait, et veut voir le chiffre, pas le déduire de deux
+   * heures affichées côte à côte.
+   *
+   * ET SA MÉDIANE À LUI, JAMAIS UNE NORME. « 10,2 h » ne dit rien tout seul —
+   * long pour quelqu'un, ordinaire pour un autre. Le repère est SA série, la
+   * même convention qu'ailleurs dans ce produit. On ne qualifie pas : ni
+   * « trop », ni « pas assez ». Le chiffre, son habitude, et la lecture lui
+   * appartient — une étiquette posée par un écran sur le sommeil de quelqu'un
+   * est exactement ce que ce produit refuse de faire.
+   */
+  const ecartSommeil = p.sommeil_cote && p.sommeil_mediane != null
+    ? `<span class="jpdcote ${p.sommeil_cote}">${
+        p.sommeil_cote === 'pile' ? '=' : p.sommeil_cote === 'haut' ? '↑' : '↓'}
+        <span class="faint">${p.sommeil_cote === 'pile' ? 'ta médiane'
+          : `${p.sommeil_cote === 'haut' ? 'au-dessus de' : 'sous'} ${virgule(p.sommeil_mediane)} h`}</span></span>`
+    : '';
   const dormi = aDormi
-    ? `<div class="jpdormi"><span class="jpost lu" title="${esc(p.dormi_de
+    ? `<div class="jpdormi"><span class="jpdgros" title="${esc(p.dormi_de
         ? `temps de sommeil — la nuit avant ce lever, endormi vers ${p.dormi_de}${
             p.dormi_de_jour ? ` le ${p.dormi_de_jour}` : ''}`
         : 'temps de sommeil — la nuit avant ce lever')}">${
-        ico('lit', 13)}${heure(virgule(p.sommeil_h) + ' h')}</span></div>`
+        ico('lit', 15)}<b>${virgule(p.sommeil_h)}</b><i>h de sommeil</i></span>${ecartSommeil}</div>`
     : '';
 
   /*

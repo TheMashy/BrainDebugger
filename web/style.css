@@ -3699,6 +3699,21 @@ table.grid td.cell.abascule { cursor: pointer; }
 .jrsousl li { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
 .jrsousl .jrt { color: var(--ink); }
 
+/* LE SOMMEIL PASSE DEVANT. C'est la mesure qu'on vient chercher : elle se lit
+   d'un coup d'œil, pas en additionnant un lever et un coucher. La médiane à
+   côté est SA médiane — discrète, parce qu'elle situe, elle ne juge pas. */
+.jpdormi { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+           margin: 2px 0 6px; }
+.jpdgros { display: inline-flex; align-items: baseline; gap: 7px; color: var(--ink); }
+.jpdgros .ico { align-self: center; opacity: .75; }
+.jpdgros b { font-size: 25px; font-weight: 600; line-height: 1;
+             font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.jpdgros i { font-style: normal; font-size: 11.5px; color: var(--ink-dim); }
+.jpdcote { display: inline-flex; align-items: baseline; gap: 4px; font-size: 11.5px; }
+.jpdcote.haut { color: var(--ink-dim); }
+.jpdcote.bas  { color: var(--ink-dim); }
+.jpdcote.pile { color: var(--ink-faint); }
+
 /* OÙ C'ÉTAIT, QUAND LE TITRE NE DIT PAS DE QUOI IL PARLE.
    Pas une teinte de la palette des sujets : un gris hachuré, le même pour tous.
    La hachure porte le sens — « on sait où, pas de quoi » — et elle le porte

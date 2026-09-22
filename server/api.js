@@ -31,7 +31,7 @@ import { readMoodFil, readEnergy, SENS } from './mood.js';
 import { buildGraph, MIN_JOURS } from './graph.js';
 import { journee } from './journee.js';
 import { fonctionnements } from './fonctionnements.js';
-import { nuits, nuitDuJour, rythmeUtilisateur, paireEstUneNuit, MIN_NUIT } from './nuits.js';
+import { nuits, nuitDuJour, nuitDite, rythmeUtilisateur, sommeilHabituel, paireEstUneNuit, MIN_NUIT } from './nuits.js';
 import { occasionDeDemander, proposerNoteBlock, demandesDuFil } from './proposer-note.js';
 import { occasionDeDemanderConso } from './demander-conso.js';
 import { horizonBlock } from './horizons.js';
@@ -1131,7 +1131,16 @@ export function posteDuJour(date, userId = OWNER) {
   // silences du jour — sans lui, une journée loin du poste passerait devant
   // une nuit plus courte.
   const rythme = rythmeUtilisateur(userId);
-  const nuit = nuitDuJour(dig, activiteDuJour(addDays(date, -1), userId)?.digest ?? null, { rythme });
+  /*
+   * `nuitDite` ET PAS `nuitDuJour` : ce que la personne a ÉCRIT compte aussi.
+   *
+   * L'appel nu ne voit que les digests. La liste de l'onglet Année, elle,
+   * appliquait déjà les bornes écrites — donc le 18 septembre, « jme suis
+   * couché a minuit trente » donnait une nuit dans un écran et rien dans
+   * l'autre. Deux juges, deux réponses, sur la même nuit.
+   */
+  const nuit = nuitDite(date, dig, activiteDuJour(addDays(date, -1), userId)?.digest ?? null,
+                        userId, { rythme });
   // LE COUCHER MESURÉ QUI FERME LE JOUR EST DANS LE DIGEST DU LENDEMAIN.
   //
   // `poste.coucher` de D est la dernière extinction AVANT le réveil de D —
@@ -1146,6 +1155,13 @@ export function posteDuJour(date, userId = OWNER) {
    * de D (ou après minuit) et se termine au réveil de D+1. Son `coucher` est
    * exactement l'heure où la journée vécue D s'est arrêtée — y compris quand
    * elle s'arrête à 3 h du matin.
+   */
+  /*
+   * CELLE-CI RESTE NUE, ET C'EST VOULU. `nuitFin` ne sert pas à la durée
+   * dormie mais au COUCHER qui ferme la journée — et les bornes écrites y sont
+   * déjà appliquées plus bas, avec leur propre règle (un coucher du matin
+   * ferme la VEILLE). Les faire entrer ici aussi les comptait deux fois et
+   * changeait la source affichée.
    */
   const nuitFin = nuitDuJour(digDemain, dig, { rythme });
   /*
@@ -1688,7 +1704,20 @@ export function posteDuJour(date, userId = OWNER) {
   const dormi_de_jour = dormi_de && enMinutes(dormi_de) != null && enMinutes(lever.heure) != null
     ? (enMinutes(dormi_de) < enMinutes(lever.heure) ? date : addDays(date, -1))
     : null;
-  return { lever, coucher, sommeil_h,
+  /*
+   * ET CE QUE ÇA VAUT POUR ELLE. « 10,2 h » ne dit rien tout seul : long pour
+   * quelqu'un, ordinaire pour un autre. On rend donc SA médiane à côté, et de
+   * quel côté cette nuit tombe — la même convention qu'ailleurs pour les
+   * mesures. On ne qualifie pas : ni « trop », ni « pas assez ». On montre le
+   * chiffre, on montre son habitude, et la lecture lui appartient.
+   */
+  const habituel = sommeil_h == null ? null : sommeilHabituel(userId);
+  const sommeil_mediane = habituel?.mediane ?? null;
+  const sommeil_nuits = habituel?.nuits ?? null;
+  const sommeil_cote = sommeil_mediane == null || sommeil_h == null ? null
+    : Math.abs(sommeil_h - sommeil_mediane) < 0.5 ? 'pile'
+    : sommeil_h > sommeil_mediane ? 'haut' : 'bas';
+  return { lever, coucher, sommeil_h, sommeil_mediane, sommeil_nuits, sommeil_cote,
            // Même raison que `sommeil_h` : le coucher de la nuit DORMIE vient de
            // la nuit retenue. Le reprendre au poste ressusciterait la paire que
            // `nuitDuJour` vient d'écarter.

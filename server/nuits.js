@@ -433,6 +433,50 @@ export function ecartsAuRythme(liste, { ecartH = ECART_H, minPourRythme = MIN_PO
  *
  * @returns {Array<{date, coucher, lever, sommeil_h, source, souci}>}
  */
+/**
+ * LA NUIT DE D, CE QUE LA MACHINE EN DÉDUIT **ET** CE QUE LA PERSONNE EN DIT.
+ *
+ * UN SEUL JUGE, UNE SEULE RÉPONSE — et il n'y en avait pas un seul. Ce corps
+ * vivait dans la boucle de `nuits()`, donc la liste de l'onglet Année
+ * appliquait les bornes écrites, pendant que la vue d'une journée appelait
+ * `nuitDuJour` toute nue et ne les voyait jamais. Résultat mesuré sur le
+ * 18 septembre : la personne avait écrit « jme suis couché a minuit trente »,
+ * la liste le savait, et « Ce qui a été mesuré » affichait une journée sans
+ * durée de sommeil. Deux écrans, deux vérités, sur la même nuit.
+ *
+ * @returns {object|null} null seulement si RIEN n'est connu — ni déduit, ni dit.
+ */
+export function nuitDite(d, dig, digVeille, userId = OWNER, { rythme = null } = {}) {
+  const n = nuitDuJour(dig, digVeille, { rythme });
+  // « Je me couche » / « je me lève » écrits ce jour-là : la personne a le dernier mot.
+  const dits = mesuresDuJour(d, userId).filter(m => m.source === 'dit');
+  const ditLever = dits.find(m => m.cle === 'lever_dit')?.texte ?? null;
+  const ditCoucher = mesuresDuJour(addDays(d, -1), userId).find(m => m.source === 'dit' && m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 0) >= 12 * 60)?.texte
+    ?? dits.find(m => m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 1440) < 12 * 60)?.texte ?? null;
+  if (!n && !ditLever && !ditCoucher) return null;
+  const r = n ? { ...n } : { coucher: null, lever: null, sommeil_h: null, source: 'dit', souci: null };
+  if (ditLever) { r.lever = ditLever; r.source = 'dit'; }
+  if (ditCoucher) { r.coucher = ditCoucher; r.source = 'dit'; }
+  // Deux bornes dites : ce n'est plus une déduction, c'est un témoignage.
+  // Cette nuit-là a le droit de faire rythme.
+  if (ditLever && ditCoucher) delete r.incertain;
+  if ((ditLever || ditCoucher) && r.coucher && r.lever) {
+    const c = enMinutes(r.coucher), l = enMinutes(r.lever);
+    const duree = l - (c >= 12 * 60 ? c - 1440 : c);
+    if (duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60) r.sommeil_h = Math.round(duree / 6) / 10;
+  }
+  /*
+   * LE SOUCI SE RECALCULE APRÈS CE QUI A ÉTÉ DIT.
+   *
+   * Il était posé sur les heures DÉRIVÉES, puis « je me suis levé à 15:30 »
+   * remplaçait le lever sans toucher au souci : l'infobulle affichait
+   * « levé 15:30 ⚠ un lever à 00:58 » — un reproche sur une heure qui n'était
+   * plus là. Ce qu'on montre et ce qu'on commente doivent être la même chose.
+   */
+  if (ditLever || ditCoucher) souci(r, n ? undefined : null);
+  return r;
+}
+
 export function nuits(userId = OWNER, { jours = 90, jusquA = null } = {}) {
   const fin = jusquA ?? new Date().toISOString().slice(0, 10);
   const debut = addDays(fin, -(jours - 1));
@@ -441,34 +485,8 @@ export function nuits(userId = OWNER, { jours = 90, jusquA = null } = {}) {
   const passe = rythme => {
     const out = [];
     for (let d = debut; d <= fin; d = addDays(d, 1)) {
-      const n = nuitDuJour(parDate.get(d) ?? null, parDate.get(addDays(d, -1)) ?? null, { rythme });
-      // « Je me couche » / « je me lève » écrits ce jour-là : la personne a le dernier mot.
-      const dits = mesuresDuJour(d, userId).filter(m => m.source === 'dit');
-      const ditLever = dits.find(m => m.cle === 'lever_dit')?.texte ?? null;
-      const ditCoucher = mesuresDuJour(addDays(d, -1), userId).find(m => m.source === 'dit' && m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 0) >= 12 * 60)?.texte
-        ?? dits.find(m => m.cle === 'coucher_dit' && (enMinutes(m.texte) ?? 1440) < 12 * 60)?.texte ?? null;
-      if (!n && !ditLever && !ditCoucher) continue;
-      const r = n ? { ...n } : { coucher: null, lever: null, sommeil_h: null, source: 'dit', souci: null };
-      if (ditLever) { r.lever = ditLever; r.source = 'dit'; }
-      if (ditCoucher) { r.coucher = ditCoucher; r.source = 'dit'; }
-      // Deux bornes dites : ce n'est plus une déduction, c'est un témoignage.
-      // Cette nuit-là a le droit de faire rythme.
-      if (ditLever && ditCoucher) delete r.incertain;
-      if ((ditLever || ditCoucher) && r.coucher && r.lever) {
-        const c = enMinutes(r.coucher), l = enMinutes(r.lever);
-        const duree = l - (c >= 12 * 60 ? c - 1440 : c);
-        if (duree >= MIN_NUIT * 60 && duree <= MAX_NUIT * 60) r.sommeil_h = Math.round(duree / 6) / 10;
-      }
-      /*
-       * LE SOUCI SE RECALCULE APRÈS CE QUI A ÉTÉ DIT.
-       *
-       * Il était posé sur les heures DÉRIVÉES, puis « je me suis levé à 15:30 »
-       * remplaçait le lever sans toucher au souci : l'infobulle affichait
-       * « levé 15:30 ⚠ un lever à 00:58 » — un reproche sur une heure qui
-       * n'était plus là. Ce qu'on montre et ce qu'on commente doivent être la
-       * même chose.
-       */
-      if (ditLever || ditCoucher) souci(r, n ? undefined : null);
+      const r = nuitDite(d, parDate.get(d) ?? null, parDate.get(addDays(d, -1)) ?? null, userId, { rythme });
+      if (!r) continue;
       out.push({ date: d, ...r });
     }
     return out;
@@ -511,4 +529,37 @@ export function rythmeUtilisateur(userId = OWNER, { jusquA = null } = {}) {
   return rythme;
 }
 
-export function oublierRythme(userId = OWNER) { MEMO_RYTHME.delete(userId); }
+export function oublierRythme(userId = OWNER) { MEMO_RYTHME.delete(userId); MEMO_SOMMEIL.delete(userId); }
+
+/*
+ * COMBIEN CETTE PERSONNE DORT D'HABITUDE — la sienne, pas une norme.
+ *
+ * Le chiffre d'une nuit ne dit rien tout seul : « 10,2 h » est long pour
+ * quelqu'un et ordinaire pour un autre, et une recommandation de santé
+ * publique n'a rien à faire dans le journal de quelqu'un. La médiane de SA
+ * série est le seul repère que ce produit s'autorise — la même convention
+ * qu'ailleurs pour les mesures.
+ *
+ * LA MÉDIANE, PAS LA MOYENNE : une nuit de quinze heures après une semaine
+ * blanche tirerait la moyenne, et le repère bougerait pour une exception.
+ *
+ * Rendu null sous sept nuits connues : trois nuits ne font pas une habitude,
+ * et un repère fondé sur trois nuits se lirait comme un fait.
+ */
+const MEMO_SOMMEIL = new Map();
+const SOMMEIL_MIN_NUITS = 7;
+
+export function sommeilHabituel(userId = OWNER) {
+  const memo = MEMO_SOMMEIL.get(userId);
+  if (memo && Date.now() - memo.t < RYTHME_TTL_MS) return memo.v;
+  const heures = nuits(userId, { jours: RYTHME_JOURS })
+    .map(n => n.sommeil_h).filter(h => typeof h === 'number' && h > 0).sort((a, b) => a - b);
+  const v = heures.length < SOMMEIL_MIN_NUITS ? null : {
+    mediane: heures.length % 2
+      ? heures[(heures.length - 1) / 2]
+      : Math.round((heures[heures.length / 2 - 1] + heures[heures.length / 2]) * 5) / 10,
+    nuits: heures.length,
+  };
+  MEMO_SOMMEIL.set(userId, { t: Date.now(), v });
+  return v;
+}
