@@ -11,6 +11,7 @@ import { poserLesNuits, graduations, enHeures, enHHMM, medianeHoraire, mediane, 
 import { bandeLiee, bandeCouches, COUCHES, symbole, joursDe } from './bande.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { proposerLechelle, DU_COMPAGNON } from './ressenti.js';
+import { FREQ, MAX_S, wavDe, reechantillonner, recoller, inserer } from './dictee.js';
 /* Les nombres s'écrivent pareil partout — voir `web/formats.js`, qui dit
    pourquoi c'est un fichier et pas quatre lignes ici. */
 import { virgule, fmtNb, dollars, fmtTok } from './formats.js';
@@ -751,6 +752,16 @@ async function renderTonight() {
             <circle cx="12" cy="12" r="8.2"/><path d="M12 12V7.6"/><path d="M12 12l3.1 2.4"/>
           </svg>
         </button>
+        ${/* LE MICRO. La voix devient du texte dans Machi Tool, sur ce PC, avec
+              le moteur de Handy — elle ne va jamais au serveur. Le texte se pose
+              dans le champ ; c'est toi qui envoies. */''}
+        <button class="clip micro" id="micro" aria-label="Dicter" aria-pressed="false"
+                data-tip="Dicter — la voix reste sur ton PC (Machi Tool)">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="3.2" width="6" height="11" rx="3"/><path d="M5.8 11.2a6.2 6.2 0 0 0 12.4 0"/><path d="M12 17.4v3.4"/>
+          </svg>
+        </button>
         <textarea id="input" rows="1" placeholder="Écris ici…" aria-label="Ton message"></textarea>
         <button class="sendarrow" id="send" aria-label="Envoyer" title="Envoyer">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
@@ -912,6 +923,8 @@ async function renderTonight() {
   $('#send').onclick = send;
 
   $('#clip').onclick = () => $('#fichiers').click();
+  $('#micro').onclick = () => basculerDictee();
+  if (DICTEE_EN_COURS) marquerMicro('ecoute');
   /* Le bouton et son échelle vivent dans le COMPOSEUR, pas dans le fil : les
      brancher avec les gestes du fil (`bindGestes`) laissait le clic sans
      écouteur — un bouton qui s'affiche normalement et ne fait rien. */
@@ -1834,6 +1847,172 @@ function dessinerJointes() {
     <button data-dejoindre="${i}" aria-label="Retirer ${esc(p.nom)}">×</button>
   </span>`).join('');
 }
+
+/* =====================================================================
+ * LA DICTÉE, CÔTÉ PAGE.
+ *
+ * Un clic : on écoute. Un second : on s'arrête, le son part à Machi Tool
+ * (127.0.0.1, avec la clé de la passerelle), le texte revient et se pose au
+ * curseur. Échap annule sans rien envoyer. Rien ne part tout seul au
+ * compagnon : on relit, on corrige, on envoie.
+ *
+ * Le modèle n'est pas là la première fois : Machi Tool le reprend à Handy s'il
+ * l'a, sinon il le télécharge — ce qu'on demande AVANT, avec sa taille.
+ * ===================================================================== */
+let DICTEE_EN_COURS = null;
+
+function marquerMicro(etat, titre) {
+  const b = $('#micro');
+  if (!b) return;
+  if (etat) b.dataset.etat = etat; else delete b.dataset.etat;
+  b.setAttribute('aria-pressed', String(etat === 'ecoute'));
+  b.dataset.tip = titre ?? (etat === 'ecoute' ? 'Je t’écoute — clique pour arrêter, Échap pour annuler'
+    : etat === 'transcrit' ? 'Machi Tool écrit ce que tu as dit…'
+    : 'Dicter — la voix reste sur ton PC (Machi Tool)');
+  // L'infobulle est lue au survol : si elle est ouverte sur le micro, elle suit
+  // l'état — sinon « Machi Tool écrit… » resterait affiché une fois le texte arrivé.
+  const tip = $('#tip');
+  if (tip?.classList.contains('on') && b.matches(':hover')) tip.textContent = b.dataset.tip;
+}
+
+const versMachiTool = (u, opts = {}, ms = 4000) => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return fetch(u, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+};
+
+async function basculerDictee() {
+  if (DICTEE_EN_COURS) return finirDictee();
+  const etatBouton = $('#micro')?.dataset.etat;
+  if (etatBouton === 'transcrit' || etatBouton === 'prepare') return;
+
+  let mt;
+  try { mt = await api('/api/passerelle/local'); } catch { mt = null; }
+  if (!mt?.cle) {
+    return toast('La dictée passe par Machi Tool : crée d’abord la clé dans Réglages › La passerelle.', { duree: 4500 });
+  }
+  const h = { 'X-Machitool-Cle': mt.cle };
+  let etat;
+  try {
+    const r = await versMachiTool(mt.url + '/dictee', { headers: h });
+    if (r.status === 404) return toast('Mets Machi Tool à jour (1.26 ou plus) pour dicter.', { duree: 4500 });
+    if (r.status === 401) return toast('Machi Tool refuse la clé de la passerelle.', { duree: 4000 });
+    etat = await r.json();
+  } catch {
+    return toast('Machi Tool ne répond pas — la dictée tourne sur ton PC, par lui.', { duree: 4500 });
+  }
+  if (!etat.moteur) return toast('Cette version de Machi Tool n’a pas le moteur de dictée — mets-la à jour.', { duree: 4500 });
+
+  if (etat.etat !== 'pret') {
+    if (etat.etat !== 'preparation') {
+      const question = etat.handy
+        ? 'Machi Tool va reprendre le modèle de dictée de Handy, déjà sur ton PC — rien à télécharger. On y va ?'
+        : `Pour dicter, Machi Tool doit télécharger une fois le modèle de reconnaissance vocale (${etat.taille_mo ?? 456} Mo). `
+          + 'Il reste sur ton PC, et ta voix n’en sort jamais. Lancer le téléchargement ?';
+      if (!confirm(question)) return;
+      try { await versMachiTool(mt.url + '/dictee/preparer', { method: 'POST', headers: h }); }
+      catch { return toast('Machi Tool n’a pas pu lancer la préparation.'); }
+    }
+    return suivrePreparation(mt);
+  }
+  return commencerDictee(mt);
+}
+
+async function suivrePreparation(mt) {
+  marquerMicro('prepare', 'Préparation du modèle de dictée…');
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1500));
+    const b = $('#micro');
+    if (!b) return;                                   // on a changé de vue
+    let e;
+    try { e = await (await versMachiTool(mt.url + '/dictee', { headers: { 'X-Machitool-Cle': mt.cle } })).json(); }
+    catch { marquerMicro(null); return toast('Machi Tool ne répond plus.'); }
+    b.style.setProperty('--progres', String(e.progres ?? 0));
+    if (e.etat === 'pret') { marquerMicro(null); return toast('La dictée est prête — clique sur le micro et parle.', { duree: 3500 }); }
+    if (e.etat === 'erreur') { marquerMicro(null); return toast(`Le modèle n’a pas pu s’installer : ${e.message || 'erreur inconnue'}`, { duree: 5000 }); }
+    marquerMicro('prepare', `Modèle de dictée : ${Math.round((e.progres ?? 0) * 100)} %`);
+  }
+}
+
+/* Le processeur qui recopie le son du micro, morceau par morceau. Chargé par
+   une URL locale : un fichier de plus à servir pour quinze lignes n'apporte rien. */
+const PRISE_DE_SON = `registerProcessor('prise-de-son', class extends AudioWorkletProcessor {
+  process(entrees) { const c = entrees[0] && entrees[0][0]; if (c) this.port.postMessage(c.slice(0)); return true; }
+});`;
+
+async function commencerDictee(mt) {
+  let flux;
+  try {
+    flux = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch {
+    return toast('Le navigateur n’a pas donné accès au micro.', { duree: 4000 });
+  }
+  let ctx, source;
+  try {
+    ctx = new AudioContext({ sampleRate: FREQ });
+    source = ctx.createMediaStreamSource(flux);
+  } catch {
+    // Firefox refuse de relier un micro à 48 kHz à un contexte à 16 kHz : on
+    // capte à la fréquence native et on ramène à 16 kHz à la fin.
+    try { await ctx?.close(); } catch { /* déjà fermé */ }
+    ctx = new AudioContext();
+    source = ctx.createMediaStreamSource(flux);
+  }
+  const url = URL.createObjectURL(new Blob([PRISE_DE_SON], { type: 'application/javascript' }));
+  try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+  const noeud = new AudioWorkletNode(ctx, 'prise-de-son');
+  const morceaux = [];
+  noeud.port.onmessage = e => morceaux.push(e.data);
+  // Relié à une sortie muette : un nœud que rien ne tire n'est jamais appelé.
+  const muet = ctx.createGain();
+  muet.gain.value = 0;
+  source.connect(noeud).connect(muet).connect(ctx.destination);
+
+  DICTEE_EN_COURS = { mt, flux, ctx, noeud, morceaux, freq: ctx.sampleRate,
+                      minuteur: setTimeout(() => finirDictee(), MAX_S * 1000) };
+  marquerMicro('ecoute');
+}
+
+async function finirDictee({ annuler = false } = {}) {
+  const d = DICTEE_EN_COURS;
+  if (!d) return;
+  DICTEE_EN_COURS = null;
+  clearTimeout(d.minuteur);
+  d.flux.getTracks().forEach(t => t.stop());        // le voyant du micro s'éteint tout de suite
+  try { d.noeud.disconnect(); await d.ctx.close(); } catch { /* déjà fermé */ }
+  if (annuler) { marquerMicro(null); return toast('Dictée annulée.'); }
+
+  const son = reechantillonner(recoller(d.morceaux), d.freq);
+  d.morceaux.length = 0;
+  if (son.length < FREQ * 0.3) { marquerMicro(null); return; }   // un clic, pas une phrase
+  marquerMicro('transcrit');
+  try {
+    const r = await versMachiTool(d.mt.url + '/dictee', {
+      method: 'POST',
+      headers: { 'X-Machitool-Cle': d.mt.cle, 'Content-Type': 'audio/wav' },
+      body: wavDe([son])
+    }, 120000);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.erreur ?? `Machi Tool a répondu ${r.status}`);
+    if (!j.texte) return toast('Je n’ai rien entendu.');
+    const input = $('#input');
+    if (!input) return;
+    const { valeur, curseur } = inserer(input.value, input.selectionStart, input.selectionEnd, j.texte);
+    input.value = valeur;
+    input.focus();
+    input.setSelectionRange(curseur, curseur);
+    autoSize(input);
+  } catch (err) {
+    toast(err?.name === 'AbortError' ? 'Machi Tool a mis trop longtemps à répondre.' : String(err?.message ?? err), { duree: 4000 });
+  } finally {
+    marquerMicro(null);
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && DICTEE_EN_COURS) { e.preventDefault(); finirDictee({ annuler: true }); }
+});
 
 /**
  * ENVOYER — au clavier, ou d'un geste sur l'échelle.

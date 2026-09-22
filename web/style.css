@@ -4881,3 +4881,23 @@ details.jpecol .jpetop { margin-top: 5px; }
   letter-spacing: .04em; color: var(--ink-faint); opacity: .85;
 }
 .venu svg { opacity: .8; }
+
+/* ---- le micro ----
+   Trois états, et chacun se voit sans lire d'infobulle : il écoute (rouge
+   qui respire), il prépare le modèle (un anneau qui se remplit), il écrit
+   (atténué, en attente). */
+.micro { position: relative; }
+.micro[data-etat="ecoute"] { color: hsl(356 72% 62%); }
+.micro[data-etat="ecoute"]::after {
+  content: ''; position: absolute; inset: 3px; border-radius: 50%;
+  border: 1.5px solid hsl(356 72% 62% / .7); animation: micro-souffle 1.4s ease-in-out infinite;
+}
+.micro[data-etat="prepare"]::after {
+  content: ''; position: absolute; inset: 2px; border-radius: 50%;
+  background: conic-gradient(var(--ink-dim) calc(var(--progres, 0) * 360deg), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+}
+.micro[data-etat="transcrit"] { opacity: .45; cursor: progress; }
+@keyframes micro-souffle { 0%, 100% { transform: scale(.86); opacity: .9; } 50% { transform: scale(1.06); opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .micro[data-etat="ecoute"]::after { animation: none; } }
