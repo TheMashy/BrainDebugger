@@ -1436,7 +1436,72 @@ export function posteDuJour(date, userId = OWNER) {
    * croire à une taxonomie où il y aurait « irontide ». Machi Tool en écarte
    * déjà « autre », qui est le mot qu'il écrit quand il n'a PAS trouvé de nom.
    */
-  const sites = minutes(dig?.temps_par_site_seul_s);
+  /*
+   * ET POUR LES JOURNÉES D'AVANT : LE SITE, DÉDUIT DE CE QU'ON A DÉJÀ.
+   *
+   * `temps_par_site_seul_s` n'existe que depuis que Machi Tool sait le
+   * calculer. Toutes les journées d'avant l'affichaient « n % qui n'a même pas
+   * de nom » — et c'était FAUX : leurs noms sont dans la barre juste au-dessus,
+   * puisque le digest porte ses titres rangés par site.
+   *
+   * On les déduit donc sans aucune table et sans rien redemander : `titres`
+   * donne, par site, les secondes de chaque page ; `titres_par_theme` donne
+   * celles qu'un sujet a déjà prises. La soustraction est ce qu'aucun sujet
+   * n'a su nommer, et on sait sur quel site c'était.
+   *
+   * CE QU'ON NE DÉDUIT PAS : le TYPE du lieu. « vidéo », « forum » viennent
+   * d'une table qui vit dans Machi Tool, et la recopier ici en ferait deux qui
+   * divergent au premier mot ajouté. Une journée relue rend donc des NOMS, pas
+   * des catégories — ce qui est moins, et vrai.
+   *
+   * `titres_par_theme` est plafonné à dix titres par sujet : la soustraction
+   * peut donc rendre un peu TROP. Elle est bornée par site, et la somme reste
+   * sous le temps de navigateur — vérifié sur une journée réelle : 174 min
+   * déduites + 34 de sujets = 208, pour 214 de navigateur.
+   */
+  const SITE_SANS_NOM = new Set(['autre', 'sans titre', 'inconnu', '']);
+  const sitesDeduits = () => {
+    const titres = dig?.titres;
+    if (!titres || typeof titres !== 'object') return [];
+    const prisParUnSujet = new Map();
+    for (const d of Object.values(dig?.titres_par_theme ?? {})) {
+      for (const [t, sec] of Object.entries(d ?? {})) {
+        if (typeof sec === 'number' && sec > 0) prisParUnSujet.set(t, (prisParUnSujet.get(t) ?? 0) + sec);
+      }
+    }
+    const par = {};
+    for (const [cat, d] of Object.entries(titres)) {
+      if (!String(cat).startsWith('web:')) continue;
+      const site = String(cat).slice(4);
+      if (SITE_SANS_NOM.has(site)) continue;
+      let reste = 0;
+      for (const [t, sec] of Object.entries(d ?? {})) {
+        if (typeof sec !== 'number' || sec <= 0) continue;
+        reste += Math.max(0, sec - Math.min(sec, prisParUnSujet.get(t) ?? 0));
+      }
+      if (reste > 0) par[site] = reste;
+    }
+    return minutes(par);
+  };
+  /*
+   * QUAND DÉDUIRE : QUAND CE QUI EST DÉJÀ LÀ NE COUVRE PAS CE QU'ON SAIT.
+   *
+   * « A-t-elle le champ ? » ne suffit pas. Une journée dont Machi Tool s'est
+   * mis à jour à 18 h porte un `temps_par_lieu_web_s` VRAI mais partiel — 30
+   * minutes là où ses propres titres en nomment 174 — et la traiter comme
+   * classée la laissait à 15 %.
+   *
+   * On compare donc les deux. La déduction rend un peu TROP (dix titres par
+   * sujet au plafond, donc des minutes déjà prises qu'on recompte), d'où la
+   * marge : tant que la mesure couvre 80 % de ce que la déduction trouve, elle
+   * est bonne et on n'y touche pas. En dessous, elle est en retard, et on
+   * montre la déduction À SA PLACE — jamais en plus, sinon les deux
+   * s'additionneraient et la journée durerait plus longtemps qu'elle n'a duré.
+   *
+   * CE QU'ON PERD EN DÉDUISANT : le type. « vidéo · 24 min » cède la place à
+   * « youtube · 96 min ». Moins précis sur ces 24 minutes-là, et vrai sur les
+   * 96 — c'est le bon échange, et l'écran dit « relu après coup ».
+   */
   const themes = Object.entries(th)
     .filter(([, v]) => typeof v === 'number' && v > 0)
     .sort((a, b) => b[1] - a[1])
@@ -1456,6 +1521,42 @@ export function posteDuJour(date, userId = OWNER) {
       };
     })
     .filter(x => x.min > 0);
+
+  /* Le bloc ci-dessous lit `themes` : il vient donc APRÈS lui, et pas à côté
+     des autres champs de l'écran. Placé plus haut, il levait dans la zone
+     morte de la déclaration — `posteDuJour` tombait, et la journée entière
+     revenait vide sans que rien ne le dise. */
+  const somme = xs => xs.reduce((n, x) => n + x.min, 0);
+  const mesures = minutes(dig?.temps_par_site_seul_s);
+  /*
+   * ET UN PLAFOND DUR, PARCE QUE LA DÉDUCTION REND TROP.
+   *
+   * `titres_par_theme` garde les DIX plus longs titres par sujet, au-dessus de
+   * trente secondes : ce qu'un sujet a réellement pris est donc sous-compté, et
+   * la soustraction recompte ces minutes-là. Mesuré : une journée rendait
+   * 112 % — 240 minutes nommées sur 214 de navigateur. Une barre qui dépasse
+   * la journée est pire que la barre vide qu'on remplace.
+   *
+   * On remplit donc jusqu'au temps qui RESTE vraiment, du plus gros site au
+   * plus petit, et on tronque le dernier. Ce qui dépasse ne s'affiche pas :
+   * mieux vaut montrer les trois gros sites et s'arrêter que montrer les dix
+   * et mentir sur le total.
+   */
+  const borner = (xs, plafond) => {
+    const out = [];
+    let reste = plafond;
+    for (const x of xs) {
+      if (reste <= 0) break;
+      out.push(x.min <= reste ? x : { ...x, min: reste });
+      reste -= Math.min(x.min, reste);
+    }
+    return out;
+  };
+  const webMin = Math.round(webS / 60);
+  const deduits = borner(sitesDeduits(), Math.max(0, webMin - somme(themes)));
+  const couvre = somme(lieux) + somme(mesures);
+  const enRetard = somme(deduits) > 0 && couvre < 0.8 * somme(deduits);
+  const sites = enRetard ? deduits : mesures;
   const ecran = (appS || webS) ? {
     app_min: Math.round(appS / 60), web_min: Math.round(webS / 60),
     top_app: top(apps), top_web: top(webs, 'web:'),
@@ -1463,8 +1564,11 @@ export function posteDuJour(date, userId = OWNER) {
     // « web » ou « ecran » : le total auquel les minutes ci-dessus se
     // rapportent. Les lieux, eux, sont toujours le navigateur.
     themes_sur: themes.length ? (thWeb ? 'web' : 'ecran') : null,
-    lieux: lieux.length ? lieux : null,
-    sites: sites.length ? sites : null
+    lieux: enRetard ? null : (lieux.length ? lieux : null),
+    sites: sites.length ? sites : null,
+    // L'écran doit pouvoir dire « relu », parce qu'une journée relue rend des
+    // noms de sites et pas des catégories : ce n'est pas la même promesse.
+    sites_deduits: enRetard ? true : null
   } : null;
   const lever = bornerLever();
   /*

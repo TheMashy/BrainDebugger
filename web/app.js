@@ -6679,7 +6679,13 @@ function posteMarkup(p, synchro) {
             <span class="mono faint">${x.min} min</span></li>`).join('')}
         </ul>` : ''}
         ${st.length ? `<ul class="jrleg jrleglieux jrlegsites">
-          <li class="jrlieutitre">${Math.round(pct(nomme))} % dont on ne sait que le site</li>
+          ${/* UNE JOURNÉE RELUE LE DIT. Elle rend des noms de sites, pas des
+                catégories : « on ne sait que le site » est déjà la phrase
+                juste, mais elle vient d'une déduction faite ici et pas d'une
+                mesure faite sur la machine — et c'est une différence qu'on
+                n'a pas le droit d'effacer. */''}
+          <li class="jrlieutitre">${Math.round(pct(nomme))} % dont on ne sait que le site${
+            p.ecran?.sites_deduits ? ' <span class="faint">· relu après coup</span>' : ''}</li>
           ${st.slice(0, 6).map(x => `<li><i class="jrsitep"></i>
             <span class="jrnom">${esc(x.nom)}</span>
             <span class="mono faint">${x.min} min</span></li>`).join('')}
