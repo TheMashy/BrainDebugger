@@ -650,6 +650,15 @@ export const DEFAULT_SETTINGS = {
      ne connaît pas — sans cette ligne, `poserCle` rend une clé que rien n'a
      enregistrée, et le connecteur refuse une clé qu'on vient de lui donner. */
   connecteurCle: '',
+  /*
+   * QUELLE VERSION DES EXTRACTEURS DE BORNES A DEJA RELU LE JOURNAL.
+   *
+   * Un extracteur qui apprend une tournure -- « je me suis couche a minuit
+   * trente » -- ne dira jamais rien des messages deja ecrits : ils ont ete lus
+   * une fois, par la version d'avant. Ce numero declenche la relecture UNE
+   * fois quand il monte, et jamais ensuite.
+   */
+  bornesLues: 0,
   // La demande de synchro déposée par le site, que Machi Tool ramasse à son
   // prochain relevé. Effacée dès qu'un digest arrive.
   demandeSynchro: null,

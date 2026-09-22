@@ -939,6 +939,36 @@ export function relireLesNotesDites(userId = OWNER) {
  * @returns {{jours: number, messages: number, sans_coupure: number,
  *            bornes_retrouvees: number, notes_retrouvees: number}}
  */
+/*
+ * LE NUMERO MONTE QUAND LES EXTRACTEURS APPRENNENT QUELQUE CHOSE.
+ *
+ * 1 : le passe du coucher (« je me suis couche »), « jme » pour « je me »,
+ *     et minuit/midi ecrits en lettres.
+ */
+const VERSION_BORNES = 1;
+
+/**
+ * Relit tout le journal UNE FOIS quand les extracteurs ont appris une tournure.
+ *
+ * APRES LA REPONSE, ET PAS PENDANT. La relecture prend une demi-seconde sur
+ * mille sept cents journees -- pas grand-chose, sauf que c'est `/api/state`
+ * qui ouvre la page, et qu'une demi-seconde de plus devant un ecran vide est
+ * exactement ce dont on se plaint. Le drapeau monte AVANT de lancer : deux
+ * onglets ouverts en meme temps ne la lanceraient pas deux fois.
+ */
+export function relireSiLesOreillesOntChange(userId = OWNER) {
+  try {
+    if (Number(getSettings(userId)?.bornesLues ?? 0) >= VERSION_BORNES) return false;
+    setSettings({ bornesLues: VERSION_BORNES }, userId);
+    setImmediate(() => {
+      try { rangerToutLeJournal(userId); }
+      catch (e) { console.error('relecture des bornes :', e?.message ?? e); }
+    });
+    return true;
+  } catch { return false; }
+}
+
+
 export function rangerToutLeJournal(userId = OWNER) {
   // Les notes dites d'abord : elles ne déplacent aucune journée, donc leur
   // ordre vis-à-vis du rangement n'a pas d'importance — mais les oublier ici
@@ -1970,6 +2000,7 @@ export const routes = {
   'GET /api/temps': () => etatDuTemps(),
 
   'GET /api/state': ({ userId }) => {
+    relireSiLesOreillesOntChange(userId);
     const s = getSettings(userId);
     const { series: ser, byDate, textCount } = series(userId);
     /*
