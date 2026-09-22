@@ -1158,9 +1158,9 @@ function drawThread() {
     return sep + silence + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}${
       m.via ? ' dehors' : ''}"${teinte} data-id="${m.id ?? ''}"
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
-      }${reflexionMarkup(m)}<span class="tx">${esc(
+      }${reflexionMarkup(m)}${imagesMarkup(m)}${seulementLesNoms(m) ? '' : `<span class="tx">${esc(
         m.role === 'pet' ? sansMarqueur(m.text) : m.text
-      )}</span>${marque}${dehors}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
+      )}</span>`}${marque}${dehors}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
@@ -1170,6 +1170,33 @@ function drawThread() {
   majFil(th);
   bindGestes(th);
   syncPetSay();
+}
+
+/* =====================================================================
+ * LES IMAGES QU'ON AVAIT MONTRÉES.
+ *
+ * Ce sont les miniatures gardées au fil (voir `poserApercus`), servies par
+ * `/api/apercu` au nom de la session. Hauteur fixe : le fil se cale en bas
+ * AVANT que les images arrivent, et une image qui pousserait la bulle en
+ * chargeant ferait remonter la conversation sous les yeux.
+ *
+ * Un clic l'ouvre en grand dans un nouvel onglet.
+ * ===================================================================== */
+function imagesMarkup(m) {
+  if (!m.pieces?.length) return '';
+  return `<span class="images">${m.pieces.map(p => {
+    const src = p.url ?? `/api/apercu?id=${encodeURIComponent(p.id)}`;
+    return `<a class="image" href="${esc(src)}" target="_blank" rel="noopener"
+      ><img src="${esc(src)}" alt="${esc(p.nom ?? 'image envoyée')}" loading="lazy" decoding="async"></a>`;
+  }).join('')}</span>`;
+}
+
+/* Un message fait QUE d'images porte leurs noms comme texte (« [capture.png] »),
+   pour ne jamais s'enregistrer vide. Sous l'image elle-même, ce nom n'apprend
+   rien : on ne l'affiche pas. */
+function seulementLesNoms(m) {
+  if (!m.pieces?.length) return false;
+  return String(m.text ?? '').trim() === m.pieces.map(p => `[${p.nom}]`).join(' ');
 }
 
 /* =====================================================================
@@ -1721,11 +1748,13 @@ async function readSSE(res, on) {
    ordonnance, un compte rendu, une capture. Ils partent tels quels et le
    compagnon les lit.
 
-   Ils ne sont PAS enregistrés. Le journal est un fichier SQLite qu'on exporte
-   et qu'on emporte ; y coller des mégaoctets de binaire le rendrait
+   L'original n'est PAS enregistré. Le journal est un fichier SQLite qu'on
+   exporte et qu'on emporte ; y coller des mégaoctets de binaire le rendrait
    intransportable pour rien -- ce qui compte dans un compte rendu, le compagnon
-   peut le RANGER dans le carnet avec l'outil qu'il a déjà, et c'est là, en
-   texte, que ça sert ensuite.
+   peut le RANGER dans le carnet avec l'outil qu'il a déjà.
+
+   Une image laisse en revanche sa MINIATURE au fil, faite ici avant l'envoi :
+   on revoit ce qu'on avait montré, pour quelques dizaines de Ko.
 
    Les fichiers TEXTE, eux, sont lus ici et collés dans le message : ils sont
    donc gardés comme tout ce qu'on écrit.                                     */
@@ -1743,6 +1772,40 @@ const lireBase64 = f => new Promise((ok, ko) => {
   r.readAsDataURL(f);
 });
 
+/*
+ * LA MINIATURE D'UNE IMAGE — 640 px sur le grand côté, en WebP.
+ *
+ * Faite ici parce que le serveur n'a aucune bibliothèque d'image, et qu'il n'en
+ * a pas besoin : le navigateur sait déjà décoder et réduire. Si le WebP n'est
+ * pas disponible (vieux Safari), on retombe sur du JPEG, sur fond blanc — un
+ * PNG transparent en JPEG sortirait sur du noir. Rien ne bloque l'envoi si ça
+ * échoue : l'image part au compagnon, elle ne restera juste pas au fil.
+ */
+const APERCU_COTE = 640;
+const APERCU_MAX = 380 * 1024;
+
+async function miniature(f) {
+  try {
+    const img = await createImageBitmap(f);
+    const k = Math.min(1, APERCU_COTE / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
+    for (const [type, q] of [['image/webp', 0.8], ['image/jpeg', 0.82]]) {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      if (type === 'image/jpeg') { g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); }
+      g.drawImage(img, 0, 0, w, h);
+      const b = await new Promise(ok => c.toBlob(ok, type, q));
+      if (b && b.type === type && b.size <= APERCU_MAX) {
+        img.close?.();
+        return { media: type, donnees: await lireBase64(b), url: URL.createObjectURL(b) };
+      }
+    }
+    img.close?.();
+  } catch { /* pas de miniature : l'image part quand même */ }
+  return null;
+}
+
 async function joindre(liste) {
   for (const f of [...(liste ?? [])]) {
     if (JOINTES.length >= 5) { toast('Cinq pièces au maximum.'); break; }
@@ -1751,7 +1814,9 @@ async function joindre(liste) {
       if (estTexte(f)) {
         JOINTES.push({ nom: f.name, media: 'texte', texte: (await f.text()).slice(0, 40000) });
       } else if (BINAIRES.has(f.type)) {
-        JOINTES.push({ nom: f.name, media: f.type, donnees: await lireBase64(f) });
+        const ap = f.type.startsWith('image/') ? await miniature(f) : null;
+        JOINTES.push({ nom: f.name, media: f.type, donnees: await lireBase64(f),
+                       ...(ap ? { apercu: { media: ap.media, donnees: ap.donnees }, url: ap.url } : {}) });
       } else {
         toast(`« ${f.name} » : format non lu (images, PDF, texte).`);
       }
@@ -1765,7 +1830,7 @@ function dessinerJointes() {
   if (!el) return;
   el.hidden = !JOINTES.length;
   el.innerHTML = JOINTES.map((p, i) => `<span class="jointe" data-t="${p.media === 'texte' ? 'texte' : p.media === 'application/pdf' ? 'pdf' : 'image'}">
-    <b>${esc(p.nom)}</b>
+    ${p.url ? `<img src="${esc(p.url)}" alt="">` : ''}<b>${esc(p.nom)}</b>
     <button data-dejoindre="${i}" aria-label="Retirer ${esc(p.nom)}">×</button>
   </span>`).join('');
 }
@@ -1800,8 +1865,12 @@ async function send(force = null) {
     text = [text, ...textes.map(p => `\n\n— ${p.nom} —\n${p.texte}`)].join('').trim();
   }
   const pieces = force ? [] : JOINTES.filter(p => p.media !== 'texte')
-    .map(p => ({ nom: p.nom, media: p.media, donnees: p.donnees }));
+    .map(p => ({ nom: p.nom, media: p.media, donnees: p.donnees,
+                 ...(p.apercu ? { apercu: p.apercu } : {}) }));
   const noms = pieces.map(p => p.nom);
+  // Pour la bulle optimiste : l'image s'affiche tout de suite, depuis la mémoire
+  // du navigateur, avant que le serveur ait rendu la sienne.
+  const locales = force ? [] : JOINTES.filter(p => p.url).map(p => ({ nom: p.nom, url: p.url }));
   if (!force) {
     JOINTES = [];
     dessinerJointes();
@@ -1815,7 +1884,8 @@ async function send(force = null) {
   FRAIS = new Set();                  // et les motifs qu'il avait reconnus aussi
   // affichage optimiste : ce que tu écris apparaît tout de suite
   S.messages.push({ ts: new Date().toISOString(), date: S.today, role: 'user',
-                    text: text || noms.map(n => `[${n}]`).join(' ') });
+                    text: text || noms.map(n => `[${n}]`).join(' '),
+                    ...(locales.length ? { pieces: locales } : {}) });
   drawThread();
 
   let typing = null;

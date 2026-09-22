@@ -1,6 +1,6 @@
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
-  addMessage, messagesForDate, recentMessages, filAncre, allEvents, deleteEvent,
+  addMessage, poserApercus, messagesForDate, recentMessages, filAncre, allEvents, deleteEvent,
   comptesVerdicts,
   allAnchors, setAnchor, getUser, deleteDay, clearNote, wipe, OWNER,
   addEvent, allMotifs, addMotif, marquerMotif, motifsDesMessages, deleteMotif, teinterMotif, motifSeries,
@@ -3943,7 +3943,11 @@ export const routes = {
     entries: allEntries(userId),
     events: allEvents(userId),
     anchors: allAnchors(userId),
-    messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts').all(userId)
+    messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts').all(userId),
+    // Les miniatures aussi : ce sont ses images, et elles partent avec le reste.
+    images: db.prepare('SELECT id, message_id, nom, media, octets FROM apercus WHERE user_id = ? ORDER BY id')
+      .all(userId).map(r => ({ id: r.id, message_id: r.message_id, nom: r.nom, media: r.media,
+                               base64: Buffer.from(r.octets).toString('base64') }))
   }),
 
   /** La jauge de jetons : ce qu'il reste ce mois-ci, et ce que ça a coûté. */
@@ -4034,8 +4038,10 @@ const joursEntre = (a, b) =>
 /*
  * LES PIECES JOINTES D'UN MESSAGE.
  *
- * Elles valent pour CE tour : le fil garde la mention du fichier, le binaire
- * ne touche jamais la base. Voir l'en-tete de blocsDePiece() dans chat.js --
+ * L'ORIGINAL vaut pour CE tour : il part au compagnon et ne touche jamais la
+ * base. Une image apporte en plus sa MINIATURE (`apercu`), faite par le
+ * navigateur : c'est elle, et elle seule, qui reste au fil pour qu'on revoie
+ * ce qu'on avait montré (voir `poserApercus`). Voir l'en-tete de blocsDePiece() dans chat.js --
  * ce qui compte dans un compte rendu se range en note, en texte, et c'est la
  * qu'il sert ensuite.
  *
@@ -4054,8 +4060,10 @@ function piecesDe(body) {
     // client peut mentir, et un PDF de cent mega fait tomber la requete
     // entiere -- avec le message qu'on venait d'ecrire.
     if (!donnees || donnees.length * 0.75 > PIECE_OCTETS) continue;
+    const a = p?.apercu;
     out.push({ nom: String(p?.nom ?? 'pièce jointe').slice(0, 120),
-               media: String(p?.media ?? ''), donnees });
+               media: String(p?.media ?? ''), donnees,
+               ...(a?.donnees ? { apercu: { media: String(a.media ?? ''), donnees: String(a.donnees) } } : {}) });
   }
   return out;
 }
@@ -4314,6 +4322,8 @@ export async function streamMessage(body, send, userId = OWNER) {
   noterBornesDites(text, userId);
   const date = body.date ?? jourVecu(userId);
   const messageId = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'user', text, userId });
+  // Avant l'envoi du fil ci-dessous : la bulle a ses images dès son premier rendu.
+  if (pieces.length) poserApercus(messageId, pieces, userId);
   /* PAS DEUX FOIS LE MÊME INSTANT. `noterNoteDite` lit « 3/10 » dans une
      phrase et en fait un relevé — ce qui est exactement ce qu'on vient de
      poser, à la main, sur la question. Le laisser tourner ici relèverait le

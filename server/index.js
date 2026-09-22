@@ -12,7 +12,7 @@ import { analyser, apercuDe } from './mesures.js';
 import { oublierRythme } from './nuits.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
 import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi,
-         poserActiviteJour, activiteJours, effacerMesures } from './db.js';
+         poserActiviteJour, activiteJours, effacerMesures, apercu } from './db.js';
 import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
 import * as discord from './discord.js';
@@ -578,6 +578,22 @@ async function traiter(req, res) {
       else { res.write(`event: error\ndata: ${JSON.stringify({ error: String(err.message ?? err) })}\n\n`); res.end(); }
     }
     return;
+  }
+
+  /* ---------- les miniatures du fil ----------
+     Des octets, pas du JSON : traitées avant `routes`, comme le flux. Après
+     la garde d'authentification, et lues au nom de la session -- une image
+     d'un autre compte rend 404, pas 403, pour ne rien dire de son existence. */
+  if (key === 'GET /api/apercu') {
+    const a = apercu(url.searchParams.get('id'), currentUser(req));
+    if (!a) return json(res, 404, { error: 'image introuvable' });
+    res.writeHead(200, {
+      'Content-Type': a.media,
+      'X-Content-Type-Options': 'nosniff',
+      // Une miniature ne change jamais : son identifiant suffit à la mettre en cache.
+      'Cache-Control': 'private, max-age=31536000, immutable'
+    });
+    return res.end(Buffer.from(a.octets));
   }
 
   /* ---------- API ---------- */

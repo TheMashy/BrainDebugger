@@ -2781,6 +2781,13 @@ button.amasrow:hover { background: var(--panel); }
 [data-pudique] .gauge img,
 [data-pudique] .gaugepanel .head img { filter: blur(5px); }
 
+/* Une image envoyée au compagnon se reconnaît bien plus vite qu'un visage :
+   une ordonnance, une capture, une photo. Flou fort, et ni clic ni glisser —
+   l'ouvrir en grand pendant un partage d'écran la montrerait en clair. */
+[data-pudique] .msg .image img,
+[data-pudique] .jointe img { filter: blur(18px) saturate(.6); }
+[data-pudique] .msg .image { pointer-events: none; }
+
 /* SVG : le remplissage d'un <text> ne passe pas par text-fill-color. Les
    etiquettes des periodes de la frise se floutent donc pour de bon. Les annees
    et les guides, eux, restent : une graduation n'a jamais rien raconte. */
@@ -3142,6 +3149,24 @@ button.mecatitre:hover { background: none; color: hsl(var(--p, 258) 65% 82%); }
 .jointe[data-t="image"]::before { background: hsl(284 55% 62%); }
 .jointe[data-t="pdf"]::before   { background: hsl(336 55% 62%); }
 .jointe[data-t="texte"]::before { background: hsl(232 55% 62%); border-radius: 50%; }
+/* L'image qu'on s'apprête à envoyer se voit, au lieu d'un nom de fichier. */
+.jointe img {
+  width: 26px; height: 26px; margin: -3px 0 -3px -6px; border-radius: 6px;
+  object-fit: cover; flex: none;
+}
+.jointe:has(img)::before { display: none; }
+
+/* ---- les images dans le fil ----
+   Hauteur FIXE : le fil se cale en bas avant qu'elles arrivent, et une image
+   qui grandirait en chargeant ferait remonter la conversation. */
+.msg .images { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.msg .images:only-child, .msg .images:last-child { margin-bottom: 0; }
+.msg .image { display: block; border-radius: 10px; overflow: hidden; line-height: 0;
+  background: var(--panel-2); }
+.msg .image img { height: 168px; width: auto; max-width: 100%; object-fit: cover; display: block; }
+.msg .image:focus-visible { outline: 2px solid var(--ink-dim); outline-offset: 2px; }
+@media (max-width: 480px) { .msg .image img { height: 128px; } }
+
 .jointe button {
   padding: 0; width: 18px; height: 18px; flex: none; border: 0; border-radius: 50%;
   background: none; color: var(--ink-faint); font-size: 15px; line-height: 1;

@@ -177,6 +177,21 @@ CREATE TABLE IF NOT EXISTS motif_vues (
 );
 CREATE INDEX IF NOT EXISTS idx_motif_vues_msg ON motif_vues(message_id);
 
+-- Les MINIATURES des images envoyées au compagnon. Pas l'original : le journal
+-- est un fichier qu'on emporte, et des mégaoctets de photos le rendraient
+-- intransportable. Une miniature (~640 px, quelques dizaines de Ko) suffit à
+-- revoir dans le fil ce qu'on avait montré. Table à part : la table des messages reste
+-- léger, et ce qu'on lit du fil à chaque rendu ne traîne pas de binaire.
+CREATE TABLE IF NOT EXISTS apercus (
+  id         INTEGER PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  nom        TEXT,
+  media      TEXT NOT NULL,
+  octets     BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_apercus_msg ON apercus(message_id);
+
 /*
  * Les objectifs : ce que la personne a decide d'arreter, de tenir, de changer.
  *
@@ -875,6 +890,75 @@ export function addMessage({ ts, date, source = 'web', role, text, reflexion = n
   return Number(info.lastInsertRowid);
 }
 
+/*
+ * LES MINIATURES D'UN MESSAGE.
+ *
+ * Le navigateur les fabrique au moment d'envoyer ; on vérifie ici ce qu'il
+ * rend, parce que le client peut mentir : un type d'image connu, et un poids
+ * de miniature. Au-delà, ce n'est plus une miniature, et on ne la garde pas —
+ * l'image part quand même au compagnon, elle ne reste simplement pas au fil.
+ */
+export const APERCU_TYPES = new Set(['image/webp', 'image/jpeg', 'image/png']);
+export const APERCU_OCTETS = 400 * 1024;
+
+export function poserApercus(messageId, pieces, userId = OWNER) {
+  const ins = db.prepare(
+    'INSERT INTO apercus(user_id, message_id, nom, media, octets) VALUES(?,?,?,?,?)');
+  let n = 0;
+  for (const p of pieces ?? []) {
+    const a = p?.apercu;
+    if (!a || !APERCU_TYPES.has(String(a.media))) continue;
+    const octets = Buffer.from(String(a.donnees ?? ''), 'base64');
+    if (!octets.length || octets.length > APERCU_OCTETS) continue;
+    ins.run(userId, messageId, String(p.nom ?? '').slice(0, 120) || null, String(a.media), octets);
+    n++;
+  }
+  return n;
+}
+
+/** Les miniatures des messages donnés, rangées par message — sans le binaire. */
+export function apercusDes(ids, userId = OWNER) {
+  const out = new Map();
+  const liste = [...new Set((ids ?? []).map(Number).filter(Number.isFinite))];
+  if (!liste.length) return out;
+  const rows = db.prepare(
+    `SELECT id, message_id, nom FROM apercus WHERE user_id = ? AND message_id IN (${
+      liste.map(() => '?').join(',')}) ORDER BY id`).all(userId, ...liste);
+  for (const r of rows) {
+    const k = Number(r.message_id);
+    if (!out.has(k)) out.set(k, []);
+    out.get(k).push({ id: Number(r.id), nom: r.nom });
+  }
+  return out;
+}
+
+/** Les messages, avec `pieces` sur ceux qui en portent. */
+export function avecApercus(rows, userId = OWNER) {
+  const par = apercusDes(rows.map(r => r.id), userId);
+  if (!par.size) return rows;
+  return rows.map(r => par.has(Number(r.id)) ? { ...r, pieces: par.get(Number(r.id)) } : r);
+}
+
+/** Une miniature, à SON propriétaire seulement. */
+export function apercu(id, userId = OWNER) {
+  return db.prepare('SELECT media, octets FROM apercus WHERE user_id = ? AND id = ?')
+    .get(userId, Number(id)) ?? null;
+}
+
+/*
+ * UNE IMAGE PART AVEC SON MESSAGE.
+ *
+ * Appelé après chaque suppression de messages — rembobiner, effacer une
+ * journée, effacer le texte ou tout. Une photo qui survivrait au message qui
+ * la portait serait exactement le genre de reste qu'on n'a pas demandé à
+ * garder, et que personne ne verrait plus jamais pour l'effacer.
+ */
+export function purgerApercus(userId = OWNER) {
+  return db.prepare(
+    'DELETE FROM apercus WHERE user_id = ? AND message_id NOT IN (SELECT id FROM messages WHERE user_id = ?)'
+  ).run(userId, userId).changes;
+}
+
 /**
  * REMBOBINER LE FIL JUSQU'A UN MESSAGE.
  *
@@ -917,6 +1001,7 @@ export function rembobiner(id, userId = OWNER) {
     for (const m of suite) { delVues.run(m.id); del.run(userId, m.id); }
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
+  purgerApercus(userId);
 
   // Hors transaction : rebuildEntryText ecrit dans entries, et une journee qui
   // se retrouve vide n'a plus de raison d'exister -- sauf si elle porte une
@@ -949,7 +1034,7 @@ export function recentMessages(limit = 80, userId = OWNER) {
   const rows = since
     ? db.prepare('SELECT id, ts, date, source, role, text, reflexion, via FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
     : db.prepare('SELECT id, ts, date, source, role, text, reflexion, via FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
-  return rows.reverse();
+  return avecApercus(rows.reverse(), userId);
 }
 
 /**
@@ -996,9 +1081,10 @@ export const joursEcrits = (userId = OWNER) => db.prepare(
 ).all(userId).map(r => r.date);
 
 export function messagesForDate(date, userId = OWNER) {
-  return db.prepare(
+  const rows = db.prepare(
     'SELECT id, ts, source, role, text, via FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
   ).all(userId, date);
+  return avecApercus(rows, userId);
 }
 
 export function recentUserMessages(limit = 40, userId = OWNER) {
@@ -1037,6 +1123,7 @@ export function deleteDay(date, userId = OWNER) {
     db.prepare('DELETE FROM entries  WHERE user_id = ? AND date = ?').run(userId, date);
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
+  purgerApercus(userId);
   return true;
 }
 
@@ -1094,6 +1181,8 @@ export function wipe(portee, userId = OWNER) {
     }
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
+  const images = purgerApercus(userId);
+  if (images) compte.images = images;
   return compte;
 }
 
