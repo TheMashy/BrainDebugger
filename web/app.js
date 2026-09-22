@@ -1173,7 +1173,7 @@ function drawThread() {
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }${reflexionMarkup(m)}${imagesMarkup(m)}${seulementLesNoms(m) ? '' : `<span class="tx">${esc(
         m.role === 'pet' ? sansMarqueur(m.text) : m.text
-      )}</span>`}${marque}${dehors}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
+      )}</span>`}${repliMarkup(m)}${marque}${dehors}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.
@@ -1202,6 +1202,13 @@ function imagesMarkup(m) {
     return `<a class="image" href="${esc(src)}" target="_blank" rel="noopener"
       ><img src="${esc(src)}" alt="${esc(p.nom ?? 'image envoyée')}" loading="lazy" decoding="async"></a>`;
   }).join('')}</span>`;
+}
+
+/* Une relance de secours ne se fait pas passer pour le compagnon : la raison
+   reste sous la bulle, là où le toast, lui, ne restait pas. */
+function repliMarkup(m) {
+  if (m.role !== 'pet' || !m.repli) return '';
+  return `<span class="replibulle">${ico('parler', 10)}réponse hors-ligne — ${esc(m.repli)}</span>`;
 }
 
 /* Un message fait QUE d'images porte leurs noms comme texte (« [capture.png] »),
@@ -1894,12 +1901,23 @@ async function basculerDictee() {
   const h = { 'X-Machitool-Cle': mt.cle };
   let etat;
   try {
-    const r = await versMachiTool(mt.url + '/dictee', { headers: h });
+    // Dix secondes et pas quatre : une première réponse de Machi Tool peut
+    // tomber pendant qu'il fait autre chose (un relevé, une synchro).
+    const r = await versMachiTool(mt.url + '/dictee', { headers: h }, 10000);
     if (r.status === 404) return toast('Mets Machi Tool à jour (1.26 ou plus) pour dicter.', { duree: 4500 });
     if (r.status === 401) return toast('Machi Tool refuse la clé de la passerelle.', { duree: 4000 });
+    if (r.status === 403) return toast('Machi Tool ne reconnaît pas ce site — vérifie ses origines autorisées.', { duree: 5000 });
     etat = await r.json();
-  } catch {
-    return toast('Machi Tool ne répond pas — la dictée tourne sur ton PC, par lui.', { duree: 4500 });
+  } catch (err) {
+    /* DEUX PANNES QUI NE SE RÉPARENT PAS PAREIL. Trop lent : il est là,
+       réessayer suffit. Injoignable : sans doute pas lancé — on le relance
+       par son lien, comme le fait déjà la synchro. */
+    if (err?.name === 'AbortError') {
+      return toast('Machi Tool met du temps à répondre — réessaie dans un instant.', { duree: 4500 });
+    }
+    lancerApp();
+    return toast('Machi Tool ne répond pas : je tente de le lancer. Réessaie dans quelques secondes. '
+               + 'Si Chrome demande l’accès aux applis de cet appareil, accepte.', { duree: 7000 });
   }
   if (!etat.moteur) return toast('Cette version de Machi Tool n’a pas le moteur de dictée — mets-la à jour.', { duree: 4500 });
 

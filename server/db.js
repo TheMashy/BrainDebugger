@@ -496,6 +496,15 @@ for (const [table, colonne, decl] of [
    * invisible pour un journal qui n'a jamais rien verse.
    */
   ['messages', 'via', 'TEXT'],
+  /*
+   * POURQUOI CETTE RÉPONSE N'EST PAS DU COMPAGNON, quand elle ne l'est pas.
+   *
+   * Enveloppe épuisée, refus, API en panne : une relance de secours prend la
+   * place de la réponse (« Raconte. »). La raison partait dans un toast de
+   * deux secondes — le toast suivant l'effaçait, et la bulle restait là, à
+   * passer pour une vraie réponse. Elle reste maintenant sous la bulle.
+   */
+  ['messages', 'repli', 'TEXT'],
 ]) {
   try {
     const a = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -881,11 +890,12 @@ export function normaliserTs(ts) {
 }
 
 export function addMessage({ ts, date, source = 'web', role, text, reflexion = null,
-                             via = null, userId = OWNER }) {
+                             via = null, repli = null, userId = OWNER }) {
   ts = normaliserTs(ts);
   const info = db.prepare(
-    'INSERT INTO messages(user_id, ts, date, source, role, text, reflexion, via) VALUES(?,?,?,?,?,?,?,?)'
-  ).run(userId, ts, date, source, role, text, reflexion || null, via || null);
+    'INSERT INTO messages(user_id, ts, date, source, role, text, reflexion, via, repli) VALUES(?,?,?,?,?,?,?,?,?)'
+  ).run(userId, ts, date, source, role, text, reflexion || null, via || null,
+        repli ? String(repli).slice(0, 300) : null);
   if (role === 'user') rebuildEntryText(date, userId);
   return Number(info.lastInsertRowid);
 }
@@ -1032,8 +1042,8 @@ export function rembobiner(id, userId = OWNER) {
 export function recentMessages(limit = 80, userId = OWNER) {
   const since = getSettings(userId).chatSince;
   const rows = since
-    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion, via FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
-    : db.prepare('SELECT id, ts, date, source, role, text, reflexion, via FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
+    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion, via, repli FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
+    : db.prepare('SELECT id, ts, date, source, role, text, reflexion, via, repli FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
   return avecApercus(rows.reverse(), userId);
 }
 

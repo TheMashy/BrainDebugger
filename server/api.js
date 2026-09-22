@@ -2187,7 +2187,7 @@ export const routes = {
     /* L'ORDRE COMPTE : le relevé de dépense nomme la réponse, il ne peut donc
        pas être écrit avant elle. */
     const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
-                               text: r.text, userId });
+                               text: r.text, repli: raisonDuRepli(r), userId });
     if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output,
                              r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet, r.composition ?? null);
     return {
@@ -4287,6 +4287,18 @@ export function poserCeQuIlDit(body, userId = OWNER) {
   return { ok: true, releve: r, messageId: Number(m.id) };
 }
 
+/**
+ * Ce qui a remplacé le compagnon, en une phrase — ou rien s'il a répondu.
+ * Le mode hors-ligne CHOISI n'est pas un repli : il n'y a rien à expliquer.
+ */
+export function raisonDuRepli(r) {
+  if (!r || r.backend !== 'scripted') return null;
+  if (r.exhausted) return 'enveloppe de jetons du mois épuisée';
+  if (r.refused) return 'le modèle a décliné de répondre';
+  if (r.degraded) return String(r.degraded);
+  return null;
+}
+
 export async function streamMessage(body, send, userId = OWNER) {
   const pieces = piecesDe(body);
   let text = String(body.text ?? '').trim();
@@ -4359,7 +4371,7 @@ export async function streamMessage(body, send, userId = OWNER) {
   /* Même ordre que sur l'autre route : la réponse d'abord, ce qu'elle a coûté
      ensuite — sans quoi la dépense ne peut nommer aucun message. */
   const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
-                             text: r.text, reflexion: r.pensee ?? null, userId });
+                             text: r.text, reflexion: r.pensee ?? null, repli: raisonDuRepli(r), userId });
   if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output,
                            r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet, r.composition ?? null);
   send('done', {

@@ -88,3 +88,11 @@ test('le micro s’éteint dès qu’on s’arrête, et Échap annule sans rien 
   assert.ok(i > 0 && i < glue.indexOf("'Content-Type': 'audio/wav'"), 'l’annulation doit sortir avant l’envoi');
   assert.equal(MAX_S, 300);
 });
+
+test('trop lent et injoignable ne se disent pas pareil — et l’injoignable est relancé', () => {
+  assert.match(glue, /versMachiTool\(mt\.url \+ '\/dictee', \{ headers: h \}, 10000\)/,
+    'quatre secondes : un Machi Tool occupé passait pour éteint');
+  assert.match(glue, /err\?\.name === 'AbortError'/);
+  const i = glue.indexOf("err?.name === 'AbortError'");
+  assert.ok(glue.indexOf('lancerApp();', i) > i, 'l’injoignable doit être relancé, comme pour la synchro');
+});

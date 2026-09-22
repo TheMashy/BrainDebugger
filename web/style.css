@@ -4901,3 +4901,9 @@ details.jpecol .jpetop { margin-top: 5px; }
 .micro[data-etat="transcrit"] { opacity: .45; cursor: progress; }
 @keyframes micro-souffle { 0%, 100% { transform: scale(.86); opacity: .9; } 50% { transform: scale(1.06); opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .micro[data-etat="ecoute"]::after { animation: none; } }
+
+/* La raison d'une relance de secours, sous la bulle : discrète, mais lisible. */
+.replibulle {
+  display: flex; align-items: center; gap: 5px; margin-top: 6px;
+  font-size: 11.5px; color: var(--warn, hsl(38 80% 62%)); opacity: .85;
+}
