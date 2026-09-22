@@ -140,7 +140,7 @@ test('la jauge connaît son prix — sinon elle facture 25 % de trop en silence'
    * produit venant de passer sur Opus 5.5, l'oubli aurait porté sur la
    * totalité de la dépense.
    */
-  assert.deepEqual(PRICES[OPUS55], { in: 4, out: 20 });
+  assert.deepEqual(PRICES[OPUS55], { in: 4, out: 20, lu: 0.05 });
   assert.ok(PRICES[OPUS55].in < PRICES['claude-opus-5'].in, 'moins cher que la génération d’avant');
   assert.ok(PRICES[OPUS55].out > PRICES['claude-sonnet-5'].out, 'mais toujours plus cher que Sonnet');
 });
