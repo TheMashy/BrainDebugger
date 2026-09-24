@@ -41,6 +41,23 @@ test('l’ENVIE de tout prendre compte, pas seulement la prise faite', () => {
     assert.equal(messageGrave(t), false, t);
 });
 
+test('et en anglais : Jarvis parle anglais, un message grave ne change pas de chemin avec la langue', () => {
+  // Avant : seul « suicide » s'écrit pareil dans les deux langues — « I want to
+  // die » partait chez le majordome.
+  for (const t of ['I want to die', 'i want to kill myself', 'I am going to end it all tonight',
+                   "I don't want to live anymore", 'I want to hurt myself', "I'd be better off dead",
+                   'I feel suicidal', 'I want to go to sleep and never wake up', "I'm going to take all my pills",
+                   'there is no point in living', 'I want to end my life', 'I cut myself again',
+                   "I can't go on", 'I wish I was dead', 'everyone would be better off without me'])
+    assert.equal(messageGrave(t), true, t);
+  // Une intention envers soi, pas un mot : les commandes et les façons de parler passent.
+  for (const t of ['kill the lights', 'this game is killing me', 'I could die for a pizza', 'the battery died',
+                   'kill the process', 'I want to end this meeting', "I'm dying to see it",
+                   'I never wake up on time', 'take all the time you need', 'I hurt my back',
+                   'set a timer for ten minutes', 'the character wants to die in the game'])
+    assert.equal(messageGrave(t), false, t);
+});
+
 test('une soirée ordinaire ne l’est pas', () => {
   for (const t of ['je fais une liste de courses', 'je suis mort de rire', 'on a fini le film',
                    'la négo il m a dit que 170 c était trop brutal', 'je vais dormir, bonne nuit'])

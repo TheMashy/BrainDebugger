@@ -98,6 +98,82 @@ test('un message grave ne touche JAMAIS le majordome', async () => {
   assert.equal(client.appels.length, 0);
 });
 
+test('en anglais : la consigne est anglaise, britannique, sans « sir » par défaut', async () => {
+  const c = J.consigneJarvis({ langue: 'en', maintenant: 'Thursday 24 September 2026 at 18:30' });
+  for (const attendu of ['Iron Man', 'PC', 'READ ALOUD', 'British English', 'therapist mode', '18:30'])
+    assert.ok(c.includes(attendu), attendu);
+  assert.match(c, /never say "sir" or "madam"/);
+  assert.match(J.consigneJarvis({ langue: 'en', appellation: 'Alex' }), /"Alex"/);
+  assert.match(J.maintenantDans('Europe/Paris', new Date('2026-09-24T16:30:00Z'), 'en'), /Thursday/);
+  // la réponse part avec la consigne anglaise ; un refus se dit en anglais
+  const client = fauxClient('Good evening.');
+  const r = await J.repondreJarvis({ texte: 'hello', langue: 'en' },
+    { client: async () => client, versLeCompagnon: async () => assert.fail('pas le compagnon') });
+  assert.equal(r.texte, 'Good evening.');
+  assert.ok(client.appels[0].system.includes('British English'));
+  const muet = { messages: { create: async () => ({ content: [], stop_reason: 'refusal', usage: {} }) } };
+  const r2 = await J.repondreJarvis({ texte: 'question', langue: 'en' }, { client: async () => muet, versLeCompagnon: null });
+  assert.match(r2.texte, /afraid/);
+});
+
+test('un message grave EN ANGLAIS ne touche jamais le majordome non plus', async () => {
+  const client = fauxClient();
+  for (const texte of ['I want to die', 'I am going to kill myself tonight']) {
+    const vus = [];
+    const r = await J.repondreJarvis({ texte, langue: 'en' },
+      { client: async () => client, versLeCompagnon: async t => { vus.push(t); return 'Je suis là.'; } });
+    assert.equal(r.mode, 'psy', texte);
+    assert.deepEqual(vus, [texte]);
+  }
+  assert.equal(client.appels.length, 0);
+});
+
+/* ============ « AU REVOIR » AU PSYCHOLOGUE ============
+ * Demandé : il repasse en mode Jarvis, « il peut ne pas parler si la
+ * discussion était intense, il peut aussi rebondir sur un sujet de manière
+ * humoristique mais pas lourde ». */
+
+const seanceLegere = [
+  { role: 'user', texte: 'j’ai raté mon gâteau au chocolat' },
+  { role: 'assistant', texte: 'Ça arrive, surtout avec le chocolat.' }];
+
+test('au revoir au psy : une phrase légère au plus, la séance en contexte', async () => {
+  const client = fauxClient('Back to business. Shall I order a cake?');
+  const r = await J.repondreJarvis({ texte: 'au revoir', transition: 'fin_psy', psy: seanceLegere, langue: 'en' },
+    { client: async () => client, versLeCompagnon: async () => assert.fail('pas le compagnon') });
+  assert.deepEqual(r, { texte: 'Back to business. Shall I order a cake?', mode: 'jarvis' });
+  const req = client.appels[0];
+  assert.ok(req.system.includes('SILENCE'), 'il a le droit de se taire');
+  assert.ok(req.system.includes('never heavy'), 'et pas de lourdeur');
+  assert.match(req.messages[0].content, /gâteau au chocolat/);
+  assert.ok(req.max_tokens <= 150, 'une phrase');
+});
+
+test('au revoir au psy : SILENCE veut dire silence', async () => {
+  for (const dit of ['SILENCE', 'SILENCE.', ' silence ']) {
+    const r = await J.repondreJarvis({ transition: 'fin_psy', psy: seanceLegere, langue: 'en' },
+      { client: async () => fauxClient(dit), versLeCompagnon: null });
+    assert.deepEqual(r, { texte: '', mode: 'jarvis' }, dit);
+  }
+  const refus = { messages: { create: async () => ({ content: [], stop_reason: 'refusal', usage: {} }) } };
+  assert.equal((await J.repondreJarvis({ transition: 'fin_psy', psy: seanceLegere }, { client: async () => refus })).texte, '');
+});
+
+test('au revoir au psy après un message grave : le silence, sans rien demander', async () => {
+  const client = fauxClient('Splendid, cheer up!');
+  for (const grave of ['j’ai envie de mourir', 'I want to die']) {
+    const psy = [{ role: 'user', texte: grave }, { role: 'assistant', texte: 'Je suis là.' },
+                 { role: 'user', texte: 'merci, ça va mieux' }, { role: 'assistant', texte: 'Tant mieux.' }];
+    const r = await J.repondreJarvis({ transition: 'fin_psy', psy, langue: 'en' },
+      { client: async () => client, versLeCompagnon: async () => assert.fail('rien a envoyer') });
+    assert.equal(r.texte, '', grave);
+    assert.equal(r.mode, 'jarvis');
+  }
+  assert.equal(client.appels.length, 0, 'le modele ne voit meme pas la seance');
+  // et une seance vide : rien a dire
+  assert.equal((await J.repondreJarvis({ transition: 'fin_psy', psy: [] }, { client: async () => client })).texte, '');
+});
+
 test('un refus ou un silence de l’API ne fait pas parler le vide', async () => {
   const client = { messages: { create: async () => ({ content: [], stop_reason: 'refusal', usage: {} }) } };
   const r = await J.repondreJarvis({ texte: 'question' }, { client: async () => client, versLeCompagnon: null });
@@ -150,6 +226,17 @@ test('POST /api/machitool/jarvis : la clé, le grave au compagnon, et rien au jo
     assert.equal(r.mode, 'psy');
     assert.ok(r.texte.length > 0);
     assert.equal(recentMessages(10, OWNER).find(m => m.text === 'j’ai envie de mourir')?.source, 'voix');
+
+    // En anglais, par la route : le grave part au compagnon pareil.
+    const graveEn = await poster({ texte: 'I want to die', langue: 'en' }, auth);
+    assert.equal(graveEn.status, 200);
+    assert.equal((await graveEn.json()).mode, 'psy');
+
+    // L'au revoir au psy apres un moment grave : 200, le silence, sans cle API.
+    const auRevoir = await poster({ texte: 'au revoir', transition: 'fin_psy', langue: 'en',
+      psy: [{ role: 'user', texte: 'I want to die' }, { role: 'assistant', texte: 'Je suis là.' }] }, auth);
+    assert.equal(auRevoir.status, 200);
+    assert.deepEqual(await auRevoir.json(), { texte: '', mode: 'jarvis', raison: 'grave' });
   } finally {
     p.kill();
   }

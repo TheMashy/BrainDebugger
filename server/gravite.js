@@ -47,12 +47,43 @@ export const PASSIF = [
   /\b(?:plein|tous|tout|toutes) (?:d |de |mes |les )?(?:anxios?|anxiolytiques?|medocs?|cachets?|comprimes?|somniferes?)\b/,
 ];
 
+/**
+ * ET EN ANGLAIS. Jarvis parle anglais depuis que la personne l'a demandé, et
+ * on lui répond dans sa langue : « I want to die » passait chez le majordome,
+ * parce que seul « suicide » s'écrit pareil dans les deux langues. Ce qu'un
+ * message grave déclenche — le compagnon, le journal, la section crise — ne
+ * doit pas dépendre de la langue dans laquelle il est dit.
+ *
+ * Toujours une INTENTION envers soi (« kill myself », « end my life ») et pas
+ * un mot : « kill the lights » est une commande, « this game is killing me »
+ * une façon de parler, « I could die for a pizza » une faim.
+ * (Les apostrophes sont devenues des espaces : « don t », « i d ».)
+ */
+export const PASSIF_EN = [
+  /\b(?:want|wanna|going|gonna|ready|planning|plan|trying|tried|try|need) to (?:die|kill myself|end (?:it all|it|my life|everything)|hurt myself|harm myself|disappear)\b/,
+  /\bkill(?:ing)? myself\b/,
+  /\bend (?:it all|my life)\b/,
+  /\b(?:don t|do not|dont|no longer) want to (?:live|be alive|exist|wake up|be here|go on|keep going)\b/,
+  /\bno (?:reason|point) (?:to|in) (?:live|living|go on|going on|be alive|carry on|carrying on)\b/,
+  /\bbetter off (?:dead|without me)\b/,
+  /\b(?:hurt|harm|cut) myself\b/,
+  /\bself ?harm/,
+  /\bsuicid(?:e|al)\b/,
+  /\b(?:sleep|go to sleep|fall asleep) (?:forever|and never wake up|and not wake up)\b/,
+  /\bhope i (?:don t|do not|never) wake up\b/,
+  /\b(?:wish|want) (?:i was|i were|to be) dead\b/,
+  /\bwish i (?:was|were|had) never (?:been )?born\b/,
+  /\b(?:take|swallow|down|overdose on) (?:all|the whole|a whole|every)\b.{0,20}\b(?:pills|meds|medication|tablets|bottle|box|pack)\b/,
+  /\boverdos(?:e|ing)\b/,
+  /\bcan t (?:go on|do this anymore|keep going)\b/,
+];
+
 /** Ce message dit-il, même à demi-mot, qu'il voudrait ne plus être là ? */
 export function messageGrave(texte) {
   const t = String(texte ?? '');
   if (niveauDuTexte(t)?.niveau) return true;
   const n = norm(t);
-  return PASSIF.some(r => r.test(n));
+  return PASSIF.some(r => r.test(n)) || PASSIF_EN.some(r => r.test(n));
 }
 
 /**

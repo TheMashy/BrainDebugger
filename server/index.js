@@ -486,9 +486,11 @@ async function traiter(req, res) {
     });
     try {
       const corps = await readBody(req);
+      const langue = corps?.langue === 'en' ? 'en' : 'fr';
       const r = await repondreJarvis({
         texte: corps?.texte, historique: corps?.historique, appellation: corps?.appellation,
-        maintenant: maintenantDans(zoneCourante())
+        maintenant: maintenantDans(zoneCourante(), new Date(), langue), langue,
+        transition: corps?.transition === 'fin_psy' ? 'fin_psy' : '', psy: corps?.psy
       }, {
         client: () => clientDe(getSettings(userId)),
         versLeCompagnon: async texte => (await routes['POST /api/message'](

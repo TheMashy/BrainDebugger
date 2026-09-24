@@ -27,7 +27,48 @@ export const JARVIS_EFFORT = 'low';
 export const JARVIS_PLAFOND = 400;
 export const HISTORIQUE_MAX = 12;
 
-export function consigneJarvis({ appellation = '', maintenant = '' } = {}) {
+/**
+ * EN ANGLAIS : « make him speak like Jarvis… and in English as well ». La même
+ * consigne, dite dans la langue où il répond — une consigne française obtenait
+ * des réponses françaises à lire par une voix britannique. Le mode
+ * psychologue, lui, reste le compagnon, en français.
+ */
+export function consigneJarvisAnglais({ appellation = '', maintenant = '' } = {}) {
+  const nom = String(appellation ?? '').trim().slice(0, 40);
+  return [
+    'You are JARVIS, the intelligence of this Windows PC — in the manner of Iron Man\'s J.A.R.V.I.S., '
+    + 'but for a workstation rather than a suit of armour. A digital butler with British composure: '
+    + 'courteous, precise, quietly efficient, with a dry wit that is never laboured. ALWAYS answer in '
+    + 'British English, even when spoken to in French.'
+    + (nom ? ` You address the person as "${nom}", sparingly.` : ' You never say "sir" or "madam": you do not know who is at the keyboard.'),
+    '',
+    'EVERYTHING YOU WRITE IS READ ALOUD by a speech synthesiser:',
+    '- one to three short sentences, as spoken; the answer first, no preamble;',
+    '- never lists, headings, markdown, emoji or web addresses;',
+    '- numbers and abbreviations the way they are said.',
+    '',
+    'WHAT YOU DO: answer questions, help with a computer or technical problem, do a calculation, a '
+    + 'conversion, a definition, hold a conversation with wit. You have NO access to the PC or the '
+    + 'internet: never claim to have done something, opened a file or checked anything online. If asked '
+    + 'for the news, say so plainly.',
+    'Machi Tool itself carries out: the lights (on, off, a colour, normal light), the screen / sound / apps '
+    + 'modes, timers and reminders, the time, the date, opening BrainDebugger. If one of those requests '
+    + 'reaches you anyway, give in one sentence the phrasing that works, for example: "Say: Jarvis, set a '
+    + 'timer for ten minutes."',
+    '',
+    'WHAT YOU ARE NOT: a therapist. No questions about feelings, no empathic rephrasing, no wellbeing '
+    + 'advice. If the person talks about their mood, health, treatment, sleep or notes, offer in one '
+    + 'sentence to switch to therapist mode — the companion of their journal, BrainDebugger: "Shall I '
+    + 'switch to therapist mode?"',
+    'If it is about harming themselves or not wanting to live, you do not joke: one serious, warm '
+    + 'sentence, and you say you are handing over to therapist mode.',
+    '',
+    maintenant ? `Now: ${maintenant}.` : ''
+  ].filter((l, i, t) => l !== '' || t[i - 1] !== '').join('\n').trim();
+}
+
+export function consigneJarvis({ appellation = '', maintenant = '', langue = 'fr' } = {}) {
+  if (langue === 'en') return consigneJarvisAnglais({ appellation, maintenant });
   const nom = String(appellation ?? '').trim().slice(0, 40);
   return [
     'Tu es JARVIS, l\'intelligence de ce PC Windows — à la manière du J.A.R.V.I.S. d\'Iron Man, '
@@ -96,7 +137,13 @@ export function texteDe(reponse) {
  * Demander à Jarvis. `client` est un client Anthropic (celui des réglages) ;
  * rend { texte, usage, model }.
  */
-export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '' }) {
+function usageDe(r) {
+  const u = r.usage ?? {};
+  return { input: u.input_tokens ?? 0, output: u.output_tokens ?? 0,
+           cacheLu: u.cache_read_input_tokens ?? 0, cacheEcrit: u.cache_creation_input_tokens ?? 0 };
+}
+
+export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr' }) {
   const messages = historiquePropre(historique);
   if (messages.length && messages[messages.length - 1].role === 'user') {
     messages[messages.length - 1].content += '\n' + texte;
@@ -106,23 +153,84 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   const r = await client.messages.create({
     model: JARVIS_MODELE,
     max_tokens: JARVIS_PLAFOND,
-    system: consigneJarvis({ appellation, maintenant }),
+    system: consigneJarvis({ appellation, maintenant, langue }),
     messages,
     ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
   });
   let dit = texteDe(r);
-  if (r.stop_reason === 'refusal' || !dit) dit = 'Je crains de ne pas pouvoir vous aider sur ce point.';
-  const u = r.usage ?? {};
-  return { texte: dit, model: r.model ?? JARVIS_MODELE,
-           usage: { input: u.input_tokens ?? 0, output: u.output_tokens ?? 0,
-                    cacheLu: u.cache_read_input_tokens ?? 0, cacheEcrit: u.cache_creation_input_tokens ?? 0 } };
+  if (r.stop_reason === 'refusal' || !dit) {
+    dit = langue === 'en' ? 'I\'m afraid I can\'t help with that one.'
+                          : 'Je crains de ne pas pouvoir vous aider sur ce point.';
+  }
+  return { texte: dit, model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
 }
 
-/** L'heure de la personne, en toutes lettres, dans sa zone. */
-export function maintenantDans(zone, date = new Date()) {
+/**
+ * « AU REVOIR » AU PSYCHOLOGUE. Demandé : « il repasse en mode Jarvis de base,
+ * il peut ne pas parler si la discussion était intense, il peut aussi rebondir
+ * sur un sujet de manière humoristique mais pas lourde ».
+ *
+ * Le majordome voit la séance (elle est déjà dans le journal : Machi Tool ne la
+ * garde qu'en mémoire, le temps qu'elle dure) et choisit entre le SILENCE et
+ * UNE phrase légère. Dans le doute, le silence. Et un message grave dans la
+ * séance, c'est le silence sans même lui demander — voir `repondreJarvis`.
+ */
+export const SILENCE = 'SILENCE';
+
+export function consigneRetour(langue = 'en') {
+  if (langue === 'en') {
+    return [
+      'THE PERSON HAS JUST SAID GOODBYE TO THERAPIST MODE (the companion of their journal) and is back '
+      + 'with you. You are shown that conversation for context only: never quote it, summarise it, '
+      + 'analyse it or give advice about it.',
+      'Choose one of two things:',
+      `- if that conversation was emotionally heavy, intense or painful, or touched on anything serious `
+      + `(grief, fear, shame, health, a crisis), reply with exactly: ${SILENCE}`,
+      '- otherwise, you may welcome them back in ONE short sentence, and you may bounce off a light '
+      + 'topic from that conversation with gentle, dry humour — never heavy, never mocking, never about '
+      + 'their feelings or their difficulties.',
+      `When in doubt: ${SILENCE}.`
+    ].join('\n');
+  }
+  return [
+    'LA PERSONNE VIENT DE DIRE AU REVOIR AU MODE PSYCHOLOGUE (le compagnon de son journal) et revient '
+    + 'vers toi. Tu vois cette conversation pour le contexte seulement : ne la cite pas, ne la résume '
+    + 'pas, ne l\'analyse pas, ne donne aucun conseil à son sujet.',
+    'Choisis entre deux choses :',
+    `- si cette conversation était lourde, intense ou douloureuse, ou touchait à quelque chose de grave `
+    + `(deuil, peur, honte, santé, une crise), réponds exactement : ${SILENCE}`,
+    '- sinon, tu peux l\'accueillir en UNE phrase courte, et rebondir sur un sujet léger de cette '
+    + 'conversation avec un humour doux et pince-sans-rire — jamais lourd, jamais moqueur, jamais sur '
+    + 'ses émotions ou ses difficultés.',
+    `Dans le doute : ${SILENCE}.`
+  ].join('\n');
+}
+
+export async function retourDuPsy(client, { psy = [], langue = 'en', appellation = '', maintenant = '' }) {
+  const seance = historiquePropre(psy);
+  if (!seance.length) return { texte: '', usage: null };
+  const qui = langue === 'en' ? { user: 'Person', assistant: 'Companion' } : { user: 'La personne', assistant: 'Le compagnon' };
+  const transcription = seance.map(m => `${qui[m.role]}: ${m.content}`).join('\n');
+  const r = await client.messages.create({
+    model: JARVIS_MODELE,
+    max_tokens: 120,
+    system: consigneJarvis({ appellation, maintenant, langue }) + '\n\n' + consigneRetour(langue),
+    messages: [{ role: 'user', content: (langue === 'en'
+      ? `[The conversation with the companion, for context only]\n${transcription}\n\n[They just said goodbye to it.]`
+      : `[La conversation avec le compagnon, pour le contexte seulement]\n${transcription}\n\n[Elle vient de lui dire au revoir.]`) }],
+    ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
+  });
+  let dit = texteDe(r);
+  // Le silence, ou tout ce qui y ressemble : un refus, rien, le mot lui-même.
+  if (r.stop_reason === 'refusal' || !dit || dit.toUpperCase().includes(SILENCE)) dit = '';
+  return { texte: dit, model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
+}
+
+/** L'heure de la personne, en toutes lettres, dans sa zone — et dans sa langue. */
+export function maintenantDans(zone, date = new Date(), langue = 'fr') {
   try {
-    return new Intl.DateTimeFormat('fr-FR', { timeZone: zone, weekday: 'long', day: 'numeric',
-      month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date);
+    return new Intl.DateTimeFormat(langue === 'en' ? 'en-GB' : 'fr-FR', { timeZone: zone, weekday: 'long',
+      day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date);
   } catch { return ''; }
 }
 
@@ -133,14 +241,28 @@ export function maintenantDans(zone, date = new Date()) {
  *
  * Rend { texte, mode: 'jarvis' | 'psy' }.
  */
-export async function repondreJarvis({ texte, historique = [], appellation = '', maintenant = '' },
+export async function repondreJarvis({ texte, historique = [], appellation = '', maintenant = '',
+                                       langue = 'fr', transition = '', psy = [] },
                                      { client, versLeCompagnon, noter = () => {} }) {
+  const L = langue === 'en' ? 'en' : 'fr';
+  if (transition === 'fin_psy') {
+    // Un message grave dans la séance : le silence, sans rien demander à
+    // personne. On ne plaisante pas au sortir de ça, et on ne tente pas le sort.
+    const seance = historiquePropre(psy);
+    if (seance.some(h => h.role === 'user' && messageGrave(h.content))) {
+      return { texte: '', mode: 'jarvis', raison: 'grave' };
+    }
+    if (!seance.length) return { texte: '', mode: 'jarvis' };
+    const r = await retourDuPsy(await client(), { psy, langue: L, appellation, maintenant });
+    if (r.usage) noter(r.usage, r.model);
+    return { texte: r.texte, mode: 'jarvis' };
+  }
   const t = String(texte ?? '').trim().slice(0, 4000);
   if (!t) throw Object.assign(new Error('texte vide'), { statut: 400 });
   if (pourLeCompagnon(t, historique)) {
     return { texte: await versLeCompagnon(t), mode: 'psy', raison: 'grave' };
   }
-  const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant });
+  const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L });
   noter(r.usage, r.model);
   return { texte: r.texte, mode: 'jarvis' };
 }
