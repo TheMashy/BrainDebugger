@@ -32,6 +32,15 @@ test('ce que la veille voit (un geste, un objet en main) compte aussi', () => {
     assert.equal(messageGrave(t), true, t);
 });
 
+test('l’ENVIE de tout prendre compte, pas seulement la prise faite', () => {
+  for (const t of ["j'ai envie de prendre plein d'anxios",
+                   "m'envoyer un joint et tout mes anxios avec du caravan palace",
+                   'avaler toute la plaquette'])
+    assert.equal(messageGrave(t), true, t);
+  for (const t of ['je prends mon anxio du soir', 'tout mes amis sont là', 'on a pris tous les billets'])
+    assert.equal(messageGrave(t), false, t);
+});
+
 test('une soirée ordinaire ne l’est pas', () => {
   for (const t of ['je fais une liste de courses', 'je suis mort de rire', 'on a fini le film',
                    'la négo il m a dit que 170 c était trop brutal', 'je vais dormir, bonne nuit'])

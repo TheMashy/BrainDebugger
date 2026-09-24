@@ -40,6 +40,11 @@ export const PASSIF = [
   /\bne plus (?:etre la|exister|etre vivant)\b/,
   /\b(?:mourir|me tuer|me suicider|suicide|suicidaire)\b/,
   /\ba quoi bon (?:vivre|continuer|tout ca)\b/,
+  // Prendre d'un coup ce qu'on a sous la main : « plein d'anxios », « toute la
+  // plaquette », « m'envoyer tous mes anxios ». La veille ne voit que la prise
+  // FAITE ; l'envie compte autant pour qui doit la lire.
+  /\b(?:prendre|avaler|m envoyer|m enfiler|gober)\b.{0,30}\b(?:plein|tous|toutes|toute|la boite|la plaquette|tout le tube)\b.{0,20}\b(?:anxios?|anxiolytiques?|medocs?|medicaments?|cachets?|comprimes?|pilules?|somniferes?|xanax|lexo(?:mil)?|valium|boite|plaquette)\b/,
+  /\b(?:plein|tous|tout|toutes) (?:d |de |mes |les )?(?:anxios?|anxiolytiques?|medocs?|cachets?|comprimes?|somniferes?)\b/,
 ];
 
 /** Ce message dit-il, même à demi-mot, qu'il voudrait ne plus être là ? */

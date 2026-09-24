@@ -20,6 +20,8 @@ import { usageFor, record as recordUsage, serieUsage, profilUsage, FENETRES,
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
+import { debutDuRapport, unites, messagesDuRapport, choixParDefaut, assembler, notesDuRapport,
+         reperesDuRapport, texteAChoisir, CONSIGNE_CHOIX, OUTIL_CHOIX, MAX_TOTAL } from './rapport-seance.js';
 import { joursDuRendezVous, comptesDuRendezVous } from './rendez-vous.js';
 import { passagesSansVerdict, lancerLotVeille, releverLotVeille, MAX_PAR_LOT }
   from './juge-veille-lot.js';
@@ -37,7 +39,7 @@ import { occasionDeDemanderConso } from './demander-conso.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import * as connecteur from './connecteur.js';
-import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE } from './lecture.js';
+import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE, clientDe } from './lecture.js';
 import { sensDesLiens } from './sens.js';
 import { etats as etatsMotifs, injecterPromus, SEUILS_PROMOTION } from './promotion.js';
 import { nuitDe, archetypeDe, usageDuJour, resumeDuJour, estDetail, enMinutes,
@@ -59,7 +61,8 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
 import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock, demanderConsoBlock, posteBlock,
-         CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
+         CARNET_CAR, ANTHROPIC_MODELS, testKey, demanderOutil, optionsDuModele,
+         plafondDuCompagnon } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
@@ -3322,6 +3325,41 @@ export const routes = {
 
   'POST /api/qs/journal/vider': ({ userId }) => ({ vides: viderJournalQS(userId) }),
 
+  /* ---------- le rapport depuis la dernière séance ---------- */
+
+  'GET /api/rapport-seance/debut': ({ userId }) => debutDuRapport(userId, jourVecu(userId)),
+
+  /*
+   * LE RELEVÉ, À RELIRE AVANT D'IMPRIMER. Le PDF, lui, se fabrique dans le
+   * navigateur à partir de ce que la personne a gardé (web/pdf.js).
+   */
+  'GET /api/rapport-seance': async ({ query, userId }) => {
+    const fin = jourVecu(userId);
+    const debut = /^\d{4}-\d{2}-\d{2}$/.test(String(query?.depuis ?? ''))
+      ? String(query.depuis) : debutDuRapport(userId, fin).debut;
+    if (debut > fin) return { error: 'la date de départ est dans le futur' };
+    const liste = unites(messagesDuRapport(userId, debut, fin));
+    let choisis, choix = 'automatique', pourquoi = null;
+    const s = getSettings(userId);
+    if (liste.length && s.chatBackend === 'anthropic') {
+      try {
+        const r = await choisirAvecLeModele(liste, s);
+        choisis = r.numeros;
+        choix = 'modele';
+        recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'rapport');
+      } catch (err) {
+        pourquoi = String(err?.message ?? err).slice(0, 200);
+      }
+    }
+    if (!choisis) choisis = choixParDefaut(liste);
+    return {
+      debut, fin, choix, pourquoi, lues: liste.length,
+      jours: assembler({ debut, fin, liste, choisis,
+                         notes: notesDuRapport(userId, debut, fin),
+                         reperes: reperesDuRapport(userId, debut, fin) })
+    };
+  },
+
   /* ---------- le suivi : les séances, et le compte rendu ---------- */
 
   'GET /api/seances': ({ userId }) => ({ seances: allSeances(userId) }),
@@ -4285,6 +4323,34 @@ export function poserCeQuIlDit(body, userId = OWNER) {
   if (!r) return { erreur: 'valeur illisible' };
   invalidate(userId);
   return { ok: true, releve: r, messageId: Number(m.id) };
+}
+
+/**
+ * LE MODÈLE CHOISIT, IL N'ÉCRIT PAS. Il rend des numéros ; tout numéro qui
+ * n'est pas dans la liste est jeté, et le texte vient toujours de la base.
+ */
+export async function choisirAvecLeModele(liste, s, client = null) {
+  const model = s.anthropicModel || 'claude-opus-5-5';
+  const demande = demanderOutil(model, OUTIL_CHOIX.name);
+  const options = optionsDuModele(model, { effort: 'low', repli: false });
+  client ??= await clientDe(s);
+  const res = await client.messages.create({
+    model,
+    max_tokens: plafondDuCompagnon(options),
+    ...options,
+    system: CONSIGNE_CHOIX,
+    tools: [OUTIL_CHOIX],
+    tool_choice: demande.tool_choice,
+    messages: [{ role: 'user', content: demande.consigne + texteAChoisir(liste) }]
+  });
+  const appel = res.content?.find(b => b.type === 'tool_use');
+  if (!appel) throw new Error(`le modèle n'a pas rendu de choix (fin : ${res.stop_reason})`);
+  const connus = new Set(liste.map(u => u.id));
+  const numeros = [...new Set((appel.input?.numeros ?? []).map(Number))].filter(n => connus.has(n)).slice(0, MAX_TOTAL);
+  const u = res.usage ?? {};
+  return { numeros, modele: res.model ?? model,
+           usage: { input: u.input_tokens ?? 0, output: u.output_tokens ?? 0,
+                    cacheLu: u.cache_read_input_tokens ?? 0, cacheEcrit: u.cache_creation_input_tokens ?? 0 } };
 }
 
 /**

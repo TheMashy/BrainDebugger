@@ -2601,6 +2601,11 @@ async function renderYear(year) {
           <button class="btn ghost" id="rdvdoc">${ico('sortir', 14)}Préparer un document pour un rendez-vous</button>
           <span class="faint">le parcours depuis la naissance, puis les 30 derniers jours</span>
         </div>
+        <div class="rdvligne">
+          <button class="btn ghost" id="rapportSeance" aria-expanded="false">${ico('sortir', 14)}Rapport depuis ma dernière séance</button>
+          <span class="faint">tes phrases exactes, jour par jour — à relire, puis en PDF</span>
+        </div>
+        <div class="rapport" id="rapportPanneau" hidden></div>
         ${/*
            * LA RELECTURE DES SIGNES EST POSÉE JUSTE SOUS LE DOCUMENT, ET PAS
            * DANS LES RÉGLAGES.
@@ -2732,6 +2737,7 @@ async function renderYear(year) {
 
   wireFrise();
   wireDocRdv();
+  wireRapportSeance();
   wireJugerVeille();
   wireReperes(year);
 
@@ -3120,6 +3126,120 @@ function friseMarkup(events) {
  * d'une promesse n'est plus rattaché au clic, et Safari comme Firefox le
  * bloquent. On ouvre donc l'onglet tout de suite, on y écrit ensuite.
  */
+/* =====================================================================
+ * LE RAPPORT DEPUIS LA DERNIÈRE SÉANCE.
+ *
+ * Trois temps, et le deuxième est obligatoire : on choisit d'où il part, on
+ * RELIT ce qui a été retenu (et on retire ce qu'on ne veut pas tendre), puis
+ * le PDF se fabrique ici, dans le navigateur. Voir server/rapport-seance.js
+ * pour ce que la machine a le droit d'y écrire — des dates, rien d'autre.
+ * ===================================================================== */
+let RAPPORT = null;
+let RAPPORT_RETIREES = new Set();
+
+function wireRapportSeance() {
+  const b = document.getElementById('rapportSeance');
+  const el = document.getElementById('rapportPanneau');
+  if (!b || !el) return;
+  b.onclick = async () => {
+    const ouvert = el.hidden;
+    el.hidden = !ouvert;
+    b.setAttribute('aria-expanded', String(ouvert));
+    if (!ouvert) return;
+    el.innerHTML = '<p class="faint">Je cherche ta dernière séance…</p>';
+    let d;
+    try { d = await api('/api/rapport-seance/debut'); }
+    catch (err) { el.innerHTML = `<p class="faint">${esc(err.message)}</p>`; return; }
+    const source = d.source === 'seance' ? 'ta dernière séance enregistrée'
+      : d.source === 'journal' ? `le dernier rendez-vous raconté dans ton journal : « ${esc(d.indice)} »`
+      : 'aucun rendez-vous trouvé — deux semaines par défaut';
+    el.innerHTML = `
+      <div class="rapdepuis">
+        <label for="rapportDepuis">Depuis le</label>
+        <input type="date" id="rapportDepuis" value="${esc(d.debut)}">
+        <span class="faint">${source}</span>
+      </div>
+      ${d.trouves?.length > 1 ? `<div class="rapchips"><span class="faint">rendez-vous trouvés :</span>
+        ${d.trouves.map(t => `<button class="chip" data-depuis="${esc(t.date)}" title="${esc(t.phrase)}"
+          >${esc(fmtDay(t.date))} · ${esc(t.praticien)}</button>`).join('')}</div>` : ''}
+      <button class="btn" id="rapportPreparer">Préparer le relevé</button>
+      <div id="rapportApercu"></div>`;
+    el.querySelector('.rapchips')?.addEventListener('click', e => {
+      const c = e.target.closest('[data-depuis]');
+      if (c) $('#rapportDepuis').value = c.dataset.depuis;
+    });
+    $('#rapportPreparer').onclick = () => preparerRapport();
+  };
+}
+
+async function preparerRapport() {
+  const zone = $('#rapportApercu');
+  const bouton = $('#rapportPreparer');
+  zone.innerHTML = '<p class="faint">Je relis ton journal depuis cette date…</p>';
+  bouton.disabled = true;
+  try {
+    RAPPORT = await api(`/api/rapport-seance?depuis=${encodeURIComponent($('#rapportDepuis').value)}`);
+    RAPPORT_RETIREES = new Set();
+    dessinerRapport();
+  } catch (err) {
+    zone.innerHTML = `<p class="faint">${esc(err.message)}</p>`;
+  } finally {
+    bouton.disabled = false;
+  }
+}
+
+function dessinerRapport() {
+  const r = RAPPORT;
+  const zone = $('#rapportApercu');
+  if (!r || !zone) return;
+  const nb = r.jours.reduce((s, j) => s + j.moments.reduce((t, m) => t + m.citations.length, 0), 0);
+  zone.innerHTML = `
+    <p class="faint rapinfo">${nb} phrase${nb > 1 ? 's' : ''} retenue${nb > 1 ? 's' : ''} sur ${r.lues} —
+      ${r.choix === 'modele' ? 'choisies par le modèle, sans rien réécrire' : 'sélection automatique'}${
+      r.pourquoi ? ` (le modèle n’a pas pu choisir : ${esc(r.pourquoi)})` : ''}.
+      Tout ce qui parle de mourir, de te faire du mal ou de prendre quelque chose est gardé d’office.
+      Retire ce que tu ne veux pas tendre.</p>
+    <div class="rapjours">${r.jours.map(j => `
+      <div class="rapjour">
+        <b>${esc(j.date === r.fin ? "Aujourd'hui" : fmtDay(j.date))}</b>${j.note != null ? ` <span class="faint">${j.note}/10</span>` : ''}
+        ${j.reperes.map(x => `<div class="raprepere">Repère : ${esc(x)}</div>`).join('')}
+        ${j.moments.map(m => `<div class="rapmoment">${m.periode && j.moments.length > 1 ? `<span class="faint">${esc(m.periode)}</span>` : ''}
+          ${m.citations.map(c => `<span class="rapcit${RAPPORT_RETIREES.has(c.id) ? ' retiree' : ''}${c.grave ? ' grave' : ''}">« ${esc(c.texte)} »
+            <button data-retirer="${c.id}" aria-label="${RAPPORT_RETIREES.has(c.id) ? 'Remettre' : 'Retirer'} cette phrase"
+              title="${RAPPORT_RETIREES.has(c.id) ? 'remettre' : 'retirer'}">${RAPPORT_RETIREES.has(c.id) ? '↺' : '×'}</button></span>`).join('')}
+        </div>`).join('')}
+      </div>`).join('') || '<p class="faint">Rien d’écrit sur cette période.</p>'}</div>
+    <div class="rapfin">
+      <label><input type="checkbox" id="rapportRetenir" checked> retenir aujourd’hui comme ma dernière séance</label>
+      <button class="btn" id="rapportPdf">${ico('sortir', 14)}Télécharger le PDF</button>
+    </div>`;
+  zone.querySelector('.rapjours').onclick = e => {
+    const b = e.target.closest('[data-retirer]');
+    if (!b) return;
+    const id = Number(b.dataset.retirer);
+    if (RAPPORT_RETIREES.has(id)) RAPPORT_RETIREES.delete(id); else RAPPORT_RETIREES.add(id);
+    dessinerRapport();
+  };
+  $('#rapportPdf').onclick = () => telechargerRapport();
+}
+
+async function telechargerRapport() {
+  const r = RAPPORT;
+  const [{ documentPdf }, { paragraphesDuRapport, nomDuFichier }] =
+    await Promise.all([import('./pdf.js'), import('./rapport-seance.js')]);
+  const octets = documentPdf({ titre: 'Depuis ma dernière séance', pied: `Relevé du ${fmtDay(r.fin)}`,
+                               paragraphes: paragraphesDuRapport(r, RAPPORT_RETIREES) });
+  const url = URL.createObjectURL(new Blob([octets], { type: 'application/pdf' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nomDuFichier(r);
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  if ($('#rapportRetenir')?.checked) {
+    try { await api('/api/seances', { date: r.fin, praticien: 'psy' }); toast('PDF prêt. La prochaine fois, le relevé partira d’aujourd’hui.'); }
+    catch { toast('PDF prêt.'); }
+  } else toast('PDF prêt.');
+}
+
 function wireDocRdv() {
   const b = document.getElementById('rdvdoc');
   if (!b) return;

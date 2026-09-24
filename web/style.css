@@ -4907,3 +4907,23 @@ details.jpecol .jpetop { margin-top: 5px; }
   display: flex; align-items: center; gap: 5px; margin-top: 6px;
   font-size: 11.5px; color: var(--warn, hsl(38 80% 62%)); opacity: .85;
 }
+
+/* ---- le rapport depuis la dernière séance ---- */
+.rapport { display: grid; gap: 12px; margin: 4px 0 14px; padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.rapdepuis { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.rapdepuis input { width: auto; }
+.rapchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
+.rapinfo { margin: 0; font-size: 12.5px; }
+.rapjours { display: grid; gap: 12px; max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+.rapjour { display: grid; gap: 5px; }
+.rapmoment { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding-left: 12px; }
+.rapmoment > .faint { font-size: 12px; }
+.raprepere { padding-left: 12px; font-size: 12.5px; color: var(--ink-dim); }
+.rapcit { font-family: Georgia, 'Times New Roman', serif; }
+.rapcit.grave { border-bottom: 1px dotted var(--warn); }
+.rapcit.retiree { text-decoration: line-through; opacity: .45; }
+.rapcit button { border: 0; background: none; color: var(--ink-faint); padding: 0 3px; font-size: 13px; cursor: pointer; }
+.rapcit button:hover { color: var(--ink); }
+.rapfin { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+[data-pudique] .rapcit { -webkit-text-fill-color: transparent; text-shadow: 0 0 8px currentColor; user-select: none; }
