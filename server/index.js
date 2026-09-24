@@ -11,12 +11,16 @@ import * as connecteur from './connecteur.js';
 import { analyser, apercuDe } from './mesures.js';
 import { oublierRythme } from './nuits.js';
 import { dansLaZone, zoneDeRequete, ZONE_SERVEUR } from './temps.js';
-import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi,
+import { DB_PATH, db, upsertUser, countUsers, OWNER, poserMesure, noterEnvoi, getSettings,
          poserActiviteJour, activiteJours, effacerMesures, apercu } from './db.js';
 import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
 import * as discord from './discord.js';
 import { commitDeploye, versionDuPaquet, DEMARRE_LE } from './version.js';
+import { repondreJarvis, maintenantDans } from './jarvis.js';
+import { clientDe } from './lecture.js';
+import { record as noterDepense } from './usage.js';
+import { zoneCourante } from './temps.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -461,6 +465,42 @@ async function traiter(req, res) {
       indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
     });
     return json(res, 200, { jours: activiteJours(userId) });
+  }
+
+  /* ---------- JARVIS, LE MAJORDOME DU PC ----------
+   *
+   * Le mode par défaut du mot d'éveil (orange) : un assistant de poste de
+   * travail à la manière du JARVIS d'Iron Man — Sonnet, effort bas, sans
+   * réflexion, pour répondre vite. Rien n'est rangé dans le journal : une
+   * question sur une imprimante n'est pas une journée. Sauf un message GRAVE,
+   * qui ne reste jamais chez le majordome : il part au compagnon, avec tout ce
+   * qui le protège, et la réponse dit `mode: 'psy'` pour que Machi Tool passe
+   * en bleu. Voir server/jarvis.js.
+   */
+  if (req.method === 'POST'
+      && (url.pathname === '/api/machitool/jarvis' || url.pathname === '/api/passerelle/jarvis')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      const corps = await readBody(req);
+      const r = await repondreJarvis({
+        texte: corps?.texte, historique: corps?.historique, appellation: corps?.appellation,
+        maintenant: maintenantDans(zoneCourante())
+      }, {
+        client: () => clientDe(getSettings(userId)),
+        versLeCompagnon: async texte => (await routes['POST /api/message'](
+          { body: { text: texte, source: 'voix' }, userId, req })).reponse ?? '',
+        noter: (u, model) => noterDepense(userId, model, u.input, u.output, u.cacheLu, u.cacheEcrit, 'jarvis')
+      });
+      return json(res, 200, r);
+    } catch (err) {
+      if (err.statut === 400) return json(res, 400, { error: err.message });
+      console.error('[jarvis]', String(err.message ?? err).slice(0, 200));
+      return json(res, 502, { error: String(err.message ?? err).slice(0, 200) });
+    }
   }
 
   /* ---------- ce qu'on dit à JARVIS, et que Machi Tool apporte ----------
