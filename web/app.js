@@ -2022,7 +2022,15 @@ async function finirDictee({ annuler = false } = {}) {
     input.setSelectionRange(curseur, curseur);
     autoSize(input);
   } catch (err) {
-    toast(err?.name === 'AbortError' ? 'Machi Tool a mis trop longtemps à répondre.' : String(err?.message ?? err), { duree: 4000 });
+    /* « Failed to fetch » brut, c'est la connexion coupée en pleine requête :
+       jusqu'à Machi Tool 1.26.1, le moteur tournait DANS l'application et
+       l'emportait en tombant. Depuis 1.26.2 il tourne à part, et une panne
+       revient ici en phrase claire (503) au lieu de couper la connexion. */
+    const coupe = err instanceof TypeError;
+    toast(err?.name === 'AbortError' ? 'Machi Tool a mis trop longtemps à répondre.'
+      : coupe ? 'La connexion à Machi Tool s’est coupée pendant la transcription. S’il s’est fermé, '
+              + 'relance-le : la version 1.26.2 isole le moteur de dictée pour que ça n’arrive plus.'
+      : String(err?.message ?? err), { duree: 7000 });
   } finally {
     marquerMicro(null);
   }

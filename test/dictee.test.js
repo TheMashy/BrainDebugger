@@ -96,3 +96,8 @@ test('trop lent et injoignable ne se disent pas pareil — et l’injoignable es
   const i = glue.indexOf("err?.name === 'AbortError'");
   assert.ok(glue.indexOf('lancerApp();', i) > i, 'l’injoignable doit être relancé, comme pour la synchro');
 });
+
+test('une connexion coupée ne s’affiche plus en « Failed to fetch »', () => {
+  assert.match(glue, /const coupe = err instanceof TypeError;/);
+  assert.match(glue, /La connexion à Machi Tool s’est coupée pendant la transcription/);
+});
