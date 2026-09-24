@@ -576,6 +576,7 @@ export const DEFAULT_SETTINGS = {
   petSprite: 'chaton',        // id integre, ou 'custom'
   petImage: null,             // data URL si petSprite === 'custom'
   blipEnabled: true,          // la voix du compagnon : un blip par syllabe
+  fondAnime: true,            // le décor WebGL — éteignable quand la machine ne suit pas
   blipVoice: 'aa',            // identifiant de timbre (voir web/blips.js)
   blipPitch: 1,               // 0.6 .. 1.6
   blipVolume: 0.7,            // 0 .. 1

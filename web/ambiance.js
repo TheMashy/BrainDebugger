@@ -121,16 +121,59 @@ void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
 
 const DUREE_FONDU = 9000;   // ms — assez lent pour qu'on ne voie pas le changement
 
+/*
+ * QUAND LA MACHINE NE SUIT PAS, LE FOND S'EFFACE.
+ *
+ * Vu en vrai : attente au chargement, PC qui rame, Claude qui plante à côté.
+ * Ce shader est léger sur une carte graphique ; il ne l'est plus du tout quand
+ * Chrome rend sur le PROCESSEUR — accélération matérielle coupée, ou retombée
+ * après un plantage du GPU. Mesuré ainsi : 150 à 300 ms par image, en continu.
+ * Un décor ne vaut pas ça.
+ *
+ * Trois gardes :
+ *   - pas de démarrage si le rendu est logiciel (SwiftShader, llvmpipe…) ;
+ *   - arrêt si LENTS_MAX images d'affilée arrivent à plus de LENT_MS d'écart ;
+ *   - arrêt si le GPU se réinitialise (contexte WebGL perdu).
+ * Les deux derniers sont RETENUS sur cet appareil une semaine : la machine
+ * n'a pas suivi, on ne lui redemande pas à chaque ouverture.
+ */
+export const RENDU_LOGICIEL = /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/i;
+export const LENT_MS = 150;
+export const LENTS_MAX = 8;
+const MEMO = 'bd-fond-coupe';
+const MEMO_DUREE = 7 * 86400000;
+
+/** Le compte d'images lentes d'affilée — remis à zéro par la première qui suit. */
+export const compterLenteur = (lents, ecart) => (ecart > LENT_MS ? lents + 1 : 0);
+
+function lireMemo() {
+  try {
+    const m = JSON.parse(localStorage.getItem(MEMO) || 'null');
+    return m && Date.now() - m.quand < MEMO_DUREE ? m.raison : null;
+  } catch { return null; }
+}
+function ecrireMemo(raison) {
+  try { localStorage.setItem(MEMO, JSON.stringify({ raison, quand: Date.now() })); } catch { /* stockage refusé */ }
+}
+function oublierMemo() { try { localStorage.removeItem(MEMO); } catch { /* idem */ } }
+
 export const Ambiance = {
   gl: null, prog: null, u: {}, canvas: null,
+  coupe: false, raison: null,
   a: 0, b: 0, mixDebut: 0, enFondu: false,
   energie: 0.35, cibleEnergie: 0.35,
   t0: 0, raf: null, actif: false,
 
   /** @returns {boolean} false si WebGL est indisponible — l'app marche sans. */
-  start() {
-    if (this.gl) return true;
+  start({ forcer = false } = {}) {
+    if (forcer) oublierMemo();
+    if (this.gl) {
+      if (this.coupe) { this.coupe = false; this.raison = null; this.canvas.style.display = ''; this.resume(); }
+      return true;
+    }
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    const memo = lireMemo();
+    if (memo) { this.raison = memo; return false; }
 
     const c = document.createElement('canvas');
     c.id = 'ambiance';
@@ -141,6 +184,18 @@ export const Ambiance = {
       powerPreference: 'low-power', preserveDrawingBuffer: false
     });
     if (!gl) { c.remove(); return false; }
+
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const rendu = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) || '');
+    if (RENDU_LOGICIEL.test(rendu)) {
+      c.remove();
+      this.raison = 'le navigateur dessine sans carte graphique';
+      return false;
+    }
+    c.addEventListener('webglcontextlost', e => {
+      e.preventDefault();
+      this.couper('la carte graphique a été réinitialisée', true);
+    });
 
     const src = PREAMBULE + SCENES_GLSL + dispatcher(SCENE_IDS);
     const prog = compile(gl, VERT, src);
@@ -165,7 +220,7 @@ export const Ambiance = {
     // Onglet caché : on arrête tout. Personne ne regarde, et une boucle de rendu
     // en arrière-plan est de la batterie prise à quelqu'un qui ne l'a pas demandé.
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') this.pause(); else this.resume();
+      if (document.visibilityState === 'hidden') this.pause(); else if (!this.coupe) this.resume();
     });
     this.resume();
     return true;
@@ -203,14 +258,28 @@ export const Ambiance = {
 
   pause() { if (this.raf) { cancelAnimationFrame(this.raf); this.raf = null; } this.actif = false; },
 
+  /** Arrête le fond et le cache. `retenir` : cet appareil ne le relancera pas avant une semaine. */
+  couper(raison, retenir = false) {
+    this.coupe = true;
+    this.raison = raison;
+    this.pause();
+    if (this.canvas) this.canvas.style.display = 'none';
+    if (retenir) ecrireMemo(raison);
+  },
+
   resume() {
-    if (this.actif || !this.gl) return;
+    if (this.actif || !this.gl || this.coupe) return;
     this.actif = true;
-    let dernier = 0;
+    let dernier = 0, lents = 0;
     const boucle = now => {
       this.raf = requestAnimationFrame(boucle);
       if (now - dernier < 33) return;          // ~30 images/s suffisent largement
+      lents = dernier ? compterLenteur(lents, now - dernier) : 0;
       dernier = now;
+      if (lents >= LENTS_MAX) {
+        this.couper('la machine ne suivait pas le fond animé', true);
+        return;
+      }
       this.frame(now);
     };
     this.raf = requestAnimationFrame(boucle);

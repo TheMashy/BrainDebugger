@@ -7999,6 +7999,13 @@ async function peindreReglages() {
           de ta carte restent. L'application se montre entière, sans que personne puisse la lire.
         </p>
         ${pudMarkup()}
+        ${segment('fondAnime', 'Le fond animé', [
+          { id: 'oui', label: 'animé', note: 'le décor qui suit la conversation' },
+          { id: 'non', label: 'éteint', note: 'plus léger pour la machine' }
+        ], s.fondAnime !== false, { bool: true })}
+        ${Ambiance.raison && s.fondAnime !== false ? `<p class="sub" style="margin:-4px 0 0;font-size:12.5px;color:var(--warn)">
+          Éteint sur cet appareil : ${esc(Ambiance.raison)}.${Ambiance.raison.includes('sans carte graphique') ? ''
+            : ' Remets « animé » pour réessayer.'}</p>` : ''}
         <p class="sub" style="margin:0;font-size:12.5px">
           Ça ne change rien à ce qui est enregistré — c'est un rideau, pas une gomme.
           <b>Toi non plus</b> tu ne peux plus lire pendant ce temps : c'est ce qui fait
@@ -8035,6 +8042,8 @@ async function peindreReglages() {
       for (const x of rangee.querySelectorAll('button'))
         x.setAttribute('aria-pressed', String(x.dataset.val === versBouton(s2[cle])));
       if (cle === 'chatBackend') return renderBackendCfg();
+      // Rallumé à la main : on oublie que cet appareil n'avait pas suivi.
+      if (cle === 'fondAnime') { appliquerFond({ forcer: s2.fondAnime !== false }); renderSettings(); }
     } catch (err) {
       [...rangee.querySelectorAll('button')].forEach((x, i) => x.setAttribute('aria-pressed', avant[i]));
       toast(err.message);
@@ -10066,6 +10075,13 @@ function suivreSession() {
   addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') fermer(); });
 }
 
+/** Le fond animé, s'il est voulu et si la machine le porte. */
+function appliquerFond({ forcer = false } = {}) {
+  if (S.settings?.fondAnime === false) { Ambiance.couper('coupé dans Réglages'); syncAmbianceRail(); return; }
+  if (Ambiance.start({ forcer })) syncAmbiance();
+  else syncAmbianceRail();
+}
+
 /** Applique la scène choisie par le serveur. Sans effet si le fond est absent. */
 function syncAmbiance() {
   const a = S.ambiance;
@@ -10086,8 +10102,12 @@ async function boot() {
   // Le fond démarre après l'état : il doit savoir quelle scène poser d'entrée,
   // sinon on voit la scène par défaut céder la place trois secondes plus tard.
   monterPet();
-  if (Ambiance.start()) syncAmbiance();
-  else syncAmbianceRail();
+  /* LE FOND ATTEND QUE LA PAGE SOIT LÀ. Il démarrait avant le premier
+     affichage : sa mise en route (contexte WebGL, shader) passait avant ce
+     qu'on est venu lire. La scène est connue (S vient d'arriver), donc il
+     démarre directement sur la bonne. */
+  syncAmbianceRail();
+  (window.requestIdleCallback ?? (f => setTimeout(f, 300)))(() => appliquerFond(), { timeout: 2500 });
   document.querySelector('nav').addEventListener('click', e => {
     const b = e.target.closest('button[data-view]');
     if (b) go(b.dataset.view);
