@@ -2033,6 +2033,21 @@ async function releverLecture(userId) {
   }
 }
 
+/**
+ * Ce qui accompagne une phrase dite à Jarvis, dans la copie transmise au
+ * modèle seulement : la réponse sera lue par une voix de synthèse.
+ */
+export const CONSIGNE_VOIX = '[Dit à voix haute, à Jarvis. Ta réponse sera lue par une voix de synthèse : '
+  + 'parle comme à l’oral, deux ou trois phrases, sans liste, sans titre, sans emoji ni mise en forme.]';
+
+export function avecConsigneVoix(history) {
+  const i = history.length - 1;
+  if (i >= 0 && history[i].role === 'user') {
+    history[i] = { ...history[i], text: `${history[i].text}\n\n${CONSIGNE_VOIX}` };
+  }
+  return history;
+}
+
 export const routes = {
 
   /*
@@ -2164,8 +2179,21 @@ export const routes = {
     noterBornesDites(text, userId);
     const date = body.date ?? jourVecu(userId);
     const now = new Date().toISOString();
+    /*
+     * À VOIX HAUTE, PAR JARVIS.
+     *
+     * Machi Tool entend « Jarvis, … », transcrit sur le poste, et pose la
+     * phrase ici par sa clé de passerelle. C'est le même fil, le même
+     * compagnon, la même veille : rien de ce qui protège une conversation
+     * écrite ne saute parce qu'elle a été dite. Seule la forme de la réponse
+     * change — elle sera LUE par une voix de synthèse, donc parlée, courte,
+     * sans liste ni mise en forme. La consigne voyage avec la copie transmise
+     * au modèle, jamais dans le journal : ce qui y est rangé, c'est ce que la
+     * personne a dit.
+     */
+    const source = body.source === 'voix' ? 'voix' : 'web';
 
-    const idMsg = addMessage({ ts: now, date, source: 'web', role: 'user', text, userId });
+    const idMsg = addMessage({ ts: now, date, source, role: 'user', text, userId });
     // Une note écrite en toutes lettres devient un relevé, sans passer par le
     // modèle : voir `noterNoteDite`. Après l'enregistrement, parce qu'un relevé
     // s'ancre au message qui le porte.
@@ -2173,6 +2201,7 @@ export const routes = {
     invalidate(userId);
 
     const history = filAncre(FIL_TRANSMIS, userId).map(m => ({ role: m.role, text: m.text, ts: m.ts }));
+    if (source === 'voix') avecConsigneVoix(history);
     const m = recentMemory(date, userId, text);
     /*
      * LES OUTILS AUSSI SUR CETTE ROUTE-CI.
@@ -2189,13 +2218,14 @@ export const routes = {
                                                           grave: conversationGrave(history) });
     /* L'ORDRE COMPTE : le relevé de dépense nomme la réponse, il ne peut donc
        pas être écrit avant elle. */
-    const idPet = addMessage({ ts: new Date().toISOString(), date, source: 'web', role: 'pet',
+    const idPet = addMessage({ ts: new Date().toISOString(), date, source, role: 'pet',
                                text: r.text, repli: raisonDuRepli(r), userId });
     if (r.usage) recordUsage(userId, r.model, r.usage.input, r.usage.output,
                              r.usage.cacheLu, r.usage.cacheEcrit, 'chat', idPet, r.composition ?? null);
     return {
       messages: recentMessages(80, userId), backend: r.backend,
-      degraded: r.degraded ?? null, refused: r.refused ?? false
+      degraded: r.degraded ?? null, refused: r.refused ?? false,
+      reponse: r.text
     };
   },
 

@@ -1168,12 +1168,21 @@ function drawThread() {
       ? `<span class="venu" title="Échange tenu hors de l’application, versé ici par ${esc(m.via)}"
            >${ico('parler', 11)}${esc(m.via)}</span>`
       : '';
+    /* DIT À VOIX HAUTE, À JARVIS. Même fil, même compagnon ; la marque dit
+       seulement que la phrase a été parlée (et transcrite sur le poste), et
+       que la réponse a été lue par la voix de Machi Tool. */
+    const voix = m.source === 'voix'
+      ? `<span class="venu voix" title="${m.role === 'user' ? 'Dit à voix haute à Jarvis, transcrit sur ton PC'
+                                                            : 'Réponse lue à voix haute par Jarvis'}"
+           ><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3.2" width="6" height="11" rx="3"/><path d="M5.8 11.2a6.2 6.2 0 0 0 12.4 0"/><path d="M12 17.4v3.4"/></svg>Jarvis</span>`
+      : '';
     return sep + silence + `<div class="msg ${m.role}${passe}${mots.length ? ' teinte' : ''}${
       m.via ? ' dehors' : ''}"${teinte} data-id="${m.id ?? ''}"
       >${pause ? `<span class="t">${fmtTime(m.ts)}</span>` : ''
       }${reflexionMarkup(m)}${imagesMarkup(m)}${seulementLesNoms(m) ? '' : `<span class="tx">${esc(
         m.role === 'pet' ? sansMarqueur(m.text) : m.text
-      )}</span>`}${repliMarkup(m)}${marque}${dehors}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
+      )}</span>`}${repliMarkup(m)}${marque}${dehors}${voix}${coutMarkup(m)}${echelleMarkup(m, dernierDuCompagnon)}${rembobMarkup(m)}</div>`;
   }).join('') + gestesMarkup();
   // On revient toujours en bas et replié : un rendu du fil est un retour à la
   // conversation, pas une reprise de lecture.

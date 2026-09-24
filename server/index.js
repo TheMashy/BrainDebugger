@@ -463,6 +463,40 @@ async function traiter(req, res) {
     return json(res, 200, { jours: activiteJours(userId) });
   }
 
+  /* ---------- ce qu'on dit à JARVIS, et que Machi Tool apporte ----------
+   *
+   * « Jarvis, … » : Machi Tool a entendu le mot d'éveil, transcrit la phrase
+   * SUR LE POSTE, et vu que ce n'était pas une commande locale (la lumière, un
+   * minuteur, l'heure). Elle est donc pour le compagnon — le même, par le même
+   * chemin que le chat écrit (`POST /api/message`) : même fil, même mémoire,
+   * même veille, même section crise. Machi Tool lit ensuite la réponse à voix
+   * haute.
+   *
+   * LA CLÉ ÉCRIT ET REÇOIT LA RÉPONSE, ET RIEN D'AUTRE. Elle ne lit pas le
+   * journal : la seule chose qui revient, c'est ce que le compagnon vient de
+   * répondre à la phrase qu'on lui a apportée.
+   */
+  if (req.method === 'POST'
+      && (url.pathname === '/api/machitool/parler' || url.pathname === '/api/passerelle/parler')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      const corps = await readBody(req);
+      const texte = String(corps?.texte ?? corps?.text ?? '').trim().slice(0, 4000);
+      if (!texte) return json(res, 400, { error: 'texte vide' });
+      const out = await routes['POST /api/message']({ body: { text: texte, source: 'voix' }, userId, req });
+      if (out?.error) return json(res, 400, { error: out.error });
+      return json(res, 200, { texte: out.reponse ?? '', degrade: out.degraded ?? null,
+                              refuse: out.refused ?? false });
+    } catch (err) {
+      console.error('[jarvis]', err);
+      return json(res, 500, { error: String(err.message ?? err).slice(0, 200) });
+    }
+  }
+
   /* ---------- verrou ---------- */
 
   /* ---------- connexion Discord ---------- */
