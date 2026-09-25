@@ -154,11 +154,11 @@ export const OUTILS_PC = [
   },
   {
     name: 'pc',
-    description: 'Le PC : « verrouiller » ; « veille » (dans huit secondes : dis au revoir) — seulement si la '
-      + 'personne le demande clairement ; « luminosite » des écrans, avec « sens » (regler, monter, baisser) '
-      + 'et « niveau » (0 à 100).',
+    description: 'Le PC : « verrouiller » (seulement si la personne le demande clairement) ; « luminosite » des '
+      + 'écrans, avec « sens » (regler, monter, baisser) et « niveau » (0 à 100). Éteindre, redémarrer, mettre en '
+      + 'veille ou fermer la session : impossible, et voulu ainsi.',
     input_schema: { type: 'object', properties: {
-      action: { type: 'string', enum: ['verrouiller', 'veille', 'luminosite'] },
+      action: { type: 'string', enum: ['verrouiller', 'luminosite'] },
       sens: { type: 'string', enum: ['regler', 'monter', 'baisser'] },
       niveau: { type: 'integer', minimum: 0, maximum: 100 }
     }, required: ['action'] }
@@ -349,7 +349,25 @@ export const OUTIL_RETRAIT = {
     + 'pour un simple « merci » ou « ça ira » au milieu d\'une demande.',
   input_schema: { type: 'object', properties: {} }
 };
-export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', OUTIL_RETRAIT.name]);
+/**
+ * PASSER AU PSYCHOLOGUE. « Donne accès à BrainDebugger pour se mettre en mode
+ * psychologue s'il comprend que c'est ce que je veux. » Machi Tool reconnaît
+ * « psychologue », « notes psy »... ; quand la personne le dit autrement, le
+ * modèle appelle cet outil : sa phrase part telle quelle au compagnon (le même
+ * que le chat, avec le journal), et Machi Tool reste en mode psychologue.
+ */
+export const OUTIL_PSY = {
+  name: 'passer_au_psychologue',
+  description: 'Quand tu comprends que la personne veut parler au psychologue — le compagnon de BrainDebugger, '
+    + 'qui connaît son journal — sans qu\'elle dise le mot : « j\'ai besoin de parler », « je peux vider mon '
+    + 'sac ? », « on peut parler de ma journée ? », « ça va pas trop, j\'aimerais en parler », « passe-moi '
+    + 'le psy » : appelle cet outil, et rien d\'autre. Sa phrase lui est transmise et c\'est lui qui répond. '
+    + 'Pas pour une question de culture sur la psychologie, ni pour une humeur glissée au milieu d\'une demande '
+    + 'pratique (« je suis crevé, mets de la musique »).',
+  input_schema: { type: 'object', properties: {} }
+};
+export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', OUTIL_RETRAIT.name,
+                                      OUTIL_PSY.name]);
 
 export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false,
                                fenetreAgenda = false } = {}) {
@@ -409,7 +427,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
   if (langue === 'en') {
     return [
       'YOUR HANDS ON THE PC: tools to control the music, launch apps and Steam games, manage windows, '
-      + 'set the volume (overall or per app) and the screen brightness, lock the PC or put it to sleep, '
+      + 'set the volume (overall or per app) and the screen brightness, lock the PC, '
       + 'open a Google search, a link or a YouTube video in Chrome, look through folders, find files, '
       + 'create a folder and open things'
       + (navigation ? ', search the browser history for a video or a link seen before' : '')
@@ -417,6 +435,8 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
       spotify ? '- To play music, use spotify_jouer (their Spotify account is connected).'
               : '- To play a specific song, use youtube (Spotify is not connected); the spotify tool only opens a search.',
       '- Use them only when the person asks for something they do; never on your own initiative.',
+      '- You can NOT shut down, restart or put the computer to sleep, nor log the session off: not directly, not '
+      + 'through a program, a script or a shortcut. That is deliberate: if asked, say so in one sentence (locking is fine).',
       '- If an access code is needed, Machi Tool asks for it itself. You never ask for a code and never mention one.',
       '- You can write a note and create NEW text files; you cannot delete, move, rename or change an existing '
       + 'file (except adding to your notes), nor write a script or a program: say so plainly if asked.',
@@ -430,14 +450,17 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
   }
   return [
     'TES MAINS SUR LE PC : des outils pour commander la musique, lancer une appli ou un jeu Steam, gérer '
-    + 'les fenêtres, régler le son (général ou d\'une appli) et la luminosité, verrouiller le PC ou le mettre '
-    + 'en veille, ouvrir une recherche Google, un lien ou une vidéo YouTube dans Chrome, parcourir les '
+    + 'les fenêtres, régler le son (général ou d\'une appli) et la luminosité, verrouiller le PC, '
+    + 'ouvrir une recherche Google, un lien ou une vidéo YouTube dans Chrome, parcourir les '
     + 'dossiers, chercher des fichiers, créer un dossier et ouvrir des choses'
     + (navigation ? ', chercher dans l\'historique du navigateur une vidéo ou un lien déjà vu' : '')
     + (ecran ? ', et regarder un des deux écrans' : '') + '.',
     spotify ? '- Pour lancer une musique, sers-toi de spotify_jouer (son compte Spotify est connecté).'
             : '- Pour lancer un morceau précis, sers-toi de youtube (Spotify n\'est pas connecté) ; l\'outil spotify ne fait qu\'ouvrir une recherche.',
     '- Ne t\'en sers que quand la personne demande quelque chose qu\'ils font ; jamais de ta propre initiative.',
+    '- Tu ne peux NI éteindre, NI redémarrer, NI mettre en veille l\'ordinateur, NI fermer la session — ni '
+    + 'directement, ni par un programme, un script ou un raccourci. C\'est voulu : si on te le demande, dis-le '
+    + 'en une phrase (verrouiller, lui, est possible).',
     '- Si un code d\'accès est nécessaire, Machi Tool le demande lui-même. Tu ne demandes jamais de code et tu n\'en parles pas.',
     '- Tu peux écrire une note et créer des fichiers texte NEUFS ; tu ne peux ni supprimer, ni déplacer, ni renommer, ni '
     + 'modifier un fichier existant (sauf compléter tes notes), ni écrire un script ou un programme : dis-le simplement si on te le demande.',
@@ -451,7 +474,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
 }
 
 const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA,
-                      OUTIL_RETRAIT, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
+                      OUTIL_RETRAIT, OUTIL_PSY, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;

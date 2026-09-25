@@ -45,18 +45,24 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
   const c = clientScenario([fini('Bonjour.'), fini('Bonjour.'), fini('Bonjour.')]);
   const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
   await J.repondreJarvis({ texte: 'bonjour' }, dep);
-  assert.deepEqual(c.appels[0].tools.map(t => t.name).sort(), ['consulter_claude', 'se_retirer', 'web_search'],
+  assert.deepEqual(c.appels[0].tools.map(t => t.name).sort(), ['consulter_claude', 'passer_au_psychologue', 'se_retirer', 'web_search'],
     'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
     ['affiner_recherche', 'chercher_fichiers', 'consulter_claude', 'creer_dossier', 'creer_fichier', 'ecrire_note',
      'fenetre', 'lancer_appli', 'lien',
-     'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'pc', 'rechercher_google', 'se_retirer', 'son',
+     'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'passer_au_psychologue', 'pc', 'rechercher_google',
+     'se_retirer', 'son',
      'spotify', 'temperatures', 'web_search', 'youtube']);
   assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
   assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer, ni modifier un fichier existant/);
   assert.match(c.appels[1].system, /ni écrire un script ou un programme/);
+  // « qu'il ne puisse pas éteindre, redémarrer, mettre en veille, ni fermer la session »
+  const pc = c.appels[1].tools.find(t => t.name === 'pc');
+  assert.deepEqual(pc.input_schema.properties.action.enum, ['verrouiller', 'luminosite']);
+  assert.match(c.appels[1].system, /NI éteindre, NI redémarrer, NI mettre en veille l'ordinateur, NI fermer la session/);
+  assert.doesNotMatch(c.appels[1].system, /mettre en veille, ouvrir|le mettre en veille/);
   await J.repondreJarvis({ texte: 'bonjour', outils: true, ecran: true }, dep);
   assert.ok(c.appels[2].tools.some(t => t.name === 'regarder_ecran'));
   assert.match(c.appels[2].system, /regarde par-dessus l'épaule/);
@@ -361,4 +367,15 @@ test('congédié, il se retire pour de bon : la réponse porte `fin`', async () 
   const c3 = clientScenario([fini('Il est midi.')]);
   const r3 = await J.repondreJarvis({ texte: 'quelle heure' }, { client: async () => c3, versLeCompagnon: async () => '' });
   assert.equal(r3.fin, undefined);
+});
+
+test('il comprend qu\'on veut le psychologue : la phrase va au compagnon, et le mode suit', async () => {
+  const c = clientScenario([outilDemande('passer_au_psychologue', {})]);
+  const transmis = [];
+  const dep = { client: async () => c, versLeCompagnon: async t => { transmis.push(t); return 'Je t\'écoute. Raconte-moi.'; } };
+  const r = await J.repondreJarvis({ texte: 'j\'ai eu une journée pourrie, j\'ai besoin d\'en parler' }, dep);
+  assert.deepEqual(r, { texte: 'Je t\'écoute. Raconte-moi.', mode: 'psy', raison: 'demande' });
+  assert.deepEqual(transmis, ['j\'ai eu une journée pourrie, j\'ai besoin d\'en parler'], 'sa phrase, telle quelle');
+  assert.equal(c.appels.length, 1, 'Jarvis ne reprend pas la parole');
+  assert.match(c.appels[0].tools.find(t => t.name === 'passer_au_psychologue').description, /sans qu'elle dise le mot/);
 });

@@ -23,7 +23,7 @@
 import { messageGrave } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
-         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_RETRAIT, CLAUDE_CONSULTE } from './jarvis-outils.js';
+         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE } from './jarvis-outils.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
 export const JARVIS_EFFORT = 'low';
@@ -288,13 +288,19 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     + (memoire ? '\n\n' + consigneMemoire(langue, preferences, souvenirs) : '')
     + (outils && ouverts ? '\n\n' + consigneOnglets(langue, ouverts) : '');
   const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda }) : []),
-                 ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
+                 ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, OUTIL_PSY, ...(memoire ? OUTILS_MEMOIRE : []),
+                 OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
   const details = [];
   const consultations = [];     // Opus, compté à son prix et pas à celui de Jarvis
   let fin = false;              // congédié : Machi Tool cessera d'écouter
   let demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
+  // Il a compris qu'on veut le psychologue : on s'arrête là, c'est le
+  // compagnon qui répondra (voir repondreJarvis).
+  if (demandes.some(d => d.nom === OUTIL_PSY.name)) {
+    return { texte: '', psy: true, consultations, model: r.model ?? JARVIS_MODELE, usage };
+  }
   // Claude consulté : ici, tout de suite ; deux fois au plus par question.
   for (let tour = 0; tour < 2 && demandes.some(d => OUTILS_LOCAUX.has(d.nom)); tour++) {
     const locaux = [];
@@ -337,6 +343,9 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     const u = usageDe(r);
     for (const k of Object.keys(usage)) usage[k] += u[k] ?? 0;
     demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
+    if (demandes.some(d => d.nom === OUTIL_PSY.name)) {
+      return { texte: texteDe(r), psy: true, consultations, model: r.model ?? JARVIS_MODELE, usage };
+    }
   }
   demandes = demandes.filter(d => !OUTILS_LOCAUX.has(d.nom));
   if ((outils || memoire) && demandes.length) {
@@ -530,6 +539,14 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
+    if (r.psy) {
+      // au milieu d'une suite d'outils : la phrase d'origine est la première du fil
+      const premiere = suite.find(m => m?.role === 'user' && typeof m.content === 'string')?.content;
+      return premiere
+        ? { texte: await versLeCompagnon(String(premiere).slice(0, 4000)), mode: 'psy', raison: 'demande' }
+        : { texte: r.texte || (L === 'en' ? 'I\'ll hand you over.' : 'Je vous passe le psychologue.'),
+            mode: 'psy', raison: 'demande' };
+    }
     return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
              ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
   }
@@ -545,6 +562,11 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     fenetreAgenda: !!(outils && fenetreAgenda), agenda, souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000) });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
+  if (r.psy) {
+    // « s'il comprend que c'est ce que je veux » : la phrase va au compagnon,
+    // qui répond, et Machi Tool reste avec lui
+    return { texte: await versLeCompagnon(t), mode: 'psy', raison: 'demande' };
+  }
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
            ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
 }
