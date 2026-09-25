@@ -21,6 +21,7 @@
  */
 import { messageGrave } from './gravite.js';
 import { optionsDuModele } from './chat.js';
+import { outilsPermis, consigneOutils, suitePropre, resultatsEnBlocs, outilsDemandes } from './jarvis-outils.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
 export const JARVIS_EFFORT = 'low';
@@ -148,20 +149,39 @@ function usageDe(r) {
            cacheLu: u.cache_read_input_tokens ?? 0, cacheEcrit: u.cache_creation_input_tokens ?? 0 };
 }
 
-export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr' }) {
-  const messages = historiquePropre(historique);
-  if (messages.length && messages[messages.length - 1].role === 'user') {
-    messages[messages.length - 1].content += '\n' + texte;
+export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
+                                              outils = false, ecran = false, suite = null, resultats = null }) {
+  let messages;
+  if (suite) {
+    // LA SUITE D'UN OUTIL : la conversation telle que Machi Tool l'a rendue, et
+    // ce qu'il vient de faire sur le PC.
+    messages = suitePropre(suite);
+    const blocs = resultatsEnBlocs(resultats);
+    if (!messages.length || !blocs.length) throw Object.assign(new Error('suite sans résultat'), { statut: 400 });
+    messages.push({ role: 'user', content: blocs });
   } else {
-    messages.push({ role: 'user', content: texte });
+    messages = historiquePropre(historique);
+    if (messages.length && messages[messages.length - 1].role === 'user') {
+      messages[messages.length - 1].content += '\n' + texte;
+    } else {
+      messages.push({ role: 'user', content: texte });
+    }
   }
+  const system = consigneJarvis({ appellation, maintenant, langue })
+    + (outils ? '\n\n' + consigneOutils(langue, { ecran }) : '');
   const r = await client.messages.create({
     model: JARVIS_MODELE,
     max_tokens: JARVIS_PLAFOND,
-    system: consigneJarvis({ appellation, maintenant, langue }),
+    system,
     messages,
+    ...(outils ? { tools: outilsPermis({ ecran }) } : {}),
     ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
   });
+  const demandes = outils && r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
+  if (demandes.length) {
+    return { texte: texteDe(r), outils: demandes, suite: suitePropre([...messages, { role: 'assistant', content: r.content }]),
+             model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
+  }
   let dit = texteDe(r);
   if (r.stop_reason === 'refusal' || !dit) {
     dit = langue === 'en' ? 'I\'m afraid I can\'t help with that one.'
@@ -247,7 +267,8 @@ export function maintenantDans(zone, date = new Date(), langue = 'fr') {
  * Rend { texte, mode: 'jarvis' | 'psy' }.
  */
 export async function repondreJarvis({ texte, historique = [], appellation = '', maintenant = '',
-                                       langue = 'fr', transition = '', psy = [] },
+                                       langue = 'fr', transition = '', psy = [],
+                                       outils = false, ecran = false, suite = null, resultats = null },
                                      { client, versLeCompagnon, noter = () => {} }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'fin_psy') {
@@ -262,12 +283,20 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     if (r.usage) noter(r.usage, r.model);
     return { texte: r.texte, mode: 'jarvis' };
   }
+  if (suite) {
+    // La phrase a déjà passé la porte du grave au premier tour ; ce qui revient
+    // ici, c'est ce que les outils ont fait.
+    const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: true, ecran, suite, resultats });
+    noter(r.usage, r.model);
+    return { texte: r.texte, mode: 'jarvis', ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
+  }
   const t = String(texte ?? '').trim().slice(0, 4000);
   if (!t) throw Object.assign(new Error('texte vide'), { statut: 400 });
   if (pourLeCompagnon(t, historique)) {
     return { texte: await versLeCompagnon(t), mode: 'psy', raison: 'grave' };
   }
-  const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L });
+  const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L,
+                                                    outils: !!outils, ecran: !!(outils && ecran) });
   noter(r.usage, r.model);
-  return { texte: r.texte, mode: 'jarvis' };
+  return { texte: r.texte, mode: 'jarvis', ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
 }
