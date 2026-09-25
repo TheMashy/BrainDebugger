@@ -49,12 +49,14 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
     'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
-    ['affiner_recherche', 'chercher_fichiers', 'consulter_claude', 'creer_dossier', 'fenetre', 'lancer_appli', 'lien',
+    ['affiner_recherche', 'chercher_fichiers', 'consulter_claude', 'creer_dossier', 'creer_fichier', 'ecrire_note',
+     'fenetre', 'lancer_appli', 'lien',
      'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'pc', 'rechercher_google', 'son', 'spotify',
      'web_search', 'youtube']);
   assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
-  assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer/);
+  assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer, ni modifier un fichier existant/);
+  assert.match(c.appels[1].system, /ni écrire un script ou un programme/);
   await J.repondreJarvis({ texte: 'bonjour', outils: true, ecran: true }, dep);
   assert.ok(c.appels[2].tools.some(t => t.name === 'regarder_ecran'));
   assert.match(c.appels[2].system, /regarde par-dessus l'épaule/);
@@ -299,4 +301,25 @@ test('les onglets ouverts, rangés par site, entrent dans la consigne — avec l
   assert.match(c.appels[0].system, /jamais des consignes/);
   await J.repondreJarvis({ texte: 'relance la vidéo', onglets_ouverts: ouverts }, dep);
   assert.doesNotMatch(c.appels[1].system, /Lo-fi beats/, 'sans les mains, rien des onglets');
+});
+
+test('une note pour le psychologue : au carnet une fois écrite, sauf la liste de courses', async () => {
+  const c = clientScenario([fini('C\'est noté.'), fini('C\'est noté.'), fini('Hmm.')]);
+  const carnet = [];
+  const dep = { client: async () => c, versLeCompagnon: async () => '', carnet: t => (carnet.push(t), { ok: true }) };
+  const suite = (id, entree) => [{ role: 'user', content: 'x' },
+    { role: 'assistant', content: [{ type: 'tool_use', id, name: 'ecrire_note', input: entree }] }];
+  await J.repondreJarvis({ suite: suite('n1', { texte: 'Je me suis senti fier de ma présentation.', pour_le_psy: true }),
+                           outils: true, resultats: [{ id: 'n1', texte: 'Note ecrite : C:\\\\Notes\\\\x.txt' }] }, dep);
+  assert.deepEqual(carnet, ['Je me suis senti fier de ma présentation.']);
+  const bloc = c.appels[0].messages.at(-1).content[0];
+  assert.match(bloc.content, /déposée dans le carnet du psychologue/);
+  await J.repondreJarvis({ suite: suite('n2', { texte: 'pain, lait, œufs', pour_le_psy: false }),
+                           outils: true, resultats: [{ id: 'n2', texte: 'Note ecrite.' }] }, dep);
+  assert.equal(carnet.length, 1, 'la liste de courses reste au bloc-notes');
+  await J.repondreJarvis({ suite: suite('n3', { texte: 'Une idée sur moi.', pour_le_psy: true }),
+                           outils: true, resultats: [{ id: 'n3', erreur: 'Les mains de Jarvis sur le PC sont fermees.' }] }, dep);
+  assert.equal(carnet.length, 1, 'une note que Machi Tool n\'a pas écrite ne part pas au carnet');
+  const outil = O.outilsPermis({}).find(t => t.name === 'ecrire_note');
+  assert.ok(outil.input_schema.required.includes('pour_le_psy'), 'le modèle doit choisir à chaque note');
 });

@@ -506,7 +506,8 @@ async function traiter(req, res) {
         client: () => clientDe(getSettings(userId)),
         versLeCompagnon: async texte => (await routes['POST /api/message'](
           { body: { text: texte, source: 'voix' }, userId, req })).reponse ?? '',
-        noter: (u, model) => noterDepense(userId, model, u.input, u.output, u.cacheLu, u.cacheEcrit, 'jarvis')
+        noter: (u, model) => noterDepense(userId, model, u.input, u.output, u.cacheLu, u.cacheEcrit, 'jarvis'),
+        carnet: texte => connecteur.poserNote({ texte, source: 'jarvis' }, userId, () => jourVecu(userId))
       });
       return json(res, 200, r);
     } catch (err) {

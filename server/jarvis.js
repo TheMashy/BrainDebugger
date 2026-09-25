@@ -406,6 +406,33 @@ export function maintenantDans(zone, date = new Date(), langue = 'fr') {
 }
 
 /**
+ * « RAJOUTE LE MODE ÉCRIRE UNE NOTE, QUI FAIT QUE JARVIS ENVOIE UNE NOTE AU
+ * PSYCHOLOGUE AUTOMATIQUEMENT (À MOINS QUE CE SOIT JUSTE UNE LISTE DE COURSES
+ * OU UNE PETITE NOTE RAPIDE). » Les `ecrire_note` du dernier tour que Machi
+ * Tool a réussis vont au carnet (`carnet(texte)`), et le résultat le dit à
+ * Jarvis. Rend les résultats, complétés.
+ */
+export function deposerNotes(suite, resultats, carnet) {
+  if (!carnet || !Array.isArray(resultats)) return resultats;
+  const derniere = [...(Array.isArray(suite) ? suite : [])].reverse().find(m => m?.role === 'assistant');
+  const notes = new Map((Array.isArray(derniere?.content) ? derniere.content : [])
+    .filter(b => b?.type === 'tool_use' && b.name === 'ecrire_note' && b.input?.pour_le_psy !== false)
+    .map(b => [b.id, String(b.input?.texte ?? '').trim()]));
+  return resultats.map(r => {
+    if (!r || r.erreur || !notes.has(r.id) || !notes.get(r.id)) return r;
+    let dit;
+    try {
+      const d = carnet(notes.get(r.id));
+      dit = d?.erreur ? ` — mais le carnet du psychologue l'a refusée (${d.erreur}).`
+                      : ' — et déposée dans le carnet du psychologue.';
+    } catch (err) {
+      dit = ' — mais le carnet du psychologue n\'a pas pu la prendre.';
+    }
+    return { ...r, texte: String(r.texte ?? 'Note écrite.') + dit };
+  });
+}
+
+/**
  * LA ROUTE, SANS LE RÉSEAU. `versLeCompagnon(texte)` rend la réponse du
  * compagnon (le chemin de `POST /api/message`) ; `client()` rend un client
  * Anthropic ; `noter(usage, model)` relève la dépense.
@@ -417,7 +444,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        outils = false, ecran = false, suite = null, resultats = null,
                                        navigation = false, memoire = false, preferences = [], spotify = false,
                                        onglets = false, souvenirs = [], onglets_ouverts = '' },
-                                     { client, versLeCompagnon, noter = () => {} }) {
+                                     { client, versLeCompagnon, noter = () => {}, carnet = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'resume') {
     const r = await resumerConversation(client, { historique, langue: L });
@@ -437,6 +464,10 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     return { texte: r.texte, mode: 'jarvis' };
   }
   if (suite) {
+    // LES NOTES POUR LE PSYCHOLOGUE : une fois que Machi Tool a bien écrit la
+    // note (pas d'erreur), elle entre aussi au carnet du journal — sauf une
+    // liste de courses ou une petite note pratique (`pour_le_psy: false`).
+    resultats = deposerNotes(suite, resultats, carnet);
     // La phrase a déjà passé la porte du grave au premier tour ; ce qui revient
     // ici, c'est ce que les outils ont fait.
     const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: !!outils,
