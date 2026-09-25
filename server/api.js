@@ -2061,6 +2061,11 @@ export function reglagesDeLaVoix(s) {
   return { ...s, anthropicModelChat: JARVIS_MODELE, anthropicEffort: 'low', chatPensee: false };
 }
 
+/** Une clé d'API Anthropic, à sa forme : « sk-ant- » puis des lettres, chiffres, - et _. */
+export function cleAnthropicPlausible(v) {
+  return /^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(String(v ?? '').trim());
+}
+
 export const routes = {
 
   /*
@@ -3993,6 +3998,15 @@ export const routes = {
     // une action explicite.
     const patch = { ...body };
     if (patch.apiKey === '' && !body.clearKey) delete patch.apiKey;
+    /*
+     * CE QUI N'EST PAS UNE CLÉ ANTHROPIC N'EN DEVIENT PAS UNE. Le navigateur
+     * remplissait tout seul le champ avec un mot de passe enregistré : il était
+     * rangé comme clé, la page se redessinait, le champ se remplissait encore —
+     * une boucle, et un mot de passe en base. Une clé commence par « sk-ant- ».
+     */
+    if (typeof patch.apiKey === 'string' && patch.apiKey !== '' && !cleAnthropicPlausible(patch.apiKey)) {
+      return { error: 'Ce n’est pas une clé Anthropic : elle commence par « sk-ant- ». Rien n’a été enregistré.' };
+    }
 
     // setSettings ne verifie que l'existence de la cle, jamais la forme. Une
     // naissance dans le futur etire la frise de plusieurs annees sur du vide ;

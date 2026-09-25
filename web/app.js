@@ -8503,7 +8503,7 @@ async function renderBackendCfg() {
     </div>
     <div class="field">
       <span>Clé API</span>
-      <div class="keystate ${s.keySource}">
+      <div class="keystate ${s.keySource}" id="keyState">
         ${s.keySource === 'env'
           ? `<b>Fournie par l'environnement</b> — variable <code>ANTHROPIC_API_KEY</code>. Rien à faire.
              ${s.hasStoredKey ? `Une clé traîne aussi en base ; elle est ignorée.
@@ -8513,7 +8513,13 @@ async function renderBackendCfg() {
                <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}effacer</button>`
             : `<b>Aucune clé</b> — le compagnon reste en mode hors-ligne.`}
       </div>
-      <input type="password" id="apiKey" value="" autocomplete="off"
+      ${/* PAS UN CHAMP MOT DE PASSE : le navigateur y versait tout seul un mot
+            de passe enregistré, qui s'enregistrait, redessinait la page, et se
+            reversait — une boucle. Un champ texte masqué, que les gestionnaires
+            de mots de passe laissent tranquille. */''}
+      <input type="text" id="apiKey" name="bd-anthropic-key" value="" autocomplete="off" spellcheck="false"
+        autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other"
+        style="-webkit-text-security:disc"
         placeholder="${s.keySource === 'none' ? 'sk-ant-… — colle ta clé ici' : 'sk-ant-… — pour la remplacer'}">
       <p class="faint" style="font-size:11.5px;margin:6px 0 0">
         Sur un serveur, préfère la variable d'environnement : la clé ne passe alors jamais par la base,
@@ -8613,15 +8619,52 @@ async function renderBackendCfg() {
     $('#' + id)?.addEventListener('change', async e => { await saveSettings({ [id]: e.target.value }); });
   }
 
-  // Le champ est vide en permanence : une chaine vide ne doit pas effacer la
-  // cle enregistree. L'effacement passe par le bouton.
+  /*
+   * LA CLÉ, SANS BOUCLE. Le champ est vide en permanence : une chaîne vide
+   * n'efface pas la clé enregistrée (l'effacement passe par le bouton). On
+   * n'enregistre que ce qui a la forme d'une clé (« sk-ant-… »), une seule
+   * fois par valeur, et on repeint le cadre de la clé — pas toute la page :
+   * `renderSettings()` refermait et rouvrait les groupes sous les doigts, et
+   * un navigateur qui remplit le champ tout seul relançait le tout sans fin.
+   */
+  const peindreCle = () => {
+    const st = S.settings, el = $('#keyState');
+    if (!el) return;
+    el.className = `keystate ${st.keySource}`;
+    el.innerHTML = st.keySource === 'env'
+      ? `<b>Fournie par l'environnement</b> — variable <code>ANTHROPIC_API_KEY</code>. Rien à faire.
+         ${st.hasStoredKey ? `Une clé traîne aussi en base ; elle est ignorée.
+           <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}l'effacer</button>` : ''}`
+      : st.keySource === 'stored'
+        ? `<b>Enregistrée dans l'app</b> — elle n'est jamais renvoyée au navigateur.
+           <button class="btn" id="clearKey" style="padding:2px 9px;font-size:11.5px;margin-left:6px">${ico('corbeille', 11)}effacer</button>`
+        : `<b>Aucune clé</b> — le compagnon reste en mode hors-ligne.`;
+    const champ = $('#apiKey');
+    if (champ) champ.placeholder = st.keySource === 'none' ? 'sk-ant-… — colle ta clé ici' : 'sk-ant-… — pour la remplacer';
+    $('#clearKey')?.addEventListener('click', effacerCle);
+  };
+  const effacerCle = async () => {
+    await saveSettings({ apiKey: '', clearKey: true });
+    peindreCle();
+    toast('Clé effacée');
+  };
+  let derniereCleEssayee = '';
   $('#apiKey')?.addEventListener('change', async e => {
     const v = e.target.value.trim();
-    if (!v) return;
-    await saveSettings({ apiKey: v });
     e.target.value = '';
-    renderSettings();
-    toast('Clé enregistrée');
+    if (!v || v === derniereCleEssayee) return;
+    derniereCleEssayee = v;
+    if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(v)) {
+      $('#keyResult').innerHTML = '<span style="color:var(--danger)">Ce n’est pas une clé Anthropic (elle commence par « sk-ant- ») : rien n’a été enregistré.</span>';
+      return;
+    }
+    try {
+      await saveSettings({ apiKey: v });
+      peindreCle();
+      toast(S.settings.keySource === 'env' ? 'Clé enregistrée — mais celle de l’environnement reste prioritaire' : 'Clé enregistrée');
+    } catch (err) {
+      $('#keyResult').innerHTML = `<span style="color:var(--danger)">${esc(err.message)}</span>`;
+    }
   });
   $('#testKey')?.addEventListener('click', async e => {
     const b = e.currentTarget, out = $('#keyResult');
@@ -8638,11 +8681,7 @@ async function renderBackendCfg() {
     }
   });
 
-  $('#clearKey')?.addEventListener('click', async () => {
-    await saveSettings({ apiKey: '', clearKey: true });
-    renderSettings();
-    toast('Clé effacée');
-  });
+  $('#clearKey')?.addEventListener('click', effacerCle);
 
   /*
    * LA CLÉ DE LA PASSERELLE. Elle est CRÉÉE par le serveur, jamais choisie ici :
