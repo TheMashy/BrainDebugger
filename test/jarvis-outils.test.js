@@ -49,8 +49,9 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
     'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
-    ['chercher_fichiers', 'consulter_claude', 'creer_dossier', 'fenetre', 'lancer_appli', 'lien', 'lister_dossier',
-     'musique', 'ouvrir', 'pc', 'rechercher_google', 'son', 'spotify', 'web_search', 'youtube']);
+    ['affiner_recherche', 'chercher_fichiers', 'consulter_claude', 'creer_dossier', 'fenetre', 'lancer_appli', 'lien',
+     'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'pc', 'rechercher_google', 'son', 'spotify',
+     'web_search', 'youtube']);
   assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
   assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer/);

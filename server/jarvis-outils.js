@@ -50,11 +50,33 @@ export const OUTILS_PC = [
   },
   {
     name: 'chercher_fichiers',
-    description: 'Cherche des fichiers et dossiers dont le nom contient un mot, dans un dossier et ses '
-      + 'sous-dossiers (mêmes noms de dossiers que lister_dossier).',
+    description: 'Commence une recherche de fichiers et de dossiers : ceux dont le chemin (le nom, ou celui '
+      + 'd\'un dossier parent) contient TOUS les mots, sous un dossier (mêmes noms que lister_dossier ; '
+      + 'Accueil par défaut). « type » : pdf, image, video, audio, document, tableur, presentation, archive, '
+      + 'code ou dossier ; « jours » : modifiés dans les N derniers jours. Rend le nombre et les plus récents, '
+      + 'numérotés. Dis combien il y en a.',
     input_schema: { type: 'object', properties: {
-      nom: { type: 'string' }, dans: { type: 'string' }
-    }, required: ['nom'] }
+      mots: { type: 'string' }, dans: { type: 'string' }, type: { type: 'string' },
+      jours: { type: 'integer', minimum: 1 }
+    } }
+  },
+  {
+    name: 'affiner_recherche',
+    description: 'Modifie la dernière recherche de fichiers : « ajouter » des mots (« rajoute stage »), en '
+      + '« retirer », changer le « type » (chaîne vide pour l\'enlever), les « jours » (0 pour l\'enlever) ou le '
+      + 'dossier (« dans »). Rend le nouveau compte.',
+    input_schema: { type: 'object', properties: {
+      ajouter: { type: 'string' }, retirer: { type: 'string' }, type: { type: 'string' },
+      jours: { type: 'integer', minimum: 0 }, dans: { type: 'string' }
+    } }
+  },
+  {
+    name: 'ouvrir_resultats',
+    description: 'Ouvre des résultats de la dernière recherche de fichiers : par leurs numéros (« ouvre le 2 »), '
+      + 'ou tous (« ouvre-les ») s\'il y en a dix au plus.',
+    input_schema: { type: 'object', properties: {
+      numeros: { type: 'array', items: { type: 'integer', minimum: 1 } }
+    } }
   },
   {
     name: 'creer_dossier',
