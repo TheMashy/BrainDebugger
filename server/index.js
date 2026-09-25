@@ -17,7 +17,7 @@ import { claimOwnerData } from './migrate.js';
 import * as auth from './auth.js';
 import * as discord from './discord.js';
 import { commitDeploye, versionDuPaquet, DEMARRE_LE } from './version.js';
-import { repondreJarvis, maintenantDans } from './jarvis.js';
+import { repondreJarvis, maintenantDans, raisonErreurApi } from './jarvis.js';
 import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans } from './agenda.js';
 import { clientDe } from './lecture.js';
 import { record as noterDepense } from './usage.js';
@@ -520,7 +520,7 @@ async function traiter(req, res) {
     } catch (err) {
       if (err.statut === 400) return json(res, 400, { error: err.message });
       console.error('[jarvis]', String(err.message ?? err).slice(0, 200));
-      return json(res, 502, { error: String(err.message ?? err).slice(0, 200) });
+      return json(res, 502, { error: String(err.message ?? err).slice(0, 200), raison: raisonErreurApi(err) });
     }
   }
 

@@ -41,6 +41,21 @@ export const RECHERCHE_WEB = { type: 'web_search_20250305', name: 'web_search', 
 export const JARVIS_PLAFOND_WEB = 1024;
 const SANS_WEB = { refuse: false };
 
+/**
+ * POURQUOI L'API A REFUSÉ — pour que Machi Tool le DISE. « BrainDebugger a
+ * répondu par une erreur 502 » ne disait pas quoi faire ; la cause était là,
+ * dans le message d'Anthropic, et restait dans les journaux du serveur.
+ */
+export function raisonErreurApi(err) {
+  const statut = Number(err?.status ?? err?.statusCode ?? 0);
+  const m = String(err?.message ?? err ?? '');
+  if (statut === 401 || statut === 403 || /authentication|x-api-key|api[ _-]?key|permission/i.test(m)) return 'cle';
+  if (/credit balance|billing|crédit/i.test(m)) return 'credit';
+  if (statut === 529 || /overloaded/i.test(m)) return 'surcharge';
+  if (statut === 429 || /rate.?limit/i.test(m)) return 'limite';
+  return 'autre';
+}
+
 /** Claude consulté : la demande que Jarvis a écrite, et la réponse complète. */
 export async function consulterClaude(client, demande, langue = 'fr') {
   const r = await client.messages.create({

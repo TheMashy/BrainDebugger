@@ -337,3 +337,12 @@ test('les deux écrans d\'un coup : deux images dans le même résultat, et il r
   assert.match(c.appels[0].system, /REGARDE ses écrans/);
   assert.equal(c.appels[0].tools.find(t => t.name === 'regarder_ecran').input_schema.properties.ecran.minimum, 0);
 });
+
+test('un refus de l\'API a une raison que Machi Tool peut dire', () => {
+  const e = (status, message) => Object.assign(new Error(message), { status });
+  assert.equal(J.raisonErreurApi(e(401, 'authentication_error: invalid x-api-key')), 'cle');
+  assert.equal(J.raisonErreurApi(e(400, 'Your credit balance is too low to access the Anthropic API.')), 'credit');
+  assert.equal(J.raisonErreurApi(e(529, 'Overloaded')), 'surcharge');
+  assert.equal(J.raisonErreurApi(e(429, 'rate_limit_error')), 'limite');
+  assert.equal(J.raisonErreurApi(e(500, 'Internal server error')), 'autre');
+});
