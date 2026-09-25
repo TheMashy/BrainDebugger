@@ -175,6 +175,22 @@ export const OUTIL_HISTORIQUE = {
  * même sans les mains sur le PC (`memoire`).
  */
 /**
+ * LES ONGLETS DE CHROME, par l'extension de Machi Tool. Offert seulement si
+ * Machi Tool dit qu'elle est branchée (`onglets`).
+ */
+export const OUTIL_ONGLETS = {
+  name: 'onglets',
+  description: 'Les onglets du navigateur : « lister » ; « ouvrir » un nouvel onglet (une adresse « url », ou '
+    + 'une « recherche » Google) ; « aller » sur un onglet ; « fermer » ; « couper_son » / « remettre_son ». '
+    + '« cible » : quelques mots du titre ou le site (« youtube ») ; « tous » : tous ceux qui correspondent '
+    + '(« ferme les onglets YouTube »).',
+  input_schema: { type: 'object', properties: {
+    action: { type: 'string', enum: ['lister', 'ouvrir', 'aller', 'fermer', 'couper_son', 'remettre_son'] },
+    cible: { type: 'string' }, url: { type: 'string' }, recherche: { type: 'string' }, tous: { type: 'boolean' }
+  }, required: ['action'] }
+};
+
+/**
  * SPOTIFY PAR SON API. Offert seulement si Machi Tool dit que le compte
  * Spotify de la personne y est connecté (`spotify`).
  */
@@ -250,9 +266,9 @@ export const OUTIL_CLAUDE = {
 };
 export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name]);
 
-export function outilsPermis({ ecran = false, navigation = false, spotify = false } = {}) {
+export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false } = {}) {
   return [...OUTILS_PC, ...(ecran ? [OUTIL_ECRAN] : []), ...(navigation ? [OUTIL_HISTORIQUE] : []),
-          ...(spotify ? OUTILS_SPOTIFY : [])];
+          ...(spotify ? OUTILS_SPOTIFY : []), ...(onglets ? [OUTIL_ONGLETS] : [])];
 }
 
 /** Les préférences telles que Machi Tool les envoie : des phrases, bornées. */
@@ -315,7 +331,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
   ].filter(Boolean).join('\n');
 }
 
-const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
+const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;

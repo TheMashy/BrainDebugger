@@ -252,3 +252,14 @@ test('les outils du PC entier passent l\'aller-retour avec Machi Tool', async ()
                                       resultats: [{ id: 'toolu_1', texte: 'Volume de Discord à 40 %.' }] }, dep);
   assert.equal(r2.texte, 'C\'est fait.');
 });
+
+test('les onglets : offerts seulement quand l\'extension de Machi Tool est branchée, et avec les mains', async () => {
+  const c = clientScenario([fini('Oui.'), fini('Oui.'), fini('Oui.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  await J.repondreJarvis({ texte: 'ferme youtube', outils: true }, dep);
+  assert.ok(!c.appels[0].tools.some(t => t.name === 'onglets'));
+  await J.repondreJarvis({ texte: 'ferme youtube', outils: true, onglets: true }, dep);
+  assert.ok(c.appels[1].tools.some(t => t.name === 'onglets'));
+  await J.repondreJarvis({ texte: 'ferme youtube', onglets: true }, dep);
+  assert.ok(!c.appels[2].tools.some(t => t.name === 'onglets'), 'sans les mains, pas d\'onglets');
+});
