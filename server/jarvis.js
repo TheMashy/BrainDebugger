@@ -229,7 +229,7 @@ function usageDe(r) {
 export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
                                               outils = false, ecran = false, suite = null, resultats = null,
                                               navigation = false, memoire = false, preferences = [],
-                                              spotify = false, onglets = false, web = true }) {
+                                              spotify = false, onglets = false, souvenirs = [], web = true }) {
   let messages;
   if (suite) {
     // LA SUITE D'UN OUTIL : la conversation telle que Machi Tool l'a rendue, et
@@ -252,7 +252,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   }
   const system = w => consigneJarvis({ appellation, maintenant, langue, web: w })
     + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '')
-    + (memoire ? '\n\n' + consigneMemoire(langue, preferences) : '');
+    + (memoire ? '\n\n' + consigneMemoire(langue, preferences, souvenirs) : '');
   const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets }) : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
@@ -361,6 +361,40 @@ export async function retourDuPsy(client, { psy = [], langue = 'en', appellation
   return { texte: dit, model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
 }
 
+/**
+ * SES SOUVENIRS. « Il faut que Jarvis se souvienne des anciennes discussions,
+ * mais simplement. » À la fin d'une conversation en mode Jarvis, Machi Tool
+ * demande ici UNE phrase qui la résume, et la garde sur le PC ; les dernières
+ * reviennent avec chaque question (`souvenirs`). Rien si c'était une commande
+ * ou un bonjour, rien sur la santé ni l'intime, et rien du tout si un message
+ * grave y est passé : on ne le décide même pas au modèle.
+ */
+export const RIEN = 'RIEN';
+
+export async function resumerConversation(client, { historique = [], langue = 'fr' }) {
+  const conv = historiquePropre(historique);
+  if (!conv.some(h => h.role === 'user')) return { texte: '', usage: null };
+  if (conv.some(h => h.role === 'user' && messageGrave(h.content))) return { texte: '', usage: null, raison: 'grave' };
+  const qui = langue === 'en' ? { user: 'Person', assistant: 'Jarvis' } : { user: 'La personne', assistant: 'Jarvis' };
+  const r = await (await client()).messages.create({
+    model: JARVIS_MODELE,
+    max_tokens: 100,
+    system: langue === 'en'
+      ? 'Summarise this conversation with JARVIS in ONE short factual sentence, so he can remember it later: '
+        + 'the topic, and what was done or decided. Never health, feelings or anything intimate. If nothing '
+        + `is worth remembering (a command, a greeting, small talk), reply exactly: ${RIEN}`
+      : 'Résume cette conversation avec JARVIS en UNE phrase courte et factuelle, pour qu\'il s\'en souvienne '
+        + 'plus tard : le sujet, et ce qui a été fait ou décidé. Jamais la santé, les émotions ni l\'intime. Si '
+        + `rien ne vaut d'être retenu (une commande, un bonjour, du bavardage), réponds exactement : ${RIEN}`,
+    messages: [{ role: 'user', content: conv.map(m => `${qui[m.role]}: ${m.content}`).join('\n') }],
+    ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
+  });
+  let dit = texteDe(r).replace(/\s+/g, ' ').trim().slice(0, 200);
+  // RIEN, dit seul (un « il n'a rien trouvé » est un vrai résumé).
+  if (r.stop_reason === 'refusal' || !dit || dit.replace(/[^a-z]/gi, '').toUpperCase() === RIEN) dit = '';
+  return { texte: dit, model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
+}
+
 /** L'heure de la personne, en toutes lettres, dans sa zone — et dans sa langue. */
 export function maintenantDans(zone, date = new Date(), langue = 'fr') {
   try {
@@ -380,9 +414,14 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        langue = 'fr', transition = '', psy = [],
                                        outils = false, ecran = false, suite = null, resultats = null,
                                        navigation = false, memoire = false, preferences = [], spotify = false,
-                                       onglets = false },
+                                       onglets = false, souvenirs = [] },
                                      { client, versLeCompagnon, noter = () => {} }) {
   const L = langue === 'en' ? 'en' : 'fr';
+  if (transition === 'resume') {
+    const r = await resumerConversation(client, { historique, langue: L });
+    if (r.usage) noter(r.usage, r.model);
+    return { texte: r.texte, mode: 'jarvis' };
+  }
   if (transition === 'fin_psy') {
     // Un message grave dans la séance : le silence, sans rien demander à
     // personne. On ne plaisante pas au sortir de ça, et on ne tente pas le sort.
@@ -401,7 +440,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: !!outils,
                                                       ecran: !!(outils && ecran), navigation: !!(outils && navigation),
                                                       memoire: !!memoire, preferences, spotify: !!(outils && spotify),
-                                                      onglets: !!(outils && onglets),
+                                                      onglets: !!(outils && onglets), souvenirs,
                                                       suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
@@ -416,7 +455,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
   const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L,
                                                     outils: !!outils, ecran: !!(outils && ecran),
                                                     navigation: !!(outils && navigation), memoire: !!memoire, preferences,
-                                                    spotify: !!(outils && spotify), onglets: !!(outils && onglets) });
+                                                    spotify: !!(outils && spotify), onglets: !!(outils && onglets),
+                                                    souvenirs });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),

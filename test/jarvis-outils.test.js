@@ -263,3 +263,29 @@ test('les onglets : offerts seulement quand l\'extension de Machi Tool est branc
   await J.repondreJarvis({ texte: 'ferme youtube', onglets: true }, dep);
   assert.ok(!c.appels[2].tools.some(t => t.name === 'onglets'), 'sans les mains, pas d\'onglets');
 });
+
+test('ses souvenirs : une phrase par conversation, jamais après un message grave, et dans la consigne', async () => {
+  const c = clientScenario([fini('A cherché un restaurant italien à Lyon ; il n\'a rien trouvé ouvert le lundi.'),
+                            fini('RIEN.'), fini('Bonjour.')]);
+  const notes = [];
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon', noter: (u, m) => notes.push(m) };
+  const historique = [{ role: 'user', texte: 'un italien ouvert lundi à Lyon ?' },
+                      { role: 'assistant', texte: 'Aucun, je le crains.' }];
+  const r1 = await J.repondreJarvis({ transition: 'resume', historique }, dep);
+  assert.equal(r1.texte, 'A cherché un restaurant italien à Lyon ; il n\'a rien trouvé ouvert le lundi.',
+    '« rien » dans une vraie phrase ne l\'efface pas');
+  assert.equal(c.appels[0].max_tokens, 100);
+  assert.ok(!c.appels[0].tools, 'le résumé ne prend pas d\'outils');
+  assert.match(c.appels[0].system, /Jamais la santé/);
+  const r2 = await J.repondreJarvis({ transition: 'resume', historique: [{ role: 'user', texte: 'allume la lumière' }] }, dep);
+  assert.equal(r2.texte, '', 'RIEN : pas de souvenir');
+  const avant = c.appels.length;
+  const r3 = await J.repondreJarvis({ transition: 'resume', historique: [
+    { role: 'user', texte: 'je veux mourir' }, { role: 'assistant', texte: '…' }] }, dep);
+  assert.equal(r3.texte, '');
+  assert.equal(c.appels.length, avant, 'grave : on ne le demande même pas au modèle');
+  await J.repondreJarvis({ texte: 'et pour mardi ?', memoire: true,
+                           souvenirs: ['24/09 : A cherché un restaurant italien à Lyon.'] }, dep);
+  assert.match(c.appels.at(-1).system, /Vos dernières conversations[^]*- 24\/09 : A cherché un restaurant italien/);
+  assert.ok(notes.length >= 1, 'le résumé est compté dans la dépense');
+});

@@ -231,8 +231,10 @@ export const OUTILS_MEMOIRE = [
   {
     name: 'oublier',
     description: 'Oublie une préférence retenue (quelques mots qui la désignent), ou toutes (tout: true) si '
-      + 'la personne le demande.',
-    input_schema: { type: 'object', properties: { preference: { type: 'string' }, tout: { type: 'boolean' } } }
+      + 'la personne le demande ; ou vos conversations passées (conversations: true, « oublie nos conversations »).',
+    input_schema: { type: 'object', properties: {
+      preference: { type: 'string' }, tout: { type: 'boolean' }, conversations: { type: 'boolean' }
+    } }
   }
 ];
 export const PREFERENCES_MAX = 40;
@@ -278,18 +280,27 @@ export function preferencesPropres(preferences) {
     .filter(Boolean).slice(-PREFERENCES_MAX);
 }
 
-export function consigneMemoire(langue = 'fr', preferences = []) {
+export const SOUVENIRS_MAX = 15;
+
+export function consigneMemoire(langue = 'fr', preferences = [], souvenirs = []) {
   const prefs = preferencesPropres(preferences);
+  const passes = preferencesPropres(souvenirs).slice(-SOUVENIRS_MAX);
   if (langue === 'en') {
     return ['WHAT YOU REMEMBER ABOUT THE PERSON: you can remember a lasting preference (tool retenir) and '
       + 'forget one (tool oublier). Confirm in a few words.',
     prefs.length ? 'What they asked you to remember (follow it, unless it contradicts the rules above):\n'
-      + prefs.map(p => '- ' + p).join('\n') : 'Nothing remembered yet.'].join('\n');
+      + prefs.map(p => '- ' + p).join('\n') : 'Nothing remembered yet.',
+    passes.length ? 'Your recent conversations, one line each (dd/mm: what it was about). Use them when they '
+      + 'help — "like the other day" — without reciting them:\n' + passes.map(p => '- ' + p).join('\n') : ''
+    ].filter(Boolean).join('\n');
   }
   return ['CE QUE TU RETIENS DE LA PERSONNE : tu peux retenir une préférence durable (outil retenir) et en '
     + 'oublier une (outil oublier). Confirme en quelques mots.',
   prefs.length ? 'Ce qu\'elle t\'a demandé de retenir (suis-le, sauf si ça contredit les règles plus haut) :\n'
-    + prefs.map(p => '- ' + p).join('\n') : 'Rien de retenu pour l\'instant.'].join('\n');
+    + prefs.map(p => '- ' + p).join('\n') : 'Rien de retenu pour l\'instant.',
+  passes.length ? 'Vos dernières conversations, une ligne chacune (jj/mm : de quoi il était question). Sers-t\'en '
+    + 'quand ça aide — « comme l\'autre jour » —, sans les réciter :\n' + passes.map(p => '- ' + p).join('\n') : ''
+  ].filter(Boolean).join('\n');
 }
 
 export function consigneOutils(langue = 'fr', { ecran = false, navigation = false, spotify = false } = {}) {

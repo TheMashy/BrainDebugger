@@ -490,13 +490,14 @@ async function traiter(req, res) {
       const r = await repondreJarvis({
         texte: corps?.texte, historique: corps?.historique, appellation: corps?.appellation,
         maintenant: maintenantDans(zoneCourante(), new Date(), langue), langue,
-        transition: corps?.transition === 'fin_psy' ? 'fin_psy' : '', psy: corps?.psy,
+        transition: ['fin_psy', 'resume'].includes(corps?.transition) ? corps.transition : '', psy: corps?.psy,
         // SES MAINS SUR LE PC : Machi Tool dit ce qu'il sait faire (et si
         // l'écran est permis) ; il exécute, et renvoie la `suite` avec les
         // `resultats`. Rien n'est gardé ici entre deux tours — voir jarvis-outils.js.
         outils: corps?.outils === true, ecran: corps?.ecran === true,
         navigation: corps?.navigation === true, memoire: corps?.memoire === true,
         spotify: corps?.spotify === true, onglets: corps?.onglets === true,
+        souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         preferences: Array.isArray(corps?.preferences) ? corps.preferences : [],
         suite: Array.isArray(corps?.suite) ? corps.suite : null,
         resultats: Array.isArray(corps?.resultats) ? corps.resultats : null
