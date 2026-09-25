@@ -18,10 +18,15 @@ import * as auth from './auth.js';
 import * as discord from './discord.js';
 import { commitDeploye, versionDuPaquet, DEMARRE_LE } from './version.js';
 import { repondreJarvis, maintenantDans, raisonErreurApi } from './jarvis.js';
+import { creerRegistre } from './taches.js';
+
 import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans, bilanDesJours } from './agenda.js';
 import { clientDe } from './lecture.js';
 import { record as noterDepense } from './usage.js';
 import { zoneCourante } from './temps.js';
+
+// Les tâches de fond de Jarvis, en mémoire : voir server/taches.js.
+const TACHES = creerRegistre();
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -502,6 +507,9 @@ async function traiter(req, res) {
         // Machi Tool lui-même : la guirlande, ses routines, ses réglages
         application: corps?.application === true,
         routines: typeof corps?.routines === 'string' ? corps.routines.slice(0, 3000) : '',
+        // ses tâches de fond, et ce que Machi Tool sait des projets
+        taches: corps?.taches === true,
+        projets: typeof corps?.projets === 'string' ? corps.projets.slice(0, 4000) : '',
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',
         preferences: Array.isArray(corps?.preferences) ? corps.preferences : [],
@@ -524,6 +532,39 @@ async function traiter(req, res) {
       if (err.statut === 400) return json(res, 400, { error: err.message });
       console.error('[jarvis]', String(err.message ?? err).slice(0, 200));
       return json(res, 502, { error: String(err.message ?? err).slice(0, 200), raison: raisonErreurApi(err) });
+    }
+  }
+
+  /* ---------- LES TÂCHES DE FOND DE JARVIS ----------
+   *
+   * « Rechercher des choses sur le côté. » Machi Tool lance (POST) et vient
+   * voir (GET ?id=…, ou la liste sans id) : la tâche tourne ici sans lui, en
+   * mémoire, et rien n'entre dans le journal. Voir server/taches.js.
+   */
+  if ((req.method === 'GET' || req.method === 'POST')
+      && (url.pathname === '/api/machitool/tache' || url.pathname === '/api/passerelle/tache')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      if (req.method === 'POST') {
+        const corps = await readBody(req);
+        const langue = corps?.langue === 'en' ? 'en' : 'fr';
+        const t = TACHES.lancer(userId, corps, {
+          client: () => clientDe(getSettings(userId)),
+          noter: (u, model) => noterDepense(userId, model, u.input, u.output, u.cacheLu, u.cacheEcrit, 'jarvis'),
+          maintenant: maintenantDans(zoneCourante(), new Date(), langue)
+        });
+        return json(res, 202, t);
+      }
+      const id = url.searchParams.get('id');
+      if (!id) return json(res, 200, { taches: TACHES.lister(userId) });
+      const t = TACHES.lire(userId, id);
+      return t ? json(res, 200, t) : json(res, 404, { error: 'tâche inconnue (le serveur a peut-être redémarré)' });
+    } catch (err) {
+      return json(res, err.statut ?? 400, { error: String(err.message ?? err).slice(0, 200) });
     }
   }
 

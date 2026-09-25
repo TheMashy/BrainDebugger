@@ -24,7 +24,8 @@ import { messageGrave } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
          OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE,
-         OUTILS_APPLI, consigneAppli } from './jarvis-outils.js';
+         OUTILS_APPLI, consigneAppli, OUTILS_TACHES, consigneProjets } from './jarvis-outils.js';
+import { projetsPropres } from './taches.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
 export const JARVIS_EFFORT = 'low';
@@ -58,15 +59,20 @@ export function raisonErreurApi(err) {
 }
 
 /** Claude consulté : la demande que Jarvis a écrite, et la réponse complète. */
-export async function consulterClaude(client, demande, langue = 'fr') {
+export async function consulterClaude(client, demande, langue = 'fr', projets = '') {
+  // « Réfléchir sur des idées simples avec un peu de contexte des projets » :
+  // ce que Machi Tool sait de ses projets vient avec la demande.
+  const p = projetsPropres(projets);
   const r = await client.messages.create({
     model: CLAUDE_CONSULTE,
     max_tokens: 4000,
-    system: langue === 'en'
+    system: (langue === 'en'
       ? 'You are answering a request passed on by JARVIS, the voice assistant of the person you are helping. '
         + 'Answer it fully and precisely, without filler. Plain text; code in code blocks if any.'
       : 'Tu réponds à une demande transmise par JARVIS, l\'assistant vocal de la personne que tu aides. '
-        + 'Réponds complètement et précisément, sans remplissage. Texte simple ; du code en blocs s\'il y en a.',
+        + 'Réponds complètement et précisément, sans remplissage. Texte simple ; du code en blocs s\'il y en a.')
+      + (p ? (langue === 'en' ? '\n\nTheir projects (context, use it when relevant):\n'
+                             : '\n\nSes projets (du contexte, à utiliser quand c\'est utile) :\n') + p : ''),
     messages: [{ role: 'user', content: String(demande ?? '').slice(0, 20000) }],
     ...optionsDuModele(CLAUDE_CONSULTE, { effort: 'high', pense: true, repli: false })
   });
@@ -264,6 +270,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                                               spotify = false, onglets = false, fenetreAgenda = false,
                                               agenda = null, souvenirs = [], ouverts = '',
                                               application = false, routines = '',
+                                              taches = false, projets = '',
                                               web = true }) {
   let messages;
   if (suite) {
@@ -289,10 +296,11 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '')
     + (memoire ? '\n\n' + consigneMemoire(langue, preferences, souvenirs) : '')
     + (outils && ouverts ? '\n\n' + consigneOnglets(langue, ouverts) : '')
-    + (application ? '\n\n' + consigneAppli(langue, routines) : '');
+    + (application ? '\n\n' + consigneAppli(langue, routines) : '')
+    + (taches ? '\n\n' + consigneProjets(langue, projets) : '');
   const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda }) : []),
                  ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, OUTIL_PSY, ...(memoire ? OUTILS_MEMOIRE : []),
-                 ...(application ? OUTILS_APPLI : []), OUTIL_CLAUDE];
+                 ...(application ? OUTILS_APPLI : []), ...(taches ? OUTILS_TACHES : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
   const details = [];
@@ -325,7 +333,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
         continue;
       }
       try {
-        const c = await consulterClaude(client, d.entree?.demande, langue);
+        const c = await consulterClaude(client, d.entree?.demande, langue, projets);
         consultations.push({ usage: c.usage, model: c.model });
         details.push(c.texte);
         locaux.push({ id: d.id, texte: c.texte });
@@ -351,7 +359,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     }
   }
   demandes = demandes.filter(d => !OUTILS_LOCAUX.has(d.nom));
-  if ((outils || memoire || application) && demandes.length) {
+  if ((outils || memoire || application || taches) && demandes.length) {
     return { texte: texteDe(r), outils: demandes, suite: suitePropre([...messages, { role: 'assistant', content: r.content }]),
              ...(details.length ? { detail: details.join('\n\n') } : {}), consultations, model: r.model ?? JARVIS_MODELE, usage };
   }
@@ -507,7 +515,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        outils = false, ecran = false, suite = null, resultats = null,
                                        navigation = false, memoire = false, preferences = [], spotify = false,
                                        onglets = false, fenetreAgenda = false, souvenirs = [], onglets_ouverts = '',
-                                       application = false, routines = '' },
+                                       application = false, routines = '', taches = false, projets = '' },
                                      { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'resume') {
@@ -540,6 +548,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       onglets: !!(outils && onglets), fenetreAgenda: !!(outils && fenetreAgenda),
                                                       agenda,
                                                       souvenirs, application: !!application, routines,
+                                                      taches: !!taches, projets: String(projets ?? ''),
                                                       suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
@@ -564,7 +573,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     navigation: !!(outils && navigation), memoire: !!memoire, preferences,
                                                     spotify: !!(outils && spotify), onglets: !!(outils && onglets),
                                                     fenetreAgenda: !!(outils && fenetreAgenda), agenda, souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000),
-                                                    application: !!application, routines: String(routines ?? '') });
+                                                    application: !!application, routines: String(routines ?? ''),
+                                                    taches: !!taches, projets: String(projets ?? '') });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   if (r.psy) {
