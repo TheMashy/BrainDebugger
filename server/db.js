@@ -990,6 +990,64 @@ export function purgerApercus(userId = OWNER) {
  * transaction. Sans ce recalcul, la journee garderait la phrase effacee
  * jusqu'au prochain message, et personne ne saurait pourquoi.
  */
+/**
+ * EFFACER UN PASSAGE D'UNE JOURNÉE. « Une petite fonctionnalité pour pouvoir
+ * supprimer des conversations d'une journée (avec validation), pour supprimer
+ * les conversations hors du contexte psychologique. »
+ *
+ * Pas `rembobiner` : lui efface un message ET TOUT CE QUI SUIT. Ici, on retire
+ * seulement les phrases de la personne qu'on désigne, avec les réponses du
+ * compagnon qui leur répondaient (jusqu'à sa phrase suivante) — le reste du fil
+ * ne bouge pas. Même principe que `rembobiner` : on supprime VRAIMENT, et le
+ * texte des journées touchées se recalcule, sinon la phrase resterait dans la
+ * carte, les échos et les statistiques.
+ *
+ * Ce qui s'y rattache part avec : les motifs repérés dans ces messages, les
+ * aperçus d'images, les relevés d'humeur, les verdicts de la veille. La
+ * dépense, elle, reste — elle a bien eu lieu — mais ne pointe plus vers rien.
+ *
+ * Rend { supprimes, dates } ; ne touche qu'aux messages de CETTE personne.
+ */
+export function effacerPassage(ids, userId = OWNER) {
+  const voulus = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter(Number.isInteger))];
+  if (!voulus.length) return { supprimes: 0, dates: [] };
+  const fil = db.prepare('SELECT id, ts, date, role FROM messages WHERE user_id = ? ORDER BY ts ASC, id ASC')
+    .all(userId);
+  const index = new Map(fil.map((m, i) => [m.id, i]));
+  const partir = new Set();
+  for (const id of voulus) {
+    const i = index.get(id);
+    if (i === undefined || fil[i].role !== 'user') continue;       // seulement ses phrases à elle
+    partir.add(fil[i].id);
+    for (let k = i + 1; k < fil.length && fil[k].role !== 'user'; k++) partir.add(fil[k].id);
+  }
+  if (!partir.size) return { supprimes: 0, dates: [] };
+  const dates = [...new Set(fil.filter(m => partir.has(m.id)).map(m => m.date))];
+  db.exec('BEGIN');
+  try {
+    const q = sql => db.prepare(sql);
+    const del = q('DELETE FROM messages WHERE user_id = ? AND id = ?');
+    const vues = q('DELETE FROM motif_vues WHERE message_id = ?');
+    const releves = q('DELETE FROM releves WHERE user_id = ? AND message_id = ?');
+    const verdicts = q('DELETE FROM verdicts_veille WHERE user_id = ? AND message_id = ?');
+    let depense = null;
+    try { depense = q('UPDATE usage SET message_id = NULL WHERE user_id = ? AND message_id = ?'); } catch { /* pas de table */ }
+    for (const id of partir) {
+      vues.run(id); releves.run(userId, id); verdicts.run(userId, id); depense?.run(userId, id);
+      del.run(userId, id);
+    }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  purgerApercus(userId);
+  for (const d of dates) {
+    rebuildEntryText(d, userId);
+    db.prepare(
+      "DELETE FROM entries WHERE user_id = ? AND date = ? AND note IS NULL AND (text IS NULL OR TRIM(text) = '')"
+    ).run(userId, d);
+  }
+  return { supprimes: partir.size, dates };
+}
+
 export function rembobiner(id, userId = OWNER) {
   const cible = db.prepare(
     'SELECT id, ts, date, role, text FROM messages WHERE user_id = ? AND id = ?'

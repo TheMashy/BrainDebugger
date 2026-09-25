@@ -7227,6 +7227,8 @@ function sujetsMarkup(sujets) {
   const corps = s => s.morceaux?.length
     ? s.morceaux.map(m => `<span class="jsphr"${m.id != null ? ` data-id="${esc(m.id)}"` : ''}>${esc(m.texte)}</span>`).join(' ')
     : esc(s.texte);
+  // EFFACER UN PASSAGE : « pour supprimer les conversations hors du contexte
+  // psychologique ». Un bouton discret par passage, qui demande avant d'effacer.
   return `<div class="jsujets">${sujets.map(s => `
     <div class="jsujet"${s.ids?.length ? ` data-ids="${esc(s.ids.join(','))}"` : ''}>
       <span class="jsmarque">
@@ -7234,6 +7236,8 @@ function sujetsMarkup(sujets) {
         ${s.heure ? `<span class="jsheure mono">${esc(s.heure)}</span>` : ''}
       </span>
       <p class="serif jstexte">${corps(s)}</p>
+      ${s.ids?.length ? `<button class="jseff" data-effacer="${esc(s.ids.join(','))}"
+        data-heure="${esc(s.heure ?? '')}" title="Effacer ce passage" aria-label="Effacer ce passage">${ico('corbeille', 13)}</button>` : ''}
     </div>`).join('')}</div>`;
 }
 
@@ -7615,6 +7619,24 @@ function wireMirror() {
     }
     if (e.target.closest('#backToChat')) return go('tonight');
 
+    const eff = e.target.closest('[data-effacer]');
+    if (eff) {
+      const ids = eff.dataset.effacer.split(',').map(Number).filter(Number.isInteger);
+      const h = eff.dataset.heure;
+      if (!confirm(`Effacer ce passage${h ? ` de ${h}` : ''} — ${ids.length > 1 ? `tes ${ids.length} messages` : 'ton message'} `
+          + `et les réponses du compagnon qui ${ids.length > 1 ? 'leur' : 'lui'} répondaient ?\n\n`
+          + 'Sans retour. Il ne comptera plus nulle part : ni dans la journée, ni dans la carte, '
+          + 'ni dans les échos, ni dans ce que le compagnon se rappelle.')) return;
+      try {
+        const r = await api('/api/passage/effacer', { ids });
+        S = await api('/api/state');
+        SERIES = null;
+        syncHeader();
+        rejouer(r.dates?.[0] ?? S.today);
+        toast(r.supprimes > 1 ? `Passage effacé (${r.supprimes} messages).` : 'Passage effacé.');
+      } catch (err) { toast(err.message); }
+      return;
+    }
     const del = e.target.closest('[data-erase]');
     if (del) {
       const d = del.dataset.erase;

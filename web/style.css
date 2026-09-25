@@ -3950,6 +3950,21 @@ details.jpecol .jpetop { margin-top: 5px; }
   border-radius: 0 7px 7px 0;
 }
 .jsujet { transition: background .18s ease, box-shadow .18s ease; padding-right: 4px; }
+/* Effacer un passage : discret, il ne se montre qu'au survol ou au clavier ;
+   sur un écran tactile (pas de survol), il reste là, en retrait. */
+.jsujet { position: relative; }
+.jseff {
+  position: absolute; top: 2px; right: -30px; width: 26px; height: 26px;
+  display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--danger, #e06c6c); cursor: pointer;
+  opacity: 0; transition: opacity .15s ease, background .15s ease;
+}
+.jsujet:hover .jseff, .jseff:focus-visible { opacity: .75; }
+.jseff:hover { opacity: 1; background: color-mix(in srgb, currentColor 14%, transparent); }
+.jseff:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+@media (hover: none) { .jseff { opacity: .45; } }
+@media (max-width: 700px) { .jseff { right: 0; top: -2px; } }
+@media (prefers-reduced-motion: reduce) { .jseff { transition: none } }
 @media (prefers-reduced-motion: reduce) { .jsujet { transition: none } }
 
 /* LA PHRASE DÉSIGNÉE, ET ELLE SEULE. Quand on connaît le message d'où vient

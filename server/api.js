@@ -8,7 +8,7 @@ import {
   addCarnet, allCarnet, carnetDuJour, updateCarnet, deleteCarnet, countCarnet,
   updateEvent, renommerMotif, rangerMessage, allObjectifs, addObjectif, marquerObjectif, deleteObjectif,
   lesSuivis, poserSuivi, retirerSuivi,
-  getLecture, setLecture, rembobiner, addReleve, relevesDuJour, relevesDuMessage, relevesDeToi, amplitude, amplitudes, TEINTES,
+  getLecture, setLecture, rembobiner, effacerPassage, addReleve, relevesDuJour, relevesDuMessage, relevesDeToi, amplitude, amplitudes, TEINTES,
   inventaireMesures, derniereMesure, oublierMesure, journalQS, viderJournalQS, mesuresDuJour,
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
   toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, versionMachiTool, joursEcrits,
@@ -3878,6 +3878,20 @@ export const routes = {
     if (!r) return { error: "Ce message n'existe plus." };
     invalidate(userId);
     return { ...r, messages: recentMessages(80, userId), motifs: motifsDuFil(userId) };
+  },
+
+  /*
+   * EFFACER UN PASSAGE D'UNE JOURNÉE — ses phrases et les réponses qui leur
+   * répondaient, rien d'autre (voir `effacerPassage`). La confirmation est
+   * côté page ; ici, on n'efface que les messages de la personne connectée.
+   */
+  'POST /api/passage/effacer': ({ body, userId }) => {
+    const ids = Array.isArray(body?.ids) ? body.ids : [];
+    if (!ids.length) return { error: 'aucun message désigné' };
+    const r = effacerPassage(ids, userId);
+    if (!r.supprimes) return { error: 'Ce passage n’existe plus.' };
+    invalidate(userId);
+    return r;
   },
 
   'GET /api/objectifs': ({ userId }) => ({ objectifs: allObjectifs(userId) }),
