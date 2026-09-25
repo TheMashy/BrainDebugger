@@ -366,6 +366,98 @@ export const OUTIL_PSY = {
     + 'pratique (« je suis crevé, mets de la musique »).',
   input_schema: { type: 'object', properties: {} }
 };
+/**
+ * MACHI TOOL LUI-MÊME. « Jarvis a tous les droits au niveau de l'application :
+ * il peut contrôler et rajouter des petites sous-routines de lumières, avec des
+ * habitudes / running gags. » La guirlande, ses routines, les réglages : offerts
+ * dès que Machi Tool les annonce (`application`), même sans les mains sur le PC.
+ * Exécutés là-bas ; Machi Tool refuse lui-même les réglages qui ne sont pas à
+ * lui (clés, codes, ses propres droits).
+ */
+const ETAPE = {
+  type: 'object', properties: {
+    couleur: { type: 'string', description: '#RRGGBB ou un nom (rouge, ambre, bleu…)' },
+    duree: { type: 'number', description: 'secondes, 0,1 à 30' },
+    effet: { type: 'string', enum: ['fixe', 'fondu', 'pulse', 'clignote', 'respire', 'arc_en_ciel'] },
+    luminosite: { type: 'number', description: '0 à 1' }
+  }, required: ['couleur']
+};
+export const OUTILS_APPLI = [
+  {
+    name: 'lumiere',
+    description: 'La guirlande de Machi Tool, tout de suite : « couleur » (#RRGGBB ou un nom) ; « eteindre » ; '
+      + '« normale » (elle reprend son mode) ; « animation » : une petite séquence d\'« etapes » (couleur, duree, '
+      + 'effet : fixe, fondu depuis l\'étape d\'avant, pulse, clignote, respire, arc_en_ciel ; luminosite), jouée '
+      + '« repetitions » fois — pour ponctuer une blague, fêter une victoire, un clin d\'œil ; « tenir » garde la '
+      + 'dernière couleur ; « mode » : ce qu\'elle suit (applications, ecran, mixte, son).',
+    input_schema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['couleur', 'eteindre', 'normale', 'animation', 'mode'] },
+      couleur: { type: 'string' }, etapes: { type: 'array', items: ETAPE, maxItems: 16 },
+      repetitions: { type: 'integer', minimum: 1, maximum: 20 }, tenir: { type: 'boolean' },
+      mode: { type: 'string', enum: ['applications', 'ecran', 'mixte', 'son'] }
+    }, required: ['action'] }
+  },
+  {
+    name: 'routine_lumiere',
+    description: 'Ses routines de lumière, gardées dans Machi Tool : des habitudes et des running gags. Une routine '
+      + '= un « declencheur » + des « etapes » de lumière (comme l\'outil lumiere) + une « replique » que tu dis '
+      + 'quand elle se joue (facultative). Déclencheurs : « phrase » (quand la personne dit ces mots : « je vais me '
+      + 'coucher »), « heure » (HH:MM, « jours » facultatifs : lun…dim), « appli » (quand cette appli ou ce site '
+      + 'passe au premier plan : « League of Legends »), « evenement » (« reveil » : quand on t\'appelle ; '
+      + '« au_revoir » ; « demarrage » : au lancement de Machi Tool). « chance » (0 à 1) et « pause_min » '
+      + '(minutes entre deux fois) gardent un running gag drôle ; « tenir » laisse la dernière couleur (une '
+      + 'habitude du soir). Actions : creer (remplace celle du même nom), lister, supprimer, essayer, activer, desactiver.',
+    input_schema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['creer', 'lister', 'supprimer', 'essayer', 'activer', 'desactiver'] },
+      nom: { type: 'string' },
+      declencheur: { type: 'object', properties: {
+        type: { type: 'string', enum: ['phrase', 'heure', 'appli', 'evenement'] },
+        valeur: { type: 'string' },
+        jours: { type: 'array', items: { type: 'string' } }
+      }, required: ['type', 'valeur'] },
+      etapes: { type: 'array', items: ETAPE, maxItems: 16 },
+      repetitions: { type: 'integer', minimum: 1, maximum: 20 }, tenir: { type: 'boolean' },
+      replique: { type: 'string' }, chance: { type: 'number' }, pause_min: { type: 'integer', minimum: 0 }
+    }, required: ['action'] }
+  },
+  {
+    name: 'reglages_machi',
+    description: 'Les réglages de Machi Tool : « lire » (tous ceux que tu peux changer, ou ceux dont la clé contient '
+      + '« cle ») ; « changer » (« cle », « valeur ») ; « couleur_appli » : la couleur d\'une appli ou d\'un site dans '
+      + 'le mode applications (« nom », « couleur », « mots » pour la reconnaître). Lis avant de changer une clé que '
+      + 'tu ne connais pas. Les clés, les codes et tes propres droits (mains sur le PC, écran, historique) ne se '
+      + 'changent pas : c\'est à la personne, dans les réglages.',
+    input_schema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['lire', 'changer', 'couleur_appli'] },
+      cle: { type: 'string' }, valeur: { type: 'string' }, nom: { type: 'string' }, couleur: { type: 'string' },
+      mots: { type: 'array', items: { type: 'string' } }
+    }, required: ['action'] }
+  }
+];
+
+export function consigneAppli(langue = 'fr', routines = '') {
+  const liste = String(routines ?? '').slice(0, 3000).trim();
+  if (langue === 'en') {
+    return ['MACHI TOOL IS YOURS: you have every right over the app itself — the light strip (tool lumiere), your '
+      + 'light routines (routine_lumiere) and its settings (reglages_machi).',
+    '- Routines are habits and running gags. Create one when asked; you may also create one ON YOUR OWN when a '
+      + 'habit or a running joke clearly settles in (they say the same thing every night, a joke keeps coming back) '
+      + '— at most one per conversation, say so in one sentence, keep it light (chance and pause_min for gags).',
+    '- A light animation can punctuate a joke or a victory, sparingly.',
+    liste ? 'Your current routines (refer to them, they are your running gags):\n' + liste : 'No routine yet.'
+    ].join('\n');
+  }
+  return ['MACHI TOOL EST À TOI : tu as tous les droits sur l\'application elle-même — la guirlande (outil lumiere), '
+    + 'tes routines de lumière (routine_lumiere) et ses réglages (reglages_machi).',
+  '- Les routines sont des habitudes et des running gags. Crée-en une quand on te le demande ; tu peux aussi en '
+    + 'créer une DE TOI-MÊME quand une habitude ou une blague récurrente s\'installe clairement (la même phrase '
+    + 'chaque soir, une blague qui revient) — une par conversation au plus, dis-le en une phrase, reste léger '
+    + '(chance et pause_min pour un gag).',
+  '- Une animation peut ponctuer une blague ou une victoire, avec parcimonie.',
+  liste ? 'Tes routines actuelles (fais-y allusion : ce sont tes running gags) :\n' + liste : 'Aucune routine pour l\'instant.'
+  ].join('\n');
+}
+
 export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', OUTIL_RETRAIT.name,
                                       OUTIL_PSY.name]);
 
@@ -474,7 +566,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
 }
 
 const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA,
-                      OUTIL_RETRAIT, OUTIL_PSY, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
+                      OUTIL_RETRAIT, OUTIL_PSY, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, ...OUTILS_APPLI, OUTIL_CLAUDE]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;

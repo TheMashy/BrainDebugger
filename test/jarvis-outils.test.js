@@ -379,3 +379,20 @@ test('il comprend qu\'on veut le psychologue : la phrase va au compagnon, et le 
   assert.equal(c.appels.length, 1, 'Jarvis ne reprend pas la parole');
   assert.match(c.appels[0].tools.find(t => t.name === 'passer_au_psychologue').description, /sans qu'elle dise le mot/);
 });
+
+test('Machi Tool est à lui : la guirlande, ses routines, les réglages — même sans les mains sur le PC', async () => {
+  const c = clientScenario([outilDemande('routine_lumiere', { action: 'creer', nom: 'Bonne nuit' }), fini('Bonne nuit.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  const r = await J.repondreJarvis({ texte: 'quand je dis bonne nuit, tamise en ambre', application: true,
+                                     routines: '- Encore League : quand League of Legends passe au premier plan' }, dep);
+  const noms = c.appels[0].tools.map(t => t.name);
+  for (const n of ['lumiere', 'routine_lumiere', 'reglages_machi']) assert.ok(noms.includes(n), n);
+  assert.ok(!noms.includes('lancer_appli'), 'le PC, lui, reste fermé');
+  assert.match(c.appels[0].system, /MACHI TOOL EST À TOI/);
+  assert.match(c.appels[0].system, /Encore League/, 'il connaît ses running gags');
+  assert.match(c.appels[0].system, /DE TOI-MÊME quand une habitude/);
+  assert.deepEqual(r.outils.map(o => o.nom), ['routine_lumiere'], 'l\'outil part à Machi Tool');
+  const sans = clientScenario([fini('Bonjour.')]);
+  await J.repondreJarvis({ texte: 'bonjour' }, { client: async () => sans, versLeCompagnon: async () => '' });
+  assert.ok(!sans.appels[0].tools.some(t => t.name === 'lumiere'), 'sans annonce, rien');
+});

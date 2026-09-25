@@ -499,6 +499,9 @@ async function traiter(req, res) {
         navigation: corps?.navigation === true, memoire: corps?.memoire === true,
         spotify: corps?.spotify === true, onglets: corps?.onglets === true,
         fenetreAgenda: corps?.fenetre_agenda === true,
+        // Machi Tool lui-même : la guirlande, ses routines, ses réglages
+        application: corps?.application === true,
+        routines: typeof corps?.routines === 'string' ? corps.routines.slice(0, 3000) : '',
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',
         preferences: Array.isArray(corps?.preferences) ? corps.preferences : [],
