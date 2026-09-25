@@ -49,8 +49,8 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
     'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
-    ['chercher_fichiers', 'consulter_claude', 'creer_dossier', 'lien', 'lister_dossier', 'musique', 'ouvrir',
-     'rechercher_google', 'spotify', 'web_search']);
+    ['chercher_fichiers', 'consulter_claude', 'creer_dossier', 'fenetre', 'lancer_appli', 'lien', 'lister_dossier',
+     'musique', 'ouvrir', 'pc', 'rechercher_google', 'son', 'spotify', 'web_search', 'youtube']);
   assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
   assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer/);
@@ -226,4 +226,28 @@ test('les préférences sont bornées : quarante phrases de deux cents signes au
   assert.equal(p.length, 40);
   assert.ok(p.every(x => x.length <= 200));
   assert.ok(p[0].startsWith('p10 '), 'les plus récentes restent');
+});
+
+test('Spotify par son API : offert seulement quand le compte est connecté, et YouTube sinon', async () => {
+  const c = clientScenario([fini('Oui.'), fini('Oui.'), fini('Oui.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  await J.repondreJarvis({ texte: 'mets Get Lucky', outils: true }, dep);
+  assert.ok(!c.appels[0].tools.some(t => t.name === 'spotify_jouer'));
+  assert.match(c.appels[0].system, /sers-toi de youtube/);
+  await J.repondreJarvis({ texte: 'mets Get Lucky', outils: true, spotify: true }, dep);
+  const noms = c.appels[1].tools.map(t => t.name);
+  for (const n of ['spotify_jouer', 'spotify_en_cours', 'spotify_aimer']) assert.ok(noms.includes(n), n);
+  assert.match(c.appels[1].system, /spotify_jouer/);
+  await J.repondreJarvis({ texte: 'mets Get Lucky', spotify: true }, dep);
+  assert.ok(!c.appels[2].tools.some(t => t.name === 'spotify_jouer'), 'sans les mains, pas de Spotify');
+});
+
+test('les outils du PC entier passent l\'aller-retour avec Machi Tool', async () => {
+  const c = clientScenario([outilDemande('son', { action: 'baisser', appli: 'discord' }), fini('C\'est fait.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  const r1 = await J.repondreJarvis({ texte: 'baisse discord', outils: true }, dep);
+  assert.deepEqual(r1.outils, [{ id: 'toolu_1', nom: 'son', entree: { action: 'baisser', appli: 'discord' } }]);
+  const r2 = await J.repondreJarvis({ suite: r1.suite, outils: true,
+                                      resultats: [{ id: 'toolu_1', texte: 'Volume de Discord à 40 %.' }] }, dep);
+  assert.equal(r2.texte, 'C\'est fait.');
 });

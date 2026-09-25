@@ -229,7 +229,7 @@ function usageDe(r) {
 export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
                                               outils = false, ecran = false, suite = null, resultats = null,
                                               navigation = false, memoire = false, preferences = [],
-                                              web = true }) {
+                                              spotify = false, web = true }) {
   let messages;
   if (suite) {
     // LA SUITE D'UN OUTIL : la conversation telle que Machi Tool l'a rendue, et
@@ -251,9 +251,9 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     }
   }
   const system = w => consigneJarvis({ appellation, maintenant, langue, web: w })
-    + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation }) : '')
+    + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '')
     + (memoire ? '\n\n' + consigneMemoire(langue, preferences) : '');
-  const tools = [...(outils ? outilsPermis({ ecran, navigation }) : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
+  const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify }) : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
   const details = [];
@@ -379,7 +379,7 @@ export function maintenantDans(zone, date = new Date(), langue = 'fr') {
 export async function repondreJarvis({ texte, historique = [], appellation = '', maintenant = '',
                                        langue = 'fr', transition = '', psy = [],
                                        outils = false, ecran = false, suite = null, resultats = null,
-                                       navigation = false, memoire = false, preferences = [] },
+                                       navigation = false, memoire = false, preferences = [], spotify = false },
                                      { client, versLeCompagnon, noter = () => {} }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'fin_psy') {
@@ -399,7 +399,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     // ici, c'est ce que les outils ont fait.
     const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: !!outils,
                                                       ecran: !!(outils && ecran), navigation: !!(outils && navigation),
-                                                      memoire: !!memoire, preferences, suite, resultats });
+                                                      memoire: !!memoire, preferences, spotify: !!(outils && spotify),
+                                                      suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
     return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),
@@ -412,7 +413,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
   }
   const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L,
                                                     outils: !!outils, ecran: !!(outils && ecran),
-                                                    navigation: !!(outils && navigation), memoire: !!memoire, preferences });
+                                                    navigation: !!(outils && navigation), memoire: !!memoire, preferences,
+                                                    spotify: !!(outils && spotify) });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),

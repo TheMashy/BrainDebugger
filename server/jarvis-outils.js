@@ -75,6 +75,50 @@ export const OUTILS_PC = [
     input_schema: { type: 'object', properties: { recherche: { type: 'string' } }, required: ['recherche'] }
   },
   {
+    name: 'youtube',
+    description: 'Lance une musique ou une vidéo sur YouTube : ouvre dans Chrome la première vidéo pour une '
+      + 'recherche (« Daft Punk Get Lucky »), qui se lance toute seule. Pour la musique quand Spotify n\'est '
+      + 'pas connecté, ou quand la personne dit YouTube.',
+    input_schema: { type: 'object', properties: { recherche: { type: 'string' } }, required: ['recherche'] }
+  },
+  {
+    name: 'lancer_appli',
+    description: 'Lance une application installée (menu Démarrer : Discord, OBS, Word…) ou un jeu Steam, par son '
+      + 'nom. Si plusieurs correspondent, le résultat les nomme : demande laquelle.',
+    input_schema: { type: 'object', properties: { nom: { type: 'string' } }, required: ['nom'] }
+  },
+  {
+    name: 'fenetre',
+    description: 'Les fenêtres ouvertes : les lister, en mettre une au premier plan, la réduire, l\'agrandir, '
+      + 'la restaurer ou la fermer (poliment : l\'appli peut proposer d\'enregistrer). « cible » : quelques mots '
+      + 'de son titre ou le nom de l\'appli. « tout » avec réduire : tout réduire (afficher le bureau).',
+    input_schema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['lister', 'premier_plan', 'reduire', 'agrandir', 'restaurer', 'fermer'] },
+      cible: { type: 'string' }, tout: { type: 'boolean' }
+    }, required: ['action'] }
+  },
+  {
+    name: 'son',
+    description: 'Le volume : général (sans « appli »), ou celui d\'une appli qui fait du son (« discord », '
+      + '« chrome », un jeu). « regler » à un niveau de 0 à 100 ; « monter » / « baisser » de « niveau » points '
+      + '(10 par défaut) ; « couper » / « remettre ».',
+    input_schema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['regler', 'monter', 'baisser', 'couper', 'remettre'] },
+      appli: { type: 'string' }, niveau: { type: 'integer', minimum: 0, maximum: 100 }
+    }, required: ['action'] }
+  },
+  {
+    name: 'pc',
+    description: 'Le PC : « verrouiller » ; « veille » (dans huit secondes : dis au revoir) — seulement si la '
+      + 'personne le demande clairement ; « luminosite » des écrans, avec « sens » (regler, monter, baisser) '
+      + 'et « niveau » (0 à 100).',
+    input_schema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['verrouiller', 'veille', 'luminosite'] },
+      sens: { type: 'string', enum: ['regler', 'monter', 'baisser'] },
+      niveau: { type: 'integer', minimum: 0, maximum: 100 }
+    }, required: ['action'] }
+  },
+  {
     name: 'lien',
     description: 'Ouvre une adresse web (http ou https) dans Chrome, ou la copie dans le presse-papiers '
       + '(action « copier ») : une page retrouvée dans l\'historique, ou une adresse que la personne te donne.',
@@ -108,6 +152,34 @@ export const OUTIL_HISTORIQUE = {
  * question (`preferences`) ; ces deux outils les changent, là-bas. Offerts
  * même sans les mains sur le PC (`memoire`).
  */
+/**
+ * SPOTIFY PAR SON API. Offert seulement si Machi Tool dit que le compte
+ * Spotify de la personne y est connecté (`spotify`).
+ */
+export const OUTILS_SPOTIFY = [
+  {
+    name: 'spotify_jouer',
+    description: 'Lance sur Spotify exactement ce qui est demandé : un titre, un album, un artiste ou une '
+      + 'playlist (les siennes d\'abord : « ma playlist Sport »). « file » : ajoute un titre à la file '
+      + 'd\'attente au lieu de le jouer tout de suite.',
+    input_schema: { type: 'object', properties: {
+      recherche: { type: 'string' },
+      genre: { type: 'string', enum: ['titre', 'album', 'artiste', 'playlist'] },
+      file: { type: 'boolean' }
+    }, required: ['recherche'] }
+  },
+  {
+    name: 'spotify_en_cours',
+    description: 'Ce qui joue sur Spotify en ce moment (titre, artiste).',
+    input_schema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'spotify_aimer',
+    description: 'Ajoute le titre en cours à ses titres likés sur Spotify.',
+    input_schema: { type: 'object', properties: {} }
+  }
+];
+
 export const OUTILS_MEMOIRE = [
   {
     name: 'retenir',
@@ -156,8 +228,9 @@ export const OUTIL_CLAUDE = {
 };
 export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name]);
 
-export function outilsPermis({ ecran = false, navigation = false } = {}) {
-  return [...OUTILS_PC, ...(ecran ? [OUTIL_ECRAN] : []), ...(navigation ? [OUTIL_HISTORIQUE] : [])];
+export function outilsPermis({ ecran = false, navigation = false, spotify = false } = {}) {
+  return [...OUTILS_PC, ...(ecran ? [OUTIL_ECRAN] : []), ...(navigation ? [OUTIL_HISTORIQUE] : []),
+          ...(spotify ? OUTILS_SPOTIFY : [])];
 }
 
 /** Les préférences telles que Machi Tool les envoie : des phrases, bornées. */
@@ -181,13 +254,17 @@ export function consigneMemoire(langue = 'fr', preferences = []) {
     + prefs.map(p => '- ' + p).join('\n') : 'Rien de retenu pour l\'instant.'].join('\n');
 }
 
-export function consigneOutils(langue = 'fr', { ecran = false, navigation = false } = {}) {
+export function consigneOutils(langue = 'fr', { ecran = false, navigation = false, spotify = false } = {}) {
   if (langue === 'en') {
     return [
-      'YOUR HANDS ON THE PC: tools to control the music and Spotify, open a Google search or a link in '
-      + 'Chrome, look through folders, find files, create a folder and open things'
+      'YOUR HANDS ON THE PC: tools to control the music, launch apps and Steam games, manage windows, '
+      + 'set the volume (overall or per app) and the screen brightness, lock the PC or put it to sleep, '
+      + 'open a Google search, a link or a YouTube video in Chrome, look through folders, find files, '
+      + 'create a folder and open things'
       + (navigation ? ', search the browser history for a video or a link seen before' : '')
       + (ecran ? ', and look at one of the two screens' : '') + '.',
+      spotify ? '- To play music, use spotify_jouer (their Spotify account is connected).'
+              : '- To play a specific song, use youtube (Spotify is not connected); the spotify tool only opens a search.',
       '- Use them only when the person asks for something they do; never on your own initiative.',
       '- If an access code is needed, Machi Tool asks for it itself. You never ask for a code and never mention one.',
       '- You cannot delete, move, rename or write into files: say so plainly if asked.',
@@ -198,10 +275,14 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
     ].filter(Boolean).join('\n');
   }
   return [
-    'TES MAINS SUR LE PC : des outils pour commander la musique et Spotify, ouvrir une recherche Google '
-    + 'ou un lien dans Chrome, parcourir les dossiers, chercher des fichiers, créer un dossier et ouvrir '
-    + 'des choses' + (navigation ? ', chercher dans l\'historique du navigateur une vidéo ou un lien déjà vu' : '')
+    'TES MAINS SUR LE PC : des outils pour commander la musique, lancer une appli ou un jeu Steam, gérer '
+    + 'les fenêtres, régler le son (général ou d\'une appli) et la luminosité, verrouiller le PC ou le mettre '
+    + 'en veille, ouvrir une recherche Google, un lien ou une vidéo YouTube dans Chrome, parcourir les '
+    + 'dossiers, chercher des fichiers, créer un dossier et ouvrir des choses'
+    + (navigation ? ', chercher dans l\'historique du navigateur une vidéo ou un lien déjà vu' : '')
     + (ecran ? ', et regarder un des deux écrans' : '') + '.',
+    spotify ? '- Pour lancer une musique, sers-toi de spotify_jouer (son compte Spotify est connecté).'
+            : '- Pour lancer un morceau précis, sers-toi de youtube (Spotify n\'est pas connecté) ; l\'outil spotify ne fait qu\'ouvrir une recherche.',
     '- Ne t\'en sers que quand la personne demande quelque chose qu\'ils font ; jamais de ta propre initiative.',
     '- Si un code d\'accès est nécessaire, Machi Tool le demande lui-même. Tu ne demandes jamais de code et tu n\'en parles pas.',
     '- Tu ne peux ni supprimer, ni déplacer, ni renommer, ni écrire dans un fichier : dis-le simplement si on te le demande.',
@@ -212,7 +293,8 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
   ].filter(Boolean).join('\n');
 }
 
-const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, ...OUTILS_MEMOIRE, OUTIL_CLAUDE].map(o => o.name));
+const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
+  .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;
 const IMAGE_MAX = 6 * 1024 * 1024;       // base64 : une capture JPEG en fait bien moins
