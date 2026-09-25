@@ -142,11 +142,13 @@ export const OUTILS_PC = [
   },
   {
     name: 'son',
-    description: 'Le volume : général (sans « appli »), ou celui d\'une appli qui fait du son (« discord », '
-      + '« chrome », un jeu). « regler » à un niveau de 0 à 100 ; « monter » / « baisser » de « niveau » points '
-      + '(10 par défaut) ; « couper » / « remettre ».',
+    description: 'Le volume : général (sans « appli »), ou celui d\'UNE appli qui fait du son — un nom (« spotify », '
+      + '« discord ») ou une famille : « jeu » (le jeu en cours), « navigateur » (Chrome, Edge, Firefox : YouTube), '
+      + '« musique », « appel » (Discord, Teams, Zoom). « regler » à un niveau de 0 à 100 ; « monter » / '
+      + '« baisser » de « niveau » points (10 par défaut) ; « couper » / « remettre » ; « lister » : ce qui fait du '
+      + 'son et à quel volume. Plusieurs applis, réglages différents : un appel par appli.',
     input_schema: { type: 'object', properties: {
-      action: { type: 'string', enum: ['regler', 'monter', 'baisser', 'couper', 'remettre'] },
+      action: { type: 'string', enum: ['regler', 'monter', 'baisser', 'couper', 'remettre', 'lister'] },
       appli: { type: 'string' }, niveau: { type: 'integer', minimum: 0, maximum: 100 }
     }, required: ['action'] }
   },
