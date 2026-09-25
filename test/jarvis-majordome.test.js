@@ -241,3 +241,18 @@ test('POST /api/machitool/jarvis : la clé, le grave au compagnon, et rien au jo
     p.kill();
   }
 });
+
+test('le mode psychologue ne se propose pas à tout propos, et une seule fois', () => {
+  // « Il faut faire gaffe que le mode psychologue n'arrive pas trop facilement. »
+  // Il se proposait dès qu'on parlait de sommeil, de santé ou de notes.
+  const fr = J.consigneJarvis({ langue: 'fr' });
+  assert.match(fr, /que si elle dit clairement qu'elle ne va pas bien/);
+  assert.match(fr, /mention en passant du sommeil/);
+  assert.match(fr, /au plus une fois par conversation/);
+  assert.doesNotMatch(fr, /parle de son moral, de sa santé, de son traitement, de son sommeil ou de ses notes, propose/);
+  const en = J.consigneJarvis({ langue: 'en' });
+  assert.match(en, /only if they clearly say they are not doing well/);
+  assert.match(en, /at most once in a conversation/);
+  // Le grave, lui, part toujours au compagnon : la règle ne l'affaiblit pas.
+  assert.match(fr, /tu passes la main au mode psychologue/);
+});
