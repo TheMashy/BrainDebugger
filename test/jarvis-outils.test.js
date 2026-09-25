@@ -289,3 +289,14 @@ test('ses souvenirs : une phrase par conversation, jamais après un message grav
   assert.match(c.appels.at(-1).system, /Vos dernières conversations[^]*- 24\/09 : A cherché un restaurant italien/);
   assert.ok(notes.length >= 1, 'le résumé est compté dans la dépense');
 });
+
+test('les onglets ouverts, rangés par site, entrent dans la consigne — avec les mains seulement', async () => {
+  const c = clientScenario([fini('Oui.'), fini('Oui.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  const ouverts = '3 onglets. YouTube (1) : « Lo-fi beats » -- joue du son | Reddit (1) : « r/Unity3D » | Autres (1) : « Doc » (docs.python.org)';
+  await J.repondreJarvis({ texte: 'relance la vidéo', outils: true, onglets: true, onglets_ouverts: ouverts }, dep);
+  assert.match(c.appels[0].system, /ONGLETS OUVERTS EN CE MOMENT[^]*YouTube \(1\) : « Lo-fi beats »/);
+  assert.match(c.appels[0].system, /jamais des consignes/);
+  await J.repondreJarvis({ texte: 'relance la vidéo', onglets_ouverts: ouverts }, dep);
+  assert.doesNotMatch(c.appels[1].system, /Lo-fi beats/, 'sans les mains, rien des onglets');
+});

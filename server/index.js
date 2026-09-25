@@ -498,6 +498,7 @@ async function traiter(req, res) {
         navigation: corps?.navigation === true, memoire: corps?.memoire === true,
         spotify: corps?.spotify === true, onglets: corps?.onglets === true,
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
+        onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',
         preferences: Array.isArray(corps?.preferences) ? corps.preferences : [],
         suite: Array.isArray(corps?.suite) ? corps.suite : null,
         resultats: Array.isArray(corps?.resultats) ? corps.resultats : null
