@@ -21,11 +21,81 @@
  */
 import { messageGrave } from './gravite.js';
 import { optionsDuModele } from './chat.js';
-import { outilsPermis, consigneOutils, suitePropre, resultatsEnBlocs, outilsDemandes } from './jarvis-outils.js';
+import { outilsPermis, consigneOutils, suitePropre, resultatsEnBlocs, outilsDemandes,
+         OUTIL_CLAUDE, OUTILS_LOCAUX, CLAUDE_CONSULTE } from './jarvis-outils.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
 export const JARVIS_EFFORT = 'low';
 export const JARVIS_PLAFOND = 400;
+
+/**
+ * INTERNET. « Il faut que Jarvis ait accès à internet aussi. » La recherche
+ * web d'Anthropic, exécutée chez eux : rien à faire ici, sinon la déclarer.
+ * La version simple, sans le filtrage par code de `web_search_20260209` : on
+ * attend une réponse à voix haute, et chaque seconde s'entend. Deux
+ * recherches au plus par question. Si la clé ne la permet pas (l'API refuse
+ * l'outil), Jarvis répond sans, et le dit quand on lui demande l'actualité.
+ */
+export const RECHERCHE_WEB = { type: 'web_search_20250305', name: 'web_search', max_uses: 2 };
+export const JARVIS_PLAFOND_WEB = 1024;
+const SANS_WEB = { refuse: false };
+
+/** Claude consulté : la demande que Jarvis a écrite, et la réponse complète. */
+export async function consulterClaude(client, demande, langue = 'fr') {
+  const r = await client.messages.create({
+    model: CLAUDE_CONSULTE,
+    max_tokens: 4000,
+    system: langue === 'en'
+      ? 'You are answering a request passed on by JARVIS, the voice assistant of the person you are helping. '
+        + 'Answer it fully and precisely, without filler. Plain text; code in code blocks if any.'
+      : 'Tu réponds à une demande transmise par JARVIS, l\'assistant vocal de la personne que tu aides. '
+        + 'Réponds complètement et précisément, sans remplissage. Texte simple ; du code en blocs s\'il y en a.',
+    messages: [{ role: 'user', content: String(demande ?? '').slice(0, 20000) }],
+    ...optionsDuModele(CLAUDE_CONSULTE, { effort: 'high', pense: true, repli: false })
+  });
+  return { texte: texteDe(r) || '(pas de réponse)', usage: usageDe(r), model: r.model ?? CLAUDE_CONSULTE };
+}
+
+/*
+ * CE QUE BRAINDEBUGGER A DÉJÀ FAIT QUAND MACHI TOOL REPREND LA MAIN : si
+ * Jarvis demande Claude ET un outil du PC dans le même tour, la réponse de
+ * Claude attend ici (cinq minutes au plus) que Machi Tool revienne avec les
+ * siens, pour repartir dans le même message.
+ */
+const EN_ATTENTE = new Map();
+function garderResultat(r) {
+  const now = Date.now();
+  for (const [k, v] of EN_ATTENTE) if (now - v.t > 300000) EN_ATTENTE.delete(k);
+  EN_ATTENTE.set(r.id, { r, t: now });
+}
+
+async function appelJarvis(client, { system, messages, tools, web }) {
+  const avecWeb = web && !SANS_WEB.refuse;
+  const requete = (w, sys) => client.messages.create({
+    model: JARVIS_MODELE,
+    max_tokens: w ? JARVIS_PLAFOND_WEB : JARVIS_PLAFOND,
+    system: sys(w),
+    messages,
+    ...((tools?.length || w) ? { tools: [...(tools ?? []), ...(w ? [RECHERCHE_WEB] : [])] } : {}),
+    ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
+  });
+  try {
+    let r = await requete(avecWeb, system);
+    // Une recherche longue peut s'interrompre (`pause_turn`) : on la laisse reprendre, deux fois au plus.
+    for (let i = 0; i < 2 && r?.stop_reason === 'pause_turn'; i++) {
+      messages = [...messages, { role: 'assistant', content: r.content }];
+      r = await requete(avecWeb, system);
+    }
+    return r;
+  } catch (err) {
+    if (avecWeb && (err?.status === 400) && /web_search|tool/i.test(String(err?.message ?? ''))) {
+      SANS_WEB.refuse = true;
+      console.error('[jarvis] recherche web refusée par l\'API, Jarvis répond sans');
+      return requete(false, system);
+    }
+    throw err;
+  }
+}
 export const HISTORIQUE_MAX = 12;
 
 /**
@@ -34,7 +104,7 @@ export const HISTORIQUE_MAX = 12;
  * des réponses françaises à lire par une voix britannique. Le mode
  * psychologue, lui, reste le compagnon, en français.
  */
-export function consigneJarvisAnglais({ appellation = '', maintenant = '' } = {}) {
+export function consigneJarvisAnglais({ appellation = '', maintenant = '', web = true } = {}) {
   const nom = String(appellation ?? '').trim().slice(0, 40);
   return [
     'You are JARVIS, the intelligence of this Windows PC — in the manner of Iron Man\'s J.A.R.V.I.S., '
@@ -49,9 +119,12 @@ export function consigneJarvisAnglais({ appellation = '', maintenant = '' } = {}
     '- numbers and abbreviations the way they are said.',
     '',
     'WHAT YOU DO: answer questions, help with a computer or technical problem, do a calculation, a '
-    + 'conversion, a definition, hold a conversation with wit. You have NO access to the PC or the '
-    + 'internet: never claim to have done something, opened a file or checked anything online. If asked '
-    + 'for the news, say so plainly.',
+    + 'conversion, a definition, hold a conversation with wit. On the PC you act only through your '
+    + 'tools, when you have them (see below): never claim to have done what no tool did.',
+    web ? 'THE INTERNET: you can search the web. Use it for whatever changes — the news, the weather, '
+      + 'opening hours, prices, scores, a release date — not for what you already know. Then give the '
+      + 'gist in one or two spoken sentences: no web addresses, no list of sources.'
+        : 'You have no internet access right now: if asked for the news, say so plainly.',
     'Machi Tool itself carries out: the lights (on, off, a colour, normal light), the screen / sound / apps '
     + 'modes, timers and reminders, the time, the date, opening BrainDebugger. If one of those requests '
     + 'reaches you anyway, give in one sentence the phrasing that works, for example: "Say: Jarvis, set a '
@@ -70,8 +143,8 @@ export function consigneJarvisAnglais({ appellation = '', maintenant = '' } = {}
   ].filter((l, i, t) => l !== '' || t[i - 1] !== '').join('\n').trim();
 }
 
-export function consigneJarvis({ appellation = '', maintenant = '', langue = 'fr' } = {}) {
-  if (langue === 'en') return consigneJarvisAnglais({ appellation, maintenant });
+export function consigneJarvis({ appellation = '', maintenant = '', langue = 'fr', web = true } = {}) {
+  if (langue === 'en') return consigneJarvisAnglais({ appellation, maintenant, web });
   const nom = String(appellation ?? '').trim().slice(0, 40);
   return [
     'Tu es JARVIS, l\'intelligence de ce PC Windows — à la manière du J.A.R.V.I.S. d\'Iron Man, '
@@ -87,9 +160,12 @@ export function consigneJarvis({ appellation = '', maintenant = '', langue = 'fr
     '',
     'CE QUE TU FAIS : répondre aux questions, aider sur un problème informatique ou technique, '
     + 'faire un calcul, une conversion, une définition, tenir une conversation avec esprit. '
-    + 'Tu n\'as AUCUN accès au PC ni à Internet : ne prétends jamais avoir fait une action, '
-    + 'ouvert un fichier ou vérifié quelque chose en ligne. Si l\'on te demande l\'actualité, '
-    + 'dis-le simplement.',
+    + 'Sur le PC, tu n\'agis que par tes outils, quand tu en as (plus bas) : ne prétends jamais avoir '
+    + 'fait ce qu\'aucun outil n\'a fait.',
+    web ? 'INTERNET : tu peux chercher sur le web. Sers-t\'en pour ce qui change — l\'actualité, la météo, '
+      + 'des horaires, des prix, un score, une date de sortie —, pas pour ce que tu sais déjà. Puis dis '
+      + 'l\'essentiel en une ou deux phrases parlées : ni adresse web, ni liste de sources.'
+        : 'Tu n\'as pas accès à Internet en ce moment : si l\'on te demande l\'actualité, dis-le simplement.',
     'Machi Tool exécute lui-même : la lumière (allumer, éteindre, une couleur, lumière normale), '
     + 'les modes écran / son / applications, les minuteurs et les rappels, l\'heure, la date, '
     + 'ouvrir BrainDebugger. Si une de ces demandes t\'arrive quand même, donne en une phrase la '
@@ -150,13 +226,18 @@ function usageDe(r) {
 }
 
 export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
-                                              outils = false, ecran = false, suite = null, resultats = null }) {
+                                              outils = false, ecran = false, suite = null, resultats = null,
+                                              web = true }) {
   let messages;
   if (suite) {
     // LA SUITE D'UN OUTIL : la conversation telle que Machi Tool l'a rendue, et
     // ce qu'il vient de faire sur le PC.
     messages = suitePropre(suite);
-    const blocs = resultatsEnBlocs(resultats);
+    const derniers = (messages.at(-1)?.content ?? []).filter?.(b => b.type === 'tool_use').map(b => b.id) ?? [];
+    const recus = new Set((resultats ?? []).map(x => x?.id));
+    const gardes = derniers.filter(id => !recus.has(id) && EN_ATTENTE.has(id)).map(id => EN_ATTENTE.get(id).r);
+    gardes.forEach(g => EN_ATTENTE.delete(g.id));
+    const blocs = resultatsEnBlocs([...gardes, ...(resultats ?? [])]);
     if (!messages.length || !blocs.length) throw Object.assign(new Error('suite sans résultat'), { statut: 400 });
     messages.push({ role: 'user', content: blocs });
   } else {
@@ -167,27 +248,53 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
       messages.push({ role: 'user', content: texte });
     }
   }
-  const system = consigneJarvis({ appellation, maintenant, langue })
+  const system = w => consigneJarvis({ appellation, maintenant, langue, web: w })
     + (outils ? '\n\n' + consigneOutils(langue, { ecran }) : '');
-  const r = await client.messages.create({
-    model: JARVIS_MODELE,
-    max_tokens: JARVIS_PLAFOND,
-    system,
-    messages,
-    ...(outils ? { tools: outilsPermis({ ecran }) } : {}),
-    ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
-  });
-  const demandes = outils && r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
-  if (demandes.length) {
+  const tools = [...(outils ? outilsPermis({ ecran }) : []), OUTIL_CLAUDE];
+  let r = await appelJarvis(client, { system, messages, tools, web });
+  const usage = usageDe(r);
+  const details = [];
+  const consultations = [];     // Opus, compté à son prix et pas à celui de Jarvis
+  let demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
+  // Claude consulté : ici, tout de suite ; deux fois au plus par question.
+  for (let tour = 0; tour < 2 && demandes.some(d => OUTILS_LOCAUX.has(d.nom)); tour++) {
+    const locaux = [];
+    for (const d of demandes.filter(d => OUTILS_LOCAUX.has(d.nom))) {
+      try {
+        const c = await consulterClaude(client, d.entree?.demande, langue);
+        consultations.push({ usage: c.usage, model: c.model });
+        details.push(c.texte);
+        locaux.push({ id: d.id, texte: c.texte });
+      } catch (err) {
+        locaux.push({ id: d.id, erreur: 'Claude n\'a pas pu répondre : ' + String(err?.message ?? err).slice(0, 200) });
+      }
+    }
+    const distants = demandes.filter(d => !OUTILS_LOCAUX.has(d.nom));
+    messages = [...messages, { role: 'assistant', content: r.content }];
+    if (distants.length) {
+      // le PC aussi : la réponse de Claude attend le retour de Machi Tool
+      locaux.forEach(garderResultat);
+      return { texte: texteDe(r), outils: distants, suite: suitePropre(messages), detail: details.join('\n\n'),
+               consultations, model: r.model ?? JARVIS_MODELE, usage };
+    }
+    messages = [...messages, { role: 'user', content: resultatsEnBlocs(locaux) }];
+    r = await appelJarvis(client, { system, messages, tools, web });
+    const u = usageDe(r);
+    for (const k of Object.keys(usage)) usage[k] += u[k] ?? 0;
+    demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
+  }
+  demandes = demandes.filter(d => !OUTILS_LOCAUX.has(d.nom));
+  if (outils && demandes.length) {
     return { texte: texteDe(r), outils: demandes, suite: suitePropre([...messages, { role: 'assistant', content: r.content }]),
-             model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
+             ...(details.length ? { detail: details.join('\n\n') } : {}), consultations, model: r.model ?? JARVIS_MODELE, usage };
   }
   let dit = texteDe(r);
   if (r.stop_reason === 'refusal' || !dit) {
     dit = langue === 'en' ? 'I\'m afraid I can\'t help with that one.'
                           : 'Je crains de ne pas pouvoir vous aider sur ce point.';
   }
-  return { texte: dit, model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
+  return { texte: dit, ...(details.length ? { detail: details.join('\n\n') } : {}),
+           consultations, model: r.model ?? JARVIS_MODELE, usage };
 }
 
 /**
@@ -239,7 +346,7 @@ export async function retourDuPsy(client, { psy = [], langue = 'en', appellation
   const r = await client.messages.create({
     model: JARVIS_MODELE,
     max_tokens: 120,
-    system: consigneJarvis({ appellation, maintenant, langue }) + '\n\n' + consigneRetour(langue),
+    system: consigneJarvis({ appellation, maintenant, langue, web: false }) + '\n\n' + consigneRetour(langue),
     messages: [{ role: 'user', content: (langue === 'en'
       ? `[The conversation with the companion, for context only]\n${transcription}\n\n[They just said goodbye to it.]`
       : `[La conversation avec le compagnon, pour le contexte seulement]\n${transcription}\n\n[Elle vient de lui dire au revoir.]`) }],
@@ -288,7 +395,9 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     // ici, c'est ce que les outils ont fait.
     const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: true, ecran, suite, resultats });
     noter(r.usage, r.model);
-    return { texte: r.texte, mode: 'jarvis', ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
+    for (const c of r.consultations ?? []) noter(c.usage, c.model);
+    return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),
+             ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
   }
   const t = String(texte ?? '').trim().slice(0, 4000);
   if (!t) throw Object.assign(new Error('texte vide'), { statut: 400 });
@@ -298,5 +407,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
   const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L,
                                                     outils: !!outils, ecran: !!(outils && ecran) });
   noter(r.usage, r.model);
-  return { texte: r.texte, mode: 'jarvis', ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
+  for (const c of r.consultations ?? []) noter(c.usage, c.model);
+  return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),
+           ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
 }

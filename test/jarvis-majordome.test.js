@@ -77,7 +77,10 @@ test('la réponse du majordome, avec la conversation en cours', async () => {
   assert.equal(req.model, 'claude-sonnet-5');
   assert.deepEqual(req.messages.map(m => m.role), ['user', 'assistant', 'user']);
   assert.equal(req.messages[2].content, 'et en hexadécimal ?');
-  assert.ok(req.max_tokens <= 600, 'des réponses parlées, courtes');
+  // Des réponses parlées, courtes : c'est la consigne qui les tient. Le plafond
+  // laisse la place à une recherche web (voir RECHERCHE_WEB).
+  assert.ok(req.max_tokens <= J.JARVIS_PLAFOND_WEB);
+  assert.ok(req.tools.some(t => t.type === J.RECHERCHE_WEB.type), 'il a Internet');
   assert.equal(notes[0][0].output, 18);
 });
 

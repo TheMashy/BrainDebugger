@@ -79,6 +79,27 @@ export const OUTIL_ECRAN = {
   } }
 };
 
+/**
+ * CLAUDE, CONSULTÉ PAR JARVIS. « Il faudrait que Jarvis puisse avoir accès à
+ * Claude et puisse prompter pour moi si besoin. » Jarvis est déjà Claude, mais
+ * rapide (Sonnet, effort bas) : pour une question qui mérite qu'on réfléchisse
+ * — du code, un raisonnement, une rédaction, un plan —, il écrit lui-même une
+ * demande complète à un Claude plus puissant, et en rapporte l'essentiel à
+ * voix haute. Exécuté ICI, pas sur le PC : c'est une conversation avec l'API,
+ * et la réponse complète revient à Machi Tool à côté du résumé (`detail`).
+ */
+export const CLAUDE_CONSULTE = 'claude-opus-5-5';
+export const OUTIL_CLAUDE = {
+  name: 'consulter_claude',
+  description: 'Transmet une demande à Claude Opus, plus puissant et plus lent (dix à quarante secondes) : '
+    + 'un problème à raisonner, du code, un texte à rédiger, un plan, une comparaison détaillée. Écris '
+    + 'toi-même la demande complète, comme un bon prompt : le contexte, ce qu\'on attend, la forme voulue. '
+    + 'Tu reçois sa réponse écrite : dis-en l\'essentiel à voix haute en deux ou trois phrases ; la '
+    + 'personne aura le texte complet. Pas pour ce que tu sais déjà faire vite.',
+  input_schema: { type: 'object', properties: { demande: { type: 'string' } }, required: ['demande'] }
+};
+export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name]);
+
 export function outilsPermis({ ecran = false } = {}) {
   return ecran ? [...OUTILS_PC, OUTIL_ECRAN] : [...OUTILS_PC];
 }
@@ -112,7 +133,7 @@ export function consigneOutils(langue = 'fr', { ecran = false } = {}) {
   ].filter(Boolean).join('\n');
 }
 
-const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN].map(o => o.name));
+const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_CLAUDE].map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;
 const IMAGE_MAX = 6 * 1024 * 1024;       // base64 : une capture JPEG en fait bien moins

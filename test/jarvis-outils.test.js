@@ -45,10 +45,11 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
   const c = clientScenario([fini('Bonjour.'), fini('Bonjour.'), fini('Bonjour.')]);
   const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
   await J.repondreJarvis({ texte: 'bonjour' }, dep);
-  assert.equal(c.appels[0].tools, undefined);
+  assert.deepEqual(c.appels[0].tools.map(t => t.name).sort(), ['consulter_claude', 'web_search'],
+    'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
-    ['chercher_fichiers', 'creer_dossier', 'lister_dossier', 'musique', 'ouvrir', 'spotify']);
+    ['chercher_fichiers', 'consulter_claude', 'creer_dossier', 'lister_dossier', 'musique', 'ouvrir', 'spotify', 'web_search']);
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
   assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer/);
   await J.repondreJarvis({ texte: 'bonjour', outils: true, ecran: true }, dep);
@@ -120,4 +121,64 @@ test('une suite sans résultat est refusée', async () => {
   const c = clientScenario([]);
   await assert.rejects(J.repondreJarvis({ suite: [{ role: 'user', content: 'x' }], resultats: [] },
                                         { client: async () => c, versLeCompagnon: async () => '' }), /suite sans résultat/);
+});
+
+test('Internet : la recherche web, et sans elle si la clé ne la permet pas', async () => {
+  // « Il faut que Jarvis ait accès à internet aussi. »
+  const appels = [];
+  let refuse = true;
+  const client = { messages: { create: async req => {
+    appels.push(req);
+    if (refuse && req.tools?.some(t => t.name === 'web_search')) {
+      refuse = false;
+      throw Object.assign(new Error('web_search is not enabled for this organization'), { status: 400 });
+    }
+    return fini('Il pleut à Paris.');
+  } } };
+  const r = await J.repondreJarvis({ texte: 'quel temps fait-il à Paris' }, { client: async () => client, versLeCompagnon: async () => '' });
+  assert.equal(r.texte, 'Il pleut à Paris.');
+  assert.ok(appels[0].tools.some(t => t.name === 'web_search'));
+  assert.ok(!appels[1].tools.some(t => t.name === 'web_search'), 'refusée : on répond sans');
+  assert.match(appels[1].system, /pas accès à Internet en ce moment/);
+  assert.match(appels[0].system, /tu peux chercher sur le web/);
+});
+
+test('une recherche interrompue (pause_turn) reprend', async () => {
+  const c = clientScenario([{ content: [{ type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'x' } }],
+                              stop_reason: 'pause_turn', model: 'claude-sonnet-5', usage },
+                            fini('Voilà.')]);
+  const r = await J.demanderAJarvis(c, { texte: 'actu', web: true });
+  assert.equal(r.texte, 'Voilà.');
+  assert.equal(c.appels[1].messages.at(-1).role, 'assistant', 'on renvoie le tour interrompu, sans « continue »');
+});
+
+test('Jarvis consulte Claude, rapporte l\'essentiel, et la réponse complète revient à côté', async () => {
+  // « Il faudrait que Jarvis puisse avoir accès à Claude et puisse prompter pour moi. »
+  const appels = [];
+  const reponses = [outilDemande('consulter_claude', { demande: 'Écris un script Python qui renomme des photos par date.' }),
+                    { content: [{ type: 'text', text: 'import os\n# le script complet' }], stop_reason: 'end_turn',
+                      model: O.CLAUDE_CONSULTE, usage: { input_tokens: 50, output_tokens: 900 } },
+                    fini('Claude a écrit le script : il lit la date de chaque photo et la renomme. Le texte complet est à côté.')];
+  const client = { messages: { create: async req => { appels.push(req); return reponses.shift(); } } };
+  const notes = [];
+  const r = await J.repondreJarvis({ texte: 'demande à Claude un script pour renommer mes photos' },
+                                   { client: async () => client, versLeCompagnon: async () => '', noter: (u, m) => notes.push(m) });
+  assert.match(r.texte, /Claude a écrit le script/);
+  assert.equal(r.detail, 'import os\n# le script complet');
+  assert.equal(appels[1].model, O.CLAUDE_CONSULTE);
+  assert.equal(appels[1].messages[0].content, 'Écris un script Python qui renomme des photos par date.');
+  assert.deepEqual(notes.sort(), ['claude-sonnet-5', O.CLAUDE_CONSULTE].sort(), 'Opus compté à son prix');
+});
+
+test('Claude et le PC dans le même tour : la réponse de Claude attend Machi Tool', async () => {
+  const double = { content: [{ type: 'tool_use', id: 'c1', name: 'consulter_claude', input: { demande: 'un nom de dossier' } },
+                             { type: 'tool_use', id: 'p1', name: 'lister_dossier', input: { chemin: 'Documents' } }],
+                   stop_reason: 'tool_use', model: 'claude-sonnet-5', usage };
+  const c = clientScenario([double, fini('« Archives 2026 ».'), fini('Créé.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => '' };
+  const r1 = await J.repondreJarvis({ texte: 'range mes documents', outils: true }, dep);
+  assert.deepEqual(r1.outils.map(o => o.nom), ['lister_dossier'], 'Machi Tool ne reçoit que ce qui est à lui');
+  await J.repondreJarvis({ suite: r1.suite, resultats: [{ id: 'p1', texte: '3 dossiers' }] }, dep);
+  const blocs = c.appels.at(-1).messages.at(-1).content;
+  assert.deepEqual(blocs.map(b => b.tool_use_id).sort(), ['c1', 'p1'], 'les deux résultats repartent ensemble');
 });
