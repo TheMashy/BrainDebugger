@@ -23,7 +23,7 @@
 import { messageGrave } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
-         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, CLAUDE_CONSULTE } from './jarvis-outils.js';
+         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_RETRAIT, CLAUDE_CONSULTE } from './jarvis-outils.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
 export const JARVIS_EFFORT = 'low';
@@ -288,16 +288,22 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     + (memoire ? '\n\n' + consigneMemoire(langue, preferences, souvenirs) : '')
     + (outils && ouverts ? '\n\n' + consigneOnglets(langue, ouverts) : '');
   const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda }) : []),
-                 ...(agenda ? OUTILS_AGENDA : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
+                 ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
   const details = [];
   const consultations = [];     // Opus, compté à son prix et pas à celui de Jarvis
+  let fin = false;              // congédié : Machi Tool cessera d'écouter
   let demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
   // Claude consulté : ici, tout de suite ; deux fois au plus par question.
   for (let tour = 0; tour < 2 && demandes.some(d => OUTILS_LOCAUX.has(d.nom)); tour++) {
     const locaux = [];
     for (const d of demandes.filter(d => OUTILS_LOCAUX.has(d.nom))) {
+      if (d.nom === 'se_retirer') {
+        fin = true;
+        locaux.push({ id: d.id, texte: 'La conversation se termine après ta réponse : une formule très brève.' });
+        continue;
+      }
       if (d.nom !== 'consulter_claude') {
         // L'agenda : dans la base de BrainDebugger, tout de suite.
         try {
@@ -338,11 +344,12 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
              ...(details.length ? { detail: details.join('\n\n') } : {}), consultations, model: r.model ?? JARVIS_MODELE, usage };
   }
   let dit = texteDe(r);
+  if (fin && !dit) dit = langue === 'en' ? 'Very good.' : 'Bien.';
   if (r.stop_reason === 'refusal' || !dit) {
     dit = langue === 'en' ? 'I\'m afraid I can\'t help with that one.'
                           : 'Je crains de ne pas pouvoir vous aider sur ce point.';
   }
-  return { texte: dit, ...(details.length ? { detail: details.join('\n\n') } : {}),
+  return { texte: dit, ...(details.length ? { detail: details.join('\n\n') } : {}), ...(fin ? { fin: true } : {}),
            consultations, model: r.model ?? JARVIS_MODELE, usage };
 }
 
@@ -523,7 +530,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
-    return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),
+    return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
              ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
   }
   const t = String(texte ?? '').trim().slice(0, 4000);
@@ -538,6 +545,6 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     fenetreAgenda: !!(outils && fenetreAgenda), agenda, souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000) });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
-  return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),
+  return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
            ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
 }

@@ -45,14 +45,14 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
   const c = clientScenario([fini('Bonjour.'), fini('Bonjour.'), fini('Bonjour.')]);
   const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
   await J.repondreJarvis({ texte: 'bonjour' }, dep);
-  assert.deepEqual(c.appels[0].tools.map(t => t.name).sort(), ['consulter_claude', 'web_search'],
+  assert.deepEqual(c.appels[0].tools.map(t => t.name).sort(), ['consulter_claude', 'se_retirer', 'web_search'],
     'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
     ['affiner_recherche', 'chercher_fichiers', 'consulter_claude', 'creer_dossier', 'creer_fichier', 'ecrire_note',
      'fenetre', 'lancer_appli', 'lien',
-     'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'pc', 'rechercher_google', 'son', 'spotify',
-     'temperatures', 'web_search', 'youtube']);
+     'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'pc', 'rechercher_google', 'se_retirer', 'son',
+     'spotify', 'temperatures', 'web_search', 'youtube']);
   assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
   assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer, ni modifier un fichier existant/);
@@ -345,4 +345,20 @@ test('un refus de l\'API a une raison que Machi Tool peut dire', () => {
   assert.equal(J.raisonErreurApi(e(529, 'Overloaded')), 'surcharge');
   assert.equal(J.raisonErreurApi(e(429, 'rate_limit_error')), 'limite');
   assert.equal(J.raisonErreurApi(e(500, 'Internal server error')), 'autre');
+});
+
+test('congédié, il se retire pour de bon : la réponse porte `fin`', async () => {
+  const c = clientScenario([outilDemande('se_retirer', {}), fini('Je me retire.'),
+                            outilDemande('se_retirer', {}, 'toolu_2'), { content: [], stop_reason: 'end_turn', usage }]);
+  const dep = { client: async () => c, versLeCompagnon: async () => '' };
+  const r = await J.repondreJarvis({ texte: 'va voir ailleurs si j\'y suis' }, dep);
+  assert.equal(r.texte, 'Je me retire.');
+  assert.equal(r.fin, true);
+  assert.equal(r.outils, undefined, 'rien ne part au PC');
+  const r2 = await J.repondreJarvis({ texte: 'du balai' }, dep);
+  assert.equal(r2.texte, 'Bien.', 'sans mot du modèle, une formule');
+  assert.equal(r2.fin, true);
+  const c3 = clientScenario([fini('Il est midi.')]);
+  const r3 = await J.repondreJarvis({ texte: 'quelle heure' }, { client: async () => c3, versLeCompagnon: async () => '' });
+  assert.equal(r3.fin, undefined);
 });

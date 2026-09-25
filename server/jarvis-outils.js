@@ -335,7 +335,21 @@ export const OUTIL_CLAUDE = {
     + 'personne aura le texte complet. Pas pour ce que tu sais déjà faire vite.',
   input_schema: { type: 'object', properties: { demande: { type: 'string' } }, required: ['demande'] }
 };
-export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire']);
+/**
+ * SE RETIRER POUR DE BON. « Quand je dis oust, dégage, casse-toi... il dit
+ * "oui" ou "je m'efface", mais reste. » Machi Tool reconnaît la plupart des
+ * congés ; pour les autres, le modèle appelle cet outil, et la réponse porte
+ * `fin` : Machi Tool dit la formule, puis cesse d'écouter.
+ */
+export const OUTIL_RETRAIT = {
+  name: 'se_retirer',
+  description: 'Quand la personne te congédie — « dégage », « laisse-moi », « tu peux disposer », « va voir '
+    + 'ailleurs », ou toute autre façon de te dire de partir : appelle cet outil, puis dis seulement une formule '
+    + 'très brève (« Bien. », « Je me retire. »). La conversation se termine et tu cesses d\'écouter. Jamais '
+    + 'pour un simple « merci » ou « ça ira » au milieu d\'une demande.',
+  input_schema: { type: 'object', properties: {} }
+};
+export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', OUTIL_RETRAIT.name]);
 
 export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false,
                                fenetreAgenda = false } = {}) {
@@ -436,7 +450,8 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
   ].filter(Boolean).join('\n');
 }
 
-const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
+const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA,
+                      OUTIL_RETRAIT, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;
