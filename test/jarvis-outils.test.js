@@ -52,7 +52,7 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
     ['affiner_recherche', 'chercher_fichiers', 'consulter_claude', 'creer_dossier', 'creer_fichier', 'ecrire_note',
      'fenetre', 'lancer_appli', 'lien',
      'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'pc', 'rechercher_google', 'son', 'spotify',
-     'web_search', 'youtube']);
+     'temperatures', 'web_search', 'youtube']);
   assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
   assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer, ni modifier un fichier existant/);
@@ -337,4 +337,17 @@ test('Google Agenda : offert seulement connecté et avec les mains ; il pose, il
   assert.ok(!c.appels[1].tools.some(t => /agenda_(lire|lister|effacer|supprimer)/.test(t.name)));
   await J.repondreJarvis({ texte: 'dentiste jeudi 14 h', agenda: true }, dep);
   assert.ok(!c.appels[2].tools.some(t => t.name === 'agenda_poser'), 'sans les mains, pas d\'agenda');
+});
+
+test('les deux écrans d\'un coup : deux images dans le même résultat, et il regarde au lieu de demander', async () => {
+  const blocs = O.resultatsEnBlocs([{ id: 't1', images: ['QUFB', 'QUJD'], texte: 'Les 2 ecrans.' },
+                                    { id: 't2', images: ['pas du base64 !'] , texte: 'x' }]);
+  assert.deepEqual(blocs[0].content.map(b => b.type), ['image', 'image', 'text']);
+  assert.equal(blocs[0].content[1].source.data, 'QUJD');
+  assert.equal(typeof blocs[1].content, 'string', 'une image invalide ne passe pas');
+  const c = clientScenario([fini('Oui.')]);
+  await J.repondreJarvis({ texte: 'c\'est quoi ce truc ?', outils: true, ecran: true },
+                         { client: async () => c, versLeCompagnon: async () => '' });
+  assert.match(c.appels[0].system, /REGARDE ses écrans/);
+  assert.equal(c.appels[0].tools.find(t => t.name === 'regarder_ecran').input_schema.properties.ecran.minimum, 0);
 });
