@@ -4942,3 +4942,19 @@ details.jpecol .jpetop { margin-top: 5px; }
 .rapcit button:hover { color: var(--ink); }
 .rapfin { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 [data-pudique] .rapcit { -webkit-text-fill-color: transparent; text-shadow: 0 0 8px currentColor; user-select: none; }
+
+/* PSY OU AGENDA, dans le composeur de repères : deux boutons collés. */
+.repgenre { display: inline-flex; border: 1px solid var(--line, #2a2f2c); border-radius: 8px; overflow: hidden; }
+.repgenre button {
+  padding: 6px 11px; border: 0; background: transparent; color: var(--mute, #8a8f8c);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.repgenre button + button { border-left: 1px solid var(--line, #2a2f2c); }
+.repgenre button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #7fd6a8) 16%, transparent); color: var(--text, #e7ece9); }
+.repgenre button:focus-visible { outline: 2px solid var(--accent, #7fd6a8); outline-offset: -2px; }
+.repheure { width: auto; }
+.repgenre-tag {
+  display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; vertical-align: 1px;
+  font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent, #7fd6a8); border: 1px solid color-mix(in srgb, var(--accent, #7fd6a8) 45%, transparent);
+}

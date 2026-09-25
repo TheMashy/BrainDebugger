@@ -325,20 +325,6 @@ test('une note pour le psychologue : au carnet une fois écrite, et seulement si
   assert.match(outil.description, /SEULEMENT quand la personne demande explicitement une note/);
 });
 
-test('Google Agenda : offert seulement connecté et avec les mains ; il pose, il ne lit rien', async () => {
-  const c = clientScenario([fini('Oui.'), fini('Oui.'), fini('Oui.')]);
-  const dep = { client: async () => c, versLeCompagnon: async () => '' };
-  await J.repondreJarvis({ texte: 'dentiste jeudi 14 h', outils: true }, dep);
-  assert.ok(!c.appels[0].tools.some(t => t.name === 'agenda_poser'));
-  await J.repondreJarvis({ texte: 'dentiste jeudi 14 h', outils: true, agenda: true }, dep);
-  const outil = c.appels[1].tools.find(t => t.name === 'agenda_poser');
-  assert.ok(outil);
-  assert.deepEqual(outil.input_schema.required, ['titre', 'debut']);
-  assert.ok(!c.appels[1].tools.some(t => /agenda_(lire|lister|effacer|supprimer)/.test(t.name)));
-  await J.repondreJarvis({ texte: 'dentiste jeudi 14 h', agenda: true }, dep);
-  assert.ok(!c.appels[2].tools.some(t => t.name === 'agenda_poser'), 'sans les mains, pas d\'agenda');
-});
-
 test('les deux écrans d\'un coup : deux images dans le même résultat, et il regarde au lieu de demander', async () => {
   const blocs = O.resultatsEnBlocs([{ id: 't1', images: ['QUFB', 'QUJD'], texte: 'Les 2 ecrans.' },
                                     { id: 't2', images: ['pas du base64 !'] , texte: 'x' }]);

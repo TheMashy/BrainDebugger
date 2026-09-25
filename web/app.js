@@ -2557,7 +2557,7 @@ async function renderYear(year) {
           <span class="faint mono" style="font-size:11.5px;margin-left:auto">${libFenetre()}</span>
         </div>
         ${COURBE === 'jour' ? dailyChart(cumX, cumX.map((_, i) => SERIES.contrastFixed[CUM0 + i]),
-                     { height: 240, events: SERIES.events, domaine: DOM }) : ''}
+                     { height: 240, events: SERIES.events.filter(e => e.genre !== 'agenda'), domaine: DOM }) : ''}
 
         ${COURBE === 'nuits' ? nuitsCorps(NUITS?.nuits ?? [], DOM) : ''}
 
@@ -2579,7 +2579,7 @@ async function renderYear(year) {
             ${drift > 0 ? '+' : ''}${drift.toFixed(2)} <span class="faint">par jour</span>
           </span>
         </div>`}
-        ${lineChart(cumX, cumY, { height: 250, events: SERIES.events, colore: true, domaine: DOM })}
+        ${lineChart(cumX, cumY, { height: 250, events: SERIES.events.filter(e => e.genre !== 'agenda'), colore: true, domaine: DOM })}
 
         ${/* La frise se pose sous la courbe et partage EXACTEMENT son axe : les
               marges de lineChart, à l'unité près. Un repère tombe alors sur
@@ -2795,7 +2795,10 @@ function wireReperes(year) {
   if (!carte) return;
   const ouvert = !!$('#evform');
 
-  const saisi = () => { const c = $('#evlabel'); if (c && EV) EV.label = c.value; };
+  const saisi = () => {
+    const c = $('#evlabel'); if (c && EV) EV.label = c.value;
+    const h = $('#evheure'); if (h && EV) EV.heure = h.value;
+  };
   /*
    * `lire` = faut-il reprendre le libelle du champ avant de redessiner ?
    *
@@ -2839,8 +2842,9 @@ function wireReperes(year) {
   const bdate = $('#evdate');
   if (bdate) bdate.onclick = () => {
     if (POP === 'date') { POP = null; return redessiner(); }
+    // Un rendez-vous est dans l'avenir ; un fait de sa vie, jamais.
     ouvrirCal('date', { debut: EV.debut, fin: EV.fin, plage: !!EV.fin,
-                        min: '1900-01-01', max: jourCivil() });
+                        min: '1900-01-01', max: EV.genre === 'agenda' ? '2100-12-31' : jourCivil() });
     redessiner();
   };
 
@@ -2888,6 +2892,17 @@ function wireReperes(year) {
       return redessiner();
     }
 
+    // --- psy ou agenda ---
+    const ge = t.closest('[data-genre]');
+    if (ge && EV) {
+      saisi();
+      EV.genre = ge.dataset.genre === 'agenda' ? 'agenda' : 'psy';
+      // Un fait de sa vie ne peut pas être dans l'avenir : on le ramène à aujourd'hui.
+      if (EV.genre === 'psy' && EV.debut > jourCivil()) { EV.debut = jourCivil(); EV.fin = null; }
+      POP = null;
+      return redessiner(false);
+    }
+
     // --- l'apparence ---
     const ic = t.closest('[data-ico]');
     if (ic) { EV.theme = ic.dataset.ico || null; return redessiner(); }
@@ -2910,7 +2925,7 @@ function wireReperes(year) {
       if (!ev) return;
       // Une période ouverte n'a pas de fin en base : on ne s'en invente pas une.
       EV = { id: ev.id, label: ev.label, theme: ev.theme ?? null, teinte: ev.teinte ?? null,
-             debut: ev.date, fin: ev.fin ?? null };
+             debut: ev.date, fin: ev.fin ?? null, genre: ev.genre ?? 'psy', heure: ev.heure ?? '' };
       POP = null;
       // Modifier, c'est le seul chemin qui DOIT ouvrir le composeur.
       REP_OUVERT = true;
@@ -2937,10 +2952,12 @@ function wireReperes(year) {
         // `theme` reste NULL tant qu'on ne l'a pas choisi : la colonne dit
         // « NULL = deduit du libelle ». Y ecrire le theme deduit fige l'icone,
         // et renommer le repere ne la ferait plus suivre.
-        theme: EV.theme, teinte: EV.teinte
+        theme: EV.theme, teinte: EV.teinte,
+        genre: EV.genre ?? 'psy', heure: EV.genre === 'agenda' ? (EV.heure || null) : null
       });
       SERIES.events = events;
-      const quoi = EV.id ? 'Repère modifié' : EV.fin ? 'Période posée' : 'Repère posé';
+      const quoi = EV.id ? 'Repère modifié' : EV.genre === 'agenda' ? 'Ajouté à l’agenda'
+                 : EV.fin ? 'Période posée' : 'Repère posé';
       EV = null; POP = null; FRISE = null; REP_OUVERT = false;
       await renderYear(year);
       toast(quoi);
@@ -3008,7 +3025,7 @@ let POP = null;
 let CAL = null;
 
 const evVide = () => ({ id: null, label: '', theme: null, teinte: null,
-                        debut: S.today, fin: null, plage: false });
+                        debut: S.today, fin: null, plage: false, genre: 'psy', heure: '' });
 
 /** Le thème effectif : celui qu'on a choisi, sinon celui que le libellé dicte. */
 const evTheme = e => e.theme ?? themeDe(e.label);
@@ -3063,13 +3080,26 @@ function composeurMarkup() {
     </span>
 
     <input type="text" id="evlabel" required maxlength="60" autocomplete="off"
-           value="${esc(e.label)}" placeholder="changement de boulot, déménagement…">
+           value="${esc(e.label)}" placeholder="${e.genre === 'agenda' ? 'dentiste, rendez-vous, anniversaire…'
+                                                                     : 'changement de boulot, déménagement…'}">
+
+    ${/* PSY OU AGENDA. Un fait de sa vie nourrit la carte et le compagnon ; un
+          rendez-vous va sur la frise et dans l'agenda de Machi Tool, nulle part
+          ailleurs. */''}
+    <span class="repgenre" role="group" aria-label="Genre du repère">
+      <button type="button" data-genre="psy" aria-pressed="${e.genre !== 'agenda'}"
+        title="Un fait de ta vie : il compte dans ta carte et pour le compagnon">Psy</button>
+      <button type="button" data-genre="agenda" aria-pressed="${e.genre === 'agenda'}"
+        title="Un rendez-vous : sur la frise et dans l'agenda de Machi Tool (Jarvis le voit), nulle part ailleurs">Agenda</button>
+    </span>
 
     <span class="anc">
       <button type="button" class="repdatebtn" id="evdate" aria-expanded="${POP === 'date'}"
         >${quandLisible(e)}</button>
       ${POP === 'date' ? calPopMarkup(true) : ''}
     </span>
+    ${e.genre === 'agenda' ? `<input type="time" id="evheure" class="repheure" value="${esc(e.heure ?? '')}"
+      title="L'heure, si c'en est une" aria-label="Heure">` : ''}
 
     <button class="btn primary" type="submit">${e.id ? ico('valider') + 'Enregistrer' : ico('epingle') + 'Poser'}</button>
     ${e.id ? `<button type="button" class="btn" id="evannul">${ico('fermer')}Annuler</button>` : ''}
@@ -3099,7 +3129,7 @@ function friseMarkup(events) {
         const jm = d => `${Number(d.slice(8))} ${MONTHS_FR[Number(d.slice(5, 7)) - 1].toLowerCase()}`;
         // Une période affiche ses DEUX bornes : la liste en montrait une seule,
         // et rien ne distinguait un instant d'une addiction de trois ans.
-        const quand = ev.fin ? `${jm(ev.date)} → ${jm(ev.fin)}` : jm(ev.date);
+        const quand = (ev.fin ? `${jm(ev.date)} → ${jm(ev.fin)}` : jm(ev.date)) + (ev.heure ? ` · ${ev.heure}` : '');
         return `<div class="repligne${EV?.id === ev.id ? ' ouvert' : ''}" data-theme="${t}"
                      data-edev="${ev.id}" role="button" tabindex="0"
                      title="Modifier ce repère">
@@ -3109,7 +3139,8 @@ function friseMarkup(events) {
           <span class="ricone-box"${teinteDe({ ...ev, theme: t }) != null
             ? ` style="color:hsl(${teinteDe({ ...ev, theme: t })} 62% 62%)"` : ''}>${icone(t, 18)}</span>
           <span class="repdate mono faint">${quand}</span>
-          <span class="replabel">${esc(ev.label)}</span>
+          <span class="replabel">${esc(ev.label)}${ev.genre === 'agenda'
+            ? ' <span class="repgenre-tag" title="Dans l’agenda de Machi Tool">agenda</span>' : ''}</span>
           <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">${ico('fermer', 11)}</button>
         </div>`;
       }).join('')}

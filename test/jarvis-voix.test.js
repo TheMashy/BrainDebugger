@@ -137,3 +137,27 @@ test('le mode psychologue de Jarvis tourne sur Sonnet, effort bas ; un message g
   assert.equal(v.chatBackend, 'anthropic');
   assert.equal(choisis.anthropicModelChat, 'claude-opus-5-5', 'le chat écrit garde son modèle');
 });
+
+test('GET/POST /api/machitool/agenda : la clé, l’agenda seulement — jamais un repère « psy »', async () => {
+  const D = await import('../server/db.js');
+  D.addEvent({ date: '2026-11-03', label: 'SECRET-PSY', genre: 'psy', userId: OWNER });
+  const cle = P.poserCle(OWNER);
+  const { p, base } = await serveur();
+  try {
+    const url = base + '/api/machitool/agenda';
+    assert.equal((await fetch(url + '?depuis=2026-11-01')).status, 401);
+    const auth = { authorization: 'Bearer ' + cle };
+    const pose = await fetch(url, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+                                    body: JSON.stringify({ titre: 'Coiffeur', date: '2026-11-03', heure: '11:00' }) });
+    assert.equal(pose.status, 200);
+    assert.match((await pose.json()).texte, /Coiffeur/);
+    const refus = await fetch(url, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+                                     body: JSON.stringify({ titre: 'x', date: 'demain' }) });
+    assert.equal(refus.status, 400);
+    const lu = await (await fetch(url + '?depuis=2026-11-01&jours=7', { headers: auth })).json();
+    assert.deepEqual(lu.rendezVous.map(r => [r.label, r.date, r.heure]), [['Coiffeur', '2026-11-03', '11:00']]);
+    assert.ok(!JSON.stringify(lu).includes('SECRET-PSY'), 'un repère psy ne sort jamais vers Machi Tool');
+  } finally {
+    p.kill();
+  }
+});

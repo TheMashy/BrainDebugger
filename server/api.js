@@ -2699,7 +2699,7 @@ export const routes = {
              ...buildGraph(rows, allAnchors(userId), { since, carnet: series(userId).carnet }) };
   },
 
-  'GET /api/events': ({ userId }) => ({ events: allEvents(userId) }),
+  'GET /api/events': ({ userId }) => ({ events: allEvents(userId, { genre: 'tous' }) }),
 
   /**
    * La frise de vie.
@@ -3985,10 +3985,15 @@ export const routes = {
     const teinte = body.teinte == null ? null : Number(body.teinte);
     if (teinte !== null && !TEINTES.includes(teinte)) return { error: 'Teinte inconnue.' };
 
+    // Psy ou agenda, et une heure pour un rendez-vous. Absents d'une
+    // modification : on garde ce qui était là.
+    if (body.genre !== undefined && !['psy', 'agenda'].includes(body.genre)) return { error: 'Genre inconnu.' };
+    if (body.heure && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(body.heure))) return { error: 'Heure invalide : il faut HH:MM.' };
     const champs = {
       date: String(body.date), fin, label: String(body.label).slice(0, 120),
       theme: body.theme ?? null, teinte, fort: body.fort ? 1 : 0,
-      ouvert: body.ouvert ? 1 : 0
+      ouvert: body.ouvert ? 1 : 0,
+      genre: body.genre, heure: body.heure === undefined ? undefined : (body.heure || null)
     };
     /*
      * MODIFIER, ET PAS SEULEMENT POSER.
@@ -4001,7 +4006,7 @@ export const routes = {
     if (body.id) {
       if (!updateEvent(Number(body.id), champs, userId)) return { error: 'Repère introuvable.' };
     } else {
-      addEvent({ ...champs, userId });
+      addEvent({ ...champs, genre: champs.genre ?? 'psy', heure: champs.heure ?? null, userId });
     }
     return reperes(userId);
   },
@@ -4131,7 +4136,8 @@ const carnetRecent = (depuis, userId) =>
  * rechargement suivant, sans que rien ne le signale.
  */
 export const reperes = userId => ({
-  events: allEvents(userId).map(e => ({ ...e, theme: e.theme ?? themeDe(e.label) }))
+  // La liste de l'année : les deux genres, pour poser, voir et corriger au même endroit.
+  events: allEvents(userId, { genre: 'tous' }).map(e => ({ ...e, theme: e.theme ?? themeDe(e.label) }))
 });
 
 function reperesDuJour(date, userId) {

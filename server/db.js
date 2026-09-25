@@ -505,6 +505,16 @@ for (const [table, colonne, decl] of [
    * passer pour une vraie réponse. Elle reste maintenant sous la bulle.
    */
   ['messages', 'repli', 'TEXT'],
+  /*
+   * PSY OU AGENDA. « Les repères seront divisés en psy et normal ; ce qui est
+   * normal sera visible sur l'agenda de Machi Tool. » Un repère « psy » est un
+   * fait de sa vie (un déménagement, une rupture) : il nourrit la carte, le
+   * compagnon, la lecture. Un repère « agenda » est un rendez-vous (dentiste
+   * jeudi à 14 h) : il est sur la frise et dans l'agenda, et nulle part
+   * ailleurs. Tout ce qui existait avant est « psy ». `heure` : « HH:MM », ou rien.
+   */
+  ['events', 'genre', "TEXT NOT NULL DEFAULT 'psy'"],
+  ['events', 'heure', 'TEXT'],
 ]) {
   try {
     const a = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -1257,8 +1267,27 @@ export function wipe(portee, userId = OWNER) {
 
 /* ---------- events ---------- */
 
-export function allEvents(userId = OWNER) {
-  return db.prepare('SELECT id, date, fin, label, theme, teinte, fort, ouvert FROM events WHERE user_id = ? ORDER BY date ASC').all(userId);
+/**
+ * Les repères. PAR DÉFAUT, LES « PSY » SEULEMENT : tout ce qui lit la vie de la
+ * personne (la carte, le compagnon, la lecture, les comparaisons, le rapport)
+ * passe par ici, et un rendez-vous chez le dentiste n'a rien à y faire.
+ * `genre: 'tous'` pour la frise et la liste, `'agenda'` pour l'agenda.
+ */
+export function allEvents(userId = OWNER, { genre = 'psy' } = {}) {
+  const champs = 'id, date, fin, label, theme, teinte, fort, ouvert, genre, heure';
+  if (genre === 'tous') {
+    return db.prepare(`SELECT ${champs} FROM events WHERE user_id = ? ORDER BY date ASC, heure ASC`).all(userId);
+  }
+  return db.prepare(`SELECT ${champs} FROM events WHERE user_id = ? AND genre = ? ORDER BY date ASC, heure ASC`)
+    .all(userId, genre === 'agenda' ? 'agenda' : 'psy');
+}
+
+/** L'agenda entre deux jours (inclus) : ce qui commence dedans, ou une période qui le traverse. */
+export function agendaEntre(depuis, jusqua, userId = OWNER) {
+  return db.prepare(`SELECT id, date, fin, label, theme, heure FROM events
+                     WHERE user_id = ? AND genre = 'agenda'
+                       AND date <= ? AND COALESCE(fin, date) >= ?
+                     ORDER BY date ASC, COALESCE(heure, '') ASC, id ASC`).all(userId, jusqua, depuis);
 }
 /*
  * Un objet, pas des positions.
@@ -1270,25 +1299,26 @@ export function allEvents(userId = OWNER) {
  * servir. Un jour quelqu'un aurait ecrit une date dans user_id.
  */
 export function addEvent({ date, fin = null, label, theme = null, teinte = null,
-                           fort = 0, ouvert = 0, userId = OWNER }) {
+                           fort = 0, ouvert = 0, genre = 'psy', heure = null, userId = OWNER }) {
   if (ouvert) fin = null;               // l'invariant, tenu a l'ecriture
+  genre = genre === 'agenda' ? 'agenda' : 'psy';
   const info = db.prepare(
-    'INSERT INTO events(user_id, date, fin, label, theme, teinte, fort, ouvert) VALUES(?,?,?,?,?,?,?,?)'
-  ).run(userId, date, fin, label, theme, teinte, fort ? 1 : 0, ouvert ? 1 : 0);
-  return { id: Number(info.lastInsertRowid), date, fin, label, theme, teinte, fort, ouvert };
+    'INSERT INTO events(user_id, date, fin, label, theme, teinte, fort, ouvert, genre, heure) VALUES(?,?,?,?,?,?,?,?,?,?)'
+  ).run(userId, date, fin, label, theme, teinte, fort ? 1 : 0, ouvert ? 1 : 0, genre, heure ?? null);
+  return { id: Number(info.lastInsertRowid), date, fin, label, theme, teinte, fort, ouvert, genre, heure: heure ?? null };
 }
 
 /** Champs autorises seulement, et filtre sur user_id comme deleteEvent. */
 export function updateEvent(id, patch, userId = OWNER) {
   const cur = db.prepare('SELECT * FROM events WHERE id = ? AND user_id = ?').get(id, userId);
   if (!cur) return null;
-  const n = { ...cur, ...patch };
+  const n = { ...cur, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
   if (n.ouvert) n.fin = null;
-  db.prepare(`UPDATE events SET date=?, fin=?, label=?, theme=?, teinte=?, fort=?, ouvert=?
+  db.prepare(`UPDATE events SET date=?, fin=?, label=?, theme=?, teinte=?, fort=?, ouvert=?, genre=?, heure=?
               WHERE id = ? AND user_id = ?`)
     .run(n.date, n.fin, n.label, n.theme ?? null, n.teinte ?? null,
-         n.fort ? 1 : 0, n.ouvert ? 1 : 0, id, userId);
-  return db.prepare('SELECT id, date, fin, label, theme, teinte, fort, ouvert FROM events WHERE id = ?').get(id);
+         n.fort ? 1 : 0, n.ouvert ? 1 : 0, n.genre === 'agenda' ? 'agenda' : 'psy', n.heure ?? null, id, userId);
+  return db.prepare('SELECT id, date, fin, label, theme, teinte, fort, ouvert, genre, heure FROM events WHERE id = ?').get(id);
 }
 export function deleteEvent(id, userId = OWNER) {
   // filtre sur l'utilisateur : un identifiant devine ne doit pas suffire

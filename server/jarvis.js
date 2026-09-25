@@ -23,7 +23,7 @@
 import { messageGrave } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
-         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, CLAUDE_CONSULTE } from './jarvis-outils.js';
+         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, CLAUDE_CONSULTE } from './jarvis-outils.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
 export const JARVIS_EFFORT = 'low';
@@ -229,8 +229,8 @@ function usageDe(r) {
 export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
                                               outils = false, ecran = false, suite = null, resultats = null,
                                               navigation = false, memoire = false, preferences = [],
-                                              spotify = false, onglets = false, agenda = false,
-                                              souvenirs = [], ouverts = '',
+                                              spotify = false, onglets = false, fenetreAgenda = false,
+                                              agenda = null, souvenirs = [], ouverts = '',
                                               web = true }) {
   let messages;
   if (suite) {
@@ -256,7 +256,8 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '')
     + (memoire ? '\n\n' + consigneMemoire(langue, preferences, souvenirs) : '')
     + (outils && ouverts ? '\n\n' + consigneOnglets(langue, ouverts) : '');
-  const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, agenda }) : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
+  const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda }) : []),
+                 ...(agenda ? OUTILS_AGENDA : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
   const details = [];
@@ -266,6 +267,17 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   for (let tour = 0; tour < 2 && demandes.some(d => OUTILS_LOCAUX.has(d.nom)); tour++) {
     const locaux = [];
     for (const d of demandes.filter(d => OUTILS_LOCAUX.has(d.nom))) {
+      if (d.nom !== 'consulter_claude') {
+        // L'agenda : dans la base de BrainDebugger, tout de suite.
+        try {
+          const f = d.nom === 'agenda_poser' ? agenda?.poser : agenda?.lire;
+          if (!f) throw new Error('agenda indisponible');
+          locaux.push({ id: d.id, texte: String(await f(d.entree ?? {})) });
+        } catch (err) {
+          locaux.push({ id: d.id, erreur: String(err?.message ?? err).slice(0, 300) });
+        }
+        continue;
+      }
       try {
         const c = await consulterClaude(client, d.entree?.demande, langue);
         consultations.push({ usage: c.usage, model: c.model });
@@ -444,8 +456,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        langue = 'fr', transition = '', psy = [],
                                        outils = false, ecran = false, suite = null, resultats = null,
                                        navigation = false, memoire = false, preferences = [], spotify = false,
-                                       onglets = false, agenda = false, souvenirs = [], onglets_ouverts = '' },
-                                     { client, versLeCompagnon, noter = () => {}, carnet = null }) {
+                                       onglets = false, fenetreAgenda = false, souvenirs = [], onglets_ouverts = '' },
+                                     { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'resume') {
     const r = await resumerConversation(client, { historique, langue: L });
@@ -474,7 +486,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: !!outils,
                                                       ecran: !!(outils && ecran), navigation: !!(outils && navigation),
                                                       memoire: !!memoire, preferences, spotify: !!(outils && spotify),
-                                                      onglets: !!(outils && onglets), agenda: !!(outils && agenda),
+                                                      onglets: !!(outils && onglets), fenetreAgenda: !!(outils && fenetreAgenda),
+                                                      agenda,
                                                       souvenirs,
                                                       suite, resultats });
     noter(r.usage, r.model);
@@ -491,7 +504,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     outils: !!outils, ecran: !!(outils && ecran),
                                                     navigation: !!(outils && navigation), memoire: !!memoire, preferences,
                                                     spotify: !!(outils && spotify), onglets: !!(outils && onglets),
-                                                    agenda: !!(outils && agenda), souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000) });
+                                                    fenetreAgenda: !!(outils && fenetreAgenda), agenda, souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000) });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),

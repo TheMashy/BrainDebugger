@@ -223,22 +223,37 @@ export const OUTIL_ONGLETS = {
 };
 
 /**
- * GOOGLE AGENDA, par son API. Offert seulement si Machi Tool dit que le compte
- * Google de la personne y est connecté (`agenda`). Il pose ; il ne lit ni
- * n'efface rien.
+ * L'AGENDA, DANS BRAINDEBUGGER. « On ne va pas passer par Google Agenda : un
+ * système dans BrainDebugger, sur la frise, visible depuis Machi Tool ; les
+ * repères divisés en psy et normal. » Jarvis ne voit et ne pose QUE les
+ * repères « agenda » — jamais les « psy », qui sont le journal. Exécutés ICI
+ * (c'est la base de BrainDebugger), pas sur le PC.
  */
-export const OUTIL_AGENDA = {
-  name: 'agenda_poser',
-  description: 'Pose un repère (un événement) dans son Google Agenda. « debut » : AAAA-MM-JJTHH:MM pour une '
-    + 'heure, AAAA-MM-JJ pour toute la journée — calcule-le depuis la date et l\'heure d\'aujourd\'hui '
-    + '(« Maintenant », plus haut). « fin » (même forme) ou « duree_minutes » (60 par défaut). « rappel_minutes » : '
-    + 'une notification tant de minutes avant. Si le jour ou l\'heure est vraiment ambigu, demande avant de poser. '
-    + 'Tu ne peux ni lire ni effacer ses événements.',
-  input_schema: { type: 'object', properties: {
-    titre: { type: 'string' }, debut: { type: 'string' }, fin: { type: 'string' },
-    duree_minutes: { type: 'integer', minimum: 5, maximum: 1440 }, description: { type: 'string' },
-    lieu: { type: 'string' }, rappel_minutes: { type: 'integer', minimum: 0, maximum: 40320 }
-  }, required: ['titre', 'debut'] }
+export const OUTILS_AGENDA = [
+  {
+    name: 'agenda_poser',
+    description: 'Ajoute un rendez-vous à son agenda (BrainDebugger, visible aussi dans Machi Tool). « date » : '
+      + 'AAAA-MM-JJ, calculée depuis la date d\'aujourd\'hui (« Maintenant », plus haut) ; « heure » : HH:MM si '
+      + 'c\'en est une ; « fin » : AAAA-MM-JJ pour plusieurs jours. Si le jour est vraiment ambigu, demande avant.',
+    input_schema: { type: 'object', properties: {
+      titre: { type: 'string' }, date: { type: 'string' }, heure: { type: 'string' }, fin: { type: 'string' }
+    }, required: ['titre', 'date'] }
+  },
+  {
+    name: 'agenda_lire',
+    description: 'Ce qui est à son agenda à partir d\'un jour (AAAA-MM-JJ, aujourd\'hui par défaut), sur N jours (7 '
+      + 'par défaut) : « qu\'est-ce que j\'ai demain ? », « ma semaine ».',
+    input_schema: { type: 'object', properties: {
+      depuis: { type: 'string' }, jours: { type: 'integer', minimum: 1, maximum: 92 }
+    } }
+  }
+];
+
+/** Ouvrir la fenêtre Agenda de Machi Tool, à l'écran (offert si Machi Tool la connaît). */
+export const OUTIL_MONTRER_AGENDA = {
+  name: 'montrer_agenda',
+  description: 'Ouvre la fenêtre Agenda de Machi Tool à l\'écran (« montre-moi mon agenda », « affiche ma semaine »).',
+  input_schema: { type: 'object', properties: {} }
 };
 
 /**
@@ -318,12 +333,13 @@ export const OUTIL_CLAUDE = {
     + 'personne aura le texte complet. Pas pour ce que tu sais déjà faire vite.',
   input_schema: { type: 'object', properties: { demande: { type: 'string' } }, required: ['demande'] }
 };
-export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name]);
+export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire']);
 
 export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false,
-                               agenda = false } = {}) {
+                               fenetreAgenda = false } = {}) {
   return [...OUTILS_PC, ...(ecran ? [OUTIL_ECRAN] : []), ...(navigation ? [OUTIL_HISTORIQUE] : []),
-          ...(spotify ? OUTILS_SPOTIFY : []), ...(onglets ? [OUTIL_ONGLETS] : []), ...(agenda ? [OUTIL_AGENDA] : [])];
+          ...(spotify ? OUTILS_SPOTIFY : []), ...(onglets ? [OUTIL_ONGLETS] : []),
+          ...(fenetreAgenda ? [OUTIL_MONTRER_AGENDA] : [])];
 }
 
 /** Les préférences telles que Machi Tool les envoie : des phrases, bornées. */
@@ -418,7 +434,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
   ].filter(Boolean).join('\n');
 }
 
-const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, OUTIL_AGENDA, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
+const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;

@@ -18,6 +18,7 @@ import * as auth from './auth.js';
 import * as discord from './discord.js';
 import { commitDeploye, versionDuPaquet, DEMARRE_LE } from './version.js';
 import { repondreJarvis, maintenantDans } from './jarvis.js';
+import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans } from './agenda.js';
 import { clientDe } from './lecture.js';
 import { record as noterDepense } from './usage.js';
 import { zoneCourante } from './temps.js';
@@ -496,7 +497,8 @@ async function traiter(req, res) {
         // `resultats`. Rien n'est gardé ici entre deux tours — voir jarvis-outils.js.
         outils: corps?.outils === true, ecran: corps?.ecran === true,
         navigation: corps?.navigation === true, memoire: corps?.memoire === true,
-        spotify: corps?.spotify === true, onglets: corps?.onglets === true, agenda: corps?.agenda === true,
+        spotify: corps?.spotify === true, onglets: corps?.onglets === true,
+        fenetreAgenda: corps?.fenetre_agenda === true,
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',
         preferences: Array.isArray(corps?.preferences) ? corps.preferences : [],
@@ -507,13 +509,45 @@ async function traiter(req, res) {
         versLeCompagnon: async texte => (await routes['POST /api/message'](
           { body: { text: texte, source: 'voix' }, userId, req })).reponse ?? '',
         noter: (u, model) => noterDepense(userId, model, u.input, u.output, u.cacheLu, u.cacheEcrit, 'jarvis'),
-        carnet: texte => connecteur.poserNote({ texte, source: 'jarvis' }, userId, () => jourVecu(userId))
+        carnet: texte => connecteur.poserNote({ texte, source: 'jarvis' }, userId, () => jourVecu(userId)),
+        // L'AGENDA : les repères « agenda » de BrainDebugger, jamais les « psy ».
+        agenda: {
+          poser: e => poserRendezVous({ titre: e.titre, date: e.date, heure: e.heure, fin: e.fin }, userId).texte,
+          lire: e => agendaEnTexte(lireAgenda({ depuis: e.depuis, jours: e.jours }, userId, jourDans(zoneCourante())))
+        }
       });
       return json(res, 200, r);
     } catch (err) {
       if (err.statut === 400) return json(res, 400, { error: err.message });
       console.error('[jarvis]', String(err.message ?? err).slice(0, 200));
       return json(res, 502, { error: String(err.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /* ---------- L'AGENDA, POUR MACHI TOOL ----------
+   *
+   * Les repères « agenda » (jamais les « psy ») : la fenêtre Agenda de Machi
+   * Tool les lit, avec la clé de la passerelle. `depuis` : son jour à lui ;
+   * `jours` : combien. Poser passe aussi par ici (POST).
+   */
+  if ((req.method === 'GET' || req.method === 'POST')
+      && (url.pathname === '/api/machitool/agenda' || url.pathname === '/api/passerelle/agenda')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      if (req.method === 'POST') {
+        const corps = await readBody(req);
+        const r = poserRendezVous({ titre: corps?.titre, date: corps?.date, heure: corps?.heure, fin: corps?.fin }, userId);
+        return json(res, 200, { ok: true, evenement: r.evenement, texte: r.texte });
+      }
+      const a = lireAgenda({ depuis: url.searchParams.get('depuis'), jours: url.searchParams.get('jours') || 14 },
+                           userId, jourDans(zoneCourante()));
+      return json(res, 200, a);
+    } catch (err) {
+      return json(res, 400, { error: String(err.message ?? err).slice(0, 200) });
     }
   }
 
