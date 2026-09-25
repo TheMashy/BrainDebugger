@@ -49,7 +49,9 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
     'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
-    ['chercher_fichiers', 'consulter_claude', 'creer_dossier', 'lister_dossier', 'musique', 'ouvrir', 'spotify', 'web_search']);
+    ['chercher_fichiers', 'consulter_claude', 'creer_dossier', 'lien', 'lister_dossier', 'musique', 'ouvrir',
+     'rechercher_google', 'spotify', 'web_search']);
+  assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
   assert.match(c.appels[1].system, /Tu ne demandes jamais de code/);
   assert.match(c.appels[1].system, /ni supprimer, ni déplacer, ni renommer/);
   await J.repondreJarvis({ texte: 'bonjour', outils: true, ecran: true }, dep);
@@ -181,4 +183,47 @@ test('Claude et le PC dans le même tour : la réponse de Claude attend Machi To
   await J.repondreJarvis({ suite: r1.suite, resultats: [{ id: 'p1', texte: '3 dossiers' }] }, dep);
   const blocs = c.appels.at(-1).messages.at(-1).content;
   assert.deepEqual(blocs.map(b => b.tool_use_id).sort(), ['c1', 'p1'], 'les deux résultats repartent ensemble');
+});
+
+test('l\'historique du navigateur : offert seulement s\'il est coché, et avec les mains', async () => {
+  const c = clientScenario([fini('Oui.'), fini('Oui.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  await J.repondreJarvis({ texte: 'retrouve la vidéo', navigation: true }, dep);
+  assert.ok(!c.appels[0].tools.some(t => t.name === 'chercher_historique'), 'sans les mains, rien');
+  await J.repondreJarvis({ texte: 'retrouve la vidéo', outils: true, navigation: true }, dep);
+  assert.ok(c.appels[1].tools.some(t => t.name === 'chercher_historique'));
+  assert.match(c.appels[1].system, /historique du navigateur/);
+});
+
+test('ce qu\'il retient : les préférences dans la consigne, et retenir/oublier même sans les mains', async () => {
+  const c = clientScenario([outilDemande('retenir', { preference: 'Préfère les réponses courtes.' }),
+                            fini('Noté.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  const r1 = await J.repondreJarvis({ texte: 'retiens que je préfère les réponses courtes', memoire: true,
+                                      preferences: ['Écoute du jazz le soir.', '', 42] }, dep);
+  const noms = c.appels[0].tools.map(t => t.name);
+  assert.ok(noms.includes('retenir') && noms.includes('oublier'));
+  assert.ok(!noms.includes('lister_dossier'), 'la mémoire n\'ouvre pas les mains');
+  assert.match(c.appels[0].system, /- Écoute du jazz le soir\./);
+  assert.match(c.appels[0].system, /- 42/);
+  assert.deepEqual(r1.outils, [{ id: 'toolu_1', nom: 'retenir', entree: { preference: 'Préfère les réponses courtes.' } }]);
+  const r2 = await J.repondreJarvis({ suite: r1.suite, resultats: [{ id: 'toolu_1', texte: 'Retenu.' }],
+                                      memoire: true, preferences: ['Préfère les réponses courtes.'] }, dep);
+  assert.equal(r2.texte, 'Noté.');
+  assert.ok(c.appels[1].tools.some(t => t.name === 'retenir'));
+});
+
+test('sans mémoire annoncée (un ancien Machi Tool), ni retenir ni préférences', async () => {
+  const c = clientScenario([fini('Bonjour.')]);
+  await J.repondreJarvis({ texte: 'bonjour', preferences: ['secret'] },
+                         { client: async () => c, versLeCompagnon: async () => '' });
+  assert.ok(!c.appels[0].tools.some(t => t.name === 'retenir'));
+  assert.doesNotMatch(c.appels[0].system, /secret/);
+});
+
+test('les préférences sont bornées : quarante phrases de deux cents signes au plus', () => {
+  const p = O.preferencesPropres(Array.from({ length: 50 }, (_, i) => 'p' + i + ' ' + 'x'.repeat(300)));
+  assert.equal(p.length, 40);
+  assert.ok(p.every(x => x.length <= 200));
+  assert.ok(p[0].startsWith('p10 '), 'les plus récentes restent');
 });

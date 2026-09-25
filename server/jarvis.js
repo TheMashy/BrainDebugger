@@ -22,8 +22,8 @@
  */
 import { messageGrave } from './gravite.js';
 import { optionsDuModele } from './chat.js';
-import { outilsPermis, consigneOutils, suitePropre, resultatsEnBlocs, outilsDemandes,
-         OUTIL_CLAUDE, OUTILS_LOCAUX, CLAUDE_CONSULTE } from './jarvis-outils.js';
+import { outilsPermis, consigneOutils, consigneMemoire, suitePropre, resultatsEnBlocs, outilsDemandes,
+         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, CLAUDE_CONSULTE } from './jarvis-outils.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
 export const JARVIS_EFFORT = 'low';
@@ -228,6 +228,7 @@ function usageDe(r) {
 
 export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
                                               outils = false, ecran = false, suite = null, resultats = null,
+                                              navigation = false, memoire = false, preferences = [],
                                               web = true }) {
   let messages;
   if (suite) {
@@ -250,8 +251,9 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     }
   }
   const system = w => consigneJarvis({ appellation, maintenant, langue, web: w })
-    + (outils ? '\n\n' + consigneOutils(langue, { ecran }) : '');
-  const tools = [...(outils ? outilsPermis({ ecran }) : []), OUTIL_CLAUDE];
+    + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation }) : '')
+    + (memoire ? '\n\n' + consigneMemoire(langue, preferences) : '');
+  const tools = [...(outils ? outilsPermis({ ecran, navigation }) : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
   const details = [];
@@ -285,7 +287,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
   }
   demandes = demandes.filter(d => !OUTILS_LOCAUX.has(d.nom));
-  if (outils && demandes.length) {
+  if ((outils || memoire) && demandes.length) {
     return { texte: texteDe(r), outils: demandes, suite: suitePropre([...messages, { role: 'assistant', content: r.content }]),
              ...(details.length ? { detail: details.join('\n\n') } : {}), consultations, model: r.model ?? JARVIS_MODELE, usage };
   }
@@ -376,7 +378,8 @@ export function maintenantDans(zone, date = new Date(), langue = 'fr') {
  */
 export async function repondreJarvis({ texte, historique = [], appellation = '', maintenant = '',
                                        langue = 'fr', transition = '', psy = [],
-                                       outils = false, ecran = false, suite = null, resultats = null },
+                                       outils = false, ecran = false, suite = null, resultats = null,
+                                       navigation = false, memoire = false, preferences = [] },
                                      { client, versLeCompagnon, noter = () => {} }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'fin_psy') {
@@ -394,7 +397,9 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
   if (suite) {
     // La phrase a déjà passé la porte du grave au premier tour ; ce qui revient
     // ici, c'est ce que les outils ont fait.
-    const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: true, ecran, suite, resultats });
+    const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: !!outils,
+                                                      ecran: !!(outils && ecran), navigation: !!(outils && navigation),
+                                                      memoire: !!memoire, preferences, suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
     return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),
@@ -406,7 +411,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     return { texte: await versLeCompagnon(t), mode: 'psy', raison: 'grave' };
   }
   const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L,
-                                                    outils: !!outils, ecran: !!(outils && ecran) });
+                                                    outils: !!outils, ecran: !!(outils && ecran),
+                                                    navigation: !!(outils && navigation), memoire: !!memoire, preferences });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),

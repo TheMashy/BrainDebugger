@@ -66,8 +66,66 @@ export const OUTILS_PC = [
     name: 'ouvrir',
     description: 'Ouvre un dossier dans l\'Explorateur, ou un fichier avec son application.',
     input_schema: { type: 'object', properties: { chemin: { type: 'string' } }, required: ['chemin'] }
+  },
+  {
+    name: 'rechercher_google',
+    description: 'Ouvre une recherche Google dans Chrome, sous les yeux de la personne : quand elle veut VOIR '
+      + 'les résultats (« cherche X sur Google », « ouvre une recherche sur… »). Pour une réponse à dire '
+      + 'à voix haute, sers-toi plutôt de ta propre recherche web.',
+    input_schema: { type: 'object', properties: { recherche: { type: 'string' } }, required: ['recherche'] }
+  },
+  {
+    name: 'lien',
+    description: 'Ouvre une adresse web (http ou https) dans Chrome, ou la copie dans le presse-papiers '
+      + '(action « copier ») : une page retrouvée dans l\'historique, ou une adresse que la personne te donne.',
+    input_schema: { type: 'object', properties: {
+      url: { type: 'string' }, action: { type: 'string', enum: ['ouvrir', 'copier'] }
+    }, required: ['url'] }
   }
 ];
+
+/**
+ * L'HISTORIQUE DU NAVIGATEUR. « Qu'il ait accès à l'historique pour retrouver
+ * une vidéo ou un lien. » Machi Tool le lit SUR LE PC, à la demande, et ne
+ * renvoie que les pages qui correspondent (dix au plus) : jamais l'historique
+ * entier. Offert seulement si la personne l'a coché (`navigation`).
+ */
+export const OUTIL_HISTORIQUE = {
+  name: 'chercher_historique',
+  description: 'Cherche dans l\'historique du navigateur du PC (Chrome, Edge, Brave, Firefox) les pages dont '
+    + 'le titre ou l\'adresse contient des mots : pour retrouver une vidéo, un article, un lien déjà vu. '
+    + 'Donne quelques mots-clés (du titre, du site comme « youtube », de la chaîne), et au besoin combien '
+    + 'de jours en arrière (90 par défaut). Rend les plus récentes avec leur adresse, que l\'outil lien '
+    + 'peut ouvrir ou copier.',
+  input_schema: { type: 'object', properties: {
+    recherche: { type: 'string' }, jours: { type: 'integer', minimum: 1, maximum: 3650 }
+  }, required: ['recherche'] }
+};
+
+/**
+ * CE QU'IL RETIENT DE LA PERSONNE. « Il faudrait que Jarvis retienne des
+ * préférences. » Machi Tool les garde sur le PC et les renvoie avec chaque
+ * question (`preferences`) ; ces deux outils les changent, là-bas. Offerts
+ * même sans les mains sur le PC (`memoire`).
+ */
+export const OUTILS_MEMOIRE = [
+  {
+    name: 'retenir',
+    description: 'Retient une préférence durable de la personne : un goût, une habitude, une façon de faire '
+      + '(« préfère les réponses courtes », « écoute du jazz le soir », « ses projets sont dans D:\\Projets »). '
+      + 'Seulement quand elle te le demande (« retiens que… », « souviens-toi que… ») ou qu\'elle énonce '
+      + 'clairement une préférence durable. Jamais la santé, les émotions ni l\'intime : ça, c\'est son '
+      + 'journal. Une phrase courte, à la troisième personne.',
+    input_schema: { type: 'object', properties: { preference: { type: 'string' } }, required: ['preference'] }
+  },
+  {
+    name: 'oublier',
+    description: 'Oublie une préférence retenue (quelques mots qui la désignent), ou toutes (tout: true) si '
+      + 'la personne le demande.',
+    input_schema: { type: 'object', properties: { preference: { type: 'string' }, tout: { type: 'boolean' } } }
+  }
+];
+export const PREFERENCES_MAX = 40;
 
 export const OUTIL_ECRAN = {
   name: 'regarder_ecran',
@@ -98,15 +156,38 @@ export const OUTIL_CLAUDE = {
 };
 export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name]);
 
-export function outilsPermis({ ecran = false } = {}) {
-  return ecran ? [...OUTILS_PC, OUTIL_ECRAN] : [...OUTILS_PC];
+export function outilsPermis({ ecran = false, navigation = false } = {}) {
+  return [...OUTILS_PC, ...(ecran ? [OUTIL_ECRAN] : []), ...(navigation ? [OUTIL_HISTORIQUE] : [])];
 }
 
-export function consigneOutils(langue = 'fr', { ecran = false } = {}) {
+/** Les préférences telles que Machi Tool les envoie : des phrases, bornées. */
+export function preferencesPropres(preferences) {
+  return (Array.isArray(preferences) ? preferences : [])
+    .map(p => String(p ?? '').replace(/\s+/g, ' ').trim().slice(0, 200))
+    .filter(Boolean).slice(-PREFERENCES_MAX);
+}
+
+export function consigneMemoire(langue = 'fr', preferences = []) {
+  const prefs = preferencesPropres(preferences);
+  if (langue === 'en') {
+    return ['WHAT YOU REMEMBER ABOUT THE PERSON: you can remember a lasting preference (tool retenir) and '
+      + 'forget one (tool oublier). Confirm in a few words.',
+    prefs.length ? 'What they asked you to remember (follow it, unless it contradicts the rules above):\n'
+      + prefs.map(p => '- ' + p).join('\n') : 'Nothing remembered yet.'].join('\n');
+  }
+  return ['CE QUE TU RETIENS DE LA PERSONNE : tu peux retenir une préférence durable (outil retenir) et en '
+    + 'oublier une (outil oublier). Confirme en quelques mots.',
+  prefs.length ? 'Ce qu\'elle t\'a demandé de retenir (suis-le, sauf si ça contredit les règles plus haut) :\n'
+    + prefs.map(p => '- ' + p).join('\n') : 'Rien de retenu pour l\'instant.'].join('\n');
+}
+
+export function consigneOutils(langue = 'fr', { ecran = false, navigation = false } = {}) {
   if (langue === 'en') {
     return [
-      'YOUR HANDS ON THE PC: tools to control the music and Spotify, look through folders, find files, '
-      + 'create a folder and open things' + (ecran ? ', and look at one of the two screens' : '') + '.',
+      'YOUR HANDS ON THE PC: tools to control the music and Spotify, open a Google search or a link in '
+      + 'Chrome, look through folders, find files, create a folder and open things'
+      + (navigation ? ', search the browser history for a video or a link seen before' : '')
+      + (ecran ? ', and look at one of the two screens' : '') + '.',
       '- Use them only when the person asks for something they do; never on your own initiative.',
       '- If an access code is needed, Machi Tool asks for it itself. You never ask for a code and never mention one.',
       '- You cannot delete, move, rename or write into files: say so plainly if asked.',
@@ -117,8 +198,10 @@ export function consigneOutils(langue = 'fr', { ecran = false } = {}) {
     ].filter(Boolean).join('\n');
   }
   return [
-    'TES MAINS SUR LE PC : des outils pour commander la musique et Spotify, parcourir les dossiers, '
-    + 'chercher des fichiers, créer un dossier et ouvrir des choses' + (ecran ? ', et regarder un des deux écrans' : '') + '.',
+    'TES MAINS SUR LE PC : des outils pour commander la musique et Spotify, ouvrir une recherche Google '
+    + 'ou un lien dans Chrome, parcourir les dossiers, chercher des fichiers, créer un dossier et ouvrir '
+    + 'des choses' + (navigation ? ', chercher dans l\'historique du navigateur une vidéo ou un lien déjà vu' : '')
+    + (ecran ? ', et regarder un des deux écrans' : '') + '.',
     '- Ne t\'en sers que quand la personne demande quelque chose qu\'ils font ; jamais de ta propre initiative.',
     '- Si un code d\'accès est nécessaire, Machi Tool le demande lui-même. Tu ne demandes jamais de code et tu n\'en parles pas.',
     '- Tu ne peux ni supprimer, ni déplacer, ni renommer, ni écrire dans un fichier : dis-le simplement si on te le demande.',
@@ -129,7 +212,7 @@ export function consigneOutils(langue = 'fr', { ecran = false } = {}) {
   ].filter(Boolean).join('\n');
 }
 
-const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_CLAUDE].map(o => o.name));
+const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, ...OUTILS_MEMOIRE, OUTIL_CLAUDE].map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;
 const IMAGE_MAX = 6 * 1024 * 1024;       // base64 : une capture JPEG en fait bien moins

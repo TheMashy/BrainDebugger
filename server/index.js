@@ -495,6 +495,8 @@ async function traiter(req, res) {
         // l'écran est permis) ; il exécute, et renvoie la `suite` avec les
         // `resultats`. Rien n'est gardé ici entre deux tours — voir jarvis-outils.js.
         outils: corps?.outils === true, ecran: corps?.ecran === true,
+        navigation: corps?.navigation === true, memoire: corps?.memoire === true,
+        preferences: Array.isArray(corps?.preferences) ? corps.preferences : [],
         suite: Array.isArray(corps?.suite) ? corps.suite : null,
         resultats: Array.isArray(corps?.resultats) ? corps.resultats : null
       }, {
