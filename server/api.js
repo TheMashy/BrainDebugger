@@ -49,6 +49,7 @@ import { bornesDitesDans, bornesConnues, medianeBorne, jourVecuDe, coupureDe, ve
          SOURCE_DIT, CLE_LEVER, CLE_COUCHER, MIDI, noteDiteDans } from './jour-vecu.js';
 import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.js';
 import { conversationGrave } from './gravite.js';
+import { JARVIS_MODELE } from './jarvis.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize, termesDuDoc } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
@@ -2048,6 +2049,18 @@ export function avecConsigneVoix(history) {
   return history;
 }
 
+/**
+ * LE MODE PSYCHOLOGUE DE JARVIS TOURNE SUR SONNET. Demandé : « en mode
+ * psychologue, fais qu'il reste avec Claude Sonnet aussi, c'est du psychologue
+ * light ». Ce qui est dit à Jarvis passe par le même compagnon — même fil,
+ * même journal, même veille, même section crise — mais sur le modèle de
+ * Jarvis, effort bas, sans réflexion. Le chat écrit garde le modèle choisi
+ * dans Réglages. Un message grave monte toujours l'effort (`reglageDuTour`).
+ */
+export function reglagesDeLaVoix(s) {
+  return { ...s, anthropicModelChat: JARVIS_MODELE, anthropicEffort: 'low', chatPensee: false };
+}
+
 export const routes = {
 
   /*
@@ -2212,7 +2225,8 @@ export const routes = {
      * comme les outils ouvrent le préfixe de cache, les deux routes n'en
      * partageaient aucun : celle-ci repayait tout son prompt à chaque message.
      */
-    const r = await reply(history, getSettings(userId), { memory: m.stable, echos: m.echos,
+    const reglages = source === 'voix' ? reglagesDeLaVoix(getSettings(userId)) : getSettings(userId);
+    const r = await reply(history, reglages, { memory: m.stable, echos: m.echos,
                                                           blocsMemoire: m.tailles,
                                                           outils: outilsPour(userId, idMsg),
                                                           grave: conversationGrave(history) });

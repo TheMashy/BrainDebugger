@@ -10,7 +10,8 @@
  *     Sonnet, effort bas, sans réflexion —, bref, flegmatique. Il ne range rien
  *     dans le journal : une question sur le port d'une imprimante n'est pas une
  *     journée ;
- *   - LE MODE PSYCHOLOGUE (bleu) : le compagnon de BrainDebugger, par
+ *   - LE MODE PSYCHOLOGUE (bleu) : le compagnon de BrainDebugger, sur Sonnet lui
+ *     aussi (un psychologue « light », voir `reglagesDeLaVoix`), par
  *     `POST /api/machitool/parler`, avec tout ce qui le protège.
  *
  * CE QUI NE CHANGE PAS SELON LE MODE : un message qui parle de se faire du mal

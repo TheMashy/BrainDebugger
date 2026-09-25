@@ -125,3 +125,15 @@ test('POST /api/machitool/parler : la clé, la phrase, la réponse — et rien d
     p.kill();
   }
 });
+
+test('le mode psychologue de Jarvis tourne sur Sonnet, effort bas ; un message grave monte encore l’effort', async () => {
+  const { reglagesDeLaVoix } = await import('../server/api.js');
+  const { reglageDuTour } = await import('../server/chat.js');
+  const choisis = { chatBackend: 'anthropic', anthropicModelChat: 'claude-opus-5-5', anthropicEffort: 'high', chatPensee: true };
+  const v = reglagesDeLaVoix(choisis);
+  assert.equal(v.anthropicModelChat, 'claude-sonnet-5');
+  assert.deepEqual(reglageDuTour(v, false), { effort: 'low', pense: false });
+  assert.deepEqual(reglageDuTour(v, true), { effort: 'high', pense: true }, 'la section crise garde son effort');
+  assert.equal(v.chatBackend, 'anthropic');
+  assert.equal(choisis.anthropicModelChat, 'claude-opus-5-5', 'le chat écrit garde son modèle');
+});
