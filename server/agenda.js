@@ -10,7 +10,8 @@
  * Tool ne voient jamais un repère « psy ». Il pose et il lit ; il n'efface rien
  * (on retire un rendez-vous dans « Année », à la main).
  */
-import { addEvent, agendaEntre, OWNER } from './db.js';
+import { addEvent, agendaEntre, db, OWNER } from './db.js';
+import { nuits, sommeilHabituel } from './nuits.js';
 
 const ISO_JOUR = /^\d{4}-\d{2}-\d{2}$/;
 const HEURE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -72,4 +73,40 @@ export function agendaEnTexte({ depuis, jusqua, rendezVous }) {
   return `${rendezVous.length} à l'agenda du ${jourLisible(depuis)} au ${jourLisible(jusqua)} :\n`
     + rendezVous.map(r => `- ${jourLisible(r.date)}${r.heure ? ` à ${r.heure}` : ''} : ${r.label}`
                           + `${r.fin ? ` (jusqu'au ${jourLisible(r.fin)})` : ''}`).join('\n');
+}
+
+/*
+ * LE BILAN DES DERNIERS JOURS, POUR LA FENÊTRE AGENDA DE MACHI TOOL.
+ *
+ * « Des infos de quantified self : temps de sommeil, note, frise avec ce qui
+ * arrive. » Des CHIFFRES, et rien d'autre : la durée de chaque nuit, son
+ * coucher et son lever (que Machi Tool a lui-même mesurés), et la note /10 que
+ * la personne a donnée à sa journée. Jamais un mot du journal, jamais un
+ * repère « psy » : la clé de passerelle ne lit toujours pas le journal.
+ */
+export function bilanDesJours(userId = OWNER, aujourdhui = null, jours = 7) {
+  const fin = aujourdhui ?? new Date().toISOString().slice(0, 10);
+  const n = Math.max(1, Math.min(31, Number(jours) || 7));
+  const debut = plusJours(fin, -(n - 1));
+  const parNuit = new Map();
+  try {
+    for (const x of nuits(userId, { jours: n, jusquA: fin })) parNuit.set(x.date, x);
+  } catch { /* pas de nuits lisibles : on montre les notes quand même */ }
+  const notes = new Map(db.prepare(
+    'SELECT date, note FROM entries WHERE user_id = ? AND date BETWEEN ? AND ? AND note IS NOT NULL'
+  ).all(userId, debut, fin).map(r => [r.date, r.note]));
+  const liste = [];
+  for (let d = debut; d <= fin; d = plusJours(d, 1)) {
+    const nu = parNuit.get(d);
+    liste.push({
+      date: d,
+      note: notes.has(d) ? Number(notes.get(d)) : null,
+      sommeil_h: typeof nu?.sommeil_h === 'number' ? nu.sommeil_h : null,
+      coucher: nu?.coucher ?? null,
+      lever: nu?.lever ?? null
+    });
+  }
+  let habituel = null;
+  try { habituel = sommeilHabituel(userId); } catch { habituel = null; }
+  return { jours: liste, sommeil_mediane: habituel?.mediane ?? null };
 }

@@ -83,3 +83,16 @@ test('Jarvis pose dans l’agenda ICI, et n’offre la fenêtre que si Machi Too
   assert.ok(appels.at(-1).tools.some(t => t.name === 'montrer_agenda'));
   assert.ok(appels.at(-1).tools.some(t => t.name === 'agenda_lire'));
 });
+
+test('le bilan des derniers jours : des chiffres (note, nuit), jamais le texte du journal', () => {
+  D.setNote('2026-09-23', 7, OWNER);
+  D.setNote('2026-09-25', 4.5, OWNER);
+  const b = A.bilanDesJours(OWNER, '2026-09-25', 3);
+  assert.deepEqual(b.jours.map(j => j.date), ['2026-09-23', '2026-09-24', '2026-09-25']);
+  assert.deepEqual(b.jours.map(j => j.note), [7, null, 4.5]);
+  for (const j of b.jours) {
+    assert.deepEqual(Object.keys(j).sort(), ['coucher', 'date', 'lever', 'note', 'sommeil_h']);
+  }
+  assert.ok('sommeil_mediane' in b);
+  assert.equal(A.bilanDesJours(OWNER, '2026-09-25', 999).jours.length, 31, 'borné');
+});

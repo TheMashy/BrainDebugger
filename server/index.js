@@ -18,7 +18,7 @@ import * as auth from './auth.js';
 import * as discord from './discord.js';
 import { commitDeploye, versionDuPaquet, DEMARRE_LE } from './version.js';
 import { repondreJarvis, maintenantDans, raisonErreurApi } from './jarvis.js';
-import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans } from './agenda.js';
+import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans, bilanDesJours } from './agenda.js';
 import { clientDe } from './lecture.js';
 import { record as noterDepense } from './usage.js';
 import { zoneCourante } from './temps.js';
@@ -543,8 +543,14 @@ async function traiter(req, res) {
         const r = poserRendezVous({ titre: corps?.titre, date: corps?.date, heure: corps?.heure, fin: corps?.fin }, userId);
         return json(res, 200, { ok: true, evenement: r.evenement, texte: r.texte });
       }
+      const aujourdhui = jourDans(zoneCourante());
       const a = lireAgenda({ depuis: url.searchParams.get('depuis'), jours: url.searchParams.get('jours') || 14 },
-                           userId, jourDans(zoneCourante()));
+                           userId, aujourdhui);
+      // La fenêtre Agenda demande aussi le bilan des derniers jours : des chiffres
+      // (nuits, note de la journée), jamais le texte du journal.
+      if (url.searchParams.get('bilan')) {
+        a.bilan = bilanDesJours(userId, aujourdhui, url.searchParams.get('bilan_jours') || 7);
+      }
       return json(res, 200, a);
     } catch (err) {
       return json(res, 400, { error: String(err.message ?? err).slice(0, 200) });
