@@ -229,7 +229,8 @@ function usageDe(r) {
 export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
                                               outils = false, ecran = false, suite = null, resultats = null,
                                               navigation = false, memoire = false, preferences = [],
-                                              spotify = false, onglets = false, souvenirs = [], ouverts = '',
+                                              spotify = false, onglets = false, agenda = false,
+                                              souvenirs = [], ouverts = '',
                                               web = true }) {
   let messages;
   if (suite) {
@@ -255,7 +256,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '')
     + (memoire ? '\n\n' + consigneMemoire(langue, preferences, souvenirs) : '')
     + (outils && ouverts ? '\n\n' + consigneOnglets(langue, ouverts) : '');
-  const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets }) : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
+  const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, agenda }) : []), ...(memoire ? OUTILS_MEMOIRE : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web });
   const usage = usageDe(r);
   const details = [];
@@ -406,17 +407,17 @@ export function maintenantDans(zone, date = new Date(), langue = 'fr') {
 }
 
 /**
- * « RAJOUTE LE MODE ÉCRIRE UNE NOTE, QUI FAIT QUE JARVIS ENVOIE UNE NOTE AU
- * PSYCHOLOGUE AUTOMATIQUEMENT (À MOINS QUE CE SOIT JUSTE UNE LISTE DE COURSES
- * OU UNE PETITE NOTE RAPIDE). » Les `ecrire_note` du dernier tour que Machi
- * Tool a réussis vont au carnet (`carnet(texte)`), et le résultat le dit à
- * Jarvis. Rend les résultats, complétés.
+ * UNE NOTE POUR LE PSYCHOLOGUE, SI ON LE DEMANDE. D'abord automatique, puis :
+ * « oublie les notes, c'est utile uniquement lorsque c'est explicitement
+ * demandé ». Les `ecrire_note` du dernier tour marquées `pour_le_psy: true`
+ * que Machi Tool a réussies vont au carnet (`carnet(texte)`), et le résultat
+ * le dit à Jarvis. Rend les résultats, complétés.
  */
 export function deposerNotes(suite, resultats, carnet) {
   if (!carnet || !Array.isArray(resultats)) return resultats;
   const derniere = [...(Array.isArray(suite) ? suite : [])].reverse().find(m => m?.role === 'assistant');
   const notes = new Map((Array.isArray(derniere?.content) ? derniere.content : [])
-    .filter(b => b?.type === 'tool_use' && b.name === 'ecrire_note' && b.input?.pour_le_psy !== false)
+    .filter(b => b?.type === 'tool_use' && b.name === 'ecrire_note' && b.input?.pour_le_psy === true)
     .map(b => [b.id, String(b.input?.texte ?? '').trim()]));
   return resultats.map(r => {
     if (!r || r.erreur || !notes.has(r.id) || !notes.get(r.id)) return r;
@@ -443,7 +444,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        langue = 'fr', transition = '', psy = [],
                                        outils = false, ecran = false, suite = null, resultats = null,
                                        navigation = false, memoire = false, preferences = [], spotify = false,
-                                       onglets = false, souvenirs = [], onglets_ouverts = '' },
+                                       onglets = false, agenda = false, souvenirs = [], onglets_ouverts = '' },
                                      { client, versLeCompagnon, noter = () => {}, carnet = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'resume') {
@@ -473,7 +474,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     const r = await demanderAJarvis(await client(), { appellation, maintenant, langue: L, outils: !!outils,
                                                       ecran: !!(outils && ecran), navigation: !!(outils && navigation),
                                                       memoire: !!memoire, preferences, spotify: !!(outils && spotify),
-                                                      onglets: !!(outils && onglets), souvenirs,
+                                                      onglets: !!(outils && onglets), agenda: !!(outils && agenda),
+                                                      souvenirs,
                                                       suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
@@ -489,7 +491,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     outils: !!outils, ecran: !!(outils && ecran),
                                                     navigation: !!(outils && navigation), memoire: !!memoire, preferences,
                                                     spotify: !!(outils && spotify), onglets: !!(outils && onglets),
-                                                    souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000) });
+                                                    agenda: !!(outils && agenda), souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000) });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}),

@@ -496,7 +496,7 @@ async function traiter(req, res) {
         // `resultats`. Rien n'est gardé ici entre deux tours — voir jarvis-outils.js.
         outils: corps?.outils === true, ecran: corps?.ecran === true,
         navigation: corps?.navigation === true, memoire: corps?.memoire === true,
-        spotify: corps?.spotify === true, onglets: corps?.onglets === true,
+        spotify: corps?.spotify === true, onglets: corps?.onglets === true, agenda: corps?.agenda === true,
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',
         preferences: Array.isArray(corps?.preferences) ? corps.preferences : [],

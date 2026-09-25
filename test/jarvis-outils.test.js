@@ -303,7 +303,7 @@ test('les onglets ouverts, rangés par site, entrent dans la consigne — avec l
   assert.doesNotMatch(c.appels[1].system, /Lo-fi beats/, 'sans les mains, rien des onglets');
 });
 
-test('une note pour le psychologue : au carnet une fois écrite, sauf la liste de courses', async () => {
+test('une note pour le psychologue : au carnet une fois écrite, et seulement si c\'est demandé', async () => {
   const c = clientScenario([fini('C\'est noté.'), fini('C\'est noté.'), fini('Hmm.')]);
   const carnet = [];
   const dep = { client: async () => c, versLeCompagnon: async () => '', carnet: t => (carnet.push(t), { ok: true }) };
@@ -314,12 +314,27 @@ test('une note pour le psychologue : au carnet une fois écrite, sauf la liste d
   assert.deepEqual(carnet, ['Je me suis senti fier de ma présentation.']);
   const bloc = c.appels[0].messages.at(-1).content[0];
   assert.match(bloc.content, /déposée dans le carnet du psychologue/);
-  await J.repondreJarvis({ suite: suite('n2', { texte: 'pain, lait, œufs', pour_le_psy: false }),
+  await J.repondreJarvis({ suite: suite('n2', { texte: 'pain, lait, œufs' }),
                            outils: true, resultats: [{ id: 'n2', texte: 'Note ecrite.' }] }, dep);
-  assert.equal(carnet.length, 1, 'la liste de courses reste au bloc-notes');
+  assert.equal(carnet.length, 1, 'sans demande explicite, la note reste au bloc-notes');
   await J.repondreJarvis({ suite: suite('n3', { texte: 'Une idée sur moi.', pour_le_psy: true }),
                            outils: true, resultats: [{ id: 'n3', erreur: 'Les mains de Jarvis sur le PC sont fermees.' }] }, dep);
   assert.equal(carnet.length, 1, 'une note que Machi Tool n\'a pas écrite ne part pas au carnet');
   const outil = O.outilsPermis({}).find(t => t.name === 'ecrire_note');
-  assert.ok(outil.input_schema.required.includes('pour_le_psy'), 'le modèle doit choisir à chaque note');
+  assert.ok(!outil.input_schema.required.includes('pour_le_psy'));
+  assert.match(outil.description, /SEULEMENT quand la personne demande explicitement une note/);
+});
+
+test('Google Agenda : offert seulement connecté et avec les mains ; il pose, il ne lit rien', async () => {
+  const c = clientScenario([fini('Oui.'), fini('Oui.'), fini('Oui.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => '' };
+  await J.repondreJarvis({ texte: 'dentiste jeudi 14 h', outils: true }, dep);
+  assert.ok(!c.appels[0].tools.some(t => t.name === 'agenda_poser'));
+  await J.repondreJarvis({ texte: 'dentiste jeudi 14 h', outils: true, agenda: true }, dep);
+  const outil = c.appels[1].tools.find(t => t.name === 'agenda_poser');
+  assert.ok(outil);
+  assert.deepEqual(outil.input_schema.required, ['titre', 'debut']);
+  assert.ok(!c.appels[1].tools.some(t => /agenda_(lire|lister|effacer|supprimer)/.test(t.name)));
+  await J.repondreJarvis({ texte: 'dentiste jeudi 14 h', agenda: true }, dep);
+  assert.ok(!c.appels[2].tools.some(t => t.name === 'agenda_poser'), 'sans les mains, pas d\'agenda');
 });

@@ -80,16 +80,15 @@ export const OUTILS_PC = [
   },
   {
     name: 'ecrire_note',
-    description: 'Écrit une note (un bloc-notes) dans son dossier Documents > Notes de Jarvis, et l\'ouvre : ce que '
-      + 'la personne dicte ou demande de noter (« note que… », « prends une note »), dans ses mots. « titre » : le '
-      + 'nom de la note (sinon la date). « ajouter_a » : le nom d\'une note déjà là, pour y ajouter à la fin. '
-      + '« pour_le_psy » : la note est AUSSI déposée dans le carnet de son journal, que lit le mode psychologue — '
-      + 'true par défaut ; false seulement pour une liste de courses ou une petite note pratique rapide (un '
-      + 'rappel, un numéro, une adresse, une liste de choses à faire).',
+    description: 'Écrit une note (un bloc-notes) dans son dossier Documents > Notes de Jarvis, et l\'ouvre — '
+      + 'SEULEMENT quand la personne demande explicitement une note (« note que… », « prends une note »), dans ses '
+      + 'mots. « titre » : le nom de la note (sinon la date). « ajouter_a » : le nom d\'une note déjà là, pour y '
+      + 'ajouter à la fin. « pour_le_psy » : true SEULEMENT si elle demande explicitement que la note aille aussi '
+      + 'à son journal ou au psychologue ; sinon, ne le mets pas.',
     input_schema: { type: 'object', properties: {
       texte: { type: 'string' }, titre: { type: 'string' }, ajouter_a: { type: 'string' }, ouvrir: { type: 'boolean' },
       pour_le_psy: { type: 'boolean' }
-    }, required: ['texte', 'pour_le_psy'] }
+    }, required: ['texte'] }
   },
   {
     name: 'creer_fichier',
@@ -217,6 +216,25 @@ export const OUTIL_ONGLETS = {
 };
 
 /**
+ * GOOGLE AGENDA, par son API. Offert seulement si Machi Tool dit que le compte
+ * Google de la personne y est connecté (`agenda`). Il pose ; il ne lit ni
+ * n'efface rien.
+ */
+export const OUTIL_AGENDA = {
+  name: 'agenda_poser',
+  description: 'Pose un repère (un événement) dans son Google Agenda. « debut » : AAAA-MM-JJTHH:MM pour une '
+    + 'heure, AAAA-MM-JJ pour toute la journée — calcule-le depuis la date et l\'heure d\'aujourd\'hui '
+    + '(« Maintenant », plus haut). « fin » (même forme) ou « duree_minutes » (60 par défaut). « rappel_minutes » : '
+    + 'une notification tant de minutes avant. Si le jour ou l\'heure est vraiment ambigu, demande avant de poser. '
+    + 'Tu ne peux ni lire ni effacer ses événements.',
+  input_schema: { type: 'object', properties: {
+    titre: { type: 'string' }, debut: { type: 'string' }, fin: { type: 'string' },
+    duree_minutes: { type: 'integer', minimum: 5, maximum: 1440 }, description: { type: 'string' },
+    lieu: { type: 'string' }, rappel_minutes: { type: 'integer', minimum: 0, maximum: 40320 }
+  }, required: ['titre', 'debut'] }
+};
+
+/**
  * SPOTIFY PAR SON API. Offert seulement si Machi Tool dit que le compte
  * Spotify de la personne y est connecté (`spotify`).
  */
@@ -294,9 +312,10 @@ export const OUTIL_CLAUDE = {
 };
 export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name]);
 
-export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false } = {}) {
+export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false,
+                               agenda = false } = {}) {
   return [...OUTILS_PC, ...(ecran ? [OUTIL_ECRAN] : []), ...(navigation ? [OUTIL_HISTORIQUE] : []),
-          ...(spotify ? OUTILS_SPOTIFY : []), ...(onglets ? [OUTIL_ONGLETS] : [])];
+          ...(spotify ? OUTILS_SPOTIFY : []), ...(onglets ? [OUTIL_ONGLETS] : []), ...(agenda ? [OUTIL_AGENDA] : [])];
 }
 
 /** Les préférences telles que Machi Tool les envoie : des phrases, bornées. */
@@ -387,7 +406,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
   ].filter(Boolean).join('\n');
 }
 
-const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
+const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, OUTIL_AGENDA, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, OUTIL_CLAUDE]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;
