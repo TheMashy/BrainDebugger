@@ -259,3 +259,13 @@ test('le mode psychologue ne se propose pas à tout propos, et une seule fois', 
   // Le grave, lui, part toujours au compagnon : la règle ne l'affaiblit pas.
   assert.match(fr, /tu passes la main au mode psychologue/);
 });
+
+test('la VF : le registre du JARVIS doublé en français — le ton, jamais les répliques ni une voix', async () => {
+  const { consigneJarvis } = await import('../server/jarvis.js');
+  const c = consigneJarvis({ langue: 'fr' });
+  assert.match(c, /version française d'Iron Man/);
+  assert.match(c, /Je m'en occupe/);
+  assert.match(c, /Jamais de familiarité/);
+  assert.match(c, /tu en as le ton, pas le texte/);
+  assert.doesNotMatch(consigneJarvis({ langue: 'en' }), /version française/, 'l\'anglais garde son registre à lui');
+});
