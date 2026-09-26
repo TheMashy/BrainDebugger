@@ -92,3 +92,20 @@ test('les deux routes du compagnon passent la gravité', () => {
   assert.match(chat, /optionsDuModele\(s\.anthropicModelChat \|\| 'claude-sonnet-5', reglageDuTour\(s, grave\)\)/);
   assert.match(chat, /anthropicReply\(history, settings, memory, onText, outils, onPense, echos, blocsMemoire, grave\)/);
 });
+
+
+test('chez Jarvis : grave, une question, ou une façon de parler', async () => {
+  const { graveMajordome } = await import('../server/gravite.js');
+  for (const t of ['j’ai envie de mourir', 'je pense à me tuer ce soir', 'je veux en finir', 'I want to die',
+                   'I am going to kill myself tonight', "I don't want to live anymore", 'j ai le couteau dans la main']) {
+    assert.equal(graveMajordome(t), 'grave', t);
+  }
+  for (const t of ['tu vas me tuer Jarvis', 'ce micro va me tuer', 'fais disparaître la boule', 'mets Mourir demain',
+                   'je veux en finir avec ce micro', "j'ai plus envie de continuer à te parler", 'ne plus me réveiller à 6h',
+                   "j'ai bu trop de café", 'mets-moi une série à binge', 'overdosing on caffeine', 'bonjour']) {
+    assert.equal(graveMajordome(t), null, t);
+  }
+  for (const t of ["j'en ai marre, je veux que ça s'arrête", "I can't do this anymore", 'I want to end it']) {
+    assert.equal(graveMajordome(t), 'demander', t);
+  }
+});

@@ -45,13 +45,13 @@ test('sans annonce de Machi Tool, pas d\'outils ; l\'écran seulement s\'il est 
   const c = clientScenario([fini('Bonjour.'), fini('Bonjour.'), fini('Bonjour.')]);
   const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
   await J.repondreJarvis({ texte: 'bonjour' }, dep);
-  assert.deepEqual(c.appels[0].tools.map(t => t.name).sort(), ['consulter_claude', 'passer_au_psychologue', 'se_retirer', 'web_search'],
+  assert.deepEqual(c.appels[0].tools.map(t => t.name).sort(), ['consulter_claude', 'proposer_le_psychologue', 'se_retirer', 'web_search'],
     'sans annonce : Internet et Claude, rien du PC');
   await J.repondreJarvis({ texte: 'bonjour', outils: true }, dep);
   assert.deepEqual(c.appels[1].tools.map(t => t.name).sort(),
     ['affiner_recherche', 'chercher_fichiers', 'consulter_claude', 'creer_dossier', 'creer_fichier', 'ecrire_note',
      'fenetre', 'lancer_appli', 'lien',
-     'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'passer_au_psychologue', 'pc', 'rechercher_google',
+     'lister_dossier', 'musique', 'ouvrir', 'ouvrir_resultats', 'pc', 'proposer_le_psychologue', 'rechercher_google',
      'se_retirer', 'son',
      'spotify', 'temperatures', 'web_search', 'youtube']);
   assert.ok(!c.appels[1].tools.some(t => t.name === 'chercher_historique'), 'l\'historique : seulement s\'il est coché');
@@ -369,15 +369,46 @@ test('congédié, il se retire pour de bon : la réponse porte `fin`', async () 
   assert.equal(r3.fin, undefined);
 });
 
-test('il comprend qu\'on veut le psychologue : la phrase va au compagnon, et le mode suit', async () => {
-  const c = clientScenario([outilDemande('passer_au_psychologue', {})]);
+test('il croit qu\'on veut le psychologue : il le PROPOSE, rien ne bascule', async () => {
+  const c = clientScenario([outilDemande('proposer_le_psychologue', {})]);
   const transmis = [];
-  const dep = { client: async () => c, versLeCompagnon: async t => { transmis.push(t); return 'Je t\'écoute. Raconte-moi.'; } };
+  const dep = { client: async () => c, versLeCompagnon: async t => { transmis.push(t); return 'compagnon'; } };
   const r = await J.repondreJarvis({ texte: 'j\'ai eu une journée pourrie, j\'ai besoin d\'en parler' }, dep);
-  assert.deepEqual(r, { texte: 'Je t\'écoute. Raconte-moi.', mode: 'psy', raison: 'demande' });
-  assert.deepEqual(transmis, ['j\'ai eu une journée pourrie, j\'ai besoin d\'en parler'], 'sa phrase, telle quelle');
-  assert.equal(c.appels.length, 1, 'Jarvis ne reprend pas la parole');
-  assert.match(c.appels[0].tools.find(t => t.name === 'passer_au_psychologue').description, /sans qu'elle dise le mot/);
+  assert.deepEqual(r, { texte: 'Voulez-vous que je passe en mode psychologue ?', mode: 'jarvis', propose_psy: true });
+  assert.deepEqual(transmis, [], 'rien au journal tant qu\'elle n\'a pas dit oui');
+  const d = c.appels[0].tools.find(t => t.name === 'proposer_le_psychologue').description;
+  assert.match(d, /agacement/);
+  assert.doesNotMatch(d, /on peut parler de ma journée/);
+  const en = await J.repondreJarvis({ texte: 'rough day, I need to talk', langue: 'en' },
+                                    { client: async () => clientScenario([outilDemande('proposer_le_psychologue', {})]),
+                                      versLeCompagnon: async () => 'x' });
+  assert.equal(en.propose_psy, true);
+  assert.match(en.texte, /therapist mode\?/);
+});
+
+test('agacé contre Jarvis : ni psychologue, ni journal ; un doute : la question', async () => {
+  const transmis = [];
+  const c = clientScenario([fini('Je fais de mon mieux, monsieur.')]);
+  const dep = { client: async () => c, versLeCompagnon: async t => { transmis.push(t); return 'compagnon'; } };
+  const r = await J.repondreJarvis({ texte: 'ce micro va me tuer' }, dep);
+  assert.equal(r.mode, 'jarvis');
+  assert.deepEqual(transmis, []);
+  const c2 = clientScenario([]);
+  const q = await J.repondreJarvis({ texte: 'j\'en ai marre, je veux que ça s\'arrête' },
+                                   { client: async () => c2, versLeCompagnon: async t => { transmis.push(t); return 'x'; } });
+  assert.deepEqual(q, { texte: 'Voulez-vous que je passe en mode psychologue ?', mode: 'jarvis', propose_psy: true });
+  assert.equal(c2.appels.length, 0, 'sans appeler le modèle');
+  assert.deepEqual(transmis, []);
+  // « non, c'était une façon de parler » : la phrase d'avant ne rend pas la suite grave
+  const c3 = clientScenario([fini('Très bien.')]);
+  const n = await J.repondreJarvis({ texte: 'non', historique: [{ role: 'user', texte: 'je veux que ça s\'arrête' },
+                                                                 { role: 'assistant', texte: 'Voulez-vous… ?' }] },
+                                   { client: async () => c3, versLeCompagnon: async t => { transmis.push(t); return 'x'; } });
+  assert.equal(n.mode, 'jarvis');
+  // le grave, lui, passe toujours la main
+  const g = await J.repondreJarvis({ texte: 'j\'ai envie de mourir' },
+                                   { client: async () => clientScenario([]), versLeCompagnon: async () => 'Je suis là.' });
+  assert.deepEqual(g, { texte: 'Je suis là.', mode: 'psy', raison: 'grave' });
 });
 
 test('Machi Tool est à lui : la guirlande, ses routines, les réglages — même sans les mains sur le PC', async () => {

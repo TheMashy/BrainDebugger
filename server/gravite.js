@@ -87,6 +87,33 @@ export function messageGrave(texte) {
 }
 
 /**
+ * CE QUI EST DIT AU MAJORDOME (Jarvis, a voix haute). `messageGrave` ratisse
+ * large exprès -- une fausse alerte n'y coûte qu'une réponse plus réfléchie.
+ * Mais chez Jarvis, grave = on bascule au psychologue : « ce micro va me
+ * tuer », « fais disparaître la boule », « je veux en finir avec ce réglage »,
+ * « j'ai bu trop de café » y faisaient entrer, et la personne n'arrivait plus
+ * à en sortir. Ici :
+ *   'grave'    -- l'intention, un acte, une méthode : on passe la main, comme avant ;
+ *   'demander' -- le détecteur a un doute : Jarvis POSE la question ;
+ *   null       -- une commande, une façon de parler.
+ * `messageGrave` lui-même ne change pas (le journal, la veille, le compagnon).
+ */
+const HYPERBOLE_MAJ = /\b(?:tu|t es|ce|cette|ca|ton|ta|il|elle)\b[^,.;!?]{0,25}\b(?:va|vas|vont|veux|veut|vais|finir par|en train de|as failli|a failli|me tueras?|me tue)\b[^,.;!?]{0,12}\bme tuer\b|\bmourir de (?:rire|honte|froid|chaud|faim|ennui|fatigue|peur)\b|\b(?:fais|faire|fait) disparaitre\b|\bdisparaitre (?:du|de la|des|le|la|les|l)\b|\ben finir avec (?:ce|cet|cette|ces|le|la|les|l|mon|ma|mes|ton|ta|tes|un|une)\b(?! (?:vie|tout))|\b(?:plus|pas) (?:d )?envie de continuer (?:a|le|la|les|l|ce|cette|avec)\b|\bne plus me reveiller (?:a|avant|aussi|si|avec|le|la)\b|\bque (?:ca|tout|tout ca) s arrete (?:ce|cette|le) \w+|\b(?:mets|joue|lance|passe) [^,.;!?]{0,20}\bmourir\b|\boverdos\w* (?:on|of) (?:coffee|caffeine|sugar|tea)\b|\bkill myself laughing\b|\bend it (?:here|now,? stop)\b|\bsleep forever mode\b/g;
+const CERTAIN_MAJ = /\b(?:envie de|veux|voudrais|vais|aimerais|pense a|penser a) (?:me tuer|me suicider|mourir|en finir)\b|\bme suicider\b|\bsuicid\w*\b|\bplus envie de vivre\b|\bme (?:pendre|jeter (?:par|sous|du)|tirer une balle|flinguer|defenestrer)\b|\b(?:don t|do not|dont|no longer) want to (?:live|be alive|exist)\b|\bm endormir pour (?:toujours|de bon)\b|\ben finir(?: avec (?:la vie|tout|moi))?\s*[.!?]*$|\b(?:want|wanna|going|gonna|plan|planning|need|trying) to (?:die|kill myself|end (?:it all|my life))\b|\bkill(?:ing)? myself\b|\bend my life\b|\bbetter off dead\b|\bwish i (?:was|were) dead\b|\b(?:hurt|harm|cut) myself\b/;
+
+export function graveMajordome(texte) {
+  if (!messageGrave(texte)) return null;
+  const v = niveauDuTexte(texte);
+  if ((v?.motifs ?? []).some(m => ['blessure', 'surdose', 'en_main'].includes(m.genre))) return 'grave';
+  const reste = norm(texte).replace(HYPERBOLE_MAJ, ' ');
+  if (CERTAIN_MAJ.test(reste)) return 'grave';
+  if (!messageGrave(reste)) return null;                 // une commande, une façon de parler
+  if ((v?.motifs ?? []).length && v.motifs.every(m => ['substance', 'evoque_passe', 'dereel'].includes(m.genre))
+      && !/\b(?:mourir|me tuer|disparaitre|arrete|finir|continuer|vivre)\b/.test(reste)) return null;
+  return 'demander';
+}
+
+/**
  * La conversation est-elle grave EN CE MOMENT ? On regarde les derniers
  * messages de la personne, pas seulement le dernier : après « j'aimerais
  * m'endormir pour toujours », le « non je ne pense pas à me tuer » qui suit

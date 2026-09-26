@@ -20,7 +20,7 @@
  * part au compagnon — rangée dans le journal, vue par la veille, traitée par la
  * section crise. Machi Tool passe alors en bleu.
  */
-import { messageGrave } from './gravite.js';
+import { messageGrave, graveMajordome } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
          OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE,
@@ -245,8 +245,20 @@ export function historiquePropre(historique) {
  * La phrase elle-même, ou ce qui a été dit juste avant dans cette conversation.
  */
 export function pourLeCompagnon(texte, historique = []) {
-  if (messageGrave(texte)) return true;
-  return historiquePropre(historique).some(h => h.role === 'user' && messageGrave(h.content));
+  if (graveMajordome(texte) === 'grave') return true;
+  return historiquePropre(historique).some(h => h.role === 'user' && graveMajordome(h.content) === 'grave');
+}
+
+/**
+ * « IL EST RENTRÉ EN MODE PSYCHOLOGUE ET J'AI PAS RÉUSSI À EN SORTIR. » Un
+ * doute (le détecteur), ou le modèle qui croit comprendre : Jarvis ne bascule
+ * plus -- il POSE la question, et Machi Tool ne passe au psychologue que sur
+ * un oui franc (la phrase d'origine suit alors).
+ */
+export function propositionPsy(langue = 'fr') {
+  return { texte: langue === 'en' ? 'That sounded heavy. Shall I switch to therapist mode?'
+                                  : 'Voulez-vous que je passe en mode psychologue ?',
+           mode: 'jarvis', propose_psy: true };
 }
 
 /** Le texte d'une réponse de l'API : ses blocs de texte, rien d'autre. */
@@ -552,14 +564,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       suite, resultats });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
-    if (r.psy) {
-      // au milieu d'une suite d'outils : la phrase d'origine est la première du fil
-      const premiere = suite.find(m => m?.role === 'user' && typeof m.content === 'string')?.content;
-      return premiere
-        ? { texte: await versLeCompagnon(String(premiere).slice(0, 4000)), mode: 'psy', raison: 'demande' }
-        : { texte: r.texte || (L === 'en' ? 'I\'ll hand you over.' : 'Je vous passe le psychologue.'),
-            mode: 'psy', raison: 'demande' };
-    }
+    if (r.psy) return propositionPsy(L);        // une question, jamais une bascule
     return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
              ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
   }
@@ -568,6 +573,9 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
   if (pourLeCompagnon(t, historique)) {
     return { texte: await versLeCompagnon(t), mode: 'psy', raison: 'grave' };
   }
+  // un doute (« je veux que ça s'arrête », « I can't do this anymore ») : la
+  // question, sans même appeler le modèle
+  if (graveMajordome(t) === 'demander') return propositionPsy(L);
   const r = await demanderAJarvis(await client(), { texte: t, historique, appellation, maintenant, langue: L,
                                                     outils: !!outils, ecran: !!(outils && ecran),
                                                     navigation: !!(outils && navigation), memoire: !!memoire, preferences,
@@ -578,9 +586,9 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   if (r.psy) {
-    // « s'il comprend que c'est ce que je veux » : la phrase va au compagnon,
-    // qui répond, et Machi Tool reste avec lui
-    return { texte: await versLeCompagnon(t), mode: 'psy', raison: 'demande' };
+    // « s'il comprend que c'est ce que je veux » : il le PROPOSE ; sur un oui,
+    // Machi Tool envoie cette phrase au compagnon
+    return propositionPsy(L);
   }
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
            ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };

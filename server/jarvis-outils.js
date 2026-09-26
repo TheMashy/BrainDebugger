@@ -357,13 +357,13 @@ export const OUTIL_RETRAIT = {
  * que le chat, avec le journal), et Machi Tool reste en mode psychologue.
  */
 export const OUTIL_PSY = {
-  name: 'passer_au_psychologue',
-  description: 'Quand tu comprends que la personne veut parler au psychologue — le compagnon de BrainDebugger, '
-    + 'qui connaît son journal — sans qu\'elle dise le mot : « j\'ai besoin de parler », « je peux vider mon '
-    + 'sac ? », « on peut parler de ma journée ? », « ça va pas trop, j\'aimerais en parler », « passe-moi '
-    + 'le psy » : appelle cet outil, et rien d\'autre. Sa phrase lui est transmise et c\'est lui qui répond. '
-    + 'Pas pour une question de culture sur la psychologie, ni pour une humeur glissée au milieu d\'une demande '
-    + 'pratique (« je suis crevé, mets de la musique »).',
+  name: 'proposer_le_psychologue',
+  description: 'SEULEMENT si la personne dit qu\'elle ne va pas bien ET qu\'elle veut en parler, ou demande '
+    + 'à écrire dans son journal : cet outil lui POSE la question (« Voulez-vous que je passe en mode '
+    + 'psychologue ? ») -- il ne bascule rien. Jamais pour de l\'agacement contre toi ou contre le micro, des '
+    + 'jurons, la fatigue, une journée difficile mentionnée en passant, un problème technique, ni pour une '
+    + 'question de culture sur la psychologie. Au plus une fois par conversation ; si elle a dit non, plus jamais. '
+    + 'ONLY if the person says they are not OK AND want to talk about it: this only ASKS the question.',
   input_schema: { type: 'object', properties: {} }
 };
 /**
