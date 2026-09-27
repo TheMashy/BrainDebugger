@@ -268,6 +268,24 @@ test('le mode psychologue ne se propose pas à tout propos, et une seule fois', 
   assert.match(fr, /tu passes la main au mode psychologue/);
 });
 
+test('le majordome jazzy : un personnage, le jazz dans le tempo et quelques images, jamais en symboles', () => {
+  // « Donne-lui un personnage… avec un petit peu de jazz dans sa manière de faire. »
+  const fr = J.consigneJarvis({ langue: 'fr' });
+  assert.match(fr, /l'âme d'un pianiste de club de jazz/);
+  assert.match(fr, /Tu improvises volontiers/);
+  assert.match(fr, /une au plus, pas à chaque réponse/);
+  assert.match(fr, /jamais quand la personne est pressée, qu'une chose a échoué ou que le sujet est sérieux/);
+  assert.match(fr, /Ni onomatopée ni symbole de musique/);
+  assert.match(fr, /Tu vouvoies/, 'toujours le majordome');
+  const en = J.consigneJarvis({ langue: 'en' });
+  assert.match(en, /the soul of a jazz-club pianist/);
+  assert.match(en, /No onomatopoeia and no musical symbols/);
+  assert.match(en, /British English/);
+  // Texte fixe : deux appels, le même texte (il est dans le bloc mis en cache)
+  assert.equal(J.consigneJarvis({ langue: 'fr' }), fr);
+  assert.doesNotMatch(fr + en, /♪|♫/);
+});
+
 test('la VF : le registre du JARVIS doublé en français — le ton, jamais les répliques ni une voix', async () => {
   const { consigneJarvis } = await import('../server/jarvis.js');
   const c = consigneJarvis({ langue: 'fr' });

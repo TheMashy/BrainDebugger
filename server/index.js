@@ -525,6 +525,10 @@ async function traiter(req, res) {
         routines: typeof corps?.routines === 'string' ? corps.routines.slice(0, 3000) : '',
         // ses tâches de fond, et ce que Machi Tool sait des projets
         taches: corps?.taches === true,
+        // ses nouveaux pouvoirs, cochés dans Machi Tool : les fichiers, Windows,
+        // et les petites initiatives (que Machi Tool prend lui-même)
+        fichiers: corps?.fichiers === true, windows: corps?.windows === true,
+        initiatives: corps?.initiatives === true,
         projets: typeof corps?.projets === 'string' ? corps.projets.slice(0, 4000) : '',
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',

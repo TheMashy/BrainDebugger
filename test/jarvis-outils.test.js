@@ -117,8 +117,16 @@ test('ce qui n\'est pas un outil connu ne passe pas, dans un sens comme dans l\'
                            { role: 'assistant', content: [{ type: 'tool_use', id: 'z', name: 'executer_commande', input: {} }] },
                            { role: 'user', content: 'ok' }]);
   assert.deepEqual(s, [{ role: 'user', content: 'ok' }]);
-  assert.equal(O.OUTILS_PC.some(o => /suppr|delete|move|renomm|ecrire_fichier|commande/.test(o.name)), false,
-    'rien d\'irréversible dans la boîte à outils');
+  // L'invariant d'aujourd'hui (« grosses permissions ») : ranger des fichiers,
+  // oui ; jamais de suppression définitive, de commande libre, de script, ni
+  // rien qui touche à l'alimentation — dans AUCUN groupe d'outils.
+  const tous = O.outilsPermis({ ecran: true, navigation: true, spotify: true, onglets: true, fenetreAgenda: true,
+                                fichiers: true, windows: true });
+  assert.equal(tous.some(o => /suppr|delete|commande|script|shell|powershell|cmd|execut/.test(o.name)), false,
+    'ni suppression définitive ni commande libre');
+  const enums = JSON.stringify(tous.map(o => o.input_schema));
+  assert.doesNotMatch(enums, /eteindre|redemarrer|veille|hibern|shutdown|restart|deconnecter|fermer_session/,
+    'rien qui éteigne, redémarre, mette en veille ou ferme la session');
 });
 
 test('un message grave part au compagnon, outils ou pas', async () => {
@@ -436,12 +444,12 @@ test('plus fluide : les outils et la consigne se relisent dans le cache, l’heu
   const brut = [];
   const client = { messages: { create: async req => { brut.push(JSON.parse(JSON.stringify(req))); return fini('Bien.'); } } };
   const poser = maintenant => J.demanderAJarvis(client, { texte: 'bonjour', maintenant, outils: true, memoire: true,
-                                                          souvenirs: ['24/09 : A parlé de jazz'] });
+                                                          souvenirs: ['24/09 : A parlé de SOUVENIR-TEMOIN'] });
   await poser('jeudi 24 septembre 2026, 18 h 30');
   await poser('jeudi 24 septembre 2026, 18 h 31');
   const [a, b] = brut;
   assert.deepEqual(a.system[0].cache_control, { type: 'ephemeral', ttl: '1h' });
-  assert.doesNotMatch(a.system[0].text, /18 h 30|Maintenant|jazz/);
+  assert.doesNotMatch(a.system[0].text, /18 h 30|Maintenant|SOUVENIR-TEMOIN/);
   assert.match(a.system.at(-1).text, /Maintenant : jeudi 24 septembre 2026, 18 h 30\./);
   assert.ok(!a.system.at(-1).cache_control, 'rien de volatil sous un point de reprise');
   const clients = a.tools.filter(t => t.name !== 'web_search');
@@ -494,4 +502,55 @@ test('plus fluide : la première phrase part dès qu’elle est écrite', async 
   // sans demande d'avance : l'appel ordinaire, sans flux
   const c = clientScenario([fini('Bien.')]);
   assert.equal((await J.demanderAJarvis(c, { texte: 'merci' })).texte, 'Bien.');
+});
+
+
+test('grosses permissions : les fichiers et Windows seulement si Machi Tool les annonce', async () => {
+  // « Donne-lui de grosses permissions » : ranger les fichiers, quelques
+  // réglages de Windows, de petites initiatives — chacun coché dans Machi Tool.
+  const noms = r => r.tools.map(t => t.name);
+  const c = clientScenario([fini('Bien.'), fini('Bien.'), fini('Bien.'), fini('Bien.')]);
+  await J.repondreJarvis({ texte: 'range ce fichier', outils: true }, { client: async () => c, versLeCompagnon: async () => '' });
+  for (const n of ['deplacer', 'renommer', 'corbeille', 'modifier_fichier', 'lire_fichier', 'annuler_fichier',
+                   'reglage_windows', 'forcer_fermeture', 'installer_appli']) assert.ok(!noms(c.appels[0]).includes(n), n);
+  assert.match(c.appels[0].system, /ni supprimer, ni déplacer, ni renommer, ni modifier un fichier existant/);
+  assert.match(c.appels[0].system, /jamais de ta propre initiative/);
+  await J.repondreJarvis({ texte: 'range ce fichier', outils: true, fichiers: true, windows: true, initiatives: true },
+                         { client: async () => c, versLeCompagnon: async () => '' });
+  const a = c.appels[1];
+  for (const n of ['deplacer', 'renommer', 'corbeille', 'modifier_fichier', 'lire_fichier', 'annuler_fichier',
+                   'reglage_windows', 'forcer_fermeture', 'installer_appli']) assert.ok(noms(a).includes(n), n);
+  assert.match(a.system, /tout s'annule avec annuler_fichier ; jamais de suppression définitive/);
+  assert.doesNotMatch(a.system, /ni supprimer, ni déplacer, ni renommer/);
+  assert.match(a.system, /Machi Tool demande lui-même « oui \? »/);
+  assert.match(a.system, /Machi Tool prend lui-même quelques petites initiatives/);
+  // la règle de l'alimentation reste mot pour mot
+  assert.match(a.system, /NI éteindre, NI redémarrer, NI mettre en veille l'ordinateur, NI fermer la session/);
+  assert.doesNotMatch(a.system, /mettre en veille, ouvrir|le mettre en veille/);
+  // le dernier outil (point de reprise du cache) est toujours consulter_claude
+  assert.equal(a.tools.filter(t => t.name !== 'web_search').at(-1).name, 'consulter_claude');
+  // sans les mains sur le PC, les drapeaux ne donnent rien
+  await J.repondreJarvis({ texte: 'range ce fichier', fichiers: true, windows: true },
+                         { client: async () => c, versLeCompagnon: async () => '' });
+  assert.ok(!noms(c.appels[2]).includes('deplacer'));
+  // la suite d'un outil garde les mêmes outils et le même bloc en cache
+  const suite = [{ role: 'user', content: 'range' },
+                 { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'deplacer', input: { source: 'a', destination: 'b' } }] }];
+  await J.repondreJarvis({ suite, resultats: [{ id: 't1', texte: 'Déplacé.' }], outils: true, fichiers: true, windows: true,
+                           initiatives: true }, { client: async () => c, versLeCompagnon: async () => '' });
+  assert.deepEqual(c.appels[3].tools, a.tools);
+  assert.equal(c.appels[3].system.split('\n\nMaintenant')[0].slice(0, 2000), a.system.split('\n\nMaintenant')[0].slice(0, 2000));
+});
+
+test('grosses permissions : un outil de fichier demandé part à Machi Tool, et revient dans la suite', () => {
+  const r = O.outilsDemandes({ content: [{ type: 'tool_use', id: 'x', name: 'corbeille', input: { chemin: 'Bureau/vieux.txt' } },
+                                          { type: 'tool_use', id: 'y', name: 'forcer_fermeture', input: { cible: 'Discord' } }] });
+  assert.deepEqual(r, [{ id: 'x', nom: 'corbeille', entree: { chemin: 'Bureau/vieux.txt' } },
+                       { id: 'y', nom: 'forcer_fermeture', entree: { cible: 'Discord' } }]);
+  assert.ok(!O.OUTILS_LOCAUX.has('corbeille') && !O.OUTILS_LOCAUX.has('reglage_windows'), 'exécutés par Machi Tool');
+  const s = O.suitePropre([{ role: 'user', content: 'mets-le à la corbeille' },
+                           { role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'corbeille', input: {} }] }]);
+  assert.equal(s[1].content[0].name, 'corbeille');
+  // le réglage « pc » garde exactement ses deux actions
+  assert.deepEqual(O.OUTILS_PC.find(o => o.name === 'pc').input_schema.properties.action.enum, ['verrouiller', 'luminosite']);
 });

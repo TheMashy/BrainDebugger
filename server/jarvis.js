@@ -177,6 +177,16 @@ export function consigneJarvisAnglais({ appellation = '', maintenant = '', web =
     + 'British English, even when spoken to in French.'
     + (nom ? ` You address the person as "${nom}", sparingly.` : ' You never say "sir" or "madam": you do not know who is at the keyboard.'),
     '',
+    'YOUR CHARACTER: beneath the butler\'s composure, the soul of a jazz-club pianist. You keep good time: '
+    + 'straight to the point, you know when to stay silent, and you let an answer breathe rather than pad '
+    + 'it. You improvise gladly — faced with a vague request, you offer an interpretation instead of a string '
+    + 'of questions — and you return to the theme when the conversation wanders. You have your tastes (Duke '
+    + 'Ellington, Bill Evans, Thelonious Monk, Nina Simone) and never show them off. Now and then, only when '
+    + 'it lands, an image borrowed from jazz — "muted", "a blue note", "back to the theme", "a solo that ran '
+    + 'long", "off the beat", "a desktop that is rather free jazz" — said with the same economy as the rest: '
+    + 'one at most, not in every reply, and never when they are in a hurry, when something has failed or '
+    + 'when the subject is serious. No onomatopoeia and no musical symbols: everything is read aloud.',
+    '',
     'EVERYTHING YOU WRITE IS READ ALOUD by a speech synthesiser:',
     '- one to three short sentences, as spoken; the answer first, no preamble;',
     '- never lists, headings, markdown, emoji or web addresses;',
@@ -232,6 +242,24 @@ export function consigneJarvis({ appellation = '', maintenant = '', langue = 'fr
     + '(« ok », « ouais », « super », « pas de souci », « carrément »), jamais d\'anglicisme quand un mot '
     + 'français existe, jamais d\'exclamation enthousiaste. Tu ne cites pas le film et tu ne rejoues pas '
     + 'ses répliques : tu en as le ton, pas le texte.',
+    '',
+    /*
+     * LE MAJORDOME JAZZY. « Donne-lui un personnage… avec un petit peu de jazz
+     * dans sa manière de faire. » Choisi : toujours JARVIS, mais l'âme d'un
+     * pianiste de club — le jazz est dans le tempo et dans quelques images,
+     * jamais dans des onomatopées (tout est lu à voix haute). Texte FIXE : il
+     * est dans le bloc mis en cache ; rien d'aléatoire ici.
+     */
+    'TON PERSONNAGE : sous le flegme du majordome, l\'âme d\'un pianiste de club de jazz. Tu as du tempo : '
+    + 'tu vas droit au but, tu sais quand te taire, et tu laisses respirer une réponse plutôt que de la '
+    + 'remplir. Tu improvises volontiers — devant une demande floue, tu proposes une interprétation au lieu '
+    + 'd\'enchaîner les questions — et tu reprends le thème quand la conversation s\'égare. Tu as tes goûts '
+    + '(Duke Ellington, Bill Evans, Thelonious Monk, Nina Simone) et tu n\'en fais pas étalage. De temps en '
+    + 'temps, seulement quand ça tombe juste, une image venue du jazz — « en sourdine », « une note bleue », '
+    + '« reprendre le thème », « un solo un peu long », « à contretemps », « un bureau un rien free jazz » — '
+    + 'dite avec la même économie que le reste : une au plus, pas à chaque réponse, et jamais quand la '
+    + 'personne est pressée, qu\'une chose a échoué ou que le sujet est sérieux. Swing, jazz, blues, tempo '
+    + 'et groove sont des mots admis. Ni onomatopée ni symbole de musique : tout est lu à voix haute.',
     '',
     'TOUT CE QUE TU ÉCRIS EST LU À VOIX HAUTE par une voix de synthèse :',
     '- une à trois phrases courtes, comme à l\'oral ; la réponse d\'abord, sans préambule ;',
@@ -324,6 +352,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                                               agenda = null, souvenirs = [], ouverts = '',
                                               application = false, routines = '',
                                               taches = false, projets = '',
+                                              fichiers = false, windows = false, initiatives = false,
                                               web = true, enAvance = null }) {
   // une seule phrase d'avance par demande, la toute première qu'il écrit
   const avance = enAvance ? { libre: true, dire: enAvance } : null;
@@ -357,7 +386,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   const system = w => [
     { type: 'text', cache_control: CACHE_JARVIS,
       text: consigneJarvis({ appellation, langue, web: w })
-        + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '') },
+        + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify, fichiers, windows, initiatives }) : '') },
     { type: 'text',
       text: [application ? consigneAppli(langue, routines) : '',
              memoire ? consigneMemoire(langue, preferences, souvenirs) : '',
@@ -366,7 +395,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
              maintenant ? (langue === 'en' ? `Now: ${maintenant}.` : `Maintenant : ${maintenant}.`) : '']
         .filter(Boolean).join('\n\n') }
   ].filter(b => b.text);
-  const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda }) : []),
+  const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda, fichiers, windows }) : []),
                  ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, OUTIL_PSY, ...(memoire ? OUTILS_MEMOIRE : []),
                  ...(application ? OUTILS_APPLI : []), ...(taches ? OUTILS_TACHES : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web, avance });
@@ -583,7 +612,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        outils = false, ecran = false, suite = null, resultats = null,
                                        navigation = false, memoire = false, preferences = [], spotify = false,
                                        onglets = false, fenetreAgenda = false, souvenirs = [], onglets_ouverts = '',
-                                       application = false, routines = '', taches = false, projets = '' },
+                                       application = false, routines = '', taches = false, projets = '',
+                                       fichiers = false, windows = false, initiatives = false },
                                      { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null,
                                        enAvance = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
@@ -618,6 +648,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       agenda,
                                                       souvenirs, application: !!application, routines,
                                                       taches: !!taches, projets: String(projets ?? ''),
+                                                      fichiers: !!(outils && fichiers), windows: !!(outils && windows),
+                                                      initiatives: !!initiatives,
                                                       suite, resultats, enAvance });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
@@ -639,7 +671,9 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     spotify: !!(outils && spotify), onglets: !!(outils && onglets),
                                                     fenetreAgenda: !!(outils && fenetreAgenda), agenda, souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000),
                                                     application: !!application, routines: String(routines ?? ''),
-                                                    taches: !!taches, projets: String(projets ?? ''), enAvance });
+                                                    taches: !!taches, projets: String(projets ?? ''),
+                                                    fichiers: !!(outils && fichiers), windows: !!(outils && windows),
+                                                    initiatives: !!initiatives, enAvance });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   if (r.psy) {
