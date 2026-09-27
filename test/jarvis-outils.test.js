@@ -27,11 +27,12 @@ process.env.ANTHROPIC_API_KEY = '';
 const J = await import('../server/jarvis.js');
 const O = await import('../server/jarvis-outils.js');
 
+const aplat = req => ({ ...req, system: Array.isArray(req.system) ? req.system.map(b => b.text).join('\n\n') : req.system });
 function clientScenario(reponses) {
   const appels = [];
   return {
     appels,
-    messages: { create: async req => { appels.push(JSON.parse(JSON.stringify(req))); return reponses.shift(); } }
+    messages: { create: async req => { appels.push(aplat(JSON.parse(JSON.stringify(req)))); return reponses.shift(); } }
   };
 }
 const usage = { input_tokens: 10, output_tokens: 5 };
@@ -139,7 +140,7 @@ test('Internet : la recherche web, et sans elle si la clé ne la permet pas', as
   const appels = [];
   let refuse = true;
   const client = { messages: { create: async req => {
-    appels.push(req);
+    appels.push(aplat(req));
     if (refuse && req.tools?.some(t => t.name === 'web_search')) {
       refuse = false;
       throw Object.assign(new Error('web_search is not enabled for this organization'), { status: 400 });
@@ -426,4 +427,71 @@ test('Machi Tool est à lui : la guirlande, ses routines, les réglages — mêm
   const sans = clientScenario([fini('Bonjour.')]);
   await J.repondreJarvis({ texte: 'bonjour' }, { client: async () => sans, versLeCompagnon: async () => '' });
   assert.ok(!sans.appels[0].tools.some(t => t.name === 'lumiere'), 'sans annonce, rien');
+});
+
+test('plus fluide : les outils et la consigne se relisent dans le cache, l’heure vient après', async () => {
+  // « Tu peux rendre Jarvis plus fluide ? » Ce qui ne bouge pas d'une phrase à
+  // l'autre porte le point de reprise ; ce qui change (l'heure, les souvenirs)
+  // vient après, sinon le cache ne reprendrait jamais.
+  const brut = [];
+  const client = { messages: { create: async req => { brut.push(JSON.parse(JSON.stringify(req))); return fini('Bien.'); } } };
+  const poser = maintenant => J.demanderAJarvis(client, { texte: 'bonjour', maintenant, outils: true, memoire: true,
+                                                          souvenirs: ['24/09 : A parlé de jazz'] });
+  await poser('jeudi 24 septembre 2026, 18 h 30');
+  await poser('jeudi 24 septembre 2026, 18 h 31');
+  const [a, b] = brut;
+  assert.deepEqual(a.system[0].cache_control, { type: 'ephemeral', ttl: '1h' });
+  assert.doesNotMatch(a.system[0].text, /18 h 30|Maintenant|jazz/);
+  assert.match(a.system.at(-1).text, /Maintenant : jeudi 24 septembre 2026, 18 h 30\./);
+  assert.ok(!a.system.at(-1).cache_control, 'rien de volatil sous un point de reprise');
+  const clients = a.tools.filter(t => t.name !== 'web_search');
+  assert.deepEqual(clients.at(-1).cache_control, { type: 'ephemeral', ttl: '1h' });
+  assert.equal(a.tools.filter(t => t.cache_control).length, 1);
+  // d'une minute à l'autre, tout ce qui précède le point de reprise est identique
+  assert.deepEqual(b.tools, a.tools);
+  assert.deepEqual(b.system[0], a.system[0]);
+  // assez long pour être mis en cache (le modèle exige un minimum de jetons)
+  const taille = JSON.stringify(a.tools).length + a.system[0].text.length;
+  assert.ok(taille > 12000, `préfixe de ${taille} caractères`);
+});
+
+test('plus fluide : la première phrase part dès qu’elle est écrite', async () => {
+  assert.equal(J.premierePhrase('Il pleut à Paris. Prenez un parapluie.'), 'Il pleut à Paris.');
+  assert.equal(J.premierePhrase('Il pleut à Paris.'), '', 'rien ne suit : la réponse entière arrive aussitôt');
+  assert.equal(J.premierePhrase('Bonjour M. Dupont, il est midi. Voilà.'), 'Bonjour M. Dupont, il est midi.');
+  assert.equal(J.premierePhrase('Il fait 3.5 degrés'), '');
+
+  // un faux flux : les morceaux du texte, puis le message entier
+  const fauxFlux = (morceaux, message) => {
+    const h = {};
+    return {
+      on(ev, f) { (h[ev] ??= []).push(f); return this; },
+      async finalMessage() {
+        let snap = '';
+        for (const m of morceaux) {
+          if (typeof m === 'object') { (h.streamEvent ?? []).forEach(f => f({ type: 'content_block_start', content_block: m })); snap = ''; continue; }
+          snap += m;
+          (h.text ?? []).forEach(f => f(m, snap));
+        }
+        return message;
+      }
+    };
+  };
+  const dits = [];
+  const client = { messages: { stream: () => fauxFlux(['Il pleut ', 'à Paris. ', 'Prenez ', 'un parapluie.'],
+                                                   fini('Il pleut à Paris. Prenez un parapluie.')) } };
+  const r = await J.demanderAJarvis(client, { texte: 'quel temps', enAvance: t => dits.push(t) });
+  assert.deepEqual(dits, ['Il pleut à Paris.']);
+  assert.equal(r.texte, 'Il pleut à Paris. Prenez un parapluie.', 'la réponse entière suit, comme avant');
+
+  // avant une recherche : « Je regarde. » part dès que l'outil commence
+  const avant = [];
+  const client2 = { messages: { stream: () => fauxFlux(['Je regarde.', { type: 'server_tool_use' }, 'Grand soleil.'],
+                                                    fini('Je regarde.Grand soleil.')) } };
+  await J.demanderAJarvis(client2, { texte: 'et demain', enAvance: t => avant.push(t) });
+  assert.deepEqual(avant, ['Je regarde.']);
+
+  // sans demande d'avance : l'appel ordinaire, sans flux
+  const c = clientScenario([fini('Bien.')]);
+  assert.equal((await J.demanderAJarvis(c, { texte: 'merci' })).texte, 'Bien.');
 });

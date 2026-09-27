@@ -36,7 +36,7 @@ function fauxClient(texte = 'Tous les systèmes sont opérationnels.') {
     appels,
     messages: {
       create: async req => {
-        appels.push(req);
+        appels.push({ ...req, system: Array.isArray(req.system) ? req.system.map(b => b.text).join('\n\n') : req.system });
         return { content: [{ type: 'text', text: texte }], stop_reason: 'end_turn', model: req.model,
                  usage: { input_tokens: 120, output_tokens: 18 } };
       }
@@ -234,6 +234,14 @@ test('POST /api/machitool/jarvis : la clé, le grave au compagnon, et rien au jo
     const graveEn = await poster({ texte: 'I want to die', langue: 'en' }, auth);
     assert.equal(graveEn.status, 200);
     assert.equal((await graveEn.json()).mode, 'psy');
+
+    // En flux (un Machi Tool récent) : rien n'est parti en avance, c'est le
+    // JSON d'avant -- Machi Tool lit les deux.
+    const enFlux = await poster({ texte: 'j’ai envie de mourir', flux: true }, auth);
+    assert.match(enFlux.headers.get('content-type'), /application\/json/);
+    assert.equal((await enFlux.json()).mode, 'psy');
+    const sansCleFlux = await poster({ texte: 'quelle heure est-il à Lima', flux: true }, auth);
+    assert.equal(sansCleFlux.status, 502);
 
     // L'au revoir au psy apres un moment grave : 200, le silence, sans cle API.
     const auRevoir = await poster({ texte: 'au revoir', transition: 'fin_psy', langue: 'en',

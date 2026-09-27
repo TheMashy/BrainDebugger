@@ -92,16 +92,57 @@ function garderResultat(r) {
   EN_ATTENTE.set(r.id, { r, t: now });
 }
 
-async function appelJarvis(client, { system, messages, tools, web }) {
+/*
+ * Une heure plutôt que cinq minutes : on parle à Jarvis par à-coups dans la
+ * journée, et une écriture complète à chaque retour coûterait le temps qu'on
+ * cherche à gagner (même choix que la conversation, voir chat.js).
+ */
+export const CACHE_JARVIS = { type: 'ephemeral', ttl: '1h' };
+
+/** Le point de reprise sur le dernier outil : les outils ne bougent pas d'une phrase à l'autre. */
+export function outilsEnCache(tools) {
+  if (!tools.length) return tools;
+  return [...tools.slice(0, -1), { ...tools.at(-1), cache_control: CACHE_JARVIS }];
+}
+
+/*
+ * « IL MET DU TEMPS À RÉPONDRE. » Sa première phrase part dès qu'elle est
+ * écrite : Machi Tool la dit pendant que le modèle écrit la suite. Une phrase,
+ * c'est un point (ou ? ! …) suivi d'autre chose -- au moins douze signes, pour
+ * ne pas couper à « M. ». Et le texte d'avant un outil (« Je regarde. », avant
+ * une recherche) part dès que l'outil commence.
+ */
+export function premierePhrase(texte) {
+  const m = /^\s*([\s\S]{12,}?[.!?…])\s+\S/.exec(String(texte ?? ''));
+  return m ? m[1].trim() : '';
+}
+
+function unAppel(client, params, avance) {
+  if (!avance?.libre || typeof client.messages?.stream !== 'function') return client.messages.create(params);
+  const flux = client.messages.stream(params);
+  let bloc = '';
+  const lacher = t => {
+    if (!avance.libre || !t) return;
+    avance.libre = false;
+    try { avance.dire(t); } catch { /* Machi Tool a raccroché : la réponse entière suivra, ou pas */ }
+  };
+  flux.on('text', (_, snapshot) => { bloc = snapshot; lacher(premierePhrase(snapshot)); });
+  flux.on('streamEvent', ev => {
+    if (ev.type === 'content_block_start' && ev.content_block?.type !== 'text') lacher(bloc.trim());
+  });
+  return flux.finalMessage();
+}
+
+async function appelJarvis(client, { system, messages, tools, web, avance = null }) {
   const avecWeb = web && !SANS_WEB.refuse;
-  const requete = (w, sys) => client.messages.create({
+  const requete = (w, sys) => unAppel(client, {
     model: JARVIS_MODELE,
     max_tokens: w ? JARVIS_PLAFOND_WEB : JARVIS_PLAFOND,
     system: sys(w),
     messages,
-    ...((tools?.length || w) ? { tools: [...(tools ?? []), ...(w ? [RECHERCHE_WEB] : [])] } : {}),
+    ...((tools?.length || w) ? { tools: [...outilsEnCache(tools ?? []), ...(w ? [RECHERCHE_WEB] : [])] } : {}),
     ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
-  });
+  }, avance);
   try {
     let r = await requete(avecWeb, system);
     // Une recherche longue peut s'interrompre (`pause_turn`) : on la laisse reprendre, deux fois au plus.
@@ -283,7 +324,9 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                                               agenda = null, souvenirs = [], ouverts = '',
                                               application = false, routines = '',
                                               taches = false, projets = '',
-                                              web = true }) {
+                                              web = true, enAvance = null }) {
+  // une seule phrase d'avance par demande, la toute première qu'il écrit
+  const avance = enAvance ? { libre: true, dire: enAvance } : null;
   let messages;
   if (suite) {
     // LA SUITE D'UN OUTIL : la conversation telle que Machi Tool l'a rendue, et
@@ -304,16 +347,29 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
       messages.push({ role: 'user', content: texte });
     }
   }
-  const system = w => consigneJarvis({ appellation, maintenant, langue, web: w })
-    + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '')
-    + (memoire ? '\n\n' + consigneMemoire(langue, preferences, souvenirs) : '')
-    + (outils && ouverts ? '\n\n' + consigneOnglets(langue, ouverts) : '')
-    + (application ? '\n\n' + consigneAppli(langue, routines) : '')
-    + (taches ? '\n\n' + consigneProjets(langue, projets) : '');
+  /*
+   * « REND JARVIS PLUS FLUIDE. » Tout ce qui ne bouge pas d'une phrase à
+   * l'autre -- les outils, qui passent en premier, et la consigne -- est lu
+   * dans le cache au lieu d'être relu en entier : moins d'attente avant qu'il
+   * réponde. Ce qui change (l'heure, les souvenirs, les onglets, les projets)
+   * vient APRÈS le point de reprise, sinon il ne reprendrait jamais.
+   */
+  const system = w => [
+    { type: 'text', cache_control: CACHE_JARVIS,
+      text: consigneJarvis({ appellation, langue, web: w })
+        + (outils ? '\n\n' + consigneOutils(langue, { ecran, navigation, spotify }) : '') },
+    { type: 'text',
+      text: [application ? consigneAppli(langue, routines) : '',
+             memoire ? consigneMemoire(langue, preferences, souvenirs) : '',
+             taches ? consigneProjets(langue, projets) : '',
+             outils && ouverts ? consigneOnglets(langue, ouverts) : '',
+             maintenant ? (langue === 'en' ? `Now: ${maintenant}.` : `Maintenant : ${maintenant}.`) : '']
+        .filter(Boolean).join('\n\n') }
+  ].filter(b => b.text);
   const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda }) : []),
                  ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, OUTIL_PSY, ...(memoire ? OUTILS_MEMOIRE : []),
                  ...(application ? OUTILS_APPLI : []), ...(taches ? OUTILS_TACHES : []), OUTIL_CLAUDE];
-  let r = await appelJarvis(client, { system, messages, tools, web });
+  let r = await appelJarvis(client, { system, messages, tools, web, avance });
   const usage = usageDe(r);
   const details = [];
   const consultations = [];     // Opus, compté à son prix et pas à celui de Jarvis
@@ -362,7 +418,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                consultations, model: r.model ?? JARVIS_MODELE, usage };
     }
     messages = [...messages, { role: 'user', content: resultatsEnBlocs(locaux) }];
-    r = await appelJarvis(client, { system, messages, tools, web });
+    r = await appelJarvis(client, { system, messages, tools, web, avance });
     const u = usageDe(r);
     for (const k of Object.keys(usage)) usage[k] += u[k] ?? 0;
     demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
@@ -528,7 +584,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        navigation = false, memoire = false, preferences = [], spotify = false,
                                        onglets = false, fenetreAgenda = false, souvenirs = [], onglets_ouverts = '',
                                        application = false, routines = '', taches = false, projets = '' },
-                                     { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null }) {
+                                     { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null,
+                                       enAvance = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'resume') {
     const r = await resumerConversation(client, { historique, langue: L });
@@ -561,7 +618,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       agenda,
                                                       souvenirs, application: !!application, routines,
                                                       taches: !!taches, projets: String(projets ?? ''),
-                                                      suite, resultats });
+                                                      suite, resultats, enAvance });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
     if (r.psy) return propositionPsy(L);        // une question, jamais une bascule
@@ -582,7 +639,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     spotify: !!(outils && spotify), onglets: !!(outils && onglets),
                                                     fenetreAgenda: !!(outils && fenetreAgenda), agenda, souvenirs, ouverts: String(onglets_ouverts ?? '').slice(0, 3000),
                                                     application: !!application, routines: String(routines ?? ''),
-                                                    taches: !!taches, projets: String(projets ?? '') });
+                                                    taches: !!taches, projets: String(projets ?? ''), enAvance });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   if (r.psy) {

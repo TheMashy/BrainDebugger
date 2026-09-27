@@ -32,7 +32,7 @@ function fauxClient(reponses) {
     appels,
     messages: {
       create: async req => {
-        appels.push(req);
+        appels.push({ ...req, system: Array.isArray(req.system) ? req.system.map(b => b.text).join('\n\n') : req.system });
         const r = file.length > 1 ? file.shift() : file[0];
         if (r instanceof Error) throw r;
         return { model: req.model, usage: { input_tokens: 1000, output_tokens: 300 }, stop_reason: 'end_turn', ...r };

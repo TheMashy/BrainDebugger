@@ -490,9 +490,25 @@ async function traiter(req, res) {
       error: 'clé absente ou inconnue',
       indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
     });
+    /*
+     * EN FLUX (`flux: true`, un Machi Tool récent) : une ligne JSON par
+     * nouvelle -- `{"debut": …}`, sa première phrase dès qu'elle est écrite,
+     * puis `{"fin": …}`, la réponse entière, telle qu'elle partait avant (ou
+     * `{"erreur": …, "statut": …}`). Sans `flux`, rien ne change.
+     */
+    let flux = false;
+    const ligne = o => {
+      if (!flux) {
+        flux = true;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8',
+                             'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      }
+      res.write(JSON.stringify(o) + '\n');
+    };
     try {
       const corps = await readBody(req);
       const langue = corps?.langue === 'en' ? 'en' : 'fr';
+      const enAvance = corps?.flux === true ? t => ligne({ debut: t }) : null;
       const r = await repondreJarvis({
         texte: corps?.texte, historique: corps?.historique, appellation: corps?.appellation,
         maintenant: maintenantDans(zoneCourante(), new Date(), langue), langue,
@@ -525,13 +541,17 @@ async function traiter(req, res) {
         agenda: {
           poser: e => poserRendezVous({ titre: e.titre, date: e.date, heure: e.heure, fin: e.fin }, userId).texte,
           lire: e => agendaEnTexte(lireAgenda({ depuis: e.depuis, jours: e.jours }, userId, jourDans(zoneCourante())))
-        }
+        },
+        enAvance
       });
+      if (flux) return res.end(JSON.stringify({ fin: r }) + '\n');
       return json(res, 200, r);
     } catch (err) {
-      if (err.statut === 400) return json(res, 400, { error: err.message });
+      if (err.statut === 400 && !flux) return json(res, 400, { error: err.message });
       console.error('[jarvis]', String(err.message ?? err).slice(0, 200));
-      return json(res, 502, { error: String(err.message ?? err).slice(0, 200), raison: raisonErreurApi(err) });
+      const e = { error: String(err.message ?? err).slice(0, 200), raison: raisonErreurApi(err) };
+      if (flux) return res.end(JSON.stringify({ erreur: e, statut: err.statut === 400 ? 400 : 502 }) + '\n');
+      return json(res, 502, e);
     }
   }
 
