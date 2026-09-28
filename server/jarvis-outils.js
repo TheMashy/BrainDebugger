@@ -329,7 +329,9 @@ export const OUTILS_AGENDA = [
     name: 'agenda_poser',
     description: 'Ajoute un rendez-vous à son agenda (BrainDebugger, visible aussi dans Machi Tool). « date » : '
       + 'AAAA-MM-JJ, calculée depuis la date d\'aujourd\'hui (« Maintenant », plus haut) ; « heure » : HH:MM si '
-      + 'c\'en est une ; « fin » : AAAA-MM-JJ pour plusieurs jours. Si le jour est vraiment ambigu, demande avant.',
+      + 'c\'en est une ; « fin » : AAAA-MM-JJ pour plusieurs jours. Si le jour est vraiment ambigu, demande avant. '
+      + 'Toute demande d\'ajouter quelque chose à l\'agenda (un rendez-vous, un rappel à une date) passe par cet '
+      + 'outil : ne dis JAMAIS que c\'est noté sans l\'avoir appelé, et si son résultat est une erreur, dis-la.',
     input_schema: { type: 'object', properties: {
       titre: { type: 'string' }, date: { type: 'string' }, heure: { type: 'string' }, fin: { type: 'string' }
     }, required: ['titre', 'date'] }

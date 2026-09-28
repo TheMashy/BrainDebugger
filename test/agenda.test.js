@@ -77,6 +77,10 @@ test('Jarvis pose dans l’agenda ICI, et n’offre la fenêtre que si Machi Too
   assert.equal(poses.length, 1);
   assert.match(appels[1].messages.at(-1).content[0].content, /Ajouté à l'agenda : « Kiné », mercredi 7 octobre à 18:00/);
   assert.ok(A.lireAgenda({ depuis: '2026-10-07', jours: 1 }, OWNER).rendezVous.some(x => x.label === 'Kiné'));
+  // « Assure-toi que rajouter à l'agenda rajoute un élément à l'agenda » : il y
+  // est, et Machi Tool le sait (sa fenêtre Agenda se relit)
+  assert.equal(r.agenda_modifie, true);
+  assert.match(appels[0].tools.find(t => t.name === 'agenda_poser').description, /ne dis JAMAIS que c'est noté sans l'avoir appelé/);
   await J.repondreJarvis({ texte: 'montre mon agenda', outils: true }, dep);
   assert.ok(!appels.at(-1).tools.some(t => t.name === 'montrer_agenda'));
   await J.repondreJarvis({ texte: 'montre mon agenda', outils: true, fenetreAgenda: true }, dep);
@@ -95,4 +99,20 @@ test('le bilan des derniers jours : des chiffres (note, nuit), jamais le texte d
   }
   assert.ok('sommeil_mediane' in b);
   assert.equal(A.bilanDesJours(OWNER, '2026-09-25', 999).jours.length, 31, 'borné');
+});
+
+test('un rendez-vous refusé ne passe pas pour posé', async () => {
+  const usage = { input_tokens: 10, output_tokens: 5 };
+  const reponses = [
+    { content: [{ type: 'tool_use', id: 'a1', name: 'agenda_poser', input: { titre: 'Kiné', date: 'mercredi' } }],
+      stop_reason: 'tool_use', model: 'claude-sonnet-5', usage },
+    { content: [{ type: 'text', text: 'La date m’a échappé.' }], stop_reason: 'end_turn', model: 'claude-sonnet-5', usage }];
+  const appels = [];
+  const client = { messages: { create: async req => { appels.push(JSON.parse(JSON.stringify(req))); return reponses.shift(); } } };
+  const dep = { client: async () => client, versLeCompagnon: async () => '',
+                agenda: { poser: e => A.poserRendezVous(e, OWNER).texte, lire: () => 'rien' } };
+  const r = await J.repondreJarvis({ texte: 'mets-moi kiné mercredi' }, dep);
+  assert.equal(r.agenda_modifie, undefined);
+  const resultat = appels[1].messages.at(-1).content[0];
+  assert.equal(resultat.is_error, true, 'l’erreur revient au modèle, qui la dit');
 });

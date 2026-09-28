@@ -403,6 +403,8 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   const details = [];
   const consultations = [];     // Opus, compté à son prix et pas à celui de Jarvis
   let fin = false;              // congédié : Machi Tool cessera d'écouter
+  let agendaModifie = false;    // un rendez-vous posé : Machi Tool relit sa fenêtre Agenda
+  const ag = () => (agendaModifie ? { agenda_modifie: true } : {});
   let demandes = r.stop_reason === 'tool_use' ? outilsDemandes(r) : [];
   // Il a compris qu'on veut le psychologue : on s'arrête là, c'est le
   // compagnon qui répondra (voir repondreJarvis).
@@ -424,6 +426,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
           const f = d.nom === 'agenda_poser' ? agenda?.poser : agenda?.lire;
           if (!f) throw new Error('agenda indisponible');
           locaux.push({ id: d.id, texte: String(await f(d.entree ?? {})) });
+          if (d.nom === 'agenda_poser') agendaModifie = true;   // Machi Tool relira sa fenêtre Agenda
         } catch (err) {
           locaux.push({ id: d.id, erreur: String(err?.message ?? err).slice(0, 300) });
         }
@@ -443,7 +446,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     if (distants.length) {
       // le PC aussi : la réponse de Claude attend le retour de Machi Tool
       locaux.forEach(garderResultat);
-      return { texte: texteDe(r), outils: distants, suite: suitePropre(messages), detail: details.join('\n\n'),
+      return { texte: texteDe(r), outils: distants, suite: suitePropre(messages), detail: details.join('\n\n'), ...ag(),
                consultations, model: r.model ?? JARVIS_MODELE, usage };
     }
     messages = [...messages, { role: 'user', content: resultatsEnBlocs(locaux) }];
@@ -457,7 +460,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   }
   demandes = demandes.filter(d => !OUTILS_LOCAUX.has(d.nom));
   if ((outils || memoire || application || taches) && demandes.length) {
-    return { texte: texteDe(r), outils: demandes, suite: suitePropre([...messages, { role: 'assistant', content: r.content }]),
+    return { texte: texteDe(r), outils: demandes, suite: suitePropre([...messages, { role: 'assistant', content: r.content }]), ...ag(),
              ...(details.length ? { detail: details.join('\n\n') } : {}), consultations, model: r.model ?? JARVIS_MODELE, usage };
   }
   let dit = texteDe(r);
@@ -466,7 +469,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
     dit = langue === 'en' ? 'I\'m afraid I can\'t help with that one.'
                           : 'Je crains de ne pas pouvoir vous aider sur ce point.';
   }
-  return { texte: dit, ...(details.length ? { detail: details.join('\n\n') } : {}), ...(fin ? { fin: true } : {}),
+  return { texte: dit, ...(details.length ? { detail: details.join('\n\n') } : {}), ...(fin ? { fin: true } : {}), ...ag(),
            consultations, model: r.model ?? JARVIS_MODELE, usage };
 }
 
@@ -655,6 +658,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
     if (r.psy) return propositionPsy(L);        // une question, jamais une bascule
     return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
+             ...(r.agenda_modifie ? { agenda_modifie: true } : {}),
              ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
   }
   const t = String(texte ?? '').trim().slice(0, 4000);
@@ -682,5 +686,6 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
     return propositionPsy(L);
   }
   return { texte: r.texte, mode: 'jarvis', ...(r.detail ? { detail: r.detail } : {}), ...(r.fin ? { fin: true } : {}),
+             ...(r.agenda_modifie ? { agenda_modifie: true } : {}),
            ...(r.outils ? { outils: r.outils, suite: r.suite } : {}) };
 }
