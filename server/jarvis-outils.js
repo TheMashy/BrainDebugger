@@ -466,8 +466,10 @@ export const OUTIL_PSY = {
  * il peut contrôler et rajouter des petites sous-routines de lumières, avec des
  * habitudes / running gags. » La guirlande, ses routines, les réglages : offerts
  * dès que Machi Tool les annonce (`application`), même sans les mains sur le PC.
- * Exécutés là-bas ; Machi Tool refuse lui-même les réglages qui ne sont pas à
- * lui (clés, codes, ses propres droits).
+ * Exécutés là-bas. « Fait en sorte que Jarvis puisse changer n'importe quel
+ * setting de l'application » : tous, sauf les clés et les identifiants ; ceux
+ * qui lui donnent des droits (mains sur le PC, fichiers, écran, collecte…),
+ * Machi Tool les fait confirmer à voix haute (ou par le code d'accès).
  */
 const ETAPE = {
   type: 'object', properties: {
@@ -519,9 +521,10 @@ export const OUTILS_APPLI = [
     name: 'reglages_machi',
     description: 'Les réglages de Machi Tool : « lire » (tous ceux que tu peux changer, ou ceux dont la clé contient '
       + '« cle ») ; « changer » (« cle », « valeur ») ; « couleur_appli » : la couleur d\'une appli ou d\'un site dans '
-      + 'le mode applications (« nom », « couleur », « mots » pour la reconnaître). Lis avant de changer une clé que '
-      + 'tu ne connais pas. Les clés, les codes et tes propres droits (mains sur le PC, écran, historique) ne se '
-      + 'changent pas : c\'est à la personne, dans les réglages.',
+      + 'le mode applications (« nom », « couleur », « mots » pour la reconnaître). Tu peux changer TOUS les réglages '
+      + 'de l\'application : lis d\'abord pour connaître la clé exacte. Ceux qui te donnent des droits (tes mains sur '
+      + 'le PC, les fichiers, l\'écran, la collecte, le code d\'accès…) : Machi Tool demande lui-même confirmation '
+      + 'à la personne, n\'en rajoute pas. Seuls les clés secrètes et les identifiants restent hors de portée.',
     input_schema: { type: 'object', properties: {
       action: { type: 'string', enum: ['lire', 'changer', 'couleur_appli'] },
       cle: { type: 'string' }, valeur: { type: 'string' }, nom: { type: 'string' }, couleur: { type: 'string' },
@@ -529,6 +532,22 @@ export const OUTILS_APPLI = [
     }, required: ['action'] }
   }
 ];
+
+/**
+ * LES MISES À JOUR DE MACHI TOOL. « Ainsi qu'annoncer une mise à jour (il peut
+ * la lancer). » Offert quand Machi Tool l'annonce (`mise_a_jour`). Installer
+ * redémarre l'application : Machi Tool demande « oui ? » avant.
+ */
+export const OUTIL_MISE_A_JOUR = {
+  name: 'mise_a_jour',
+  description: 'Les mises à jour de Machi Tool : « etat » (la version installée, celle qui attend, ses notes) ; '
+    + '« verifier » (demande à GitHub s\'il y en a une nouvelle) ; « installer » (télécharge et pose la nouvelle '
+    + 'version : l\'application redémarre un instant — Machi Tool demande confirmation lui-même). Quand on te demande '
+    + 's\'il y a une mise à jour, vérifie ; quand on te demande de l\'installer, installe.',
+  input_schema: { type: 'object', properties: {
+    action: { type: 'string', enum: ['etat', 'verifier', 'installer'] }
+  }, required: ['action'] }
+};
 
 export function consigneAppli(langue = 'fr', routines = '') {
   const liste = String(routines ?? '').slice(0, 3000).trim();
@@ -758,7 +777,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
 
 const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA,
                       ...OUTILS_FICHIERS, ...OUTILS_WINDOWS,
-                      OUTIL_RETRAIT, OUTIL_PSY, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, ...OUTILS_APPLI, ...OUTILS_TACHES,
+                      OUTIL_RETRAIT, OUTIL_PSY, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, ...OUTILS_APPLI, OUTIL_MISE_A_JOUR, ...OUTILS_TACHES,
                       OUTIL_CLAUDE]
   .map(o => o.name));
 const SUITE_MAX = 40;

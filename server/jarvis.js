@@ -24,7 +24,7 @@ import { messageGrave, graveMajordome } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
          OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE,
-         OUTILS_APPLI, consigneAppli, OUTILS_TACHES, consigneProjets } from './jarvis-outils.js';
+         OUTILS_APPLI, OUTIL_MISE_A_JOUR, consigneAppli, OUTILS_TACHES, consigneProjets } from './jarvis-outils.js';
 import { projetsPropres } from './taches.js';
 
 export const JARVIS_MODELE = 'claude-sonnet-5';
@@ -353,7 +353,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                                               application = false, routines = '',
                                               taches = false, projets = '',
                                               fichiers = false, windows = false, initiatives = false,
-                                              web = true, enAvance = null }) {
+                                              miseAJour = false, web = true, enAvance = null }) {
   // une seule phrase d'avance par demande, la toute première qu'il écrit
   const avance = enAvance ? { libre: true, dire: enAvance } : null;
   let messages;
@@ -397,7 +397,8 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   ].filter(b => b.text);
   const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda, fichiers, windows }) : []),
                  ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, OUTIL_PSY, ...(memoire ? OUTILS_MEMOIRE : []),
-                 ...(application ? OUTILS_APPLI : []), ...(taches ? OUTILS_TACHES : []), OUTIL_CLAUDE];
+                 ...(application ? OUTILS_APPLI : []), ...(application && miseAJour ? [OUTIL_MISE_A_JOUR] : []),
+                 ...(taches ? OUTILS_TACHES : []), OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web, avance });
   const usage = usageDe(r);
   const details = [];
@@ -616,7 +617,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        navigation = false, memoire = false, preferences = [], spotify = false,
                                        onglets = false, fenetreAgenda = false, souvenirs = [], onglets_ouverts = '',
                                        application = false, routines = '', taches = false, projets = '',
-                                       fichiers = false, windows = false, initiatives = false },
+                                       fichiers = false, windows = false, initiatives = false, mise_a_jour = false },
                                      { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null,
                                        enAvance = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
@@ -652,7 +653,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       souvenirs, application: !!application, routines,
                                                       taches: !!taches, projets: String(projets ?? ''),
                                                       fichiers: !!(outils && fichiers), windows: !!(outils && windows),
-                                                      initiatives: !!initiatives,
+                                                      initiatives: !!initiatives, miseAJour: !!mise_a_jour,
                                                       suite, resultats, enAvance });
     noter(r.usage, r.model);
     for (const c of r.consultations ?? []) noter(c.usage, c.model);
@@ -677,7 +678,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     application: !!application, routines: String(routines ?? ''),
                                                     taches: !!taches, projets: String(projets ?? ''),
                                                     fichiers: !!(outils && fichiers), windows: !!(outils && windows),
-                                                    initiatives: !!initiatives, enAvance });
+                                                    initiatives: !!initiatives, miseAJour: !!mise_a_jour, enAvance });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   if (r.psy) {

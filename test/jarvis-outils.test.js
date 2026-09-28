@@ -437,6 +437,23 @@ test('Machi Tool est à lui : la guirlande, ses routines, les réglages — mêm
   assert.ok(!sans.appels[0].tools.some(t => t.name === 'lumiere'), 'sans annonce, rien');
 });
 
+test('ses mises à jour et tous les réglages : offerts quand Machi Tool les annonce', async () => {
+  // « Fait en sorte que Jarvis puisse changer n'importe quel setting de l'application,
+  // ainsi qu'annoncer une mise à jour (il peut la lancer). »
+  const c = clientScenario([outilDemande('mise_a_jour', { action: 'installer' }), fini('Oui.'), fini('Oui.')]);
+  const dep = { client: async () => c, versLeCompagnon: async () => 'compagnon' };
+  const r = await J.repondreJarvis({ texte: 'installe la mise à jour', application: true, mise_a_jour: true }, dep);
+  assert.ok(c.appels[0].tools.some(t => t.name === 'mise_a_jour'));
+  assert.deepEqual(r.outils.map(o => o.nom), ['mise_a_jour'], 'l\'outil part à Machi Tool');
+  const reglages = c.appels[0].tools.find(t => t.name === 'reglages_machi');
+  assert.match(reglages.description, /TOUS les réglages/);
+  assert.doesNotMatch(reglages.description, /ne se changent pas/);
+  await J.repondreJarvis({ texte: 'une mise à jour ?', application: true }, dep);
+  assert.ok(!c.appels.at(-1).tools.some(t => t.name === 'mise_a_jour'), 'un vieux Machi Tool ne l\'annonce pas');
+  await J.repondreJarvis({ texte: 'une mise à jour ?', mise_a_jour: true }, dep);
+  assert.ok(!c.appels.at(-1).tools.some(t => t.name === 'mise_a_jour'), 'pas sans l\'application');
+});
+
 test('plus fluide : les outils et la consigne se relisent dans le cache, l’heure vient après', async () => {
   // « Tu peux rendre Jarvis plus fluide ? » Ce qui ne bouge pas d'une phrase à
   // l'autre porte le point de reprise ; ce qui change (l'heure, les souvenirs)

@@ -530,6 +530,8 @@ async function traiter(req, res) {
         // et les petites initiatives (que Machi Tool prend lui-même)
         fichiers: corps?.fichiers === true, windows: corps?.windows === true,
         initiatives: corps?.initiatives === true,
+        // ses mises a jour : les annoncer, les lancer (Machi Tool demande « oui ? »)
+        mise_a_jour: corps?.mise_a_jour === true,
         projets: typeof corps?.projets === 'string' ? corps.projets.slice(0, 4000) : '',
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',
