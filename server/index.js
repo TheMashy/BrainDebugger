@@ -477,8 +477,9 @@ async function traiter(req, res) {
    *
    * Le mode par défaut du mot d'éveil (orange) : un assistant de poste de
    * travail à la manière du JARVIS d'Iron Man — Sonnet, effort bas, sans
-   * réflexion, pour répondre vite. Rien n'est rangé dans le journal : une
-   * question sur une imprimante n'est pas une journée. Sauf un message GRAVE,
+   * réflexion, pour répondre vite. Cette route ne range rien dans le journal :
+   * c'est Machi Tool qui y verse chaque échange, s'il est coché, par
+   * /api/machitool/journal juste en dessous. Sauf un message GRAVE,
    * qui ne reste jamais chez le majordome : il part au compagnon, avec tout ce
    * qui le protège, et la réponse dit `mode: 'psy'` pour que Machi Tool passe
    * en bleu. Voir server/jarvis.js.
@@ -556,6 +557,35 @@ async function traiter(req, res) {
       const e = { error: String(err.message ?? err).slice(0, 200), raison: raisonErreurApi(err) };
       if (flux) return res.end(JSON.stringify({ erreur: e, statut: err.statut === 400 ? 400 : 502 }) + '\n');
       return json(res, 502, e);
+    }
+  }
+
+  /* ---------- LES DISCUSSIONS DE JARVIS, DANS LE JOURNAL ----------
+   *
+   * « Fait en sorte que les discussions de Jarvis aillent aussi dans le
+   * journal ! » Machi Tool verse ici chaque échange avec le majordome, une
+   * fois dit (`{ dit, repondu }`), s'il est coché dans ses réglages. Par la
+   * même porte que le connecteur (verserEchange) : les deux bulles portent
+   * « Jarvis », et la journée compte comme écrite. Une route à part, et pas
+   * une `transition` de /jarvis : un BrainDebugger plus ancien répond 404, et
+   * rien ne part au modèle. Ce qui est parti au compagnon (le grave, le mode
+   * psychologue) est déjà au journal : Machi Tool ne le reverse pas.
+   */
+  if (req.method === 'POST'
+      && (url.pathname === '/api/machitool/journal' || url.pathname === '/api/passerelle/journal')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      const corps = await readBody(req);
+      const r = connecteur.verserEchange({ dit: corps?.dit, repondu: corps?.repondu, via: 'Jarvis' },
+                                         userId, () => jourVecu(userId));
+      if (r.erreur) return json(res, 400, { error: r.erreur });
+      return json(res, 200, { ok: true, jour: r.jour });
+    } catch (err) {
+      return json(res, err.statut ?? 400, { error: String(err.message ?? err).slice(0, 200) });
     }
   }
 

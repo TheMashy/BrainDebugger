@@ -253,6 +253,33 @@ test('POST /api/machitool/jarvis : la clé, le grave au compagnon, et rien au jo
   }
 });
 
+test('POST /api/machitool/journal : les discussions de Jarvis vont au journal, marquées « Jarvis »', async () => {
+  // « Fait en sorte que les discussions de Jarvis aillent aussi dans le journal ! »
+  const cle = P.poserCle(OWNER);
+  const { p, base } = await serveur();
+  try {
+    const poster = (corps, entetes = {}) => fetch(base + '/api/machitool/journal', {
+      method: 'POST', headers: { 'content-type': 'application/json', ...entetes }, body: JSON.stringify(corps)
+    });
+    assert.equal((await poster({ dit: 'coucou' })).status, 401, 'sans la clé, rien');
+    const auth = { authorization: 'Bearer ' + cle };
+    assert.equal((await poster({ dit: '  ' }, auth)).status, 400);
+    const r = await poster({ dit: 'quel temps fait-il à Nantes-témoin ?',
+                             repondu: 'Gris et doux, Monsieur-témoin.' }, auth);
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).ok, true);
+    const fil = recentMessages(20, OWNER);
+    const sienne = fil.find(m => m.text === 'quel temps fait-il à Nantes-témoin ?');
+    const reponse = fil.find(m => m.text === 'Gris et doux, Monsieur-témoin.');
+    assert.equal(sienne?.via, 'Jarvis');
+    assert.equal(sienne?.role, 'user');
+    assert.equal(reponse?.via, 'Jarvis');
+    assert.ok(Date.parse(reponse.ts) > Date.parse(sienne.ts), 'sa phrase, puis la réponse');
+  } finally {
+    p.kill();
+  }
+});
+
 test('le mode psychologue ne se propose pas à tout propos, et une seule fois', () => {
   // « Il faut faire gaffe que le mode psychologue n'arrive pas trop facilement. »
   // Il se proposait dès qu'on parlait de sommeil, de santé ou de notes.
