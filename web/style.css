@@ -2042,6 +2042,7 @@ button.bignum:hover { opacity: .82; }
   overflow: hidden; text-overflow: ellipsis;
 }
 .jmoment:hover .jcoeur { color: var(--ink); }
+.jcoeur.faible { font-style: italic; }
 
 /* --- ce qui a bougé --- */
 .jcote { gap: 20px; }
@@ -3935,10 +3936,13 @@ details.jpecol .jpetop { margin-top: 5px; }
 
 /* CLIQUER UN MOMENT DÉSIGNE SON PASSAGE, À DROITE.
    Les deux colonnes racontaient la même journée sans jamais se répondre : pour
-   retrouver la phrase derrière « 05:43 · De quoi le suicide est mauvais ? » il
-   fallait relire tout le pavé de droite en cherchant l'endroit. */
+   retrouver la phrase derrière une ligne de cinq heures du matin, il fallait
+   relire tout le pavé de droite en cherchant l'endroit. */
 .jmoment[data-ids] { cursor: pointer; border-radius: 7px; }
 .jmoment[data-ids]:hover { background: var(--panel-2); }
+/* Des messages rangés au carnet : rien à désigner à droite, rien à promettre. */
+.jmoment[data-range] { cursor: default; }
+.jmoment[data-range]:hover { background: transparent; }
 .jmoment[data-ids]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .jmoment.vise { background: color-mix(in srgb, var(--accent) 13%, transparent); }
 

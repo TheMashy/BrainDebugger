@@ -6561,6 +6561,7 @@ function estimeMarkup(e) {
   return `<span class="jest ${mesure ? 'mesure' : 'lu'}"
     style="--c:${noteScaleColor(e.valeur)}"
     title="${mesure ? `relevé à la main à ce moment-là — ${v}/10`
+                    : e.dApres === 'modele' ? `estimé par le compagnon, pas par toi — environ ${v}/10`
                     : `estimation lue dans tes mots, personne ne l’a posée — environ ${v}/10`}"
     aria-label="${mesure ? 'relevé' : 'estimation'} ${v} sur 10"></span>`;
 }
@@ -6571,8 +6572,8 @@ function estimeMarkup(e) {
  * Les deux colonnes racontent la même journée par deux bouts : à gauche ce
  * qu'on a ressenti, heure par heure ; à droite ce qu'on a écrit. Elles se
  * lisaient côte à côte sans jamais se répondre — pour retrouver la phrase
- * derrière « 05:43 · De quoi le suicide est mauvais ? » il fallait relire tout
- * le pavé de droite en cherchant l'endroit.
+ * derrière une ligne de cinq heures du matin, il fallait relire tout le pavé
+ * de droite en cherchant l'endroit.
  *
  * Le lien se fait par les MESSAGES, pas par l'heure affichée : un moment et un
  * passage sont exactement les mêmes messages. Rapprocher par l'heure marcherait
@@ -6608,7 +6609,8 @@ function montrerLePassage(moment) {
   const dejaLa = moment?.classList.contains('vise');
   for (const el of document.querySelectorAll('.jmoment.vise, .jsujet.vise, .jsphr.vise, .dayText.vise, .jsphr.autour'))
     el.classList.remove('vise', 'autour');
-  if (!moment || dejaLa) return;
+  // Une ligne de messages rangés n'a rien à montrer à droite : cliquer éteint.
+  if (!moment || dejaLa || moment.dataset.range) return;
 
   const ids = new Set((moment.dataset.ids ?? '').split(',').filter(Boolean));
   if (!ids.size) return;
@@ -6666,14 +6668,20 @@ function momentMarkup(m) {
      tester suffit à garder l'un sans l'autre. */
   return `<li class="jmoment${m.veille?.niveau ? ` aveille ${esc(m.veille.niveau)}` : ''}"
       data-moment="${esc(m.ts)}" ${m.sens ? `title="${esc(m.sens)}"` : ''}
-      ${m.ids?.length ? `data-ids="${esc(m.ids.join(','))}" tabindex="0" role="button"
+      ${/* Des messages rangés au carnet n'ont pas de passage à droite : la ligne
+            garde ses identifiants (une recherche la retrouve), mais ne se
+            présente pas comme un bouton qui montrerait un passage. */''}
+      ${m.ids?.length && m.rangeSeul ? `data-ids="${esc(m.ids.join(','))}" data-range="1"` : ''}
+      ${m.ids?.length && !m.rangeSeul ? `data-ids="${esc(m.ids.join(','))}" tabindex="0" role="button"
       ${/* Les messages de la phrase que CETTE ligne montre : c'est elle que le
             clic désigne à droite, pas les vingt-cinq minutes autour d'elle. */''}
       ${m.coeurIds?.length ? `data-coeur="${esc(m.coeurIds.join(','))}"` : ''}
       aria-label="Montrer ce passage dans ce que tu as écrit"` : ''}>
     <span class="jheure mono">${esc(m.heure)}</span>
     ${marqueMoment(m)}
-    <span class="jcoeur">${esc(m.coeur)}</span>
+    ${/* Un moment fait seulement de messages rangés au carnet n'a pas de phrase
+          à lui : on le dit, sans rien nommer, plutôt qu'une ligne vide. */''}
+    <span class="jcoeur${m.rangeSeul ? ' faible' : ''}">${m.rangeSeul ? 'un message rangé au carnet' : esc(m.coeur)}</span>
     ${estimeMarkup(m.estime)}
   </li>`;
 }
@@ -7390,15 +7398,29 @@ function volatiliteMarkup(v, poste) {
   const arrets = [...pts].sort((a, b) => a.x - b.x).map(p =>
     `<stop offset="${(((p.x - PX) / (W - PX * 2)) * 100).toFixed(2)}%" stop-color="${p.c}"/>`).join('');
 
-  const chemin = pts.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('L');
+  /*
+   * UNE MESURE ET UNE LECTURE NE SE RELIENT PAS. Un trait entre un relevé posé
+   * par la personne et une estimation lue dans ses mots ferait passer l'une
+   * pour la suite de l'autre. On trace donc des tronçons : des points du même
+   * genre qui se suivent, et rien entre deux genres différents — une
+   * estimation du compagnon ne se relie pas non plus à une lecture des mots.
+   */
+  const troncons = [];
+  for (const p of pts) {
+    const t = troncons.at(-1);
+    if (t && t[0].dApres === p.dApres) t.push(p);
+    else troncons.push([p]);
+  }
+  const traces = troncons.filter(t => t.length >= 2);
+  const chemin = t => t.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('L');
   // Le remplissage est le MÊME dégradé que la ligne, fondu vers le bas par un
   // masque. Une couleur pleine sous la courbe, sur un fond aussi sombre, faisait
   // une tache qu'on lisait avant la courbe ; le fondu s'éteint pile sur le sol,
   // sinon le bas de l'aire se coupe net et le graphe redevient une boîte.
-  const aire = `<path d="M${pts[0].x.toFixed(1)} ${H}L${chemin}L${pts.at(-1).x.toFixed(1)} ${H}Z"
-       fill="url(#${id}l)" mask="url(#${id}m)"/>`;
-  const ligne = `<path d="M${chemin}" fill="none" stroke="url(#${id}l)" stroke-width="1.6"
-       stroke-linejoin="round" stroke-linecap="round"/>`;
+  const aire = traces.map(t => `<path d="M${t[0].x.toFixed(1)} ${H}L${chemin(t)}L${t.at(-1).x.toFixed(1)} ${H}Z"
+       fill="url(#${id}l)" mask="url(#${id}m)"/>`).join('');
+  const ligne = traces.length ? `<path d="${traces.map(t => `M${chemin(t)}`).join('')}" fill="none" stroke="url(#${id}l)" stroke-width="1.6"
+       stroke-linejoin="round" stroke-linecap="round"/>` : '';
   // Le repère de 5/10 ne se trace que s'il tombe dans la fenêtre : posé au milieu
   // du cadre quelle que soit l'échelle — ce que faisait la ligne à H/2 —, il
   // annonçait « 5 » à l'endroit où il y avait 7, et ça se lit sans se vérifier.
@@ -7413,11 +7435,17 @@ function volatiliteMarkup(v, poste) {
     // distinguait plus, alors que c'est toute la règle du produit.
     return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.4"
        fill="${mesure ? p.c : 'var(--bg)'}" stroke="${p.c}" stroke-width="${mesure ? 0 : 1.6}"
-       ><title>${esc(p.heure)} · ${mesure ? '' : '≈'}${vtxt}/10${mesure ? ' (relevé)' : ' (lu dans tes mots)'}</title></circle>`;
+       ><title>${esc(p.heure)} · ${mesure ? '' : '≈'}${vtxt}/10${mesure ? ' (relevé)' : p.dApres === 'modele' ? ' (estimé par le compagnon)' : ' (lu dans tes mots)'}</title></circle>`;
   }).join('');
 
   const fmt = virgule;
-  const surMesure = hum.some(h => h.dApres === 'releve');
+  // Ce que dit le pied : relevé par la personne, lu dans ses mots, ou estimé
+  // par le compagnon — jamais « relevé à la main » pour un chiffre qu'elle n'a
+  // pas posé.
+  const pied = hum.some(h => h.dApres === 'releve') ? 'relevé à la main'
+    : hum.every(h => h.dApres === 'mots') ? 'lu dans tes mots'
+    : hum.every(h => h.dApres === 'modele') ? 'estimé par le compagnon'
+    : 'estimé, pas relevé';
   /*
    * LES DEUX BOUTS DE L'AXE, À LEURS DEUX BOUTS.
    *
@@ -7468,7 +7496,7 @@ function volatiliteMarkup(v, poste) {
     </div>
     <div class="jvpied">
       <span class="jvchiffre mono">${fmt(bas)} <span class="faint">→</span> ${fmt(haut)}</span>
-      <span class="faint">${surMesure ? 'relevé à la main' : 'lu dans tes mots'}</span>
+      <span class="faint">${pied}</span>
     </div>
   </div>`;
 }

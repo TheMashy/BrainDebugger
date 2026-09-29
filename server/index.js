@@ -5,7 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
-         reprendreLesNuits, jourVecu } from './api.js';
+         reprendreLesNuits, reparerLesNotesDites, jourVecu } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle, synchroHonoree } from './passerelle.js';
 import * as connecteur from './connecteur.js';
 import { analyser, apercuDe } from './mesures.js';
@@ -913,6 +913,17 @@ try {
   // Une reprise qui échoue ne doit pas empêcher le site de démarrer : elle
   // rattrape un retard, elle ne conditionne rien.
   console.log(`  reprise des nuits ignorée : ${e.message}`);
+}
+
+/*
+ * Les notes dites relues à l'heure de la relecture, rendues à celle de leur
+ * message. Idempotent, annoncé — voir `reparerLesNotesDites`.
+ */
+try {
+  const remises = reparerLesNotesDites();
+  if (remises) console.log(`  ${remises} note(s) dite(s) remise(s) à l'heure de leur message`);
+} catch (e) {
+  console.log(`  réparation des notes dites ignorée : ${e.message}`);
 }
 
 server.listen(PORT, HOST, () => {
