@@ -357,12 +357,18 @@ function seau(d, unite) {
 }
 
 /** Recule d'un pas. */
-function reculer(t, unite, n) {
+export function reculer(t, unite, n) {
   const d = new Date(t);
   if (unite === 'heure') d.setUTCHours(d.getUTCHours() - n);
   else if (unite === 'jour') d.setUTCDate(d.getUTCDate() - n);
   else if (unite === 'semaine') d.setUTCDate(d.getUTCDate() - 7 * n);
-  else d.setUTCMonth(d.getUTCMonth() - n);
+  else {
+    // Le 1er d'abord : un 29 septembre moins sept mois donnait « 29 février »,
+    // que Date repousse au 1er mars -- la courbe perdait février et comptait
+    // mars deux fois, les 29, 30 et 31 de chaque mois.
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - n);
+  }
   return d;
 }
 

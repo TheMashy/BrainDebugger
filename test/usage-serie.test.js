@@ -134,3 +134,14 @@ test('chaque mesure a son propre pic — sinon les trois autres s’écrasent co
   assert.ok(s.pics.cout > 0 && s.pics.cout < 1);
   assert.equal(s.pics.cache, 100, 'un pourcentage a son plafond, pas son maximum observé');
 });
+
+test('reculer d’un mois un 29, 30 ou 31 ne saute jamais février', async () => {
+  // La courbe « 1 an » perdait février et comptait mars deux fois en fin de
+  // mois : 29 septembre moins sept mois, c'était « 29 février » -> 1er mars.
+  const { reculer } = await import('../server/usage.js');
+  for (const jour of ['2026-09-29T12:00:00.000Z', '2026-10-31T23:00:00.000Z', '2026-01-30T00:00:00.000Z']) {
+    const mois = Array.from({ length: 12 }, (_, i) => reculer(jour, 'mois', 11 - i).toISOString().slice(0, 7));
+    assert.equal(new Set(mois).size, 12, jour);
+    assert.deepEqual(mois, [...mois].sort(), jour);
+  }
+});
