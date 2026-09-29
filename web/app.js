@@ -5426,7 +5426,7 @@ function surveillesMarkup(C, schemas, { nu = false } = {}) {
   const carte = p => `<article class="fonctcarte survcarte${p.appui?.net ? ' net' : ''}">
       <div class="survquoi">${esc(p.quoi)}${p.appui?.net ? '<span class="survnet">net</span>' : ''}</div>
       <p class="fonctphr">${esc(p.phrase)}</p>
-      ${p.appui?.sur && p.appui?.hors_sur ? fonctBarres({ n: p.appui.n, d: p.appui.sur, lab: 'jours à surveiller', txt: `${p.appui.n} / ${p.appui.sur}` }, { n: p.appui.hors_n, d: p.appui.hors_sur, lab: 'les autres', txt: `${p.appui.hors_n} / ${p.appui.hors_sur}` }) : ''}
+      ${p.appui?.sur && p.appui?.hors_sur ? fonctBarres({ n: p.appui.n, d: p.appui.sur, lab: p.cle === 'heure' ? 'passages signalés' : 'jours à surveiller', txt: `${p.appui.n} / ${p.appui.sur}` }, { n: p.appui.hors_n, d: p.appui.hors_sur, lab: p.cle === 'heure' ? 'tes autres messages' : 'les autres', txt: `${p.appui.hors_n} / ${p.appui.hors_sur}` }) : ''}
     </article>`;
   const nets = C.phrases.filter(p => p.appui?.net), flous = C.phrases.filter(p => !p.appui?.net);
   const phrases = nets.length ? `<div class="fonctgrille">${nets.map(carte).join('')}</div>` : '';

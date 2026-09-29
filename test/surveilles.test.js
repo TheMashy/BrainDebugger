@@ -179,7 +179,7 @@ test('l’heure se compare à l’heure où l’on écrit d’habitude : qui éc
   const r = joursSurveilles(T, 'u', { veille: veilleDe(rouges), messages: partout, niveau: niveauOui });
   const h = r.phrases.find(x => x.cle === 'heure');
   assert.ok(h, 'la phrase de l’heure existe, avec son point de comparaison');
-  assert.match(h.phrase, /sur 6 jours dont l’heure est connue — contre \d+ sur \d+ de tes messages des autres journées écrites/);
+  assert.match(h.phrase, /fois sur 36 passages signalés \(6 jours\) — contre \d+ sur \d+ de tes messages des autres journées écrites/);
   assert.equal(h.appui.net, false);
   // Et quand la nuit est vraiment à part : six jours marqués écrits à 2 h, le reste à 14 h.
   const aPart = date => [{ role: 'user', text: 'x', ts: `${date}T${rouges.has(date) ? '02' : '14'}:00:00+01:00` }];
@@ -197,35 +197,35 @@ test('sans heure de comparaison, l’heure se tait', () => {
   assert.equal(r.phrases.find(x => x.cle === 'heure'), undefined);
 });
 
-test('trois comptes à p ≈ 0,035 : aucun n’est « net » une fois les comptes corrigés (Holm)', () => {
-  // 42 journées écrites, une tous les quatre jours (pas de grappe) ; 19 marquées.
-  // Pour trois comptes, 12 sur 19 contre 7 sur 23 : p ≈ 0,035 chacun, sous 5 %
+test('trois comptes à p ≈ 0,03 : aucun n’est « net » une fois les comptes corrigés (Holm)', () => {
+  // 45 journées écrites, une tous les quatre jours (pas de grappe) ; 20 marquées.
+  // Pour trois comptes, 13 sur 20 contre 8 sur 25 : p ≈ 0,03 chacun, sous 5 %
   // pris seul, au-dessus du seuil une fois qu'on sait qu'on en a fait cinq.
   const ecrits = new Set(), rouges = new Set(), oui = new Set();
-  for (let i = 0; i < 42; i++) { const d = dateDe(4 * i + 1); ecrits.add(d); if (i < 19) rouges.add(d); if (i < 12 || (i >= 19 && i < 26)) oui.add(4 * i + 1); }
-  const T = table(170, t => ecrits.has(dateDe(t))
+  for (let i = 0; i < 45; i++) { const d = dateDe(4 * i + 1); ecrits.add(d); if (i < 20) rouges.add(d); if (i < 13 || (i >= 20 && i < 28)) oui.add(4 * i + 1); }
+  const T = table(185, t => ecrits.has(dateDe(t))
     ? { note: 6, sommeil_h: oui.has(t) ? 5 : 7.5, absolus: oui.has(t) ? 10 : 2 }
     : { note: oui.has(t + 1) ? 3 : 6 });
   const r = joursSurveilles(T, 'u', { veille: veilleDe(rouges), messages: messagesSur(ecrits), niveau: niveauOui });
   for (const cle of ['nuit_courte', 'note_veille', 'absolus']) {
     const p = r.phrases.find(x => x.cle === cle);
     assert.ok(p, cle);
-    assert.equal(p.appui.n, 12); assert.equal(p.appui.sur, 19); assert.equal(p.appui.hors_n, 7); assert.equal(p.appui.hors_sur, 23);
+    assert.equal(p.appui.n, 13); assert.equal(p.appui.sur, 20); assert.equal(p.appui.hors_n, 8); assert.equal(p.appui.hors_sur, 25);
     assert.ok(p.appui.p < 0.05, `${cle} : p = ${p.appui.p} (seul, il serait passé)`);
     assert.equal(p.appui.net, false, p.phrase);
     assert.ok(p.appui.comptes >= 3);
   }
 });
 
-test('dix-neuf jours en deux grappes ne font pas un « net » ; les mêmes jours éparpillés, si', () => {
+test('vingt jours en deux grappes ne font pas un « net » ; les mêmes jours éparpillés, si', () => {
   const court = rouges => (t => ({ note: 6, sommeil_h: rouges.has(dateDe(t)) || t % 10 === 5 ? 5 : 7.5 }));
-  const grappes = new Set([...Array(10).keys()].map(k => dateDe(20 + k)).concat([...Array(9).keys()].map(k => dateDe(60 + k))));
+  const grappes = new Set([...Array(10).keys()].map(k => dateDe(20 + k)).concat([...Array(10).keys()].map(k => dateDe(60 + k))));
   const rg = joursSurveilles(table(120, court(grappes)), 'u', { veille: veilleDe(grappes), messages: messagesDe(14), niveau: niveauOui });
   const pg = rg.phrases.find(x => x.cle === 'nuit_courte');
-  assert.equal(pg.appui.n, 19); assert.equal(pg.appui.sur, 19);
+  assert.equal(pg.appui.n, 20); assert.equal(pg.appui.sur, 20);
   assert.equal(pg.appui.grappes.sur, 2);
   assert.equal(pg.appui.net, false, 'deux grappes, deux unités : trop peu pour trancher');
-  const eparpilles = new Set([...Array(19).keys()].map(k => dateDe(2 + 6 * k)));
+  const eparpilles = new Set([...Array(20).keys()].map(k => dateDe(2 + 6 * k)));
   const re = joursSurveilles(table(120, court(eparpilles)), 'u', { veille: veilleDe(eparpilles), messages: messagesDe(14), niveau: niveauOui });
   assert.equal(re.phrases.find(x => x.cle === 'nuit_courte').appui.net, true);
 });
@@ -240,4 +240,106 @@ test('moins de cinq jours marqués, ou toutes les journées écrites marquées :
   const r33 = joursSurveilles(T, 'u', { veille: veilleDe(trois), messages: messagesSur(trois), niveau: niveauOui });
   assert.deepEqual(r33.phrases.filter(p => p.appui.hors_sur != null), []);
   assert.match(r33.rythme, /3 jours à surveiller sur 3 journées écrites/);
+});
+
+/* ------------------------------------------------------------------ */
+/* L'heure : la même règle des deux côtés                                */
+/* ------------------------------------------------------------------ */
+// Chaque journée : les mêmes six heures, dont deux la nuit (1 h, 3 h) — un message sur trois.
+const HEURES = [1, 3, 10, 13, 15, 18];
+const journeeType = (signes = {}) => date => HEURES.map(h => ({ role: 'user', text: signes[h] ?? 'x', ts: `${date}T${String(h).padStart(2, '0')}:00:00+01:00` }));
+const niveauParTexte = texte => texte === 'R' ? { niveau: 'rouge', motifs: [{ genre: 'blessure', niveau: 'rouge' }] }
+                              : texte === 'J' ? { niveau: 'jaune', motifs: [{ genre: 'suicide', niveau: 'jaune' }] } : { niveau: null, motifs: [] };
+
+test('l’heure : plusieurs signes de même gravité aux mêmes heures chaque jour ne font pas un « net » de nuit', () => {
+  // Douze jours marqués, espacés de six jours (et tous en heure d'hiver) ; chacun
+  // porte trois jaunes à 3 h, 13 h et 18 h — un sur trois la nuit, exactement
+  // comme les messages de tous les jours. Retenir le PREMIER des plus graves
+  // (3 h) donnait « la nuit 12 fois sur 12 », et un « net » que l'heure ne
+  // justifie en rien.
+  const rouges = new Set([...Array(12).keys()].map(k => dateDe(10 + 6 * k)));
+  const signes = journeeType({ 3: 'J', 13: 'J', 18: 'J' }), rien = journeeType();
+  const messages = date => (rouges.has(date) ? signes : rien)(date);
+  const r = joursSurveilles(table(140, () => ({ note: 6 })), 'u', { veille: veilleDe(rouges), messages, niveau: niveauParTexte });
+  assert.equal(r.n, 12);
+  const h = r.phrases.find(x => x.cle === 'heure');
+  assert.ok(h, 'la phrase de l’heure existe');
+  assert.equal(h.appui.n, 12, 'un passage sur trois la nuit, pas un jour sur un');
+  assert.equal(h.appui.sur, 36);
+  assert.equal(h.appui.net, false, h.phrase);
+  assert.match(h.phrase, /12 fois sur 36 passages signalés \(12 jours\)/);
+  assert.equal(h.appui.grappes.n, 4, 'grappe par grappe, chaque jour vaut sa part : 12 × 1/3');
+  // L'heure qu'on rend pour le jour reste celle du premier des plus graves.
+  assert.ok(r.jours.every(j => j.heure === 3), JSON.stringify(r.jours.map(j => j.heure)));
+  // Et quand tous les messages portent le signe, pareil.
+  const tous = joursSurveilles(table(140, () => ({ note: 6 })), 'u', { veille: veilleDe(rouges), messages: journeeType(Object.fromEntries(HEURES.map(k => [k, 'J']))), niveau: niveauParTexte });
+  assert.equal(tous.phrases.find(x => x.cle === 'heure').appui.net, false);
+});
+
+test('l’heure : rouge d’abord, dans le compte aussi — les jaunes de la nuit ne comptent pas à côté d’un rouge de l’après-midi', () => {
+  const rouges = new Set([...Array(12).keys()].map(k => dateDe(10 + 6 * k)));
+  const signes = journeeType({ 1: 'J', 3: 'J', 15: 'R' }), rien = journeeType();
+  const r = joursSurveilles(table(140, () => ({ note: 6 })), 'u', { veille: veilleDe(rouges), messages: d => (rouges.has(d) ? signes : rien)(d), niveau: niveauParTexte });
+  const h = r.phrases.find(x => x.cle === 'heure');
+  assert.equal(h.appui.n, 0); assert.equal(h.appui.sur, 12, 'un passage par jour : le rouge de 15 h');
+  assert.ok(r.jours.every(j => j.heure === 15));
+  assert.equal(h.appui.net, false);
+});
+
+test('l’heure : une rafale de passages signalés, quelques nuits, ne fait pas un « net » — chaque jour compte pour sa part', () => {
+  // Quinze jours marqués. Six fois, le signe tient en six messages d'une même
+  // séance à 2 h ; neuf fois, en un message de l'après-midi. Compté en passages,
+  // c'est 36 sur 45 la nuit contre un message sur trois : l'écart paraît
+  // énorme, alors que six jours sur quinze la nuit, c'est à peine plus que
+  // d'habitude. Une journée « de nuit à la majorité » l'aurait laissé passer :
+  // les autres journées, à deux messages nocturnes sur six, ne le sont jamais.
+  const rouges = [...Array(15).keys()].map(k => dateDe(8 + 8 * k)), rafales = new Set(rouges.slice(0, 15).filter((_, i) => i % 5 < 2));
+  const marques = new Set(rouges), rien = journeeType();
+  const messages = date => !marques.has(date) ? rien(date)
+    : rafales.has(date) ? [...[0, 5, 10, 15, 20, 25].map(mn => ({ role: 'user', text: 'J', ts: `${date}T02:${String(mn).padStart(2, '0')}:00+01:00` })), ...rien(date)]
+    : journeeType({ 15: 'J' })(date);
+  const r = joursSurveilles(table(130, () => ({ note: 6 })), 'u', { veille: veilleDe(marques), messages, niveau: niveauParTexte });
+  const h = r.phrases.find(x => x.cle === 'heure');
+  assert.equal(rafales.size, 6);
+  assert.equal(h.appui.n, 36); assert.equal(h.appui.sur, 45);
+  assert.ok(h.appui.p < 0.001, 'compté en passages, l’écart paraît net');
+  assert.equal(h.appui.grappes.n, 6); assert.equal(h.appui.grappes.sur, 15);
+  assert.equal(h.appui.net, false, h.phrase);
+});
+
+/* ------------------------------------------------------------------ */
+/* « En main » et « l'envie de se faire du mal » font un jour à surveiller */
+/* ------------------------------------------------------------------ */
+/*
+ * La liste GENRES_SURVEILLES appartient à la veille : c'est qualite/veille qui
+ * y ajoute en_main et envie_mal. Ici, la liste est PASSÉE (option
+ * `genresSurveilles`) pour que le comptage s'éprouve sans elle ; le second
+ * test lit la liste par défaut, et ne s'exécute qu'une fois la veille de
+ * qualite/veille fusionnée (repérée à son export `plafondCourrier`) — à partir
+ * de là, retirer en_main de la liste le fait échouer.
+ */
+const veilleJs = await import('../server/veille.js');
+const AVEC_EN_MAIN = new Set(['blessure', 'surdose', 'suicide', 'moyen', 'en_main', 'envie_mal', 'substance', 'dereel']);
+const enMainOuEnvie = (rouges, jaunes) => ({
+  veille: d => rouges.has(d) ? { niveau: 'rouge', motifs: [{ genre: 'en_main', niveau: 'rouge' }] }
+             : jaunes.has(d) ? { niveau: 'jaune', motifs: [{ genre: 'envie_mal', niveau: 'jaune' }] } : null,
+  niveau: texte => texte === 'M' ? { niveau: 'rouge', motifs: [{ genre: 'en_main', niveau: 'rouge' }] }
+                 : texte === 'E' ? { niveau: 'jaune', motifs: [{ genre: 'envie_mal', niveau: 'jaune' }] } : { niveau: null, motifs: [] },
+  messages: d => [{ role: 'user', text: rouges.has(d) ? 'M' : jaunes.has(d) ? 'E' : 'x', ts: `${d}T02:30:00+01:00` }],
+});
+const rougesEnMain = new Set([10, 20, 30, 40].map(dateDe)), jaunesEnvie = new Set([15, 25, 35].map(dateDe));
+
+test('un rouge qui n’a que « en main » compte pour un jour à surveiller, un jaune « envie de se faire du mal » aussi', () => {
+  const r = joursSurveilles(table(60, () => ({ note: 6 })), 'u', { ...enMainOuEnvie(rougesEnMain, jaunesEnvie), genresSurveilles: AVEC_EN_MAIN });
+  assert.equal(r.n, rougesEnMain.size + jaunesEnvie.size);
+  assert.equal(r.genres.en_main, rougesEnMain.size);
+  assert.equal(r.genres.envie_mal, jaunesEnvie.size);
+  assert.ok(r.jours.every(j => j.heure != null), 'l’heure se lit aussi sur ces signes-là');
+});
+
+test('la liste par défaut compte « en main » et « envie_mal »', { skip: !('plafondCourrier' in veilleJs) && 'attend la veille de qualite/veille (GENRES_SURVEILLES += en_main, envie_mal)' }, () => {
+  const r = joursSurveilles(table(60, () => ({ note: 6 })), 'u', enMainOuEnvie(rougesEnMain, jaunesEnvie));
+  assert.equal(r.n, rougesEnMain.size + jaunesEnvie.size);
+  assert.equal(r.genres.en_main, rougesEnMain.size);
+  assert.equal(r.genres.envie_mal, jaunesEnvie.size);
 });

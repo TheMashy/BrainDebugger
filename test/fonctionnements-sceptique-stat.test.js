@@ -28,7 +28,7 @@ import { join } from 'node:path';
 process.env.BD_DB = join(mkdtempSync(join(tmpdir(), 'bd-fx-')), 'test.db');
 const db = await import('../server/db.js');
 const { addDays } = await import('../server/stats.js');
-const { analyserTable, absolusDe, tableDe, SEUILS } = await import('../server/fonctionnements.js');
+const { analyserTable, absolusDe, tableDe, fonctionnements, SEUILS } = await import('../server/fonctionnements.js');
 
 /* ------------------------------------------------------------------ */
 /* Outils : aléa à graine, tables synthétiques, test exact de Fisher     */
@@ -199,9 +199,9 @@ test('BASCULE — une note très inerte sans rupture (φ = 0,7, le haut du profi
  * Rejouée chaque jour sur un vrai journal, la fenêtre datait « ta note a changé
  * de niveau » sur des creux passagers à quatorze jours de la fin, puis la phrase
  * disparaissait. Le même creux au milieu n'était presque jamais daté.
- * AR(1) φ = 0,3, σ = 1,3, notes entières autour de 6,4 ; 300 tirages.
+ * AR(1) φ = 0,3, σ = 1,3, notes entières autour de 6,5 ; 300 tirages.
  */
-const noteAR = (graine, T, decale) => { const r = mulberry32(graine); let e = 0; const v = []; for (let t = 0; t < T; t++) { e = 0.3 * e + Math.sqrt(1 - 0.09) * 1.3 * normale(r); v.push(clipRound(6.4 + e + decale(t), 0, 10)); } return v; };
+const noteAR = (graine, T, decale) => { const r = mulberry32(graine); let e = 0; const v = []; for (let t = 0; t < T; t++) { e = 0.3 * e + Math.sqrt(1 - 0.09) * 1.3 * normale(r); v.push(clipRound(6.5 + e + decale(t), 0, 10)); } return v; };
 const tauxDate = (decale, { amont = 0 } = {}) => {
   let dates = 0;
   for (let s = 1; s <= 300; s++) {
@@ -237,6 +237,40 @@ test('BASCULE — le début de la fenêtre n’est plus un bord : on lit les jou
   const T = table(180, t => ({ note: v[t + 90] }));
   T.amont = v.slice(0, 90).map((note, t) => ({ date: addDays(dateDe(0), t - 90), note, sommeil_h: null }));
   for (const b of items(analyserTable(T), 'bascule')) assert.ok(b.date >= T.de && b.date <= T.a, b.date);
+});
+
+test('BASCULE — l’amont ne vaut que pour la note : les bascules du sommeil sont les mêmes avec ou sans les jours d’avant', () => {
+  // Le sommeil garde sa pénalité du banc, mesurée sur la fenêtre seule. Quatre-vingt-dix
+  // nuits lues avant, à un tout autre niveau, ne doivent ni en ajouter, ni en ôter, ni en déplacer.
+  const sommeil = b => b.variable === 'sommeil_h';
+  let vues = 0;
+  for (let s = 1; s <= 20; s++) {
+    const v = ar1(mulberry32(s * 104729), 180, 0.3, 7.2, 0.8).map((x, t) => Math.round((x + (t >= 100 ? -1.5 : 0)) * 10) / 10);
+    const sans = table(180, t => ({ sommeil_h: v[t] })), avec = table(180, t => ({ sommeil_h: v[t] }));
+    avec.amont = Array.from({ length: 90 }, (_, t) => ({ date: addDays(dateDe(0), t - 90), note: null, sommeil_h: 5 }));
+    const a = items(analyserTable(sans), 'bascule').filter(sommeil), b = items(analyserTable(avec), 'bascule').filter(sommeil);
+    assert.deepEqual(b, a, `graine ${s}`);
+    vues += a.length;
+  }
+  assert.ok(vues >= 10, `le palier du 100e jour doit se voir, sinon le test ne prouve rien (${vues})`);
+});
+
+test('BASCULE — fonctionnements() lit vraiment les 90 jours d’avant : un palier au 20e jour de la fenêtre est daté, rien ne l’est avant', () => {
+  // 270 journées notées, un palier (−2) au 110e jour : le 20e de la fenêtre de 180.
+  const U = 'amont-cable', FIN = '2026-06-30', v = noteAR(4243, 270, t => (t >= 110 ? -2 : 0));
+  db.upsertUser({ id: U, username: U });
+  for (let t = 0; t < 270; t++) db.setNote(addDays(FIN, t - 269), v[t], U);
+  const F = fonctionnements(U, { jours: 180 });
+  const de = F.periode.de, vingtieme = addDays(de, 20);
+  assert.equal(de, addDays(FIN, -179));
+  const ecart = d => Math.abs(Date.parse(d) - Date.parse(vingtieme)) / 864e5;
+  const notes = F.items.filter(i => i.type === 'bascule' && i.variable === 'note');
+  assert.ok(notes.some(b => ecart(b.date) <= 5), `palier du 20e jour (${vingtieme}) non daté : ${notes.map(b => b.date)}`);
+  for (const b of notes) assert.ok(b.date >= de, `bascule datée avant la fenêtre : ${b.date}`);
+  // Sans l'amont, la même fenêtre ne le date pas (il est à moins de 28 jours du bord) :
+  // c'est bien la seconde lecture de la base qui le rend.
+  const sans = items(analyserTable(tableDe(U, { jours: 180 })), 'bascule').filter(b => b.variable === 'note');
+  assert.ok(!sans.some(b => ecart(b.date) <= 5), sans.map(b => b.date).join(' '));
 });
 
 /* ================================================================== */
