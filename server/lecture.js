@@ -31,6 +31,9 @@ import { cueilleur } from './trouvailles.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
 import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
 import { SCHEMA_HORIZONS, validerHorizons, ecritesParHorizon } from './horizons.js';
+// Ni fonctionnements.js ni promotion.js : ils ouvrent la base à l'import.
+import { MOTS_INTERDITS, laMachineDit } from './vocabulaire.js';
+import { SANS_DIAGNOSTIC } from './compte-rendu.js';
 
 let _sdk = null;
 
@@ -922,6 +925,177 @@ function phrase(s, max) {
   return fin > max * 0.4 ? coupe.slice(0, fin + 1) : coupe.trimEnd() + '…';
 }
 
+/* ------------------------------ les preuves ------------------------------ */
+
+/*
+ * CE QUE LES VALIDATEURS EXIGENT, ET POURQUOI CES CHIFFRES.
+ *
+ * Ils ne vérifiaient que l'existence des dates. Une piste « dépression » passait
+ * sur une seule soirée, un schéma « presque à chaque fois » sur un seul jour,
+ * et une citation que la personne n'a jamais écrite l'envoyait relire sa
+ * journée pour y chercher ce qu'elle n'avait pas dit. Les chiffres sont ceux
+ * de la consigne elle-même (« trois journées au moins » pour un schéma, « vue
+ * deux fois n'est pas un nœud »), appliqués au lieu d'être demandés.
+ *
+ * Le mot lourd d'une piste demande plus : huit journées et deux retours
+ * espacés (`reprises` de promotion.js, écart de quatorze jours) -- la même
+ * logique que la carte applique déjà avant de poser un motif sous un nom de ce
+ * vocabulaire. Une salve d'une semaine n'est pas une direction.
+ */
+export const SEUILS_LECTURE = {
+  theme_dates: 2,
+  schema_jours: 3,
+  schema_preuves: 2,
+  noeud_jours: 3,
+  piste_dates: 5,
+  piste_lourde_dates: 8,
+  piste_lourde_reprises: 2,
+  ecart_reprise: 14,
+  // La part des mots d'un extrait qu'on doit retrouver, dans l'ordre, dans
+  // une fenêtre de la journée. 85 % et pas 100 % : le modèle corrige en
+  // silence l'orthographe et les accords quand il cite.
+  couverture_citation: 0.85
+};
+
+/**
+ * Les retours : les journées coupées partout où l'écart dépasse `ecart` jours.
+ * Le même découpage que `reprises()` de promotion.js (un test le vérifie),
+ * recopié parce que promotion.js ouvre la base à l'import.
+ */
+export function retours(jours, ecart = SEUILS_LECTURE.ecart_reprise) {
+  const d = [...new Set(jours ?? [])].sort();
+  if (!d.length) return [];
+  const groupes = [[d[0]]];
+  for (let i = 1; i < d.length; i++) {
+    if ((jourDe(d[i]) - jourDe(d[i - 1])) / 86400000 > ecart) groupes.push([]);
+    groupes[groupes.length - 1].push(d[i]);
+  }
+  return groupes;
+}
+
+/**
+ * La forme sous laquelle on compare un extrait à la journée : sans accents,
+ * en minuscules, apostrophes unifiées, guillemets et points de suspension
+ * retirés, espaces réduits.
+ */
+export function normaliser(s) {
+  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/[’‘`´]/g, "'")
+    .replace(/…|\.\.\./g, ' ')
+    .replace(/[«»"“”„]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+const MOT = /[\p{L}\p{M}\p{N}'’]+/gu;
+/** Les mots d'un texte, normalisés, avec leur place dans le texte d'origine. */
+function motsDe(s) {
+  const out = [];
+  for (const m of String(s ?? '').matchAll(MOT)) {
+    const cle = normaliser(m[0]).replace(/^'+|'+$/g, '');
+    if (cle) out.push({ cle, debut: m.index, fin: m.index + m[0].length });
+  }
+  return out;
+}
+
+/**
+ * LE PASSAGE REEL LE PLUS PROCHE d'un extrait qui n'est pas recopié tel quel.
+ *
+ * On cherche la fenêtre de la journée dont la plus longue sous-suite commune
+ * de mots couvre au moins 85 % des mots de l'extrait, et on rend CE QUI EST
+ * ÉCRIT dans cette fenêtre -- jamais la reformulation du modèle. Rien ne
+ * s'approche assez : null, et la preuve tombe.
+ */
+export function passageProche(extrait, jour, seuil = SEUILS_LECTURE.couverture_citation) {
+  const e = motsDe(extrait).map(x => x.cle);
+  const m = e.length;
+  if (m < 3) return null;                    // deux mots se trouvent partout
+  const d = motsDe(jour);
+  const besoin = Math.ceil(m * seuil);
+  const W = Math.ceil(m * 1.5) + 2;
+  // Le premier mot retrouvé est forcément l'un des (m - besoin + 1) premiers
+  // de l'extrait : une fenêtre ne commence que sur l'un d'eux.
+  const ouvrants = new Set(e.slice(0, m - besoin + 1));
+  let mieux = null;
+  const prec = new Array(m + 1);
+  const cour = new Array(m + 1);
+  for (let i = 0; i < d.length; i++) {
+    if (!ouvrants.has(d[i].cle)) continue;
+    prec.fill(0);
+    let dernier = -1, meilleur = 0;
+    const fin = Math.min(d.length, i + W);
+    for (let j = i; j < fin; j++) {
+      cour[0] = 0;
+      for (let k = 1; k <= m; k++) {
+        cour[k] = d[j].cle === e[k - 1] ? prec[k - 1] + 1 : Math.max(prec[k], cour[k - 1]);
+      }
+      if (cour[m] > meilleur) { meilleur = cour[m]; dernier = j; }
+      for (let k = 0; k <= m; k++) prec[k] = cour[k];
+    }
+    if (meilleur >= besoin && (!mieux || meilleur > mieux.n)) {
+      mieux = { n: meilleur, debut: d[i].debut, fin: d[dernier].fin };
+      if (meilleur === m) break;
+    }
+  }
+  return mieux ? jour.slice(mieux.debut, mieux.fin) : null;
+}
+
+/**
+ * UNE PREUVE EST CE QU'IL A ÉCRIT CE JOUR-LÀ, OU ELLE N'EST PAS.
+ *
+ * `textes` : date → texte complet de la journée. Sans lui (un appel qui n'a
+ * pas le corpus sous la main), on ne peut vérifier que la date.
+ */
+function preuveVerifiee(p, dates, textes) {
+  const date = String(p?.date);
+  if (!dates.has(date)) return null;
+  const brut = texte(p?.extrait, 600);
+  if (!textes) return { date, extrait: texte(brut, 240) };
+  const jour = textes.get(date);
+  const cles = motsDe(brut).map(x => x.cle).join(' ');
+  if (!jour || !cles) return null;
+  const dans = ` ${motsDe(jour).map(x => x.cle).join(' ')} `;
+  if (dans.includes(` ${cles} `)) return { date, extrait: texte(brut, 240) };
+  const reel = passageProche(brut, jour);
+  return reel ? { date, extrait: texte(reel, 240) } : null;
+}
+
+function preuvesVerifiees(liste, dates, textes) {
+  return (Array.isArray(liste) ? liste : [])
+    .map(p => preuveVerifiee(p, dates, textes))
+    .filter(p => p && p.extrait)
+    .slice(0, 5);
+}
+
+/** date → texte complet, depuis les lignes du corpus. */
+function textesDe(rows) {
+  if (!Array.isArray(rows)) return null;
+  const m = new Map();
+  for (const r of rows) if (r?.text && String(r.text).trim()) m.set(String(r.date), String(r.text));
+  return m.size ? m : null;
+}
+
+/*
+ * LE VOCABULAIRE, VÉRIFIÉ LÀ OÙ IL S'AFFICHE COMME UN NOM.
+ *
+ * Un thème, un schéma, un nœud ne portent jamais de nom de maladie : c'est la
+ * consigne, et rien ne l'appliquait. On teste le NOM avec MOTS_INTERDITS, ce
+ * qui est entre « » mis à part (ce sont ses mots à lui). Mais ses mots à lui
+ * contiennent aussi « anxio », « antidépresseur », « psychologue » : sans ces
+ * exemptions, le filtre jetterait le nœud de dépendance le mieux documenté et
+ * le schéma qui est l'exemple même de la consigne.
+ *
+ * Pour les phrases (quoi, maillons), seule la liste étroite du compte rendu
+ * s'applique, et jamais aux extraits : un extrait est SA phrase.
+ */
+const EXEMPTES = /anxio\w*|antid[ée]press\w*|psycholog\w*|psychiatr\w*|[ée]pisodes? d/gi;
+export const nomLourd = nom => MOTS_INTERDITS.test(laMachineDit(nom).replace(EXEMPTES, ' '));
+// « troublé », « troublant » décrivent quelqu'un de secoué, pas un trouble.
+const PAS_UN_TROUBLE = /troubl(?:é|ée|és|ées|ant|ante|ants|antes)(?![\p{L}])/giu;
+export const phraseClinique = s => {
+  const t = laMachineDit(s).toLowerCase().replace(PAS_UN_TROUBLE, ' ');
+  return SANS_DIAGNOSTIC.some(m => t.includes(m));
+};
+
 /* ------------------------------ la continuite ------------------------------ */
 
 /**
@@ -1023,15 +1197,17 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
   const parId = new Map(comps.map(c => [c.id, c]));
   const pris = new Set();
   const mem = memoire(precedente);
+  const textes = textesDe(rows);
   const themes = [];
   for (const t of (brut?.themes ?? []).slice(0, 8)) {
-    const preuves = (t.preuves ?? [])
-      .filter(p => dates.has(String(p?.date)))
-      .slice(0, 5)
-      .map(p => ({ date: String(p.date), extrait: texte(p.extrait, 240) }));
-    if (!preuves.length) continue;
+    // Chaque extrait est confronté au texte du jour : recopié, il reste ;
+    // reformulé, il est remplacé par la phrase réelle ; inventé, il tombe.
+    const preuves = preuvesVerifiees(t?.preuves, dates, textes);
+    // Deux journées au moins : un thème est ce qui revient, pas une soirée.
+    if (new Set(preuves.map(p => p.date)).size < SEUILS_LECTURE.theme_dates) continue;
     const nom = texte(t.nom, 40).toLowerCase();
     if (!nom) continue;
+    if (nomLourd(nom) || phraseClinique(t.quoi)) continue;
     themes.push({
       nom,
       quoi: texte(t.quoi, 300),
@@ -1069,6 +1245,9 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
   // noeud jete la-bas ferait pointer l'ilot vers une chose qui ne s'affiche
   // nulle part. Meme raison que les liens entre themes, meme ordre.
   const carte = validerCarte(brut?.carte, dates, mem);
+  // Les journées sur lesquelles repose chaque thème : c'est ce que les verrous
+  // des pistes comptent.
+  const datesParTheme = new Map(themes.map(t => [t.nom, new Set(t.preuves.map(p => p.date))]));
   return {
     /*
      * La synthese se coupe sur une FIN DE PHRASE, et plus loin qu'avant.
@@ -1089,9 +1268,9 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
       : null,
     themes,
     pistes: validerPistes(brut?.pistes, noms,
-      new Set(carte.noeuds.map(n => n.nom.toLowerCase())), mem),
+      new Set(carte.noeuds.map(n => n.nom.toLowerCase())), mem, datesParTheme),
     carte,
-    schemas: validerSchemas(brut?.schemas, dates, motifsConnus, mem),
+    schemas: validerSchemas(brut?.schemas, dates, motifsConnus, mem, textes),
     version: VERSION_LECTURE
   };
 }
@@ -1100,8 +1279,9 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
  * LES PISTES : ce qui autorise le mot lourd, et ce qui l'empeche de devenir une etiquette.
  *
  * Une piste peut nommer « depression » la ou un theme ne le peut pas. Ce
- * privilege tient a trois verrous, et ils sont ici, pas dans la consigne : une
- * consigne qu'on n'applique pas n'est pas une regle.
+ * privilege tient a quatre verrous, et ils sont ici, pas dans la consigne : une
+ * consigne qu'on n'applique pas n'est pas une regle. Le quatrieme -- des
+ * journees, pas seulement des themes -- est dans `validerPistes`.
  *
  *   1. ELLE REGROUPE. Moins de deux themes REELLEMENT rendus, et la piste
  *      disparait. C'est ce qui empeche « depression » d'etre une intuition
@@ -1129,33 +1309,38 @@ export const FONCTIONS = ['eviter', 'soulager', 'controler', 'tenir', 'se_punir'
  * journées filtrées sur le corpus, des motifs du fil reconnus par leur nom
  * exact. Continuité comme pour les thèmes.
  */
-export function validerSchemas(brut, dates, motifsConnus = new Set(), mem = memoire(null)) {
+export function validerSchemas(brut, dates, motifsConnus = new Set(), mem = memoire(null), textes = null) {
   const out = [];
   const vus = new Set();
   const connus = new Set([...motifsConnus].map(m => String(m).toLowerCase()));
-  for (const s of (brut ?? []).slice(0, 8)) {
+  const toutes = { has: () => true };
+  for (const s of (Array.isArray(brut) ? brut : []).slice(0, 8)) {
     const nom = texte(s?.nom, 48).toLowerCase();
     if (!nom || vus.has(nom)) continue;
-    const preuves = (s?.preuves ?? [])
-      .filter(p => !dates || dates.has(String(p?.date)))
-      .slice(0, 5)
-      .map(p => ({ date: String(p.date), extrait: texte(p.extrait, 240) }))
-      .filter(p => p.extrait);
-    if (!preuves.length) continue;
+    if (nomLourd(nom)) continue;
+    const preuves = preuvesVerifiees(s?.preuves, dates ?? toutes, textes);
+    const datesPreuves = new Set(preuves.map(p => p.date));
+    if (datesPreuves.size < SEUILS_LECTURE.schema_preuves) continue;
     const maillons = {
       declencheur: texte(s?.declencheur, 220), reaction: texte(s?.reaction, 220), comportement: texte(s?.comportement, 220),
       effet: texte(s?.effet, 220), cout: texte(s?.cout, 260)
     };
     if (!maillons.declencheur || !maillons.reaction || !maillons.comportement) continue;
+    if (Object.values(maillons).some(phraseClinique)) continue;
     const fonction = String(s?.fonction ?? '').toLowerCase().trim().replace(/\s+/g, '_').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const jours = [...new Set([...(s?.jours ?? []).map(String), ...preuves.map(p => p.date)])]
       .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!dates || dates.has(d))).sort();
+    // \u00ab Un soir n'est pas un sch\u00e9ma \u00bb : trois journ\u00e9es au moins, comme la
+    // consigne le dit. Et la force suit ce qui est compt\u00e9 : \u00ab presque \u00e0 chaque
+    // fois \u00bb ne s'\u00e9crit pas sur quatre journ\u00e9es.
+    if (jours.length < SEUILS_LECTURE.schema_jours) continue;
+    const forceMax = jours.length < 5 ? 1 : jours.length < 10 ? 2 : 3;
     vus.add(nom);
     out.push({
       nom,
       ...maillons,
       fonction: FONCTIONS.includes(fonction) ? fonction : 'soulager',
-      force: borne(Math.round(s?.force), 1, 3),
+      force: Math.min(forceMax, borne(Math.round(s?.force), 1, 3)),
       preuves,
       jours,
       motifs: [...new Set((s?.motifs ?? []).map(m => texte(m, 60).toLowerCase()))].filter(m => connus.has(m)).slice(0, 8),
@@ -1171,7 +1356,7 @@ export function validerSchemas(brut, dates, motifsConnus = new Set(), mem = memo
 }
 
 export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
-                              mem = memoire(null)) {
+                              mem = memoire(null), datesParTheme = null) {
   const out = [];
   const vus = new Set();
   /*
@@ -1196,6 +1381,19 @@ export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
     const themes = [...new Set((p?.themes ?? []).map(t => texte(t, 40).toLowerCase()))]
       .filter(t => nomsThemes.has(t));
     if (themes.length < 2) continue;
+    /*
+     * 4. ELLE REPOSE SUR DES JOURNÉES, PAS SEULEMENT SUR DES THÈMES. Deux thèmes
+     *    tirés de la même soirée faisaient une piste « dépression » sur une
+     *    seule journée. On compte les dates distinctes de leurs preuves : cinq
+     *    au moins ; et pour un nom de ce vocabulaire-là, huit, revenues au moins
+     *    deux fois à quatorze jours d'écart.
+     */
+    if (datesParTheme) {
+      const jours = [...new Set(themes.flatMap(t => [...(datesParTheme.get(t) ?? [])]))];
+      if (jours.length < SEUILS_LECTURE.piste_dates) continue;
+      if (nomLourd(nom) && (jours.length < SEUILS_LECTURE.piste_lourde_dates
+          || retours(jours, SEUILS_LECTURE.ecart_reprise).length < SEUILS_LECTURE.piste_lourde_reprises)) continue;
+    }
     const noeuds = [...new Set((p?.noeuds ?? []).map(n => texte(n, 40).toLowerCase()))]
       .filter(n => nomsNoeuds.has(n));
     vus.add(nom);
@@ -1237,6 +1435,8 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
   for (const n of (brut?.noeuds ?? []).slice(0, 20)) {
     const nom = texte(n?.nom, 40);
     if (!nom || vus.has(nom.toLowerCase())) continue;
+    // Une chose, pas un nom de maladie ; et sa phrase non plus n'en pose pas.
+    if (nomLourd(nom) || phraseClinique(n?.quoi)) continue;
     /*
      * LES JOURNEES D'UN NOEUD. C'est ce qui distingue cette carte d'un schema.
      *
@@ -1256,6 +1456,10 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
       .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!dates || dates.has(d))))]
       .sort()
       .slice(0, 120);
+    // « Une chose vue deux fois n'est pas un nœud, c'est un souvenir. » La
+    // consigne le disait ; maintenant que le corpus transmet tout le texte, on
+    // peut le compter sans sous-compter les soirées longues.
+    if (jours.length < SEUILS_LECTURE.noeud_jours) continue;
     vus.set(nom.toLowerCase(), {
       nom,
       // Un noeud sans phrase reste un noeud : les lectures d'avant n'en ont

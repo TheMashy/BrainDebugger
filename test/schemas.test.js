@@ -12,7 +12,10 @@ const DATES = new Set(['2024-03-12', '2024-04-02', '2024-05-20']);
 const brut = (x = {}) => ({
   nom: 'la porte', declencheur: 'sortir de chez toi', reaction: 'la peur monte', comportement: 'un anxio',
   effet: 'la porte se franchit', cout: 'la peur ne redescend jamais seule', fonction: 'éviter', force: 2,
-  preuves: [{ date: '2024-03-12', extrait: 'j’ai pris un truc avant de sortir' }], jours: ['2024-03-12', '2024-04-02', '1999-01-01'], ...x
+  // Trois journées et deux dates de preuve : « un soir n'est pas un schéma ».
+  preuves: [{ date: '2024-03-12', extrait: 'j’ai pris un truc avant de sortir' },
+            { date: '2024-04-02', extrait: 'encore avant de sortir' }],
+  jours: ['2024-03-12', '2024-04-02', '2024-05-20', '1999-01-01'], ...x
 });
 
 test('un schéma sans preuve datée dans le corpus n’est pas rendu', () => {
@@ -21,8 +24,8 @@ test('un schéma sans preuve datée dans le corpus n’est pas rendu', () => {
 });
 
 test('les journées inventées sont retirées, celles des preuves sont ajoutées', () => {
-  const [s] = validerSchemas([brut({ jours: ['2024-04-02', '1999-01-01'] })], DATES);
-  assert.deepEqual(s.jours, ['2024-03-12', '2024-04-02']);
+  const [s] = validerSchemas([brut({ jours: ['2024-05-20', '1999-01-01'] })], DATES);
+  assert.deepEqual(s.jours, ['2024-03-12', '2024-04-02', '2024-05-20']);
 });
 
 test('la fonction s’écrit sans accent et retombe sur « soulager » si elle est inconnue', () => {

@@ -11,6 +11,9 @@ import assert from 'node:assert/strict';
 import { valider, corpusPour, choisirJours, grainPour, GENRES, VERSION_LECTURE } from '../server/lecture.js';
 
 const DATES = new Set(['2024-03-12', '2024-04-02', '2024-05-20']);
+// Un thème repose sur deux journées au moins, un nœud sur trois.
+const DEUX = [{ date: '2024-03-12', extrait: 'z' }, { date: '2024-04-02', extrait: 'z' }];
+const TROIS = [...DATES];
 
 /* ----------------------------- la validation ----------------------------- */
 
@@ -19,11 +22,12 @@ test('une date absente du corpus est retirée', () => {
     synthese: 'x',
     themes: [{
       nom: 'instabilité', quoi: 'y', intensite: 2, serie: [],
-      preuves: [{ date: '2024-03-12', extrait: 'vrai' }, { date: '1999-01-01', extrait: 'inventé' }]
+      preuves: [{ date: '2024-03-12', extrait: 'vrai' }, { date: '1999-01-01', extrait: 'inventé' },
+                { date: '2024-04-02', extrait: 'vrai aussi' }]
     }]
   }, DATES);
-  assert.equal(r.themes[0].preuves.length, 1);
-  assert.equal(r.themes[0].preuves[0].date, '2024-03-12');
+  assert.equal(r.themes[0].preuves.length, 2);
+  assert.deepEqual(r.themes[0].preuves.map(p => p.date), ['2024-03-12', '2024-04-02']);
 });
 
 test('un thème dont toutes les preuves sont inventées disparaît', () => {
@@ -33,7 +37,7 @@ test('un thème dont toutes les preuves sont inventées disparaît', () => {
     synthese: 'x',
     themes: [
       { nom: 'fantôme', quoi: 'y', intensite: 3, serie: [], preuves: [{ date: '1999-01-01', extrait: 'z' }] },
-      { nom: 'réel', quoi: 'y', intensite: 1, serie: [], preuves: [{ date: '2024-04-02', extrait: 'z' }] }
+      { nom: 'réel', quoi: 'y', intensite: 1, serie: [], preuves: DEUX }
     ]
   }, DATES);
   assert.deepEqual(r.themes.map(t => t.nom), ['réel']);
@@ -44,9 +48,9 @@ test('un lien vers un thème retiré ne trace pas d’arête dans le vide', () =
     synthese: 'x',
     themes: [
       { nom: 'réel', quoi: 'y', intensite: 1, serie: [], liens: ['fantôme', 'autre'],
-        preuves: [{ date: '2024-04-02', extrait: 'z' }] },
+        preuves: DEUX },
       { nom: 'autre', quoi: 'y', intensite: 1, serie: [], liens: ['réel'],
-        preuves: [{ date: '2024-05-20', extrait: 'z' }] },
+        preuves: DEUX },
       { nom: 'fantôme', quoi: 'y', intensite: 3, serie: [], preuves: [{ date: '1999-01-01', extrait: 'z' }] }
     ]
   }, DATES);
@@ -57,7 +61,7 @@ test('un thème ne se lie pas à lui-même', () => {
   const r = valider({
     synthese: 'x',
     themes: [{ nom: 'boucle', quoi: 'y', intensite: 1, serie: [], liens: ['boucle', 'BOUCLE'],
-               preuves: [{ date: '2024-04-02', extrait: 'z' }] }]
+               preuves: DEUX }]
   }, DATES);
   assert.deepEqual(r.themes[0].liens, []);
 });
@@ -65,7 +69,7 @@ test('un thème ne se lie pas à lui-même', () => {
 test('les intensités hors échelle sont ramenées dedans', () => {
   const r = valider({
     synthese: 'x',
-    themes: [{ nom: 'a', quoi: 'y', intensite: 97, preuves: [{ date: '2024-03-12', extrait: 'z' }],
+    themes: [{ nom: 'a', quoi: 'y', intensite: 97, preuves: DEUX,
                serie: [{ periode: '2024-03', valeur: -4 }, { periode: '2024-04', valeur: 12 },
                        { periode: '', valeur: 2 }] }]
   }, DATES);
@@ -86,10 +90,10 @@ test('rien d’exploitable rend une lecture vide, pas une exception', () => {
 
 test('la carte n’est faite que de ce qui se relie vraiment', () => {
   const c = valider({ synthese: '', themes: [], carte: {
-    noeuds: [{ nom: 'Léa', genre: 'personne', poids: 3 },
-             { nom: 'les nuits courtes', genre: 'corps', poids: 2 },
-             { nom: 'flottant', genre: 'activite', poids: 1 },
-             { nom: 'Léa', genre: 'personne', poids: 1 }],
+    noeuds: [{ nom: 'Léa', genre: 'personne', poids: 3, jours: TROIS },
+             { nom: 'les nuits courtes', genre: 'corps', poids: 2, jours: TROIS },
+             { nom: 'flottant', genre: 'activite', poids: 1, jours: TROIS },
+             { nom: 'Léa', genre: 'personne', poids: 1, jours: TROIS }],
     liens: [{ de: 'Léa', vers: 'les nuits courtes', quoi: 'précède', force: 2 },
             { de: 'Léa', vers: 'les nuits courtes', quoi: 'redit pareil', force: 3 },
             { de: 'Léa', vers: 'fantôme', quoi: 'x', force: 1 },
@@ -116,8 +120,8 @@ test('les DEUX SENS d’une même paire survivent : c’est le cercle', () => {
    * mécanisme central de la lecture.
    */
   const c = valider({ synthese: '', themes: [], carte: {
-    noeuds: [{ nom: 'le vin le soir', genre: 'dependance', poids: 3 },
-             { nom: 'les moments à plat', genre: 'corps', poids: 2 }],
+    noeuds: [{ nom: 'le vin le soir', genre: 'dependance', poids: 3, jours: TROIS },
+             { nom: 'les moments à plat', genre: 'corps', poids: 2, jours: TROIS }],
     liens: [{ de: 'les moments à plat', vers: 'le vin le soir', quoi: 'c’est là que tu sers', force: 3 },
             { de: 'le vin le soir', vers: 'les moments à plat', quoi: 'te les rend plus lourds', force: 2 }]
   } }, DATES).carte;
@@ -129,7 +133,7 @@ test('les DEUX SENS d’une même paire survivent : c’est le cercle', () => {
 
 test('un genre inconnu retombe sur « activite » au lieu de casser le rendu', () => {
   const c = valider({ synthese: '', themes: [], carte: {
-    noeuds: [{ nom: 'a', genre: 'nimportequoi', poids: 9 }, { nom: 'b', genre: 'lieu', poids: -3 }],
+    noeuds: [{ nom: 'a', genre: 'nimportequoi', poids: 9, jours: TROIS }, { nom: 'b', genre: 'lieu', poids: -3, jours: TROIS }],
     liens: [{ de: 'a', vers: 'b', quoi: 'suit', force: 12 }]
   } }, DATES).carte;
   assert.deepEqual(c.noeuds.map(n => [n.genre, n.poids]), [['activite', 3], ['lieu', 0]]);
@@ -365,7 +369,7 @@ const COMPS = [
 ];
 const theme = (extra) => ({
   nom: 'un thème', quoi: 'ce qu’il fait', intensite: 2, serie: [],
-  preuves: [{ date: '2024-03-12', extrait: 'x' }], ...extra
+  preuves: DEUX, ...extra
 });
 
 test('le thème porte la phrase du serveur, jamais celle du modèle', () => {
@@ -424,15 +428,20 @@ test('le corpus transmet les comparaisons, et les calcule sur toute la fenêtre'
    privilège tient à trois verrous, et ils sont dans le code, pas dans la
    consigne : une consigne qu'on n'applique pas n'est pas une règle. */
 
-const THEME = (nom, date) => ({
+// Dix journées en deux retours espacés : assez pour qu'une piste, même au nom
+// lourd, tienne sur ses dates. Les verrous des dates sont testés plus bas.
+const PDATES = ['2024-03-01', '2024-03-02', '2024-03-03', '2024-03-04', '2024-03-05',
+                '2024-04-10', '2024-04-11', '2024-04-12', '2024-04-13', '2024-04-14'];
+const PD = new Set(PDATES);
+const THEME = (nom, dates) => ({
   nom, quoi: 'ce que ça donne', intensite: 2,
   serie: [{ periode: '2024-03', valeur: 2 }],
-  preuves: [{ date, extrait: 'ce jour-là' }]
+  preuves: dates.map(date => ({ date, extrait: 'ce jour-là' }))
 });
 
 const AVEC_PISTES = pistes => ({
   synthese: 'x',
-  themes: [THEME('les nuits courtes', '2024-03-12'), THEME('minimiser après coup', '2024-04-02')],
+  themes: [THEME('les nuits courtes', PDATES.slice(0, 5)), THEME('minimiser après coup', PDATES.slice(5))],
   pistes,
   carte: { noeuds: [], liens: [] }
 });
@@ -441,7 +450,7 @@ test('une piste tient si elle regroupe au moins deux thèmes rendus', () => {
   const p = valider(AVEC_PISTES([{
     nom: 'Dépression', quoi: 'ce que tu décris', contre: 'mais tu sors, et souvent',
     themes: ['les nuits courtes', 'minimiser après coup'], force: 2
-  }]), DATES).pistes;
+  }]), PD).pistes;
   assert.equal(p.length, 1);
   // Le nom est normalisé en minuscules : c'est l'interface qui l'encadre, et
   // une majuscule le ferait lire comme un titre de dossier médical.
@@ -453,7 +462,7 @@ test('une piste accrochée à un seul thème disparaît', () => {
   // Sinon « dépression » serait ce thème-là, avec un mot plus lourd dessus.
   const p = valider(AVEC_PISTES([{
     nom: 'dépression', quoi: 'x', contre: 'y', themes: ['les nuits courtes'], force: 3
-  }]), DATES).pistes;
+  }]), PD).pistes;
   assert.deepEqual(p, []);
 });
 
@@ -463,7 +472,7 @@ test('une piste qui cite un thème inexistant ne le compte pas', () => {
   const p = valider(AVEC_PISTES([{
     nom: 'dépression', quoi: 'x', contre: 'y',
     themes: ['les nuits courtes', 'un thème qui n’existe pas'], force: 2
-  }]), DATES).pistes;
+  }]), PD).pistes;
   assert.deepEqual(p, []);
 });
 
@@ -473,7 +482,7 @@ test('une piste sans « ce qui va contre » est jetée', () => {
     const p = valider(AVEC_PISTES([{
       nom: 'dépression', quoi: 'x', contre,
       themes: ['les nuits courtes', 'minimiser après coup'], force: 2
-    }]), DATES).pistes;
+    }]), PD).pistes;
     assert.deepEqual(p, [], `« ${contre} » a laissé passer une piste`);
   }
 });
@@ -485,16 +494,174 @@ test('jamais plus de trois pistes, et jamais deux fois la même', () => {
     themes: ['les nuits courtes', 'minimiser après coup'], force: 2
   });
   const p = valider(AVEC_PISTES(
-    ['a', 'b', 'c', 'd', 'e'].map(une)), DATES).pistes;
+    ['a', 'b', 'c', 'd', 'e'].map(une)), PD).pistes;
   assert.equal(p.length, 3);
-  const doubles = valider(AVEC_PISTES([une('dépression'), une('Dépression')]), DATES).pistes;
+  const doubles = valider(AVEC_PISTES([une('dépression'), une('Dépression')]), PD).pistes;
   assert.equal(doubles.length, 1);
 });
 
 test('l’absence de piste est une réponse, pas une panne', () => {
   // Sur trois semaines de journal on ne voit pas de grande direction : on voit
   // trois semaines. La lecture doit pouvoir le dire.
-  assert.deepEqual(valider(AVEC_PISTES([]), DATES).pistes, []);
-  assert.deepEqual(valider(AVEC_PISTES(undefined), DATES).pistes, []);
-  assert.deepEqual(valider(AVEC_PISTES('pas un tableau'), DATES).pistes, []);
+  assert.deepEqual(valider(AVEC_PISTES([]), PD).pistes, []);
+  assert.deepEqual(valider(AVEC_PISTES(undefined), PD).pistes, []);
+  assert.deepEqual(valider(AVEC_PISTES('pas un tableau'), PD).pistes, []);
+});
+
+/* ---------------------- les preuves, confrontées au texte ----------------------
+ *
+ * Les validateurs ne vérifiaient que l'existence des dates : deux thèmes tirés
+ * d'une même soirée faisaient une piste « dépression », force 3, sur une seule
+ * journée, et une citation que la personne n'a jamais écrite passait. Toutes
+ * les phrases ci-dessous sont synthétiques.
+ */
+const JOURNAL = [
+  ['2024-03-01', 'Réveil tôt. On est allés au marché avec ma soeur et on a acheté des fraises pour le gouter. Ensuite sieste.'],
+  ['2024-03-02', 'Longue journée au bureau, la réunion a encore débordé et je suis rentré tard.'],
+  ['2024-03-03', 'Pas grand-chose. Un peu de lecture, un appel à mon père.'],
+  ['2024-03-04', 'Encore la réunion qui déborde, je ne dis rien et je rentre vidé.'],
+  ['2024-03-05', 'Balade au canal le soir, ça m’a fait du bien.']
+];
+const ROWS_J = JOURNAL.map(([date, text]) => ({ date, note: 6, text }));
+const DATES_J = new Set(JOURNAL.map(([d]) => d));
+const lire = (brut) => valider({ synthese: 'x', ...brut }, DATES_J, [], null, ROWS_J);
+
+test('un extrait recopié tel quel est gardé, guillemets et apostrophes mis à part', () => {
+  const r = lire({ themes: [{ nom: 'la réunion qui déborde', quoi: 'y', intensite: 2, serie: [], preuves: [
+    { date: '2024-03-02', extrait: '« la réunion a encore débordé »' },
+    { date: '2024-03-05', extrait: 'ça m\'a fait du bien' }] }] });
+  assert.equal(r.themes.length, 1);
+  assert.equal(r.themes[0].preuves[1].extrait, 'ça m\'a fait du bien');
+});
+
+test('un extrait reformulé est remplacé par la phrase réellement écrite', () => {
+  const r = lire({ themes: [{ nom: 'les sorties en famille', quoi: 'y', intensite: 1, serie: [], preuves: [
+    // « sœur » corrigé, accent ajouté, un morceau sauté : ce n'est pas ce qui est écrit.
+    { date: '2024-03-01', extrait: 'on est allés au marché avec ma sœur … des fraises pour le goûter' },
+    { date: '2024-03-03', extrait: 'un appel à mon père' }] }] });
+  assert.equal(r.themes.length, 1);
+  assert.equal(r.themes[0].preuves[0].extrait,
+    'On est allés au marché avec ma soeur et on a acheté des fraises pour le gouter');
+});
+
+test('un extrait inventé fait tomber la preuve, et le thème qui n’en a plus assez', () => {
+  const r = lire({ themes: [
+    { nom: 'tenu', quoi: 'y', intensite: 1, serie: [], preuves: [
+      { date: '2024-03-02', extrait: 'la réunion a encore débordé' },
+      { date: '2024-03-04', extrait: 'je ne dis rien et je rentre vidé' },
+      { date: '2024-03-03', extrait: 'je me suis disputé avec tout le monde au travail' }] },
+    // Vrai texte, mauvaise journée : la preuve ne vaut pas plus.
+    { nom: 'fantôme', quoi: 'y', intensite: 3, serie: [], preuves: [
+      { date: '2024-03-01', extrait: 'la réunion a encore débordé' },
+      { date: '2024-03-05', extrait: 'je pleure tous les soirs depuis une semaine' }] }
+  ] });
+  assert.deepEqual(r.themes.map(t => t.nom), ['tenu']);
+  assert.deepEqual(r.themes[0].preuves.map(p => p.date), ['2024-03-02', '2024-03-04']);
+});
+
+test('un thème sur une seule journée ne tient pas', () => {
+  const r = valider({ themes: [{ nom: 'un soir', quoi: 'y', intensite: 3, serie: [],
+    preuves: [{ date: '2024-03-12', extrait: 'a' }, { date: '2024-03-12', extrait: 'b' }] }] }, DATES);
+  assert.deepEqual(r.themes, []);
+});
+
+test('une piste dont les thèmes tiennent sur trop peu de journées n’est pas rendue', () => {
+  const quatre = ['2024-03-01', '2024-03-02', '2024-03-03', '2024-03-04'];
+  const brut = nom => ({
+    synthese: 'x', carte: { noeuds: [], liens: [] },
+    themes: [THEME('les nuits courtes', quatre.slice(0, 2)), THEME('minimiser après coup', quatre.slice(2))],
+    pistes: [{ nom, quoi: 'x', contre: 'y', themes: ['les nuits courtes', 'minimiser après coup'], force: 3 }]
+  });
+  assert.deepEqual(valider(brut('la peur de décevoir'), PD).pistes, [], 'quatre journées font une piste');
+});
+
+test('le mot lourd d’une piste demande huit journées revenues deux fois', () => {
+  const avec = (dates, nom) => valider({
+    synthese: 'x', carte: { noeuds: [], liens: [] },
+    themes: [THEME('les nuits courtes', dates.slice(0, Math.ceil(dates.length / 2))),
+             THEME('minimiser après coup', dates.slice(Math.ceil(dates.length / 2)))],
+    pistes: [{ nom, quoi: 'x', contre: 'y', themes: ['les nuits courtes', 'minimiser après coup'], force: 2 }]
+  }, new Set(dates)).pistes.map(p => p.nom);
+  const six = PDATES.slice(2, 8);
+  assert.deepEqual(avec(six, 'la peur de décevoir'), ['la peur de décevoir'], 'six journées suffisent à un nom ordinaire');
+  assert.deepEqual(avec(six, 'dépression'), [], 'six journées ont suffi au mot lourd');
+  // Huit journées d'une seule salve : une période, pas une direction.
+  const salve = Array.from({ length: 10 }, (_, i) => `2024-06-${String(i + 1).padStart(2, '0')}`);
+  assert.deepEqual(avec(salve, 'trouble du sommeil'), []);
+  assert.deepEqual(avec(PDATES, 'trouble du sommeil'), ['trouble du sommeil']);
+});
+
+test('un schéma ou un nœud sur une seule journée est retiré', () => {
+  const r = valider({ synthese: 'x', themes: [], pistes: [],
+    schemas: [{ nom: 'la porte', declencheur: 'sortir', reaction: 'la peur monte', comportement: 'annuler',
+      effet: 'soulagement', cout: 'la peur revient', fonction: 'eviter', force: 3,
+      preuves: [{ date: '2024-03-12', extrait: 'x' }], jours: ['2024-03-12'] }],
+    carte: { noeuds: [{ nom: 'Léa', genre: 'personne', poids: 3, jours: ['2024-03-12'] },
+                      { nom: 'le canal', genre: 'lieu', poids: 2, jours: TROIS }],
+             liens: [{ de: 'Léa', vers: 'le canal', quoi: 'y emmène', force: 2 }] } }, DATES);
+  assert.deepEqual(r.schemas, []);
+  assert.deepEqual(r.carte.noeuds, [], 'un nœud d’un jour, et son lien avec lui');
+});
+
+test('la force d’un schéma suit ses journées : « presque à chaque fois » ne s’écrit pas sur trois', () => {
+  const r = valider({ synthese: 'x', themes: [], pistes: [], carte: { noeuds: [], liens: [] },
+    schemas: [{ nom: 'la porte', declencheur: 'sortir', reaction: 'la peur monte', comportement: 'annuler',
+      effet: 'soulagement', cout: 'la peur revient', fonction: 'eviter', force: 3,
+      preuves: DEUX, jours: TROIS }] }, DATES);
+  assert.equal(r.schemas[0].force, 1);
+});
+
+test('un nom de thème, de schéma ou de nœud ne porte pas de nom de maladie', () => {
+  const r = valider({ synthese: 'x', pistes: [],
+    themes: [{ nom: 'anxiété du soir', quoi: 'y', intensite: 2, serie: [], preuves: DEUX },
+             { nom: 'le soir qui pèse', quoi: 'y', intensite: 2, serie: [], preuves: DEUX },
+             { nom: 'le soir qui retombe', quoi: 'tu fais une rechute chaque dimanche', intensite: 2, serie: [], preuves: DEUX }],
+    schemas: [{ nom: 'la crise du soir', declencheur: 'le soir', reaction: 'ça monte', comportement: 'sortir',
+      effet: 'ça passe', cout: 'ça revient', fonction: 'fuir', force: 1, preuves: DEUX, jours: TROIS }],
+    carte: { noeuds: [{ nom: 'trouble du sommeil', genre: 'corps', poids: 2, jours: TROIS },
+                      { nom: 'le canal', genre: 'lieu', poids: 2, jours: TROIS },
+                      { nom: 'Léa', genre: 'personne', poids: 2, jours: TROIS }],
+             liens: [{ de: 'trouble du sommeil', vers: 'le canal', quoi: 'x', force: 1 },
+                     { de: 'Léa', vers: 'le canal', quoi: 'y emmène', force: 1 }] } }, DATES);
+  assert.deepEqual(r.themes.map(t => t.nom), ['le soir qui pèse']);
+  assert.deepEqual(r.schemas, []);
+  assert.deepEqual(r.carte.noeuds.map(n => n.nom).sort(), ['Léa', 'le canal']);
+});
+
+test('ses mots à lui passent : « les anxios » et le schéma de l’anxio survivent', () => {
+  // Le filtre sans exemption jetterait le nœud de dépendance le mieux documenté
+  // et le schéma qui est l'exemple même de la consigne.
+  const r = valider({ synthese: 'x', themes: [], pistes: [],
+    schemas: [{ nom: 'l’anxio avant de sortir', declencheur: 'sortir de chez toi', reaction: 'la peur monte',
+      comportement: 'tu prends un anxio', effet: 'la porte se franchit', cout: 'la peur ne redescend jamais seule',
+      fonction: 'eviter', force: 2, preuves: DEUX, jours: TROIS }],
+    carte: { noeuds: [{ nom: 'les anxios', genre: 'dependance', poids: 3, jours: TROIS,
+                        quoi: 'Ce que tu prends quand ça monte, et après quoi tu écris.' },
+                      { nom: 'la psychologue', genre: 'personne', poids: 2, jours: TROIS },
+                      { nom: 'le soir', genre: 'periode', poids: 2, jours: TROIS }],
+             liens: [{ de: 'le soir', vers: 'les anxios', quoi: 'précède', force: 2 },
+                     { de: 'la psychologue', vers: 'le soir', quoi: 'en parle', force: 1 }] } }, DATES);
+  assert.equal(r.schemas.length, 1);
+  assert.equal(r.schemas[0].comportement, 'tu prends un anxio');
+  assert.deepEqual(r.carte.noeuds.map(n => n.nom).sort(), ['la psychologue', 'le soir', 'les anxios']);
+});
+
+test('un schéma n’est vérifié que sur ce qui est écrit, et ses preuves aussi', () => {
+  const r = valider({ synthese: 'x', themes: [], pistes: [], carte: { noeuds: [], liens: [] },
+    schemas: [{ nom: 'la réunion', declencheur: 'la réunion déborde', reaction: 'ça serre', comportement: 'se taire',
+      effet: 'ça passe', cout: 'rentrer vidé', fonction: 'eviter', force: 2,
+      preuves: [{ date: '2024-03-02', extrait: 'la réunion a encore débordé' },
+                { date: '2024-03-04', extrait: 'je n’ai rien dit du tout à mon chef' }],
+      jours: ['2024-03-02', '2024-03-04', '2024-03-05'] }] }, DATES_J, [], null, ROWS_J);
+  assert.deepEqual(r.schemas, [], 'une seule preuve réelle ne fait pas un schéma');
+});
+
+test('les retours de la lecture découpent comme ceux de la carte', async () => {
+  // Recopiés dans lecture.js parce que promotion.js ouvre la base à l'import :
+  // un test garde les deux identiques.
+  const { reprises } = await import('../server/promotion.js');
+  const { retours } = await import('../server/lecture.js');
+  for (const jours of [[], PDATES, ['2024-01-01', '2024-01-15', '2024-01-30', '2024-03-01'], ['2024-05-01']]) {
+    assert.deepEqual(retours(jours, 14), reprises(jours, 14));
+  }
 });
