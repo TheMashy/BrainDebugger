@@ -4064,11 +4064,19 @@ export const routes = {
     entries: allEntries(userId),
     events: allEvents(userId),
     anchors: allAnchors(userId),
-    messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts').all(userId),
+    // `rangee` : un message rangé au carnet n'est pas une journée racontée, et
+    // sans ce drapeau un export rechargé le recompterait comme tel.
+    messages: db.prepare('SELECT id, ts, date, source, role, text, COALESCE(rangee, 0) AS rangee FROM messages WHERE user_id = ? ORDER BY ts').all(userId),
     // Les miniatures aussi : ce sont ses images, et elles partent avec le reste.
     images: db.prepare('SELECT id, message_id, nom, media, octets FROM apercus WHERE user_id = ? ORDER BY id')
       .all(userId).map(r => ({ id: r.id, message_id: r.message_id, nom: r.nom, media: r.media,
-                               base64: Buffer.from(r.octets).toString('base64') }))
+                               base64: Buffer.from(r.octets).toString('base64') })),
+    // Ce qui manquait à « partir avec » : ses notes rangées, les relevés pris
+    // en conversation, ce qu'il a dit suivre et ce qu'il a décidé de tenir.
+    carnet: allCarnet(userId),
+    releves: db.prepare('SELECT id, message_id, date, ts, valeur, quoi, source FROM releves WHERE user_id = ? ORDER BY ts, id').all(userId),
+    suivis: lesSuivis(userId),
+    objectifs: allObjectifs(userId)
   }),
 
   /** La jauge de jetons : ce qu'il reste ce mois-ci, et ce que ça a coûté. */
