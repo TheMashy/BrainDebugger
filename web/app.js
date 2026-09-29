@@ -3493,10 +3493,12 @@ function gridMarkup(grid, bascules = new Map()) {
         // perdre parce que ces jours-là n'ont pas de note chiffrée.
         const al = d.veille ? ` aveille ${d.veille}` : '';
         const bs = bascules.get(d.date) ?? [];
-        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${d.delta > 0 ? '+' : ''}${d.delta}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}${bs.map(b => `\n↕ ${b.phrase}`).join('')}`;
+        // L'écart à la référence LISSÉE : celui de la couleur (stats.js).
+        const ec = d.ecart ?? d.delta;
+        const tip = `${fmtDay(d.date)}${has ? `\n${d.note}/10 · écart ${ec > 0 ? '+' : ''}${Math.round(ec * 10) / 10}` : ''}${d.veille ? `\n${veilleTitre(d.veille).replace(' · ⚠ ', '⚠ ')}` : ''}${bs.map(b => `\n↕ ${b.phrase}`).join('')}`;
         return `<td class="cell${has ? ' has' : ''}${d.date === today ? ' today' : ''}${al}${bs.length ? ' abascule' : ''}"
           ${(has || d.veille || bs.length) ? `data-date="${d.date}" data-tip="${esc(tip)}"` : ''}
-          ${has ? `style="background:${deltaColor(d.delta)}"` : ''}>${
+          ${has ? `style="background:${deltaColor(ec)}"` : ''}>${
           d.veille ? `<span class="cellveille">${alerteGlyph(13)}</span>` : ''}${
           bs.length ? '<i class="cellbascule"></i>' : ''}</td>`;
       }).join('')}
@@ -3736,7 +3738,7 @@ function moisRuban(m, date) {
       const futur = c.date > jourCivil();
       return `<button class="mjour${c.date === date ? ' ouvert' : ''}${futur ? ' futur' : ''}${c.veille ? ` aveille ${c.veille}` : ''}"
         data-cal="jour" data-d="${c.date}" ${futur ? 'disabled' : ''}
-        ${note ? `style="background:${deltaColor(c.delta ?? 0)}"` : ''}
+        ${note ? `style="background:${deltaColor(c.ecart ?? c.delta ?? 0)}"` : ''}
         title="${esc(fmtDay(c.date))}${note ? ` · ${c.note}/10` : ''}${c.texte ? ' · écrit' : ''}${veilleTitre(c.veille)}">
         <span class="mjn">${Number(c.date.slice(8))}</span>
         ${c.texte ? '<span class="mjpt"></span>' : ''}
@@ -6354,7 +6356,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
             <button class="bignum${m.note !== null ? ' noted' : ''}" id="dayNote"
                  aria-expanded="${DAY_NOTE_OUVERT}"
                  title="${m.note !== null ? 'Changer cette note' : 'Noter cette journée'}"
-                 style="${m.note !== null ? `color:${deltaColor(m.delta)};--halo:${deltaColor(m.delta)}` : 'color:var(--ink-faint)'}">
+                 style="${m.note !== null ? `color:${deltaColor(m.ecart ?? m.delta)};--halo:${deltaColor(m.ecart ?? m.delta)}` : 'color:var(--ink-faint)'}">
               ${m.note ?? '\u2014'}<span class="sl">/10</span>
             </button>
           </div>
@@ -7541,7 +7543,7 @@ function calendarMarkup(m, date) {
       const c = par.get(d);
       if (!c) return null;
       if (c.note !== null && c.note !== undefined) {
-        return { couleur: deltaColor(c.delta ?? 0), ecrit: c.texte };
+        return { couleur: deltaColor(c.ecart ?? c.delta ?? 0), ecrit: c.texte };
       }
       return c.texte ? { ecrit: true } : null;
     }
