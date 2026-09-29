@@ -4729,8 +4729,12 @@ function priseMarkup(p) {
      forcément la même taille pour qui écrit un jour sur douze, et « 5 » contre
      « 6 » ne veut rien dire tant qu'on ne sait pas sur combien. */
   const taux = (k, sur) => p[k] / Math.max(1, p[sur]);
-  const ecart = p.compare ? taux('recent', 'recent_sur') - taux('avant', 'avant_sur') : 0;
-  const tendance = !p.compare ? null : Math.abs(ecart) < 0.02 ? 'pareil' : ecart > 0 ? 'monte' : 'baisse';
+  /* La flèche ne se dit que si les deux fenêtres ont été écrites pareil
+     (`compare`) ET que l'écart tient au test (`pente_p`) : « 8 sur 30 contre
+     1 sur 14 » se lisait « ça monte », et c'était le hasard. */
+  const tient = p.compare && p.pente_p < 0.05;
+  const ecart = tient ? taux('recent', 'recent_sur') - taux('avant', 'avant_sur') : 0;
+  const tendance = !tient ? null : ecart > 0 ? 'monte' : 'baisse';   // un écart qui tient au test n'est jamais « pareil »
 
   return `<article class="prise">
     <header>
@@ -4763,7 +4767,7 @@ function priseMarkup(p) {
       ${/* LE CHIFFRE NU EST PARTI, LA FLÈCHE RESTE. « les 28 d'avant : 5 » ne
             donnait que la matière première d'un calcul déjà rendu — la flèche
             dit « plus souvent qu'avant » et son titre porte les deux taux. */''}
-      ${p.compare ? `<span class="ptend ${tendance}" title="${esc(
+      ${tient ? `<span class="ptend ${tendance}" title="${esc(
           `${p.recent} sur ${p.recent_sur} — contre ${p.avant} sur ${p.avant_sur} avant`)}"
           >${tendance === 'monte' ? '↗' : tendance === 'baisse' ? '↘' : '='}</span>` : ''}
     </p>
