@@ -24,6 +24,7 @@ const {
   allSeances, addSeance, updateSeance, deleteSeance, seanceAvant, motifsEntre
 } = await import('../server/db.js');
 const CR = await import('../server/compte-rendu.js');
+const { addDays } = await import('../server/stats.js');
 const api = await import('../server/api.js');
 
 const notes = liste => liste.map(([date, note]) => ({ date, note, text: '' }));
@@ -106,12 +107,14 @@ test('l’évolution se refuse sous cinq journées de part et d’autre', () => 
 test('l’évolution dit le sens, et compte aussi les journées écrites', () => {
   const avant = CR.amplitudeDe(notes(Array.from({ length: 8 }, (_, i) => [`2026-01-0${i + 1}`, 4])));
   const apres = CR.amplitudeDe(notes(Array.from({ length: 6 }, (_, i) => [`2026-02-0${i + 1}`, 7])));
-  const e = CR.evolution(apres, avant);
+  const e = CR.evolution(apres, avant, { apres: 1, avant: 4 });
   assert.equal(e.sens, 'haut');
   assert.equal(e.mediane, 3);
   // Arrêter d'écrire est souvent le premier signe, avant que les notes ne
-  // baissent : le compte se lit à côté de la médiane, jamais à sa place.
-  assert.equal(e.ecrites, -2);
+  // baissent : le compte se lit à côté de la médiane, jamais à sa place. Ce
+  // sont les journées qui portent du TEXTE, pas celles qui portent une note.
+  assert.equal(e.ecrites, -3);
+  assert.equal(e.notees, -2);
 });
 
 test('un écart de moins d’un demi-point est « stable », pas une tendance', () => {
@@ -305,4 +308,58 @@ test('la route refuse une date qui n’en est pas une, sans planter', () => {
 
 test('POST /api/seances refuse une date invalide', () => {
   assert.match(api.routes['POST /api/seances']({ body: { date: 'hier' }, userId: OWNER }).error, /date/);
+});
+
+/* ============ CE QUE LE PREMIER COMPTE RENDU PERDAIT ============
+ *
+ * Sur un vrai journal (premier compte rendu, quatre ans et neuf mois) : les dix
+ * repères les plus récents disparaissaient en silence, 1732 journées notées
+ * devenaient « 1732 journées écrites, couverture 100 % » pour 44 écrites, et
+ * les creux montraient les trois zéros les plus anciens sur onze.
+ */
+
+test('trop de repères : les plus anciens tombent, le nombre écarté se dit', () => {
+  const evts = Array.from({ length: 22 }, (_, i) => ({
+    id: i + 1, date: addDays('2022-03-01', i * 60), label: `repère ${i + 1}`
+  }));
+  const f = CR.faitsDe(evts, '2022-01-01', '2026-09-29');
+  assert.equal(f.length, CR.MAX_FAITS);
+  assert.equal(f.omis, 10);
+  assert.ok(f.some(x => x.label === 'repère 22'), 'le repère le plus récent a disparu');
+  assert.equal(f.some(x => x.label === 'repère 1'), false);
+  const dates = f.map(x => x.date);
+  assert.deepEqual(dates, [...dates].sort(), 'les faits gardés ne sont plus dans l’ordre du temps');
+});
+
+test('une période ouverte depuis longtemps reste, même quand les récents débordent', () => {
+  const evts = [
+    { id: 100, date: '2019-09-01', ouvert: 1, label: 'période en cours' },
+    ...Array.from({ length: 20 }, (_, i) => ({ id: i + 1, date: addDays('2026-01-01', i * 5), label: `r${i}` }))
+  ];
+  const f = CR.faitsDe(evts, '2022-01-01', '2026-09-29');
+  assert.ok(f.some(x => x.label === 'période en cours'));
+  assert.equal(f.omis, 9);
+});
+
+test('notées et écrites se comptent à part, chacune avec sa couverture', () => {
+  // 1732 journées notées ; seules les 44 dernières portent du texte.
+  const entries = Array.from({ length: 1732 }, (_, i) => ({
+    date: addDays('2022-01-01', i), note: 5 + (i % 3), text: i >= 1732 - 44 ? 'une soirée' : ''
+  }));
+  const r = CR.compteRendu({ entries }, addDays('2022-01-01', 1731));
+  assert.equal(r.notees, 1732);
+  assert.equal(r.ecrites, 44);
+  assert.equal(r.couvertureNotees, 100);
+  assert.equal(r.couverture, 3);
+  assert.equal(r.amplitude.n, 1732, 'l’amplitude se lit sur les notes');
+});
+
+test('à note égale, le creux le plus récent passe devant, et on dit combien il y en a', () => {
+  // Onze journées à 0, réparties sur trois ans et demi.
+  const liste = Array.from({ length: 44 }, (_, i) => [addDays('2022-06-01', i * 30), i % 4 === 0 ? 0 : 6]);
+  const a = CR.amplitudeDe(notes(liste));
+  assert.equal(a.nMin, 11);
+  const plusRecent = liste.filter(([, n]) => n === 0).map(([d]) => d).sort().at(-1);
+  assert.equal(a.creux[0].date, plusRecent);
+  assert.equal(a.creux[0].note, 0);
 });

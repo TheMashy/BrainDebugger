@@ -31,6 +31,9 @@ import { cueilleur } from './trouvailles.js';
 import { comparaisons, comparaisonBlock } from './comparer.js';
 import { TEINTES_DECLAREES as TEINTES } from '../web/reperes.js';
 import { SCHEMA_HORIZONS, validerHorizons, ecritesParHorizon } from './horizons.js';
+// Ni fonctionnements.js ni promotion.js : ils ouvrent la base à l'import.
+import { MOTS_INTERDITS, laMachineDit } from './vocabulaire.js';
+import { SANS_DIAGNOSTIC } from './compte-rendu.js';
 
 let _sdk = null;
 
@@ -80,12 +83,7 @@ export const MIN_JOURS = 12;
  */
 export const VERSION_LECTURE = 2;
 
-/*
- * Le budget du corpus, en caracteres. ~45 000 fait a peu pres 12 000 jetons :
- * assez pour que le modele voie vraiment le fond, assez peu pour qu'une lecture
- * ne coute pas une conversation entiere a quelqu'un qui a une enveloppe.
- */
-const BUDGET = 45000;
+// Le plafond sous lequel une journée ne se lit plus : en dessous, on trie.
 const CAR_PAR_JOUR = 900;
 /*
  * LE BUDGET COMPLET sert à la refonte et au bouton « relire tout » : il tient
@@ -97,34 +95,126 @@ const CAR_PAR_JOUR = 900;
 export const BUDGET_COMPLET = 1_800_000;
 const CAR_PAR_JOUR_COMPLET = 4000;
 
+/*
+ * EN DESSOUS DE CE SEUIL, TOUT PART, SANS COUPE.
+ *
+ * Le budget coupait chaque journée à ses 900 premiers signes alors qu'il
+ * n'était rempli qu'aux trois quarts : sur un vrai journal, le modèle ne
+ * recevait qu'un quart du texte, et la journée la plus longue n'était vue qu'à
+ * 4 %. Or c'est dans la suite des soirées longues que se trouve l'essentiel
+ * de ce qui pèse. 160 000 signes font environ 45 000 jetons, bien sous ce que
+ * la requête prévoit déjà (soixante-dix à quatre-vingt mille) : on n'a aucune
+ * raison d'en couper un seul.
+ *
+ * AU-DESSUS, LE SEUIL DEVIENT LE BUDGET. Le plafond commun se cherchait contre
+ * l'ancien budget de 45 000 signes : à 160 100 signes, le corpus retombait d'un
+ * coup à 45 000, des journées entières disparaissaient, et on revenait au quart
+ * du texte qu'on venait de quitter. Le remplissage se fait donc contre le seuil
+ * lui-même, en signes de texte : ce qui part vaut min(tout, seuil), sans marche.
+ */
+export const SEUIL_SANS_COUPE = 160_000;
+// Ce que coûte une journée en plus de son texte : sa date, sa note, les sauts.
+const PAR_JOUR = 24;
+
 const jourDe = d => Date.parse(d + 'T00:00:00Z');
 const decaler = (d, n) => new Date(jourDe(d) + n * 86400000).toISOString().slice(0, 10);
 
 /**
- * Choisit les journees a transmettre.
+ * LE PLAFOND COMMUN : le plus grand c tel que Σ min(longueur, c) + 24 par
+ * journée tienne dans le budget. On remplit « par niveau » : les journées
+ * courtes passent entières, les longues sont toutes coupées à la même hauteur.
+ * Un plafond fixe (900) laissait un quart du budget vide tout en coupant les
+ * soirées longues à moins de 10 %.
  *
- * Pas les N dernieres : sur cinq ans, les cent dernieres journees ne disent
- * rien de ce qui revient. Pas non plus un tirage uniforme, qui noie les
- * journees denses -- celles qui portent le plus de texte sont celles ou il s'est
- * passe quelque chose. On prend donc les plus ecrites, PUIS on reordonne par
- * date : le modele doit lire une chronologie, pas un palmares.
+ * `parJour` est ce que chaque journée coûte en plus de son texte ; à 0, le
+ * budget se compte en signes de texte seulement (celui du seuil).
  */
-export function choisirJours(rows, budget = BUDGET, carParJour = CAR_PAR_JOUR) {
+export function plafondCommun(longueurs, budget, parJour = PAR_JOUR) {
+  const n = longueurs.length;
+  if (!n) return 0;
+  const cout = c => longueurs.reduce((a, l) => a + Math.min(l, c), 0) + parJour * n;
+  const max = Math.max(...longueurs);
+  if (cout(max) <= budget) return max;
+  let lo = 0, hi = max;                    // cout(lo) <= budget < cout(hi)
+  if (cout(0) > budget) return 0;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (cout(mid) <= budget) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * Choisit les journees a transmettre, et la hauteur a laquelle les couper.
+ *
+ * D'abord TOUTES, coupees au plafond commun, tant que ce plafond reste lisible
+ * (au moins `carMin` signes par journee). Au-dela seulement on trie : pas les
+ * N dernieres -- sur cinq ans, les cent dernieres journees ne disent rien de ce
+ * qui revient ; pas un tirage uniforme, qui noie les journees denses. On prend
+ * les plus ecrites, PUIS on reordonne par date : le modele doit lire une
+ * chronologie, pas un palmares. Le reste du budget releve ensuite leur plafond.
+ *
+ * @returns {{jours: object[], cap: number}}
+ */
+export function decouper(rows, budget, carMin = CAR_PAR_JOUR, parJour = PAR_JOUR) {
   const ecrites = rows.filter(r => r.text && r.text.trim());
+  const tous = plafondCommun(ecrites.map(r => r.text.length), budget, parJour);
+  if (ecrites.length && tous >= carMin) {
+    return { jours: [...ecrites].sort((a, b) => a.date.localeCompare(b.date)), cap: tous };
+  }
   const par = [...ecrites].sort((a, b) => b.text.length - a.text.length);
   const gardees = [];
   let total = 0;
   for (const r of par) {
-    const taille = Math.min(r.text.length, carParJour) + 24;
+    const taille = Math.min(r.text.length, carMin) + parJour;
     if (total + taille > budget) continue;      // continue, pas break : une
     total += taille;                            // journee courte peut encore tenir
     gardees.push(r);
   }
-  return gardees.sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    jours: gardees.sort((a, b) => a.date.localeCompare(b.date)),
+    cap: Math.max(carMin, plafondCommun(gardees.map(r => r.text.length), budget, parJour))
+  };
+}
+
+export function choisirJours(rows, budget, carParJour = CAR_PAR_JOUR) {
+  return decouper(rows, budget, carParJour).jours;
+}
+
+/**
+ * UNE JOURNEE COUPEE GARDE SA FIN.
+ *
+ * La tete seule, c'etait le debut de chaque soiree et jamais ce qui arrive
+ * apres. On garde 60 % en tete et 40 % en fin, et le trou se dit : un modele
+ * qui ne sait pas qu'il manque un morceau le raconte comme s'il n'existait pas.
+ */
+export function couperJour(texte, cap) {
+  if (texte.length <= cap) return texte;
+  const tete = Math.round(cap * 0.6);
+  const fin = cap - tete;
+  const nonLus = texte.length - tete - fin;
+  return `${texte.slice(0, tete)} [… ${nonLus} signes non lus …] ${texte.slice(texte.length - fin)}`;
+}
+
+/**
+ * LES SEUILS DU TABLEAU, DANS SON ÉCHELLE À LUI.
+ *
+ * « ≤3 » confondait une journée à 3 et une journée à 0 -- or 0, dans sa propre
+ * légende, n'est pas « un peu plus bas que 3 ». Avec des ancres, la colonne
+ * basse s'arrête à son ancre basse non nulle, et le plancher a sa colonne à
+ * lui. Sans ancres, le tableau reste celui d'avant (≤3, ≥8).
+ */
+export function seuilsDe(ancres = []) {
+  const notes = (ancres ?? []).map(a => Number(a?.note)).filter(Number.isFinite);
+  if (!notes.length) return { bas: 3, plancher: null, haut: 8 };
+  const plancher = Math.min(...notes);
+  const nonNulles = notes.filter(n => n > 0);
+  const bas = nonNulles.length ? Math.min(...nonNulles) : 3;
+  return { bas, plancher: plancher < bas ? plancher : null, haut: 8 };
 }
 
 /** Le resume mois par mois des notes : cinq ans tiennent en soixante lignes. */
-function parMois(rows) {
+function parMois(rows, seuils = seuilsDe()) {
   const m = new Map();
   for (const r of rows) {
     if (r.note === null || r.note === undefined) continue;
@@ -143,8 +233,25 @@ function parMois(rows) {
     const et = Math.sqrt(notes.reduce((a, b) => a + (b - moy) ** 2, 0) / notes.length);
     return { mois, n: notes.length, med, moy: Math.round(moy * 100) / 100,
              ecart: Math.round(et * 100) / 100,
-             bas: notes.filter(x => x <= 3).length, haut: notes.filter(x => x >= 8).length };
+             bas: notes.filter(x => x <= seuils.bas).length,
+             plancher: seuils.plancher == null ? null : notes.filter(x => x === seuils.plancher).length,
+             haut: notes.filter(x => x >= seuils.haut).length };
   });
+}
+
+/**
+ * SA LÉGENDE, TELLE QU'IL L'A ÉCRITE. Sans elle, le modèle lit une échelle
+ * générique : un 5 y devient tiède, alors que chez lui c'est « ça roule ».
+ * Elle part entre guillemets, comme ses mots, et la consigne dit qu'elle ne
+ * devient jamais un nom qu'on pose sur lui -- une ancre peut porter un mot
+ * lourd, et c'est son mot, pas un constat de la machine.
+ */
+function legendeDe(ancres = []) {
+  const a = (ancres ?? []).filter(x => Number.isFinite(Number(x?.note)) && (x.label || x.descr))
+    .sort((x, y) => y.note - x.note);
+  if (!a.length) return null;
+  return `SON ÉCHELLE, SA LÉGENDE À LUI (à citer entre guillemets, jamais à transformer en nom pour lui) :
+${a.map(x => `${x.note} = « ${[x.label, x.descr].filter(Boolean).join(' — ')} »`).join('\n')}`;
 }
 
 /**
@@ -211,9 +318,13 @@ ${parties.join('\n\n')}`;
  * @returns {{texte: string, dates: Set<string>, jours: number, depuis: string|null}}
  */
 export function corpusPour({ rows, events = [], carnet = [], motifs = [], objectifs = [],
-                             amplitudes = [], precedente = null, complet = false }) {
-  const budget = complet ? BUDGET_COMPLET : BUDGET;
-  const carParJour = complet ? CAR_PAR_JOUR_COMPLET : CAR_PAR_JOUR;
+                             amplitudes = [], precedente = null, complet = false, ancres = [] }) {
+  // Hors refonte, le budget est le seuil lui-même, en signes de texte : juste
+  // au-dessus, le plafond commun tombe juste sous la plus longue journée, et
+  // aucune ne disparaît. La refonte garde son budget, qui compte aussi les dates.
+  const [budget, carParJour, parJour] = complet
+    ? [BUDGET_COMPLET, CAR_PAR_JOUR_COMPLET, PAR_JOUR]
+    : [SEUIL_SANS_COUPE, CAR_PAR_JOUR, 0];
   // Tout, sans borne. Le budget de caracteres fait deja le tri -- et il le fait
   // sur la DENSITE des journees, ce qui est un bien meilleur critere qu'une
   // date de coupure : ce qui revient depuis quatre ans compte autant que ce qui
@@ -221,26 +332,52 @@ export function corpusPour({ rows, events = [], carnet = [], motifs = [], object
   const dans = () => true;
 
   const fenetre = rows.slice();
-  const gardees = choisirJours(fenetre, budget, carParJour);
+  const ecritesToutes = fenetre.filter(r => r.text?.trim());
+  const signesTous = ecritesToutes.reduce((a, r) => a + r.text.length, 0);
+  // Sous le seuil, tout part en entier ; au-dessus, un plafond commun qui
+  // prolonge exactement ce cas-là (le remplissage contre le seuil ne coupe rien
+  // tant que le texte y tient).
+  const { jours: gardees, cap } = signesTous <= SEUIL_SANS_COUPE
+    ? { jours: [...ecritesToutes].sort((a, b) => a.date.localeCompare(b.date)), cap: Infinity }
+    : decouper(fenetre, budget, carParJour, parJour);
   const dates = new Set(gardees.map(r => r.date));
 
   const blocs = [];
 
-  const mois = parMois(fenetre);
+  const seuils = seuilsDe(ancres);
+  const mois = parMois(fenetre, seuils);
   if (mois.length) {
-    blocs.push(`SES NOTES, MOIS PAR MOIS (0-10). « écart » est l'écart-type du mois :
+    const legende = legendeDe(ancres);
+    const plancher = seuils.plancher != null;
+    blocs.push(`${legende ? `${legende}\n\n` : ''}SES NOTES, MOIS PAR MOIS (0-10). « écart » est l'écart-type du mois :
 deux mois à 6 de moyenne, l'un plat et l'autre entre 1 et 10, ne racontent pas
 la même chose.
 
-mois | journées | médiane | moyenne | écart | ≤3 | ≥8
-${mois.map(m => `${m.mois} | ${m.n} | ${m.med} | ${m.moy} | ${m.ecart} | ${m.bas} | ${m.haut}`).join('\n')}`);
+mois | journées | médiane | moyenne | écart | ≤${seuils.bas}${plancher ? ` | =${seuils.plancher}` : ''} | ≥${seuils.haut}
+${mois.map(m => `${m.mois} | ${m.n} | ${m.med} | ${m.moy} | ${m.ecart} | ${m.bas}${plancher ? ` | ${m.plancher}` : ''} | ${m.haut}`).join('\n')}`);
   }
 
   if (gardees.length) {
-    blocs.push(`SES JOURNÉES ÉCRITES. ${gardees.length} journées sur les ${fenetre.filter(r => r.text?.trim()).length} qui portent du texte sur cette période — les plus fournies, remises dans l'ordre.
+    /*
+     * LA COUPE SE DIT. « 44 journées sur les 44 » alors que chacune était
+     * amputée des neuf dixièmes laissait le modèle croire qu'il avait tout lu
+     * -- et la consigne des nœuds lui demande « toutes les journées ».
+     */
+    const coupees = gardees.filter(r => r.text.length > cap);
+    const lus = gardees.reduce((a, r) => a + Math.min(r.text.length, cap), 0);
+    const tete = gardees.length === ecritesToutes.length
+      ? `${gardees.length} journées, toutes celles qui portent du texte`
+      : `${gardees.length} journées sur les ${ecritesToutes.length} qui portent du texte — les plus fournies, remises dans l'ordre`;
+    const nonLus = signesTous - lus;
+    const coupe = !nonLus ? `Aucune n'est coupée : tu as tout le texte.`
+      : coupees.length
+        ? `${coupees.length} journée${coupees.length > 1 ? 's' : ''} coupée${coupees.length > 1 ? 's' : ''} à ${cap} signes (le début et la fin sont gardés), ${nonLus} signes non lus sur ${signesTous}.`
+        : `${nonLus} signes non lus sur ${signesTous}.`;
+    const etendue = `Le texte va du ${gardees[0].date} au ${gardees.at(-1).date}.`;
+    blocs.push(`SES JOURNÉES ÉCRITES. ${tete}. ${coupe} ${etendue}
 
 ${gardees.map(r => `[${r.date}${r.note !== null && r.note !== undefined ? ` · ${r.note}/10` : ''}] ${
-  r.text.length > carParJour ? r.text.slice(0, carParJour) + '…' : r.text}`).join('\n\n')}`);
+  couperJour(r.text, cap)}`).join('\n\n')}`);
   }
 
   const ev = events.filter(e => dans(e.fin ?? e.date));
@@ -381,6 +518,14 @@ sous sa médiane est un fait, et le taire serait mentir par omission. Un THÈME 
 jamais de nom de maladie : c'est un fonctionnement que tu décris et que tu montres. Les mots
 plus lourds ont un endroit à eux, plus bas, et des règles à eux.
 
+Ce n'est pas une consigne de ton : c'est vérifié. Un nom de thème, de schéma ou de nœud qui
+emploie « anxiété », « angoisse », « crise », « panique », « insomnie », « trouble » ou un mot
+de ce registre est retiré, avec tout ce qu'il porte — même entre « » : un nom s'affiche comme
+un titre, et en titre ce mot reste une étiquette, qu'il vienne de ses journées ou de sa
+légende. Ses mots à lui se citent dans « quoi » et dans les extraits, pas dans un nom.
+« les anxios », « la psychologue » sont des choses de sa vie, pas des étiquettes : ces noms-là
+passent. Chaque extrait est confronté au texte de sa journée : recopie-le, ne le reformule pas.
+
 DEUXIÈME PERSONNE. Tu t'adresses à lui, tutoiement, phrases courtes, pas de jargon.
 
 L'ANCRAGE
@@ -421,7 +566,7 @@ haut. Un nom seul sur une carte est un mot ; avec sa phrase, c'est quelque chose
 reconnaît.
 
 Chaque nœud porte SES JOURNÉES : toutes les dates du corpus où cette chose apparaît. Pas
-un échantillon, pas les trois plus parlantes — toutes celles que tu as vues. Ce sont elles
+un échantillon, pas les trois plus parlantes — toutes celles que tu as vues dans ce corpus. Ce sont elles
 qui donnent son épaisseur au nœud, et c'est ce qui fait la différence entre une carte et un
 schéma : sans ses dates, un nœud affirme (« le sommeil compte chez toi ») ; avec, il rend
 compte (« le sommeil, ces journées-là »). La première se croit sur parole, la seconde se
@@ -518,6 +663,11 @@ dépression, dépendance, hyperactivité, traumatisme d'enfance, trouble du somm
 autodestruction, deuil. Employer un mot vague pour ne pas dire celui qu'on pense, c'est
 laisser quelqu'un chercher pendant des années ce qu'on aurait pu nommer. Une piste n'est
 pas forcément clinique, d'ailleurs : « la peur de décevoir » est une piste.
+
+Ce droit se mérite en journées, et c'est compté : une piste repose sur au moins cinq
+journées distinctes dans les preuves de ses thèmes ; un nom clinique, entre « » ou non, sur
+au moins huit, revenues en deux fois au moins (pas une seule semaine). En dessous, elle est
+retirée. Sa légende à lui, en tête des notes, ne compte pas comme une preuve : ce sont ses mots.
 
 CE QUI FAIT UNE PISTE : un problème, ou un fonctionnement qui coince. Pas un thème de la
 vie. « le travail », « les amis », « le sommeil » sont des rubriques ; « vide au travail »,
@@ -740,7 +890,7 @@ const OUTIL = {
                 jours: {
                   type: 'array',
                   description: "Les journées du corpus où cette chose apparaît — TOUTES celles que tu "
-                    + "as vues, pas un échantillon : ce sont elles qui donnent son épaisseur au nœud. "
+                    + "as vues dans ce corpus, pas un échantillon : ce sont elles qui donnent son épaisseur au nœud. "
                     + "Des dates AAAA-MM-JJ présentes dans le corpus ; les autres seront retirées.",
                   items: { type: 'string' }
                 }
@@ -834,6 +984,205 @@ function phrase(s, max) {
   const fin = Math.max(coupe.lastIndexOf('. '), coupe.lastIndexOf('! '), coupe.lastIndexOf('? '));
   return fin > max * 0.4 ? coupe.slice(0, fin + 1) : coupe.trimEnd() + '…';
 }
+
+/* ------------------------------ les preuves ------------------------------ */
+
+/*
+ * CE QUE LES VALIDATEURS EXIGENT, ET POURQUOI CES CHIFFRES.
+ *
+ * Ils ne vérifiaient que l'existence des dates. Une piste « dépression » passait
+ * sur une seule soirée, un schéma « presque à chaque fois » sur un seul jour,
+ * et une citation que la personne n'a jamais écrite l'envoyait relire sa
+ * journée pour y chercher ce qu'elle n'avait pas dit. Les chiffres sont ceux
+ * de la consigne elle-même (« trois journées au moins » pour un schéma, « vue
+ * deux fois n'est pas un nœud »), appliqués au lieu d'être demandés.
+ *
+ * Le mot lourd d'une piste demande plus : huit journées et deux retours
+ * espacés (`reprises` de promotion.js, écart de quatorze jours) -- la même
+ * logique que la carte applique déjà avant de poser un motif sous un nom de ce
+ * vocabulaire. Une salve d'une semaine n'est pas une direction.
+ */
+export const SEUILS_LECTURE = {
+  theme_dates: 2,
+  schema_jours: 3,
+  schema_preuves: 2,
+  noeud_jours: 3,
+  piste_dates: 5,
+  piste_lourde_dates: 8,
+  piste_lourde_reprises: 2,
+  ecart_reprise: 14,
+  // La part des mots d'un extrait qu'on doit retrouver, dans l'ordre, dans
+  // une fenêtre de la journée. 85 % et pas 100 % : le modèle corrige en
+  // silence l'orthographe et les accords quand il cite.
+  couverture_citation: 0.85
+};
+
+/**
+ * Les retours : les journées coupées partout où l'écart dépasse `ecart` jours.
+ * Le même découpage que `reprises()` de promotion.js (un test le vérifie),
+ * recopié parce que promotion.js ouvre la base à l'import.
+ */
+export function retours(jours, ecart = SEUILS_LECTURE.ecart_reprise) {
+  const d = [...new Set(jours ?? [])].sort();
+  if (!d.length) return [];
+  const groupes = [[d[0]]];
+  for (let i = 1; i < d.length; i++) {
+    if ((jourDe(d[i]) - jourDe(d[i - 1])) / 86400000 > ecart) groupes.push([]);
+    groupes[groupes.length - 1].push(d[i]);
+  }
+  return groupes;
+}
+
+/**
+ * La forme sous laquelle on compare un extrait à la journée : sans accents,
+ * en minuscules, ligatures dépliées (NFD laisse « œ » entier, et le modèle
+ * écrit « sœur » là où il a tapé « soeur »), apostrophes unifiées, guillemets et
+ * points de suspension retirés, espaces réduits.
+ */
+export function normaliser(s) {
+  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/œ/g, 'oe').replace(/æ/g, 'ae')
+    .replace(/[’‘`´]/g, "'")
+    .replace(/…|\.\.\./g, ' ')
+    .replace(/[«»"“”„]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+const MOT = /[\p{L}\p{M}\p{N}'’]+/gu;
+/** Les mots d'un texte, normalisés, avec leur place dans le texte d'origine. */
+function motsDe(s) {
+  const out = [];
+  for (const m of String(s ?? '').matchAll(MOT)) {
+    const cle = normaliser(m[0]).replace(/^'+|'+$/g, '');
+    if (cle) out.push({ cle, debut: m.index, fin: m.index + m[0].length });
+  }
+  return out;
+}
+
+/**
+ * LE PASSAGE REEL LE PLUS PROCHE d'un extrait qui n'est pas recopié tel quel.
+ *
+ * On cherche la fenêtre de la journée dont la plus longue sous-suite commune
+ * de mots couvre au moins 85 % des mots de l'extrait, et on rend CE QUI EST
+ * ÉCRIT dans cette fenêtre -- jamais la reformulation du modèle. Rien ne
+ * s'approche assez : null, et la preuve tombe.
+ */
+export function passageProche(extrait, jour, seuil = SEUILS_LECTURE.couverture_citation) {
+  const e = motsDe(extrait).map(x => x.cle);
+  const m = e.length;
+  if (m < 3) return null;                    // deux mots se trouvent partout
+  const d = motsDe(jour);
+  const besoin = Math.ceil(m * seuil);
+  const W = Math.ceil(m * 1.5) + 2;
+  // Le premier mot retrouvé est forcément l'un des (m - besoin + 1) premiers
+  // de l'extrait : une fenêtre ne commence que sur l'un d'eux.
+  const ouvrants = new Set(e.slice(0, m - besoin + 1));
+  let mieux = null;
+  const prec = new Array(m + 1);
+  const cour = new Array(m + 1);
+  for (let i = 0; i < d.length; i++) {
+    if (!ouvrants.has(d[i].cle)) continue;
+    prec.fill(0);
+    let dernier = -1, meilleur = 0;
+    const fin = Math.min(d.length, i + W);
+    for (let j = i; j < fin; j++) {
+      cour[0] = 0;
+      for (let k = 1; k <= m; k++) {
+        cour[k] = d[j].cle === e[k - 1] ? prec[k - 1] + 1 : Math.max(prec[k], cour[k - 1]);
+      }
+      if (cour[m] > meilleur) { meilleur = cour[m]; dernier = j; }
+      for (let k = 0; k <= m; k++) prec[k] = cour[k];
+    }
+    if (meilleur >= besoin && (!mieux || meilleur > mieux.n)) {
+      mieux = { n: meilleur, debut: d[i].debut, fin: d[dernier].fin };
+      if (meilleur === m) break;
+    }
+  }
+  return mieux ? jour.slice(mieux.debut, mieux.fin) : null;
+}
+
+/**
+ * La tranche de la journée qui porte exactement ces mots, dans cet ordre,
+ * telle qu'elle est écrite ; null si la suite n'y est pas.
+ */
+function tranche(cles, mots, jour) {
+  const m = cles.length;
+  for (let i = 0; i + m <= mots.length; i++) {
+    let k = 0;
+    while (k < m && mots[i + k].cle === cles[k]) k++;
+    if (k === m) return jour.slice(mots[i].debut, mots[i + m - 1].fin);
+  }
+  return null;
+}
+
+/**
+ * UNE PREUVE EST CE QU'IL A ÉCRIT CE JOUR-LÀ, OU ELLE N'EST PAS.
+ *
+ * `textes` : date → texte complet de la journée. Sans lui (un appel qui n'a
+ * pas le corpus sous la main), on ne peut vérifier que la date.
+ *
+ * Même reconnu « tel quel », l'extrait rendu est la tranche de SA journée, pas
+ * la copie du modèle : la comparaison passe outre les accents, les ligatures,
+ * les guillemets, et un « goûter » corrigé s'affichait comme une citation
+ * alors qu'il avait écrit « gouter ».
+ */
+function preuveVerifiee(p, dates, textes) {
+  const date = String(p?.date);
+  if (!dates.has(date)) return null;
+  const brut = texte(p?.extrait, 600);
+  if (!textes) return { date, extrait: texte(brut, 240) };
+  const jour = textes.get(date);
+  const cles = motsDe(brut).map(x => x.cle);
+  if (!jour || !cles.length) return null;
+  const reel = tranche(cles, motsDe(jour), jour) ?? passageProche(brut, jour);
+  return reel ? { date, extrait: texte(reel, 240) } : null;
+}
+
+function preuvesVerifiees(liste, dates, textes) {
+  return (Array.isArray(liste) ? liste : [])
+    .map(p => preuveVerifiee(p, dates, textes))
+    .filter(p => p && p.extrait)
+    .slice(0, 5);
+}
+
+/** date → texte complet, depuis les lignes du corpus. */
+function textesDe(rows) {
+  if (!Array.isArray(rows)) return null;
+  const m = new Map();
+  for (const r of rows) if (r?.text && String(r.text).trim()) m.set(String(r.date), String(r.text));
+  return m.size ? m : null;
+}
+
+/*
+ * LE VOCABULAIRE, VÉRIFIÉ LÀ OÙ IL S'AFFICHE COMME UN NOM.
+ *
+ * Un thème, un schéma, un nœud ne portent jamais de nom de maladie : c'est la
+ * consigne, et rien ne l'appliquait. On teste le NOM avec MOTS_INTERDITS, EN
+ * ENTIER : des « » ne le protègent pas. Dans une phrase, ils disent « ce sont
+ * ses mots » ; en titre, le mot s'affiche quand même comme une étiquette. Et sa
+ * légende, qui part au modèle avec la consigne de la citer entre guillemets,
+ * peut porter un mot lourd : les « » laissaient ce mot devenir un nom de
+ * thème, et une piste sur une seule salve, sans passer par son verrou.
+ *
+ * Ses mots à lui contiennent aussi « anxio », « antidépresseur », « psychologue » :
+ * sans ces exemptions, le filtre jetterait le nœud de dépendance le mieux
+ * documenté et le schéma qui est l'exemple même de la consigne. Elles ne
+ * retirent que des mots entiers : « [ée]pisodes? d » mangeait le « d » de
+ * « dépressif » et de « dissociatif », et « épisode dépressif » passait. Seul
+ * le mot « épisode » part, quand un complément suit (« épisodes de fou rire »),
+ * et ce complément reste contrôlé ; « anxiogène », lui, n'est pas un cachet.
+ *
+ * Pour les phrases (quoi, maillons), seule la liste étroite du compte rendu
+ * s'applique, et jamais aux extraits : un extrait est SA phrase.
+ */
+const EXEMPTES = /\banxiolytiques?\b|\banxios?\b|antid[ée]press\w*|psycholog\w*|psychiatr\w*|[ée]pisodes?(?=\s+(?:de|du|des)\b|\s+d['’])/gi;
+export const nomLourd = nom => MOTS_INTERDITS.test(String(nom ?? '').normalize('NFC').replace(EXEMPTES, ' '));
+// « troublé », « troublant » décrivent quelqu'un de secoué, pas un trouble.
+const PAS_UN_TROUBLE = /troubl(?:é|ée|és|ées|ant|ante|ants|antes)(?![\p{L}])/giu;
+export const phraseClinique = s => {
+  const t = laMachineDit(s).toLowerCase().replace(PAS_UN_TROUBLE, ' ');
+  return SANS_DIAGNOSTIC.some(m => t.includes(m));
+};
 
 /* ------------------------------ la continuite ------------------------------ */
 
@@ -936,15 +1285,17 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
   const parId = new Map(comps.map(c => [c.id, c]));
   const pris = new Set();
   const mem = memoire(precedente);
+  const textes = textesDe(rows);
   const themes = [];
   for (const t of (brut?.themes ?? []).slice(0, 8)) {
-    const preuves = (t.preuves ?? [])
-      .filter(p => dates.has(String(p?.date)))
-      .slice(0, 5)
-      .map(p => ({ date: String(p.date), extrait: texte(p.extrait, 240) }));
-    if (!preuves.length) continue;
+    // Chaque extrait est confronté au texte du jour : recopié, il reste ;
+    // reformulé, il est remplacé par la phrase réelle ; inventé, il tombe.
+    const preuves = preuvesVerifiees(t?.preuves, dates, textes);
+    // Deux journées au moins : un thème est ce qui revient, pas une soirée.
+    if (new Set(preuves.map(p => p.date)).size < SEUILS_LECTURE.theme_dates) continue;
     const nom = texte(t.nom, 40).toLowerCase();
     if (!nom) continue;
+    if (nomLourd(nom) || phraseClinique(t.quoi)) continue;
     themes.push({
       nom,
       quoi: texte(t.quoi, 300),
@@ -982,6 +1333,9 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
   // noeud jete la-bas ferait pointer l'ilot vers une chose qui ne s'affiche
   // nulle part. Meme raison que les liens entre themes, meme ordre.
   const carte = validerCarte(brut?.carte, dates, mem);
+  // Les journées sur lesquelles repose chaque thème : c'est ce que les verrous
+  // des pistes comptent.
+  const datesParTheme = new Map(themes.map(t => [t.nom, new Set(t.preuves.map(p => p.date))]));
   return {
     /*
      * La synthese se coupe sur une FIN DE PHRASE, et plus loin qu'avant.
@@ -1002,9 +1356,9 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
       : null,
     themes,
     pistes: validerPistes(brut?.pistes, noms,
-      new Set(carte.noeuds.map(n => n.nom.toLowerCase())), mem),
+      new Set(carte.noeuds.map(n => n.nom.toLowerCase())), mem, datesParTheme),
     carte,
-    schemas: validerSchemas(brut?.schemas, dates, motifsConnus, mem),
+    schemas: validerSchemas(brut?.schemas, dates, motifsConnus, mem, textes),
     version: VERSION_LECTURE
   };
 }
@@ -1013,8 +1367,9 @@ export function valider(brut, dates, comps = [], precedente = null, rows = null,
  * LES PISTES : ce qui autorise le mot lourd, et ce qui l'empeche de devenir une etiquette.
  *
  * Une piste peut nommer « depression » la ou un theme ne le peut pas. Ce
- * privilege tient a trois verrous, et ils sont ici, pas dans la consigne : une
- * consigne qu'on n'applique pas n'est pas une regle.
+ * privilege tient a quatre verrous, et ils sont ici, pas dans la consigne : une
+ * consigne qu'on n'applique pas n'est pas une regle. Le quatrieme -- des
+ * journees, pas seulement des themes -- est dans `validerPistes`.
  *
  *   1. ELLE REGROUPE. Moins de deux themes REELLEMENT rendus, et la piste
  *      disparait. C'est ce qui empeche « depression » d'etre une intuition
@@ -1042,33 +1397,38 @@ export const FONCTIONS = ['eviter', 'soulager', 'controler', 'tenir', 'se_punir'
  * journées filtrées sur le corpus, des motifs du fil reconnus par leur nom
  * exact. Continuité comme pour les thèmes.
  */
-export function validerSchemas(brut, dates, motifsConnus = new Set(), mem = memoire(null)) {
+export function validerSchemas(brut, dates, motifsConnus = new Set(), mem = memoire(null), textes = null) {
   const out = [];
   const vus = new Set();
   const connus = new Set([...motifsConnus].map(m => String(m).toLowerCase()));
-  for (const s of (brut ?? []).slice(0, 8)) {
+  const toutes = { has: () => true };
+  for (const s of (Array.isArray(brut) ? brut : []).slice(0, 8)) {
     const nom = texte(s?.nom, 48).toLowerCase();
     if (!nom || vus.has(nom)) continue;
-    const preuves = (s?.preuves ?? [])
-      .filter(p => !dates || dates.has(String(p?.date)))
-      .slice(0, 5)
-      .map(p => ({ date: String(p.date), extrait: texte(p.extrait, 240) }))
-      .filter(p => p.extrait);
-    if (!preuves.length) continue;
+    if (nomLourd(nom)) continue;
+    const preuves = preuvesVerifiees(s?.preuves, dates ?? toutes, textes);
+    const datesPreuves = new Set(preuves.map(p => p.date));
+    if (datesPreuves.size < SEUILS_LECTURE.schema_preuves) continue;
     const maillons = {
       declencheur: texte(s?.declencheur, 220), reaction: texte(s?.reaction, 220), comportement: texte(s?.comportement, 220),
       effet: texte(s?.effet, 220), cout: texte(s?.cout, 260)
     };
     if (!maillons.declencheur || !maillons.reaction || !maillons.comportement) continue;
+    if (Object.values(maillons).some(phraseClinique)) continue;
     const fonction = String(s?.fonction ?? '').toLowerCase().trim().replace(/\s+/g, '_').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const jours = [...new Set([...(s?.jours ?? []).map(String), ...preuves.map(p => p.date)])]
       .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!dates || dates.has(d))).sort();
+    // \u00ab Un soir n'est pas un sch\u00e9ma \u00bb : trois journ\u00e9es au moins, comme la
+    // consigne le dit. Et la force suit ce qui est compt\u00e9 : \u00ab presque \u00e0 chaque
+    // fois \u00bb ne s'\u00e9crit pas sur quatre journ\u00e9es.
+    if (jours.length < SEUILS_LECTURE.schema_jours) continue;
+    const forceMax = jours.length < 5 ? 1 : jours.length < 10 ? 2 : 3;
     vus.add(nom);
     out.push({
       nom,
       ...maillons,
       fonction: FONCTIONS.includes(fonction) ? fonction : 'soulager',
-      force: borne(Math.round(s?.force), 1, 3),
+      force: Math.min(forceMax, borne(Math.round(s?.force), 1, 3)),
       preuves,
       jours,
       motifs: [...new Set((s?.motifs ?? []).map(m => texte(m, 60).toLowerCase()))].filter(m => connus.has(m)).slice(0, 8),
@@ -1084,7 +1444,7 @@ export function validerSchemas(brut, dates, motifsConnus = new Set(), mem = memo
 }
 
 export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
-                              mem = memoire(null)) {
+                              mem = memoire(null), datesParTheme = null) {
   const out = [];
   const vus = new Set();
   /*
@@ -1109,6 +1469,20 @@ export function validerPistes(brut, nomsThemes, nomsNoeuds = new Set(),
     const themes = [...new Set((p?.themes ?? []).map(t => texte(t, 40).toLowerCase()))]
       .filter(t => nomsThemes.has(t));
     if (themes.length < 2) continue;
+    /*
+     * 4. ELLE REPOSE SUR DES JOURNÉES, PAS SEULEMENT SUR DES THÈMES. Deux thèmes
+     *    tirés de la même soirée faisaient une piste « dépression » sur une
+     *    seule journée. On compte les dates distinctes de leurs preuves : cinq
+     *    au moins ; et pour un nom de ce vocabulaire-là, huit, revenues au moins
+     *    deux fois à quatorze jours d'écart. Entre « » ou non : un libellé de sa
+     *    légende repris tel quel reste un mot lourd posé comme nom.
+     */
+    if (datesParTheme) {
+      const jours = [...new Set(themes.flatMap(t => [...(datesParTheme.get(t) ?? [])]))];
+      if (jours.length < SEUILS_LECTURE.piste_dates) continue;
+      if (nomLourd(nom) && (jours.length < SEUILS_LECTURE.piste_lourde_dates
+          || retours(jours, SEUILS_LECTURE.ecart_reprise).length < SEUILS_LECTURE.piste_lourde_reprises)) continue;
+    }
     const noeuds = [...new Set((p?.noeuds ?? []).map(n => texte(n, 40).toLowerCase()))]
       .filter(n => nomsNoeuds.has(n));
     vus.add(nom);
@@ -1150,6 +1524,8 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
   for (const n of (brut?.noeuds ?? []).slice(0, 20)) {
     const nom = texte(n?.nom, 40);
     if (!nom || vus.has(nom.toLowerCase())) continue;
+    // Une chose, pas un nom de maladie ; et sa phrase non plus n'en pose pas.
+    if (nomLourd(nom) || phraseClinique(n?.quoi)) continue;
     /*
      * LES JOURNEES D'UN NOEUD. C'est ce qui distingue cette carte d'un schema.
      *
@@ -1169,6 +1545,10 @@ export function validerCarte(brut, dates = null, mem = memoire(null)) {
       .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && (!dates || dates.has(d))))]
       .sort()
       .slice(0, 120);
+    // « Une chose vue deux fois n'est pas un nœud, c'est un souvenir. » La
+    // consigne le disait ; maintenant que le corpus transmet tout le texte, on
+    // peut le compter sans sous-compter les soirées longues.
+    if (jours.length < SEUILS_LECTURE.noeud_jours) continue;
     vus.set(nom.toLowerCase(), {
       nom,
       // Un noeud sans phrase reste un noeud : les lectures d'avant n'en ont

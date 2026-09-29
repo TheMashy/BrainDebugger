@@ -24,9 +24,10 @@ import { TEINTES_DECLAREES } from '../web/reperes.js';
 const DATES = new Set(['2024-03-12', '2024-04-02', '2024-05-20']);
 const D = [...DATES];
 
+// Deux journées de preuve : un thème en demande au moins deux.
 const theme = (nom, extra = {}) => ({
   nom, quoi: 'x', intensite: 2, serie: [],
-  preuves: [{ date: D[0], extrait: 'z' }], ...extra
+  preuves: [{ date: D[0], extrait: 'z' }, { date: D[1], extrait: 'z' }], ...extra
 });
 
 /** Une lecture deja enregistree, celle a laquelle la suivante doit se rattacher. */
@@ -146,8 +147,9 @@ test('un même ancêtre ne peut pas avoir deux successeurs', () => {
 
 test('les nœuds de la carte suivent la même règle', () => {
   const c = validerCarte({
-    noeuds: [{ nom: 'le sommeil', genre: 'corps', poids: 3, jours: [] },
-             { nom: 'les nuits blanches', genre: 'periode', poids: 2, jours: [], avant: ['Léa'] }],
+    // Trois journées chacun : « vue deux fois n'est pas un nœud ».
+    noeuds: [{ nom: 'le sommeil', genre: 'corps', poids: 3, jours: D },
+             { nom: 'les nuits blanches', genre: 'periode', poids: 2, jours: D, avant: ['Léa'] }],
     liens: [{ de: 'le sommeil', vers: 'les nuits blanches', quoi: 'précède', force: 2 }]
   }, null, { themes: new Set(), pistes: new Set(),
              noeuds: new Set(['le sommeil', 'léa']), teintes: new Map() });
