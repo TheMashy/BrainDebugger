@@ -519,5 +519,138 @@
     "phrase": "je me suis taille de la fete vers minuit",
     "attendu": "rien",
     "pourquoi": "« se tailler » veut aussi dire partir — sans partie du corps, rien."
+  },
+  {
+    "phrase": "encore cette sensation de vouloir mourir ce soir",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "L'infinitif « vouloir mourir » manquait."
+  },
+  {
+    "phrase": "ce soir c'est reparti, vouloir crever encore",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "L'infinitif « vouloir crever » manquait."
+  },
+  {
+    "phrase": "je voudrais dormir pour toujours",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "Dormir pour toujours."
+  },
+  {
+    "phrase": "certains soirs, envie de me laisser mourir",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "Se laisser mourir."
+  },
+  {
+    "phrase": "des fois je me dis que je vais me buter",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "« me buter » dit de soi."
+  },
+  {
+    "phrase": "parfois je veux juste m'auto détruire",
+    "attendu": "jaune",
+    "genre": "envie_mal",
+    "pourquoi": "S'auto-détruire : l'envie de se faire du mal, jaune."
+  },
+  {
+    "phrase": "hier soir j'ai eu envie de me faire du mal",
+    "attendu": "jaune",
+    "genre": "envie_mal",
+    "pourquoi": "L'envie écrite, seule : son propre genre."
+  },
+  {
+    "phrase": "antécédent de scarification à l'adolescence",
+    "attendu": "jaune",
+    "genre": "evoque_passe",
+    "pourquoi": "La langue du dossier médical : un passé."
+  },
+  {
+    "phrase": "patient connu, ATCD de scarification, adressé pour avis",
+    "attendu": "jaune",
+    "genre": "evoque_passe",
+    "pourquoi": "Le sigle du dossier (ATCD) : un passé."
+  },
+  {
+    "phrase": "je suis la patiente du Dr Martin, j'ai envie de mourir",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "« la patiente » ne fait pas un courrier : jamais tu."
+  },
+  {
+    "phrase": "je suis pas vraiment là ce soir",
+    "attendu": "jaune",
+    "genre": "dereel",
+    "pourquoi": "Le « là » dit de soi."
+  },
+  {
+    "phrase": "depuis ce matin je crois ne pas être réel",
+    "attendu": "jaune",
+    "genre": "dereel",
+    "pourquoi": "Ne pas être réel."
+  },
+  {
+    "phrase": "quelques fois il m'arrivait d'avaler 7 anxios pour dormir",
+    "attendu": "pas rouge",
+    "pourquoi": "Un parcours raconté (« quelques fois ») ne marque pas le jour en rouge."
+  },
+  {
+    "phrase": "j'ai pas envie de me faire du mal",
+    "attendu": "rien",
+    "pourquoi": "La négation."
+  },
+  {
+    "phrase": "je n'ai plus envie de me faire du mal",
+    "attendu": "rien",
+    "pourquoi": "La négation, par « plus »."
+  },
+  {
+    "phrase": "pas d'envie de me faire du mal, juste fatigué",
+    "attendu": "rien",
+    "pourquoi": "La négation, par « pas d' »."
+  },
+  {
+    "phrase": "j'ai envie de me couper les cheveux",
+    "attendu": "rien",
+    "pourquoi": "Des cheveux."
+  },
+  {
+    "phrase": "mon père va me buter si je rate",
+    "attendu": "rien",
+    "pourquoi": "Hyperbole, comme « va me tuer »."
+  },
+  {
+    "phrase": "je vais me détruire le dos au boulot",
+    "attendu": "rien",
+    "pourquoi": "« me détruire » nu n'est pas une envie de se faire du mal."
+  },
+  {
+    "phrase": "j'ai coupé mes cheveux au rasoir",
+    "contexte": "grosse angoisse ce soir",
+    "attendu": "rien",
+    "pourquoi": "Un rasoir, un soir d'angoisse : toujours des cheveux — le piège des lames."
+  },
+  {
+    "phrase": "c'est pas vraiment la solution",
+    "attendu": "rien",
+    "pourquoi": "Pas de soi."
+  },
+  {
+    "phrase": "c'est pas vraiment la question",
+    "attendu": "rien",
+    "pourquoi": "Pas de soi."
+  },
+  {
+    "phrase": "on a roulé dans le brouillard ce matin",
+    "attendu": "rien",
+    "pourquoi": "La météo."
+  },
+  {
+    "phrase": "je suis pas vraiment là pour juger",
+    "attendu": "rien",
+    "pourquoi": "« pas vraiment là pour » : une façon de parler."
   }
 ]

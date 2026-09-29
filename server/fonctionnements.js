@@ -739,7 +739,9 @@ export function fonctionnements(userId = OWNER, opts = {}) {
 /* vont ensemble 5 fois sur 7, contre 40 sur 150. Un souvenir raconté   */
 /* (« évoqué ») n'est pas un jour à surveiller.                          */
 /* ------------------------------------------------------------------ */
-const GENRES_SURVEILLES = new Set(['blessure', 'surdose', 'suicide', 'moyen', 'substance', 'dereel']);
+/* « en main » est le seul rouge qui se suffit à lui-même : un jour qui n'a que
+   lui en était écarté. L'envie de se faire du mal, écrite, compte aussi. */
+const GENRES_SURVEILLES = new Set(['blessure', 'surdose', 'suicide', 'moyen', 'en_main', 'envie_mal', 'substance', 'dereel']);
 function heureDe(ts) {
   try { const s = new Date(ts).toLocaleTimeString('fr-FR', { timeZone: process.env.TZ || 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false }); const m = /^(\d{2}):(\d{2})/.exec(s); return m ? +m[1] + +m[2] / 60 : null; } catch { return null; }
 }

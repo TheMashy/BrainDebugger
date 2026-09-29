@@ -1161,7 +1161,8 @@ export const joursEcrits = (userId = OWNER) => db.prepare(
 
 export function messagesForDate(date, userId = OWNER) {
   const rows = db.prepare(
-    'SELECT id, ts, source, role, text, via FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
+    // `rangee` : un texte rangé au carnet reste lu, mais ne compte plus comme la journée.
+    'SELECT id, ts, source, role, text, via, COALESCE(rangee,0) AS rangee FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
   ).all(userId, date);
   return avecApercus(rows, userId);
 }

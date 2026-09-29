@@ -3685,6 +3685,7 @@ const veilleTitre = n => n === 'rouge'
    ce ne sont pas la même journée. Reflète server/veille.js (DIT). */
 const VEILLE_DIT = {
   suicide:  'le suicide a été évoqué',
+  envie_mal: 'l’envie de se faire du mal est écrite ce jour-là',
   moyen:    'quelque chose pour se faire mal était à portée',
   en_main:  'quelque chose pour se faire mal était dans ta main, en écrivant',
   dereel:   'un moment où le réel s’est décollé',
@@ -5404,7 +5405,7 @@ function schemasMarkup(schemas, { nu = false } = {}) {
  * dans lesquelles ces jours tombent : « la porte » a 4 de ses 6 journées
  * parmi eux. Des comptes, jamais des causes.
  * ================================================================== */
-const SURV_GENRE = { blessure: 'une blessure écrite', surdose: 'une surdose écrite', suicide: 'le suicide évoqué', moyen: 'un moyen à portée', en_main: 'un moyen dans la main', substance: 'un excès', dereel: 'le réel qui se décolle' };
+const SURV_GENRE = { blessure: 'une blessure écrite', surdose: 'une surdose écrite', suicide: 'le suicide évoqué', envie_mal: 'l’envie de se faire du mal', moyen: 'un moyen à portée', en_main: 'un moyen dans la main', substance: 'un excès', dereel: 'le réel qui se décolle' };
 function surveillesMarkup(C, schemas, { nu = false } = {}) {
   if (!C) return '';
   if (!C.n) return '';
@@ -6498,14 +6499,15 @@ const marqueMoment = m => {
    règle que le bandeau du jour : « le suicide a été évoqué » et « un objet
    dangereux était à portée » sont deux jaunes, et ce ne sont pas le même
    moment. */
-/* `VEILLE_DIT` a été écrit pour le bandeau d'une JOURNÉE : trois de ses phrases
+/* `VEILLE_DIT` a été écrit pour le bandeau d'une JOURNÉE : quatre de ses phrases
    finissent par « ce jour-là ». Posées telles quelles sur une ligne de 08:10,
    elles racontent la journée devant une phrase — et c'est justement ce qu'on ne
-   veut plus, puisque la marge dit maintenant CE passage-là. Seules ces trois-là
+   veut plus, puisque la marge dit maintenant CE passage-là. Seules ces quatre-là
    changent ; les autres ne situent rien et servent aux deux. */
 const VEILLE_DIT_ICI = {
   ...VEILLE_DIT,
   blessure:  'une blessure est écrite ici',
+  envie_mal: 'l’envie de se faire du mal est écrite ici',
   substance: 'un excès d’alcool ou une prise de substance est écrite ici',
   surdose:   'une surdose est écrite ici'
 };

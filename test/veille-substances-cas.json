@@ -188,5 +188,189 @@
     "phrase": "j'ai bu toute la soiree, j'ai arrete de compter les verres",
     "attendu": "jaune",
     "pourquoi": "« j'ai arrêté » annulait la phrase entière — mais on n'a arrêté que de compter, et l'excès est écrit juste avant."
+  },
+  {
+    "phrase": "là je viens de prendre 7 anxios",
+    "attendu": "rouge",
+    "pourquoi": "« anxios » est le mot de la personne pour son traitement, et « prendre » compte autant que « pris » : à partir de cinq, une surdose."
+  },
+  {
+    "phrase": "j'ai pris 9 anxios ce soir",
+    "attendu": "rouge",
+    "pourquoi": "Compte ≥ 5, récent."
+  },
+  {
+    "phrase": "ce soir j'ai repris 8 annxios",
+    "attendu": "rouge",
+    "pourquoi": "La faute de frappe (« annxios ») et « repris » comptent."
+  },
+  {
+    "phrase": "je me suis envoyé 10 oxazepam",
+    "attendu": "rouge",
+    "pourquoi": "« envoyé » est une prise."
+  },
+  {
+    "phrase": "j'ai pris trop d'anxios ce soir",
+    "attendu": "rouge",
+    "pourquoi": "« trop d' » vaut « trop de »."
+  },
+  {
+    "phrase": "ce soir j'ai pris 3 anxios au dîner puis 3 au coucher, soit 6 au total",
+    "attendu": "rouge",
+    "pourquoi": "Un total fait par morceaux est le même compte : six."
+  },
+  {
+    "phrase": "OD cette nuit",
+    "attendu": "rouge",
+    "pourquoi": "Le nom seul, avec un marqueur récent : reste rouge."
+  },
+  {
+    "phrase": "overdose hier soir, je sors des urgences",
+    "attendu": "rouge",
+    "pourquoi": "Le nom seul, « hier soir » : reste rouge."
+  },
+  {
+    "phrase": "je vais prendre toute la plaquette ce soir",
+    "attendu": "rouge",
+    "pourquoi": "Une intention AVEC « ce soir » : le moment où le 3114 sert. La garde `!recent` reste."
+  },
+  {
+    "phrase": "j'ai fait une overdose cette nuit",
+    "attendu": "rouge",
+    "pourquoi": "Régression : reste rouge."
+  },
+  {
+    "phrase": "j'aimerais avaler tous mes anxios et dormir",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "« tous mes » dans une envie : l'idée d'une surdose, pas une prise."
+  },
+  {
+    "phrase": "je pourrais prendre toute la plaquette",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "Conditionnel sans acte ni marqueur récent : jaune suicide, plus rouge."
+  },
+  {
+    "phrase": "une overdose ça doit être doux",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "Le nom seul, sans « j'ai », sans maintenant : l'idée."
+  },
+  {
+    "phrase": "quand je suis sobre je pense que je pourrais avaler toute la plaquette",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "« quand je suis sobre » n'est pas une négation de la prise : il effaçait l'idée."
+  },
+  {
+    "phrase": "il y a des gens qui disent qu'une overdose c'est doux",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "« il y a » n'est pas un tiers."
+  },
+  {
+    "phrase": "j'ai pris des anxios pour planer",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "Pour planer : hors de l'usage prescrit."
+  },
+  {
+    "phrase": "je suis défoncé par la beuh ce soir",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "« défoncé par la beuh » n'est pas l'hyperbole « fait défoncer par »."
+  },
+  {
+    "phrase": "la weed j'en prends trop",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "« prends trop » : le trop porte sur la prise."
+  },
+  {
+    "phrase": "8 joints aujourd'hui",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "À partir de trois."
+  },
+  {
+    "phrase": "j'ai pris 2 anxios",
+    "attendu": "rien",
+    "pourquoi": "Sa dose habituelle."
+  },
+  {
+    "phrase": "je prends mes anxios pour dormir",
+    "attendu": "rien",
+    "pourquoi": "Un anxio pour dormir est l'usage prescrit."
+  },
+  {
+    "phrase": "1 anxio pour me calmer avant le train",
+    "attendu": "rien",
+    "pourquoi": "Un anxio pour se calmer est l'usage prescrit."
+  },
+  {
+    "phrase": "faut que je rachète des anxios",
+    "attendu": "rien",
+    "pourquoi": "Un achat."
+  },
+  {
+    "phrase": "j'ai pris toutes mes gélules ce matin comme prévu",
+    "attendu": "rien",
+    "pourquoi": "« toutes mes », sans envie : le traitement pris."
+  },
+  {
+    "phrase": "j'ai racheté tous mes anxios à la pharmacie",
+    "attendu": "rien",
+    "pourquoi": "« tous mes », sans envie : un achat."
+  },
+  {
+    "phrase": "j'ai pris deux anxios et après j'étais trop content de voir mes potes",
+    "attendu": "rien",
+    "pourquoi": "« trop content » ne porte pas sur la prise."
+  },
+  {
+    "phrase": "j'ai pris mes 2 anxios, donc 5 heures de sommeil au moins",
+    "attendu": "rien",
+    "pourquoi": "Un total en heures n’est pas un compte de cachets."
+  },
+  {
+    "phrase": "je me suis fait défoncer par mon chef en réunion",
+    "attendu": "rien",
+    "pourquoi": "Hyperbole."
+  },
+  {
+    "phrase": "j'ai fumé 2 joints avec des amis",
+    "attendu": "rien",
+    "pourquoi": "« 2 joints » ne compte pas plus que « deux joints »."
+  },
+  {
+    "phrase": "je sais pas trop si la beuh me détend",
+    "attendu": "rien",
+    "pourquoi": "« je sais pas trop » ne porte pas sur la prise."
+  },
+  {
+    "phrase": "j'ai peur de retomber dans une période où je me défonce",
+    "attendu": "rien",
+    "pourquoi": "Une peur, pas une prise : « j'ai peur » ne vaut pas « j'ai pris »."
+  },
+  {
+    "phrase": "j'avais envie de dormir et j'ai tout avalé, toute la plaquette",
+    "attendu": "rouge",
+    "pourquoi": "Une envie écrite À CÔTÉ d'un acte : l'acte reste rouge."
+  },
+  {
+    "phrase": "toute la plaquette y est passée, envie de dormir",
+    "attendu": "rouge",
+    "pourquoi": "« y est passée » est un acte."
+  },
+  {
+    "phrase": "j'étais en overdose, les pompiers sont venus",
+    "attendu": "rouge",
+    "pourquoi": "Le nom seul, mais vécu (« en overdose », les pompiers)."
+  },
+  {
+    "phrase": "une overdose, je sors des urgences",
+    "attendu": "rouge",
+    "pourquoi": "Le nom seul, avec les urgences : vécu."
   }
 ]
