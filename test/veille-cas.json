@@ -652,5 +652,22 @@
     "phrase": "je suis pas vraiment là pour juger",
     "attendu": "rien",
     "pourquoi": "« pas vraiment là pour » : une façon de parler."
+  },
+  {
+    "phrase": "rien ne va plus envie de me faire du mal",
+    "attendu": "jaune",
+    "genre": "envie_mal",
+    "pourquoi": "Le « plus » est celui de la phrase d'avant, dictée sans virgule."
+  },
+  {
+    "phrase": "je sais pas envie de me faire du mal",
+    "attendu": "jaune",
+    "genre": "envie_mal",
+    "pourquoi": "Le « pas » ne porte pas sur l'envie."
+  },
+  {
+    "phrase": "je n'ai jamais eu envie de me faire du mal",
+    "attendu": "rien",
+    "pourquoi": "Négation de l'envie."
   }
 ]

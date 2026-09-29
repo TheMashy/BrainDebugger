@@ -62,7 +62,7 @@ export const SENS_VERDICT = {
 };
 
 import { demanderOutil } from './chat.js';
-import { auPasse } from './veille.js';
+import { auPasse, plafondCourrier } from './veille.js';
 
 export const CONSIGNE = `Tu relis UN passage d'un journal intime qu'un détecteur de mots a signalé.
 
@@ -187,7 +187,7 @@ export function passagesDuJour(date, messages, niveau, contexteDuJour = null) {
   const ctx = contexteDuJour ?? msgs.filter(m => !m.rangee).map(m => m.text).join(' ');
   const out = [];
   msgs.forEach((m, i) => {
-    let r = niveau(m.text, { contexteDuJour: ctx, aujourdhui: date });
+    let r = plafondCourrier(m.text, niveau(m.text, { contexteDuJour: ctx, aujourdhui: date }), date);
     if (m.rangee) r = auPasse(r);
     if (!r?.niveau) return;
     out.push({

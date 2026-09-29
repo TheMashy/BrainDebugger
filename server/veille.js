@@ -118,7 +118,10 @@ const HYPERBOLE = /\b(?:va|vont|veut|veulent|voudrait|voudraient|pourrait|pourra
  * aussi : « je vais me détruire le dos au boulot ». Se couper les cheveux, ou
  * du monde, n'est pas se couper.
  * ------------------------------------------------------------------ */
-const ENVIE_MAL = /(?<!(?:pas|plus|jamais|sans) (?:d )?)\b(?:envie de me faire (?:du )?mal|envie de me (?:blesser|scarifier)|envie de me couper(?! (?:les |des |une |un |la |le |du |de |d |mes |ma |mon )?(?:cheveux|frange|meche|ongles|barbe|pointes|monde|autres|tout|parole|pain))|m auto detruire)\b/;
+/* La négation qui gouverne l'envie, pas n'importe quel « pas » posé devant :
+   dans une dictée sans virgule, « rien ne va plus envie de me faire du mal »
+   et « je sais pas envie de me faire du mal » étaient effacés. */
+const ENVIE_MAL = /(?<!\b(?:ai|avais|a|as|n ai|n avais|meme) (?:pas|plus|jamais) (?:eu )?(?:d )?)(?<!\b(?:pas|sans) d )(?<!\bsans )\b(?:envie de me faire (?:du )?mal|envie de me (?:blesser|scarifier)|envie de me couper(?! (?:les |des |une |un |la |le |du |de |d |mes |ma |mon )?(?:cheveux|frange|meche|ongles|barbe|pointes|monde|autres|tout|parole|pain))|m auto detruire)\b/;
 
 /* ---------------------------------------------------------------------
  * JAUNE AUSSI : UN MOYEN À PORTÉE.
@@ -223,6 +226,10 @@ const SURDOSE = new RegExp([
   `\\btrop (?:de|d) (?:cachets|comprimes|medicaments|medocs|gelules|pilules|xanax|lexomil|valium|doliprane|paracetamol|dafalgan|codeine|tramadol|${ANXIO})\\b`,
   '\\b(?:toute|tout) (?:la|ma|une|le|mon) (?:boite|plaquette|tube|flacon|stock|reserve)\\b', '\\b(?:la|ma) (?:boite|plaquette) (?:entiere|complete)\\b',
   '\\btous mes (?:cachets|comprimes|medicaments|medocs)\\b',
+  /* « j'ai avalé tous mes anxios » ne donnait RIEN quand l'envie de le faire
+     donnait un jaune. Avaler, gober, vider : pas « pris toutes mes gélules
+     comme prévu ». */
+  `\\b(?:avale|gobe|englouti|ingere|vide) tou[ts]e?s? mes ${UNITE_MEDOC}\\b`,
   /* « j'ai avalé une boîte de cachets » n'avait ni « toute » ni chiffre : la
      tentative racontée sans le mot passait entière à travers. « avalé » et
      « gobé » ne se disent pas d'une boîte qu'on achète ; « pris » si, donc il
@@ -235,6 +242,9 @@ const SURDOSE = new RegExp([
   '\\bmelang\\w* .{0,25}\\b(?:alcool|vodka|whisky|rhum|gin|biere|vin)\\b.{0,25}\\b(?:cachets|comprimes|medicaments|medocs|xanax|lexomil|valium|codeine|tramadol|benzo)\\b',
   '\\bmelang\\w* .{0,25}\\b(?:cachets|comprimes|medicaments|medocs|xanax|lexomil|valium|codeine|tramadol|benzo)\\b.{0,25}\\b(?:alcool|vodka|whisky|rhum|gin|biere|vin)\\b',
 ].join('|'));
+const SURDOSE_TOUTES = new RegExp(SURDOSE.source, 'g');
+/* La règle du compte : « pris 8 xanax ». */
+const COMPTE = new RegExp(`^(?:avale|pris|prendre|prends|repris|gobe|ingere|envoye) ${NB_CACHETS} `);
 /* L'alcool en excès : ce n'est pas « bu », c'est « trop bu ». */
 const ALCOOL_EXCES = /\b(?:trop|beaucoup trop|bien trop|enormement) bu\b|\bbu (?:trop|toute la (?:soiree|nuit|journee|bouteille)|jusqu a (?:vomir|tomber|plus savoir|l oubli|pas savoir))\b|\bbourre(?:e|es)?\b|\bivre(?: morte?)?\b|\b(?:une |grosse |la )?cuite\b|\bblack ?out\b|\btrou noir\b|\bgueule de bois\b|\b(?:fini|vide|descendu|siffle) (?:la|une|toute la) bouteille\b(?! (?:de|d) (?:vinaigre|shampoing|lessive|gel|huile|sirop|jus|lait|eau|soda|liquide|savon))|\bune bouteille (?:entiere|de (?:vodka|whisky|rhum|gin|vin))\b|\bbinge\b|\bdefonce(?:e|es)?\b|\btorche(?:e|es)?\b|\bcomplet(?:ement)? raide\b|\bvomi .{0,20}\balcool\b|\b(?:six|sept|huit|dix|\d+) (?:verres|bieres|shots|pintes)\b/;
 /* Les drogues : un mot ne suffit pas, il faut la prise (« j'ai pris », « sniffé », « sous »). */
@@ -254,7 +264,7 @@ const MEDOC = /\b(?:xanax|lexomil|valium|temesta|seresta|benzo|benzos|zolpidem|s
  * jour « substance ». Il doit porter sur la prise.
  * Et « 2 joints » ne compte pas plus que « deux joints » : à partir de trois.
  */
-const EXCES = /\btrop (?:fume|bu|pris|de|d)\b|\b(?:fume|pris|prends|bois|consomme)(?: beaucoup| bien)? trop\b|\btoute la (?:journee|nuit|soiree)\b|\benchaine\b|\bnon stop\b|\bsans arret\b|\b(?:trois|quatre|cinq|six|sept|huit|dix|[3-9]|\d{2,}) (?:joints|bedos|pets|cachets|comprimes|xanax|lexomil)\b|\bplus que (?:prevu|d habitude|la dose|prescrit)\b|\bpas la bonne dose\b|\bhors dose\b|\bsans ordonnance\b|\bpas prescrit\b|\bpas a moi\b|\bde ma mere\b|\bde mon pere\b|\bpour (?:dormir|planer|oublier|me calmer|tenir|m assommer|ne plus rien sentir)\b|\bavec de l alcool\b|\bavec l alcool\b/;
+const EXCES = /\btrop (?:fume|bu|pris|de|d)\b|\b(?:fume|pris|prends|bois|consomme)(?: beaucoup| bien)? trop\b|\b(?:beaucoup|largement) trop\b|\b(?:bien|vraiment) trop(?=\s*(?:$|[,.!?…]))|\btoute la (?:journee|nuit|soiree)\b|\benchaine\b|\bnon stop\b|\bsans arret\b|\b(?:trois|quatre|cinq|six|sept|huit|dix|[3-9]|\d{2,}) (?:joints|bedos|pets|cachets|comprimes|xanax|lexomil)\b|\bplus que (?:prevu|d habitude|la dose|prescrit)\b|\bpas la bonne dose\b|\bhors dose\b|\bsans ordonnance\b|\bpas prescrit\b|\bpas a moi\b|\bde ma mere\b|\bde mon pere\b|\bpour (?:dormir|planer|oublier|me calmer|tenir|m assommer|ne plus rien sentir)\b|\bavec de l alcool\b|\bavec l alcool\b/;
 /* Un anxio « pour dormir », « pour me calmer », « pour tenir » : c'est l'usage
    prescrit en appoint, pas un excès. Le même mot garde son sens pour le reste. */
 const ANXIO_RE = new RegExp(`^(?:${ANXIO})$`);
@@ -262,8 +272,12 @@ const USAGE_ANXIO = /\bpour (?:dormir|me calmer|tenir)\b/g;
 /* Ce qui ressemble à un excès et n'en est pas. « je me suis fait défoncer par
    mon chef » est une réunion, pas une prise — sauf si c'est par la weed. */
 const SUBSTANCE_HYPERBOLE = /\b(?:fait|fais|faire) defonce(?:e|es|r)? par\b(?! (?:la |le |les |l |du |des )?(?:weed|beuh|shit|joints?|alcool|vodka|cachets|medocs|an+xios?|drogue|coke|md|ket)\b)|\bivre de (?:joie|bonheur|rage|colere|fatigue)\b|\bbourre(?:e|es)? (?:de|d) (?!(?:vodka|whisky|rhum|gin|biere|bieres|vin|alcool|champagne|pastis|shots)\b)\w+|\bdefonce(?:e)? (?:de fatigue|par le sport|apres le sport|par la salle|par la seance)\b|\bcuite au four\b|\bcuite a la vapeur\b|\bune drogue douce\b|\bc est ma drogue\b|\bcomme une drogue\b|\bdrogue (?:du|de la|au) (?:travail|boulot|sport|sucre|serie|jeu)\b|\bcoke (?:zero|light|cola)\b|\bcoca\b|\bshit(?:ty)?\b(?= (?:day|show|storm))|\btaz(?:manie)?\b/g;
-/* « il y a » n'est personne : « il y a des gens qui disent qu'une overdose… » était effacé. */
-const SUBSTANCE_TIERS = /\b(?:il(?! y a)|elle|ils|elles|on|mon frere|ma soeur|mon pere|ma mere|mon pote|ma pote|mon ami|mon amie|ma copine|mon copain|mon mec|ma meuf|mon ex|mon coloc|ma coloc|les gens|tout le monde|quelqu un|un mec|une fille|mon oncle|ma tante|mon cousin|ma cousine|les autres|mes potes|mes amis|le voisin|la voisine)\b[^,;.]{0,30}\b(?:etait|etaient|est|sont|a |ont |s est|se sont|avait|avaient|buvait|buvaient|prenait|prenaient|prend|boit)\b/;
+/* « il y a » n'est personne : « il y a des gens qui disent qu'une overdose… » était effacé.
+   Mais « il y a des gens qui prennent toute la plaquette » reste l'acte des
+   autres : « des gens », « certains » qui prennent, avalent, font. Pour eux,
+   seuls les verbes d'une prise — « des gens qui disent qu'une overdose c'est
+   doux » reste l'idée, et reste un jaune. */
+const SUBSTANCE_TIERS = /\b(?:il(?! y a)|elle|ils|elles|on|mon frere|ma soeur|mon pere|ma mere|mon pote|ma pote|mon ami|mon amie|ma copine|mon copain|mon mec|ma meuf|mon ex|mon coloc|ma coloc|les gens|tout le monde|quelqu un|un mec|une fille|mon oncle|ma tante|mon cousin|ma cousine|les autres|mes potes|mes amis|le voisin|la voisine)\b[^,;.]{0,30}\b(?:etait|etaient|est|sont|a |ont |s est|se sont|avait|avaient|buvait|buvaient|prenait|prenaient|prend|boit|prennent|avalent|boivent|font)\b|\b(?:des gens|certains|certaines personnes|beaucoup de gens)\b[^,;.]{0,30}\b(?:prennent|avalent|boivent|font|prenaient|avalaient|buvaient|faisaient|ont pris|ont avale|ont fait)\b/;
 const SUBSTANCE_NEGATION = /\b(?:ne|n) (?:me suis )?(?:ai|suis|avais|etais|bois|prends|touche|fume) (?:pas|plus|jamais|rien)\b|\bpas (?:bu|pris|touche|fume|sniffe)\b|\bjamais (?:bu|pris|touche|fume|sniffe)\b|\bplus (?:bu|pris|touche|fume) depuis\b|\bsans (?:boire|alcool|rien prendre|toucher)\b|(?<!(?:moi|quand je suis|si je suis|quand j etais) )\bsobre\b|\barrete de (?:boire|fumer|prendre)\b|\bj ai arrete\b(?! de (?:compter|reflechir|y penser|me justifier|me plaindre|chercher|lutter))|\bzero alcool\b|\bpas une goutte\b|\bpas un verre\b/;
 const SUBSTANCE_INTENTION = /\benvie de (?:boire|me bourrer|me defoncer|prendre|reprendre|replonger|me mettre une cuite|sniffer)\b|\bj aimerais (?:boire|prendre|reprendre|me defoncer)\b|\bje vais (?:boire|me bourrer|me defoncer|prendre|reprendre|replonger)\b|\bsi je (?:bois|prends|reprends)\b|\bpour (?:ne pas|pas) (?:boire|reprendre|replonger|craquer)\b|\bpeur de (?:vraiment )?(?:tomber|retomber|finir|devenir)\b/;
 /*
@@ -280,24 +294,59 @@ const INTENTION_SURDOSE = new RegExp(SUBSTANCE_INTENTION.source
 /* L'acte, lui, reste un rouge même quand une envie est écrite à côté : « j'avais
    envie de dormir et j'ai tout avalé ». */
 const ACTE_SURDOSE = /\bje viens de\b|\bj (?:en )?ai (?:\w+ ){0,2}(?:pris|avale|gobe|ingere|englouti|bouffe|fini|vide)\b|\bje me suis (?:\w+ ){0,2}(?:pris|envoye|enfile|avale)\b|\by (?:est|sont) passee?s?\b/;
+/*
+ * L'ENVIE DOIT PORTER SUR LA SURDOSE ELLE-MÊME.
+ *
+ * « envie de » tout nu rétrogradait n'importe quelle surdose de la proposition :
+ * « envie de dormir alors pris 8 xanax », « envie de mourir, toute la boîte
+ * avalée » passaient du rouge au jaune — l'envie était écrite, l'acte aussi, et
+ * c'est l'envie qui l'emportait. L'idée ne compte que si le verbe qui mène à la
+ * surdose est à l'infinitif ou au conditionnel, juste devant elle (« je
+ * pourrais prendre toute la plaquette »). Et un acte écrit sans « j'ai » — un
+ * participe (« toute la plaquette avalée »), un passé en tête (« pris 8
+ * xanax ») — reste un acte.
+ */
+const VERS_SURDOSE = /\b(?:prendre|reprendre|avaler|gober|ingerer|engloutir|bouffer|faire|envoyer|enfiler|prendrais|avalerais|goberais|ferais|pourrais)\b/;
+const SURDOSE_AU_PASSE = /^(?:avale|avalee|pris|repris|gobe|ingere|envoye)\b/;
+const PARTICIPE_APRES = /^\s*(?:\S+\s+){0,2}(?:avalee?s?|prises?|gobee?s?|ingeree?s?|englouti(?:e|es|s)?|passee?s?|videe?s?|finie?s?)\b/;
+const envieDeSurdose = (q, m) => {
+  const avant = q.slice(0, m.index).trim().split(' ').slice(-5).join(' ');
+  return VERS_SURDOSE.test(avant) || /^prendre\b/.test(m[0]);   // « envie de prendre 8 xanax »
+};
+const acteDeSurdose = (q, m) => SURDOSE_AU_PASSE.test(m[0]) || PARTICIPE_APRES.test(q.slice(m.index + m[0].length));
 /* « tous mes anxios », seul, se rachète et se prend comme prévu ; dans une
-   envie, c'est la même idée que la plaquette entière. */
+   envie, ou un « je vais », c'est la même idée que la plaquette entière. */
 const TOUS_MES_MEDOCS = new RegExp(`\\btou[ts]e?s? mes ${UNITE_MEDOC}\\b`);
-const ENVIE_TOUS_MES = /\benvie d(?:e|u)\b|\bj aimerais\b|\bje voudrais\b|\bje pourrais\b|\bje prendrais\b|\bm empecherait\b/;
+const ENVIE_TOUS_MES = new RegExp(INTENTION_SURDOSE.source + '|\\benvie du\\b|\\bje veux\\b|\\bje vais\\b');
 const AVALER = /\b(?:prendre|prendrais|avaler|gober|ingerer|engloutir|bouffer|m envoyer|m enfiler|me prendre)\b/;
+const AVALER_TOUT = /\b(?:avaler|gober|ingerer|engloutir|bouffer|m envoyer|m enfiler)\b/;
+/*
+ * LA DOSE PRESCRITE N'EST PAS UNE SURDOSE.
+ *
+ * Avec « prends » et les anxios dans le compte, « je prends 5 anxios par jour »
+ * devenait un rouge — et la personne en prend tous les jours : un rouge tous
+ * les soirs est une alerte qu'on finit par éteindre. Un compte dit avec sa
+ * posologie reste écrit (jaune « substance »), pas crié. « pas prescrit »,
+ * « sans ordonnance » disent le contraire, et restent dehors.
+ */
+const DOSE_PRESCRITE = /\bpar (?:jour|nuit)\b|\bchaque (?:jour|soir|matin|nuit)\b|\bcomme (?:prescrit|prevu|d habitude)\b|(?<!\b(?:pas|sans|hors|que|non) )\bprescrits?\b|(?<!\b(?:sans|hors) )\bordonnance\b/;
 /* Le compte fait par morceaux — « 2 le matin, 2 à midi, 2 le soir, donc 6 » —
    est le même compte que « j'en ai pris 6 » : à partir de cinq, une surdose. Il
-   faut la prise d'un médicament dans la même proposition, et que le total ne
-   soit pas des heures, des jours ou des euros. */
+   faut la prise d'un médicament dans la même proposition, et que le nombre soit
+   bien celui des cachets : suivi de la fin de la proposition, d'un cachet, ou
+   d'un « au total », « ce soir ». « donc 5 personnes m'ont appelé », « au total
+   6 cette semaine » ne comptent pas des cachets. */
 const PRISE_MEDOC = new RegExp(`\\b(?:pris|avale|gobe|prendre|prends|repris|envoye)\\b[^.!?]{0,20}\\b${UNITE_MEDOC}\\b`);
-const TOTAL_PRIS = new RegExp(`\\b(?:donc|soit|en tout|au total)\\s+${NB_CACHETS}\\b(?! ?(?:h|heures?|min|minutes?|jours?|nuits?|semaines?|mois|ans?|euros?|mg|ml|g|kg|fois|km)\\b)(?!\\s*[%€])`);
+const TOTAL_PRIS = new RegExp(`\\b(?:donc|soit|en tout|au total)\\s+${NB_CACHETS}(?=(?:\\s+(?:je crois|je pense|il me semble|environ))?\\s*(?:$|[,.!?…])|\\s+(?:${UNITE_MEDOC}|au total|en tout|dans la journee|ce soir|cette nuit|aujourd hui|ajd|auj)\\b)`);
 /* Le nom seul, sans « j'ai » ni « je suis » devant : « une overdose ça doit
    être doux » parle de l'idée, pas d'une nuit aux urgences. */
 const SURDOSE_NOM = /^(?:overdose|surdose|surdosage|od)$/;
 /* … sauf si ce qui l'entoure dit la nuit elle-même : « j'étais en overdose »,
-   « mon overdose », « une overdose, je sors des urgences ». */
+   « mon overdose », « une overdose, je sors des urgences » — ou la détresse en
+   cours : « aidez-moi overdose », « je suis à deux doigts de l'overdose ». */
 const SURDOSE_VECUE_AVANT = /\b(?:j ai|j avais|je suis|j etais|me suis|m etais|mon|ma|fait|fais|faire|frole|failli)\b|\ben\s*$/;
-const SURDOSE_VECUE = /\b(?:urgences?|samu|pompiers|hopital|hosto|lavage|reanimation|rea|centre antipoison)\b/;
+const SURDOSE_VECUE_LOIN = /\b(?:j ai|je suis|me suis)\b/;   // à 40 signes : « je suis à deux doigts de l'overdose »
+const SURDOSE_VECUE = /\b(?:urgences?|samu|pompiers|hopital|hosto|lavage|reanimation|rea|centre antipoison)\b|\baide[zr]? moi\b|\ba l aide\b|\bau secours\b|\bdeux doigts\b|\ben train d(?:e)?\b|\bje me sens\b|\bje sens\b|\bje vais (?:mourir|y passer)\b|\bappele[rz]? (?:le )?(?:15|112|samu)\b/;
 
 /*
  * LES GARDES DES SUBSTANCES, PARTAGÉES.
@@ -532,12 +581,32 @@ function autourDe(q, i, n, mots = 10) {
  * reconnaît le courrier qu'à ses formules entre confrères, jamais à « le
  * patient » : « je suis la patiente du Dr X, j'ai envie de mourir » reste un
  * jaune « suicide ».
+ *
+ * LE COURRIER NE PLAFONNE QUE LA JOURNÉE, ET PAS CE QUE LA PERSONNE DIT D'ELLE.
+ * Posé dans `niveauDuTexte`, il plafonnait tout le message, jusque dans le chat
+ * en direct : « Cher confrère, je vous adresse ce patient. Et moi ce soir j'ai
+ * avalé 10 cachets » ne donnait plus de réponse de crise. Il ne s'applique donc
+ * qu'à ce qui lit la journée (`veilleDuJour`, `passagesDuJour`, comme le rangé ;
+ * les moments de `journee.js` et l'heure des jours surveillés, pour ne jamais
+ * être plus graves que le bandeau), et seulement aux motifs dont la phrase n'a
+ * pas un « je » ET un maintenant.
  */
 const COURRIER = /\bcher(?:e)? (?:confrere|cons(?:oe|œ)ur)\b|\bconfraternellement\b/;
 export function auPasse(r) {
   if (!r?.niveau) return r;
   const { mot, extrait } = r.motifs[0];
   return { niveau: 'jaune', motifs: [{ genre: 'evoque_passe', niveau: 'jaune', mot, extrait }], motif: mot, extrait };
+}
+const PREMIERE_PERSONNE = /\b(?:je|j|me|m|moi)\b/;
+export function plafondCourrier(texte, r, aujourdhui = null) {
+  if (!r?.niveau || !COURRIER.test(norm(texte))) return r;
+  const vecu = mo => { const n = norm(mo.extrait); return PREMIERE_PERSONNE.test(n) && estRecent(n, aujourdhui); };
+  const garde = r.motifs.filter(vecu), bas = r.motifs.filter(mo => !vecu(mo));
+  if (!bas.length) return r;
+  const motifs = [...garde];
+  if (!garde.some(mo => mo.genre === 'evoque_passe')) motifs.push(auPasse({ niveau: 'jaune', motifs: bas }).motifs[0]);
+  motifs.sort((a, b) => (b.niveau === 'rouge' ? 1 : 0) - (a.niveau === 'rouge' ? 1 : 0));
+  return { niveau: motifs.some(mo => mo.niveau === 'rouge') ? 'rouge' : 'jaune', motifs, motif: motifs[0].mot, extrait: motifs[0].extrait };
 }
 
 /**
@@ -611,23 +680,38 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
        * l'idée d'avaler la plaquette. La négation et le tiers ne comptent donc,
        * pour une surdose, qu'à dix mots d'elle.
        */
-      const surdose = SURDOSE.exec(q) ?? (PRISE_MEDOC.test(q) ? TOTAL_PRIS.exec(q) : null);
-      if (surdose) {
+      /* Chaque surdose de la proposition est lue, et la plus grave l'emporte :
+         « overdose, j'ai avalé toute la plaquette » ne se jugeait que sur le
+         premier mot, un nom nu — et l'acte écrit juste après était perdu. */
+      const lire = (surdose, total) => {
         const autour = autourDe(q, surdose.index, surdose[0].length);
-        if (!tiers(autour) && !SUBSTANCE_NEGATION.test(autour)) {
-          const mot = surdose[0];
-          if (INFINITIF_QUESTION.test(p.trim()) && !recent && !/\bj ai\b|\bje me suis\b/.test(q)) { poser('evoque_passe', 'jaune', mot, p); continue; }
-          if (INTENTION_SURDOSE.test(q) && !ACTE_SURDOSE.test(q) && !recent) { poser('suicide', 'jaune', mot, p); continue; }
-          if (passe && !recent) { poser('evoque_passe', 'jaune', mot, p); continue; }
-          if (SURDOSE_NOM.test(mot) && !recent && !SURDOSE_VECUE.test(q)
-              && !SURDOSE_VECUE_AVANT.test(q.slice(Math.max(0, surdose.index - 25), surdose.index))) { poser('suicide', 'jaune', mot, p); continue; }
-          poser('surdose', 'rouge', mot, p);
-          continue;
-        }
-      }
+        if (tiers(autour) || SUBSTANCE_NEGATION.test(autour)) return null;
+        const mot = surdose[0], avant = n => q.slice(Math.max(0, surdose.index - n), surdose.index);
+        if (INFINITIF_QUESTION.test(p.trim()) && !recent && !/\bj ai\b|\bje me suis\b/.test(q)) return ['evoque_passe', 'jaune', mot];
+        const acte = ACTE_SURDOSE.test(q) || acteDeSurdose(q, surdose);
+        if (INTENTION_SURDOSE.test(q) && envieDeSurdose(q, surdose) && !acte && !recent) return ['suicide', 'jaune', mot];
+        if (passe && !recent) return ['evoque_passe', 'jaune', mot];
+        if (SURDOSE_NOM.test(mot) && !recent && !ACTE_SURDOSE.test(autour) && !SURDOSE_VECUE.test(q)
+            && !SURDOSE_VECUE_AVANT.test(avant(25)) && !SURDOSE_VECUE_LOIN.test(avant(40))) return ['suicide', 'jaune', mot];
+        if ((total || COMPTE.test(mot)) && DOSE_PRESCRITE.test(autourDe(q, surdose.index, mot.length, 5))) return ['substance', 'jaune', mot];
+        return ['surdose', 'rouge', mot];
+      };
+      const lus = [...q.matchAll(SURDOSE_TOUTES)].map(s => lire(s, false));
+      const total = PRISE_MEDOC.test(q) ? TOTAL_PRIS.exec(q) : null;
+      if (total) lus.push(lire(total, true));
+      const pire = lus.find(l => l?.[1] === 'rouge') ?? lus.find(Boolean);
+      if (pire) { poser(pire[0], pire[1], pire[2], p); continue; }
       if (tiers(q)) continue;
       if (SUBSTANCE_NEGATION.test(q)) continue;
-      if (TOUS_MES_MEDOCS.test(q) && ENVIE_TOUS_MES.test(q) && AVALER.test(q) && !ACTE_SURDOSE.test(q)) { poser('suicide', 'jaune', TOUS_MES_MEDOCS.exec(q)[0], p); continue; }
+      /* « tous mes anxios » dans une envie, un « je vais » : l'idée (jaune). Un
+         « je vais » décidé, avec « ce soir », « là » et un verbe d'avalage, c'est
+         le moment (rouge) ; un souhait reste un souhait, même près d'un « à
+         partir de maintenant » ; avec sa posologie, c'est le traitement (rien). */
+      if (TOUS_MES_MEDOCS.test(q) && ENVIE_TOUS_MES.test(q) && AVALER.test(q) && !ACTE_SURDOSE.test(q) && !DOSE_PRESCRITE.test(q)) {
+        const mot = TOUS_MES_MEDOCS.exec(q)[0];
+        if (recent && AVALER_TOUT.test(q) && /\bje (?:vais|veux)\b/.test(q)) poser('surdose', 'rouge', mot, p); else poser('suicide', 'jaune', mot, p);
+        continue;
+      }
       let exces = null;
       if (ALCOOL_EXCES.test(q)) exces = ALCOOL_EXCES.exec(q)[0];
       else if (DROGUE.test(q) && PRISE.test(q)) exces = DROGUE.exec(q)[0];
@@ -675,8 +759,7 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
   const niveau = motifs.some(m => m.niveau === 'rouge') ? 'rouge' : 'jaune';
   // Le motif le plus grave d'abord : c'est celui qu'on lit si on n'en lit qu'un.
   motifs.sort((a, b) => (b.niveau === 'rouge' ? 1 : 0) - (a.niveau === 'rouge' ? 1 : 0));
-  const r = { niveau, motifs, motif: motifs[0].mot, extrait: motifs[0].extrait };
-  return COURRIER.test(t) ? auPasse(r) : r;
+  return { niveau, motifs, motif: motifs[0].mot, extrait: motifs[0].extrait };
 }
 
 /**
@@ -702,7 +785,7 @@ export function veilleDuJour(date, userId, { messages = null } = {}) {
   const tous = [];
   let passages = 0;
   for (const m of msgs) {
-    let r = niveauDuTexte(m.text, { contexteDuJour, aujourdhui: date });
+    let r = plafondCourrier(m.text, niveauDuTexte(m.text, { contexteDuJour, aujourdhui: date }), date);
     if (m.rangee) r = auPasse(r);          // lu quand même, mais au plus un jaune « évoqué »
     if (!r.niveau) continue;
     passages++;

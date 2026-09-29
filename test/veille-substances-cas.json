@@ -372,5 +372,136 @@
     "phrase": "une overdose, je sors des urgences",
     "attendu": "rouge",
     "pourquoi": "Le nom seul, avec les urgences : vécu."
+  },
+  {
+    "phrase": "envie de mourir, toute la boîte avalée",
+    "attendu": "rouge",
+    "pourquoi": "L'envie porte sur mourir, l'acte est au participe : un acte, pas une idée."
+  },
+  {
+    "phrase": "envie de mourir toute la boîte avalée",
+    "attendu": "rouge",
+    "pourquoi": "La même, dictée sans virgule."
+  },
+  {
+    "phrase": "je voudrais dormir, toute la plaquette avalée",
+    "attendu": "rouge",
+    "pourquoi": "« je voudrais » porte sur dormir ; la plaquette est avalée."
+  },
+  {
+    "phrase": "envie de dormir alors pris 8 xanax",
+    "attendu": "rouge",
+    "pourquoi": "Un passé en tête (« pris 8 xanax ») est un acte, même sans « j'ai »."
+  },
+  {
+    "phrase": "overdose, j'ai avalé toute la plaquette",
+    "attendu": "rouge",
+    "pourquoi": "Le nom nu vient d'abord, l'acte ensuite : la plus grave des deux l'emporte."
+  },
+  {
+    "phrase": "une od je crois, j'ai pris 12 xanax",
+    "attendu": "rouge",
+    "pourquoi": "Idem : l'acte écrit après le nom n'est pas perdu."
+  },
+  {
+    "phrase": "aidez moi overdose",
+    "attendu": "rouge",
+    "pourquoi": "Un appel à l'aide : la détresse en cours."
+  },
+  {
+    "phrase": "je suis à deux doigts de l'overdose",
+    "attendu": "rouge",
+    "pourquoi": "« à deux doigts » : maintenant, pas une idée."
+  },
+  {
+    "phrase": "overdose de xanax je me sens partir",
+    "attendu": "rouge",
+    "pourquoi": "« je me sens partir » : en cours."
+  },
+  {
+    "phrase": "j'ai avalé tous mes anxios",
+    "attendu": "rouge",
+    "pourquoi": "L'acte, avec un verbe d'avalage."
+  },
+  {
+    "phrase": "je vais avaler tous mes anxios ce soir",
+    "attendu": "rouge",
+    "pourquoi": "« je vais » + « ce soir » : le moment où le 3114 sert."
+  },
+  {
+    "phrase": "je suis pas bien, je vais prendre tous mes anxios",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "« je vais prendre », sans maintenant : l'idée, au moins un jaune."
+  },
+  {
+    "phrase": "je vais prendre tous mes anxios comme prévu",
+    "attendu": "rien",
+    "pourquoi": "La posologie : le traitement."
+  },
+  {
+    "phrase": "j'ai envie de tout avaler, toute la plaquette",
+    "attendu": "jaune",
+    "genre": "suicide",
+    "pourquoi": "L'infinitif porte sur la plaquette, sans acte : l'idée."
+  },
+  {
+    "phrase": "j'ai pris 8 xanax, pas prescrits",
+    "attendu": "rouge",
+    "pourquoi": "« pas prescrits » n'est pas une posologie."
+  },
+  {
+    "phrase": "je prends 5 anxios par jour",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "Un compte avec sa posologie : écrit, pas crié."
+  },
+  {
+    "phrase": "je dois prendre 6 anxios par jour",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "Idem."
+  },
+  {
+    "phrase": "j'ai pris 5 anxios comme prescrit",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "Idem."
+  },
+  {
+    "phrase": "j'ai pris 2 anxios le matin 2 le midi 2 le soir donc 6 je crois",
+    "attendu": "rouge",
+    "pourquoi": "Le total par morceaux, avec un « je crois »."
+  },
+  {
+    "phrase": "j'ai pris un anxio donc 5 personnes m'ont appelé",
+    "attendu": "rien",
+    "pourquoi": "Le nombre compte des personnes, pas des cachets."
+  },
+  {
+    "phrase": "j'ai pris un anxio, soit 5 de moins que prévu",
+    "attendu": "rien",
+    "pourquoi": "« de moins » : pas un compte de cachets."
+  },
+  {
+    "phrase": "j'ai pris mon anxio au total 6 cette semaine",
+    "attendu": "rien",
+    "pourquoi": "Un total sur la semaine."
+  },
+  {
+    "phrase": "j'ai pris mes anxios donc 7 ce mois ci",
+    "attendu": "rien",
+    "pourquoi": "Un total sur le mois."
+  },
+  {
+    "phrase": "il y a des gens qui prennent toute la plaquette",
+    "attendu": "rien",
+    "pourquoi": "Des gens qui prennent : un tiers."
+  },
+  {
+    "phrase": "j'ai pris des xanax beaucoup trop",
+    "attendu": "jaune",
+    "genre": "substance",
+    "pourquoi": "« beaucoup trop » après l'objet."
   }
 ]

@@ -21,7 +21,7 @@ import { themeDe, THEMES, DEFAUT as DEFAUT_THEME } from '../web/reperes.js';
  * aucun cycle. L'inverse en ferait un, et c'est pour ça que le niveau d'un
  * moment se calcule ici plutôt que là-bas.
  */
-import { niveauDuTexte } from './veille.js';
+import { niveauDuTexte, plafondCourrier } from './veille.js';
 import { poids, CREUX } from './lexique.js';
 import { zoneCourante } from './temps.js';
 
@@ -299,7 +299,7 @@ function veilleDuMoment(textes, date) {
   const contexteDuJour = textes.join(' ');
   const motifs = [];
   for (const t of textes) {
-    const r = niveauDuTexte(t, { contexteDuJour, aujourdhui: date });
+    const r = plafondCourrier(t, niveauDuTexte(t, { contexteDuJour, aujourdhui: date }), date);   // jamais plus grave que le bandeau
     if (!r.niveau) continue;
     for (const m of r.motifs) if (!motifs.some(x => x.genre === m.genre)) motifs.push(m);
   }

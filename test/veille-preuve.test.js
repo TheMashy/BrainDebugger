@@ -94,9 +94,29 @@ test('UN RANGÉ NE FAIT PAS LE CONTEXTE DU JOUR : il ne fait pas basculer une co
 });
 
 test('UN COURRIER ENTRE SOIGNANTS, collé sans être rangé : au plus un jaune « évoqué », jamais tu', () => {
-  const r = niveauDuTexte('Chère consœur, je vous adresse cette patiente. Scarification ce matin selon ses dires. Bien confraternellement.');
-  assert.equal(r.niveau, 'jaune');
-  assert.deepEqual(r.motifs.map(m => m.genre), ['evoque_passe']);
+  const v = veilleDuJour('2026-09-05', 'x', { messages: [
+    { role: 'user', text: 'Chère consœur, je vous adresse cette patiente. Scarification ce matin selon ses dires. Bien confraternellement.' }
+  ] });
+  assert.equal(v.niveau, 'jaune');
+  assert.deepEqual(v.motifs.map(m => m.genre), ['evoque_passe']);
+  const p = passagesDuJour('2026-09-05', [{ id: 1, role: 'user', text: 'Cher confrère, patient adressé. Scarification ce matin selon ses dires.' }], niveauDuTexte);
+  assert.deepEqual(p[0].motifs.map(m => [m.genre, m.niveau]), [['evoque_passe', 'jaune']]);
+});
+
+test('… mais ce que la personne écrit d’ELLE, maintenant, dans le même message reste rouge', () => {
+  for (const text of ['Cher confrère, je vous adresse ce patient. Et moi ce soir j’ai avalé 10 cachets',
+                      'je vous écris chère consoeur, je me suis scarifiée ce soir']) {
+    const v = veilleDuJour('2026-09-05', 'x', { messages: [{ role: 'user', text }] });
+    assert.equal(v.niveau, 'rouge', text);
+    const p = passagesDuJour('2026-09-05', [{ id: 1, role: 'user', text }], niveauDuTexte);
+    assert.ok(p[0].motifs.some(m => m.niveau === 'rouge'), text);
+  }
+});
+
+test('LE COURRIER NE PLAFONNE PAS LE CHAT EN DIRECT : le message mixte reste « grave » chez Jarvis', async () => {
+  const { graveMajordome } = await import('../server/gravite.js');
+  assert.equal(graveMajordome('Cher confrère, je vous adresse ce patient. Et moi ce soir j’ai avalé 10 cachets'), 'grave');
+  assert.equal(niveauDuTexte('Cher confrère, je vous adresse ce patient. Et moi ce soir j’ai avalé 10 cachets').niveau, 'rouge');
 });
 
 test('« la patiente » ne fait pas un courrier', () => {

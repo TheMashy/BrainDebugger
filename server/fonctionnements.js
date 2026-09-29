@@ -38,7 +38,7 @@
  *    recalibrer dans tools/banc-approches/calibrer.mjs — pas ici.
  */
 import { allEntries, activiteEntre, mesuresEntre, messagesForDate, OWNER } from './db.js';
-import { veilleDuJour, niveauDuTexte } from './veille.js';
+import { veilleDuJour, niveauDuTexte, plafondCourrier } from './veille.js';
 import { nuitDuJour, rythmeUtilisateur, MIN_NUIT, MAX_NUIT } from './nuits.js';
 import { jourLocal } from './temps.js';
 import { addDays } from './stats.js';
@@ -757,7 +757,7 @@ export function joursSurveilles(T, userId = OWNER, { veille = veilleDuJour, mess
     let heure = null;
     for (const m of messages(j.date, userId)) {
       if (m.role !== 'user' || !m.text?.trim()) continue;
-      const r = niveau(m.text, { aujourdhui: j.date });
+      const r = plafondCourrier(m.text, niveau(m.text, { aujourdhui: j.date }), j.date);   // un courrier collé : comme dans la veille du jour
       if (r?.niveau && r.motifs.some(x => GENRES_SURVEILLES.has(x.genre))) { heure = heureDe(m.ts); break; }
     }
     jours.push({ date: j.date, niveau: v.niveau, genres: [...new Set(genres)], heure });
