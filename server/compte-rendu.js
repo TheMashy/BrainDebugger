@@ -125,7 +125,15 @@ export function intervalle(seances, jusquAu, premiereJournee = null) {
 export function amplitudeDe(notes, ancres = []) {
   const v = notes.map(n => n.note).filter(n => typeof n === 'number').sort((a, b) => a - b);
   if (!v.length) return null;
-  const bas = [...notes].filter(n => typeof n.note === 'number').sort((a, b) => a.note - b.note || (a.date < b.date ? -1 : 1));
+  const notees = [...notes].filter(n => typeof n.note === 'number');
+  /*
+   * A NOTE EGALE, LA PLUS RECENTE D'ABORD. Departagees par date croissante,
+   * onze journees au plancher montraient les trois plus anciennes, et jamais
+   * la derniere -- celle qui compte le plus pour la seance qui vient.
+   */
+  const recente = (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  const bas = [...notees].sort((a, b) => a.note - b.note || recente(a, b));
+  const hauts = [...notees].sort((a, b) => b.note - a.note || recente(a, b));
   const seuil = [...(ancres ?? [])].sort((a, b) => a.note - b.note);
   const plancher = seuil[0]?.note ?? null;
   const plafond = seuil.at(-1)?.note ?? null;
@@ -133,7 +141,10 @@ export function amplitudeDe(notes, ancres = []) {
     n: v.length,
     min: v[0], max: v.at(-1), mediane: Math.round(median(v) * 10) / 10,
     creux: bas.slice(0, 3),
-    pics: bas.slice(-3).reverse(),
+    // Combien de journees a la note la plus basse : trois creux dates sur
+    // onze journees a 0 ne disent pas la meme chose que trois sur trois.
+    nMin: v.filter(x => x === v[0]).length,
+    pics: hauts.slice(0, 3),
     // Combien de journees sous l'ancre basse, au-dessus de l'ancre haute.
     sousPlancher: plancher == null ? null : v.filter(x => x <= plancher).length,
     surPlafond: plafond == null ? null : v.filter(x => x >= plafond).length,
@@ -154,7 +165,7 @@ export function amplitudeDe(notes, ancres = []) {
  */
 export const MIN_COMPARABLE = 5;
 
-export function evolution(courant, precedent) {
+export function evolution(courant, precedent, ecrites = null) {
   if (!courant || !precedent) return null;
   if (courant.n < MIN_COMPARABLE || precedent.n < MIN_COMPARABLE) return null;
   const d = Math.round((courant.mediane - precedent.mediane) * 10) / 10;
@@ -163,10 +174,13 @@ export function evolution(courant, precedent) {
     avant: precedent.mediane,
     apres: courant.mediane,
     sens: d > 0.3 ? 'haut' : d < -0.3 ? 'bas' : 'stable',
+    notees: courant.n - precedent.n,
     // Le nombre de journees ecrites bouge aussi, et c'est une information :
     // arreter d'ecrire est souvent le premier signe, avant que les notes ne
-    // baissent. Il se lit a cote de la mediane, jamais a sa place.
-    ecrites: courant.n - precedent.n
+    // baissent. Il se lit a cote de la mediane, jamais a sa place. Ce sont
+    // les journees qui portent du TEXTE : quelqu'un qui note tous les jours
+    // et ecrit rarement aurait sinon une chute d'ecriture invisible.
+    ecrites: ecrites ? ecrites.apres - ecrites.avant : null
   };
 }
 
@@ -187,16 +201,35 @@ export function faitsDe(events, debut, fin) {
     const f = e.ouvert ? fin : jour(e.fin);
     return d <= fin && f >= debut;           // la periode recouvre l'intervalle
   });
-  return dedans
-    .map(e => ({
-      ...e,
-      // « en cours » distingue ce qui a commence dans l'intervalle de ce qui le
-      // traverse. Les deux comptent, ils ne se racontent pas pareil.
-      nouveau: dans(jour(e.date), debut, fin),
-      termine: e.fin ? dans(jour(e.fin), debut, fin) : false
-    }))
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id))
-    .slice(0, MAX_FAITS);
+  const tous = dedans.map(e => ({
+    ...e,
+    // « en cours » distingue ce qui a commence dans l'intervalle de ce qui le
+    // traverse. Les deux comptent, ils ne se racontent pas pareil.
+    nouveau: dans(jour(e.date), debut, fin),
+    termine: e.fin ? dans(jour(e.fin), debut, fin) : false
+  }));
+  /*
+   * CE QUI TOMBE QUAND IL Y EN A TROP : LE PLUS ANCIEN, PAS LE PLUS RECENT.
+   *
+   * Tries du plus ancien au plus recent puis coupes a douze, les faits
+   * perdaient en silence les dix reperes les plus proches de la seance -- ceux
+   * qui servent le plus a un praticien. On garde d'abord ce qui est encore en
+   * cours a la fin de l'intervalle (une periode ouverte commencee il y a deux
+   * ans reste le fait principal), puis le plus recent ; on remet ensuite dans
+   * l'ordre du temps, et le nombre ecarte se dit.
+   */
+  const court = e => e.ouvert || (e.fin && jour(e.fin) >= fin) ? 1 : 0;
+  const recence = e => (e.ouvert ? fin : [jour(e.date), e.fin ? jour(e.fin) : ''].sort().at(-1));
+  const chrono = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id);
+  const gardes = [...tous]
+    .sort((a, b) => (court(b) - court(a))
+      || (recence(a) < recence(b) ? 1 : recence(a) > recence(b) ? -1 : 0)
+      || (b.id ?? 0) - (a.id ?? 0))
+    .slice(0, MAX_FAITS)
+    .sort(chrono);
+  // Un tableau, comme avant, qui porte en plus ce qu'il n'a pas pu montrer.
+  gardes.omis = tous.length - gardes.length;
+  return gardes;
 }
 
 /**
@@ -225,14 +258,24 @@ export function compteRendu(src, date) {
   const premiere = entries.length ? jour(entries[0].date) : null;
   const iv = intervalle(seances, date, premiere);
 
-  const ecrites = ecritesEntre(entries, iv.debut, iv.fin);
-  const amp = amplitudeDe(ecrites, ancres);
+  /*
+   * NOTEES ET ECRITES NE SONT PAS LA MEME CHOSE. Une journee notee porte un
+   * chiffre ; une journee ecrite porte du texte. Confondues, 1732 journees
+   * notees devenaient « 1732 journees ecrites, couverture 100 % » pour
+   * quelqu'un qui en a ecrit 44. Chacune a son compte et sa couverture.
+   */
+  const journees = ecritesEntre(entries, iv.debut, iv.fin);
+  const notees = journees.filter(e => typeof e.note === 'number');
+  const ecrites = journees.filter(e => String(e.texte ?? '').trim());
+  const amp = amplitudeDe(notees, ancres);
 
   // L'intervalle d'avant, de meme longueur, pour la comparaison.
   const avantFin = iv.precedente ? addDays(iv.debut, -1) : null;
   const avantDebut = avantFin ? addDays(avantFin, -(iv.jours - 1)) : null;
-  const ecritesAvant = avantDebut ? ecritesEntre(entries, avantDebut, avantFin) : [];
-  const ampAvant = ecritesAvant.length ? amplitudeDe(ecritesAvant, ancres) : null;
+  const journeesAvant = avantDebut ? ecritesEntre(entries, avantDebut, avantFin) : [];
+  const ampAvant = journeesAvant.length ? amplitudeDe(journeesAvant, ancres) : null;
+  const ecritesAvant = journeesAvant.filter(e => String(e.texte ?? '').trim()).length;
+  const faits = faitsDe(events, iv.debut, iv.fin);
 
   const bouges = amplitudes.filter(a => dans(jour(a.date), iv.debut, iv.fin));
 
@@ -243,13 +286,17 @@ export function compteRendu(src, date) {
       ? (seances ?? []).find(s => jour(s.date) === iv.precedente) ?? { date: iv.precedente }
       : null,
     ecrites: ecrites.length,
+    notees: notees.length,
     // Le taux de remplissage est un fait sur la periode, pas une note de
     // conduite : quelqu'un qui n'a rien ecrit pendant trois semaines a vecu
     // quelque chose, et c'est ca qui se lit.
     couverture: iv.jours ? Math.round((ecrites.length / iv.jours) * 100) : 0,
+    couvertureNotees: iv.jours ? Math.round((notees.length / iv.jours) * 100) : 0,
     amplitude: amp,
-    evolution: evolution(amp, ampAvant),
-    faits: faitsDe(events, iv.debut, iv.fin),
+    evolution: evolution(amp, ampAvant, { apres: ecrites.length, avant: ecritesAvant }),
+    faits,
+    // « et N reperes plus anciens » : ce que la liste bornee n'a pas montre.
+    faitsOmis: faits.omis,
     motifs: (motifs ?? []).map(m => {
       const avant = (motifsAvant ?? []).find(x => x.id === m.id);
       return { ...m, n: m.jours.length, avant: avant ? avant.jours.length : 0 };
@@ -260,7 +307,7 @@ export function compteRendu(src, date) {
     bascules: bouges.sort((a, b) => b.ecart - a.ecart).slice(0, 3),
     // Le mot que la personne s'est laisse pour cette seance-la.
     apporter: (seances ?? []).find(s => jour(s.date) === iv.precedente)?.apporter ?? null,
-    assezDeMatiere: iv.jours >= MIN_JOURS_INTERVALLE && ecrites.length > 0,
+    assezDeMatiere: iv.jours >= MIN_JOURS_INTERVALLE && journees.length > 0,
     avertissement: AVERTISSEMENT
   };
 }
