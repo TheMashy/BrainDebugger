@@ -8,7 +8,8 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { valider, corpusPour, choisirJours, grainPour, GENRES, VERSION_LECTURE } from '../server/lecture.js';
+import { valider, corpusPour, choisirJours, grainPour, nomLourd, GENRES, VERSION_LECTURE,
+         SEUIL_SANS_COUPE } from '../server/lecture.js';
 
 const DATES = new Set(['2024-03-12', '2024-04-02', '2024-05-20']);
 // Un thème repose sur deux journées au moins, un nœud sur trois.
@@ -211,23 +212,95 @@ test('un journal de 120 000 signes part en entier, même avec une journée de 23
   assert.match(c.texte, /Aucune n'est coupée/);
 });
 
-test('au-delà du seuil, un plafond commun sous le budget, et la fin des journées est là', () => {
-  const rows = Array.from({ length: 40 }, (_, i) => ({
-    date: new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10),
-    note: 5, text: journeeDe(i, 10000) + ` FIN${i}`
+/*
+ * AU-DESSUS DU SEUIL, PAS DE MARCHE. Le plafond commun se cherchait contre
+ * l'ancien budget de 45 000 signes : à 160 100 signes, le corpus retombait d'un
+ * coup au quart du texte et des journées entières disparaissaient. Ce qui part
+ * vaut maintenant min(tout, seuil), et chaque journée garde sa fin.
+ */
+// `n` journées de longueurs inégales (de 1 à 5 parts), `total` signes en tout,
+// chacune finie par sa marque FIN.
+const journal = (total, n = 50, pas = 3) => {
+  const parts = Array.from({ length: n }, (_, i) => 1 + (i % 5));
+  const somme = parts.reduce((a, b) => a + b, 0);
+  const longueurs = parts.map(p => Math.floor(total * p / somme));
+  longueurs[n - 1] += total - longueurs.reduce((a, b) => a + b, 0);
+  return longueurs.map((l, i) => ({
+    date: new Date(Date.UTC(2023, 0, 1 + i * pas)).toISOString().slice(0, 10),
+    note: 5, text: journeeDe(i, l - ` FIN${i}`.length) + ` FIN${i}`
   }));
-  const c = corpusPour({ rows });
-  assert.equal(c.dates.size, 40, 'toutes les journées tiennent au plafond commun');
+};
+const journeesLues = c => {
   const bloc = c.texte.split('\n\n———\n\n').find(b => b.startsWith('SES JOURNÉES'));
   const lignes = bloc.split('\n\n').slice(1);
-  const lus = lignes.map(l => l.replace(/^\[[^\]]*\] /, '').replace(/ \[… \d+ signes non lus …\] /, ''));
-  const cap = lus[0].length;
-  assert.ok(lus.every(t => t.length === cap), 'le plafond n’est pas commun');
-  assert.ok(lus.reduce((a, t) => a + t.length + 24, 0) <= 45000, 'budget dépassé');
-  assert.ok(cap > 900, `le plafond reste à ${cap}`);
-  for (let i = 0; i < 40; i++) assert.ok(lignes[i].endsWith(`FIN${i}`), `la fin de la journée ${i} manque`);
-  assert.match(bloc, new RegExp(`40 journées coupées à ${cap} signes`));
-  assert.match(bloc, /signes non lus sur 400\d{3}/);
+  const textes = lignes.map(l => l.replace(/^\[[^\]]*\] /, '').replace(/ \[… \d+ signes non lus …\] /, ''));
+  return { bloc, lignes, textes, lus: textes.reduce((a, t) => a + t.length, 0) };
+};
+
+test('à 159 000 signes, tout part, sans coupe', () => {
+  const rows = journal(159_000);
+  const c = corpusPour({ rows });
+  const { bloc, lus } = journeesLues(c);
+  assert.equal(c.dates.size, 50);
+  assert.equal(lus, 159_000);
+  assert.match(bloc, /Aucune n'est coupée/);
+  for (const r of rows) assert.ok(c.texte.includes(r.text), `${r.date} coupée`);
+});
+
+test('à 161 000 signes, seules les plus longues sont coupées, juste sous leur longueur', () => {
+  const rows = journal(161_000);
+  const c = corpusPour({ rows });
+  const { bloc, lignes, textes, lus } = journeesLues(c);
+  assert.equal(c.dates.size, 50, 'une journée a disparu');
+  assert.ok(lus <= SEUIL_SANS_COUPE && lus > SEUIL_SANS_COUPE - 50, `${lus} signes lus`);
+  assert.ok(c.texte.length > 160_000, `corpus de ${c.texte.length} signes`);
+  const plus = Math.max(...rows.map(r => r.text.length));
+  const cap = Number(bloc.match(/10 journées coupées à (\d+) signes/)?.[1]);
+  assert.ok(cap > plus - 150 && cap < plus, `plafond ${cap} pour ${plus}`);
+  // Le plafond est commun : chaque journée coupée garde exactement `cap` signes.
+  rows.forEach((r, i) => assert.equal(textes[i].length, Math.min(r.text.length, cap)));
+  rows.forEach((r, i) => assert.ok(lignes[i].endsWith(`FIN${i}`), `la fin de ${r.date} manque`));
+  assert.match(bloc, /\d+ signes non lus sur 161000/);
+});
+
+test('à 400 000 signes, le seuil reste rempli, et toutes les fins sont là', () => {
+  const rows = journal(400_000);
+  const c = corpusPour({ rows });
+  const { bloc, lignes, textes, lus } = journeesLues(c);
+  assert.equal(c.dates.size, 50);
+  assert.ok(lus <= SEUIL_SANS_COUPE && lus > SEUIL_SANS_COUPE - 50, `${lus} signes lus`);
+  const cap = Number(bloc.match(/40 journées coupées à (\d+) signes/)?.[1]);
+  assert.ok(cap > 3000, `le plafond reste à ${cap}`);
+  rows.forEach((r, i) => assert.equal(textes[i].length, Math.min(r.text.length, cap)));
+  rows.forEach((r, i) => assert.ok(lignes[i].endsWith(`FIN${i}`), `la fin de ${r.date} manque`));
+});
+
+test('ce qui part croît avec le journal, sans marche au passage du seuil', () => {
+  let avant = 0;
+  for (const total of [150_000, 159_000, 160_000, 160_001, 160_100, 161_000, 200_000, 300_000, 400_000]) {
+    const c = corpusPour({ rows: journal(total) });
+    const { lus } = journeesLues(c);
+    assert.equal(c.dates.size, 50, `${total} : une journée a disparu`);
+    assert.ok(lus >= Math.min(total, SEUIL_SANS_COUPE) - 50 && lus <= SEUIL_SANS_COUPE, `${total} : ${lus} lus`);
+    // Le plafond est un entier : il peut laisser quelques signes sous le seuil
+    // (moins d'un par journée coupée), jamais une marche.
+    assert.ok(lus >= avant - 50, `${total} : ${lus} lus, contre ${avant} juste avant`);
+    avant = lus;
+  }
+});
+
+test('quand il faut trier, le seuil reste rempli quand même', () => {
+  // 400 journées de 1 000 signes : un plafond commun serait à 400, illisible.
+  // On garde les plus fournies, et leur plafond remonte jusqu'à remplir le seuil.
+  const rows = Array.from({ length: 400 }, (_, i) => ({
+    date: new Date(Date.UTC(2022, 0, 1 + i)).toISOString().slice(0, 10),
+    note: 5, text: journeeDe(i, 1000)
+  }));
+  const c = corpusPour({ rows });
+  const { lus, textes } = journeesLues(c);
+  assert.ok(c.dates.size > 150 && c.dates.size < 400, `${c.dates.size} journées`);
+  assert.ok(textes.every(t => t.length >= 900), 'une journée gardée est coupée sous le minimum');
+  assert.ok(lus <= SEUIL_SANS_COUPE && lus > SEUIL_SANS_COUPE - 1000, `${lus} signes lus`);
 });
 
 test('le corpus dit l’écart-type des mois, pas seulement la moyenne', () => {
@@ -531,7 +604,20 @@ test('un extrait recopié tel quel est gardé, guillemets et apostrophes mis à 
     { date: '2024-03-02', extrait: '« la réunion a encore débordé »' },
     { date: '2024-03-05', extrait: 'ça m\'a fait du bien' }] }] });
   assert.equal(r.themes.length, 1);
-  assert.equal(r.themes[0].preuves[1].extrait, 'ça m\'a fait du bien');
+  // Gardé, mais tel qu'il l'a écrit : son apostrophe, pas celle du modèle.
+  assert.deepEqual(r.themes[0].preuves.map(p => p.extrait),
+    ['la réunion a encore débordé', 'ça m’a fait du bien']);
+});
+
+test('un extrait reconnu tel quel rend sa phrase à lui, pas la copie corrigée du modèle', () => {
+  // Accent ajouté, ligature, majuscule, points de suspension : la comparaison
+  // passe outre, et ce qui s'affiche comme citation est ce qui est écrit.
+  const r = lire({ themes: [{ nom: 'le marché', quoi: 'y', intensite: 1, serie: [], preuves: [
+    { date: '2024-03-01', extrait: '« on est allés au marché avec ma sœur »' },
+    { date: '2024-03-01', extrait: '… des fraises pour le goûter …' },
+    { date: '2024-03-05', extrait: 'Ça m\'a fait du bien.' }] }] });
+  assert.deepEqual(r.themes[0].preuves.map(p => p.extrait),
+    ['On est allés au marché avec ma soeur', 'des fraises pour le gouter', 'ça m’a fait du bien']);
 });
 
 test('un extrait reformulé est remplacé par la phrase réellement écrite', () => {
@@ -711,4 +797,78 @@ test('le corpus du journal transmet ses ancres', async () => {
   const c = api.corpusDuJournal(OWNER);
   assert.ok(c.texte.includes('0 = « Plancher — le fond »'));
   assert.match(c.texte, /≤2 \| =0 \| ≥8/);
+});
+
+/* ---------------- des « » ne font pas passer un mot lourd ----------------
+ *
+ * Le contrôle des noms mettait de côté ce qui est entre « », comme dans une
+ * phrase. Or sa légende, qui peut porter un mot lourd, part au modèle avec la
+ * consigne de la citer entre guillemets : un thème « dépression » passait, et
+ * une piste du même nom tenait sur une seule salve. Tout est synthétique.
+ */
+// Une piste sur deux thèmes qui se partagent ces journées-là.
+const pisteSur = (dates, nom) => valider({
+  synthese: 'x', carte: { noeuds: [], liens: [] },
+  themes: [THEME('les nuits courtes', dates.slice(0, Math.ceil(dates.length / 2))),
+           THEME('minimiser après coup', dates.slice(Math.ceil(dates.length / 2)))],
+  pistes: [{ nom, quoi: 'x', contre: 'y', themes: ['les nuits courtes', 'minimiser après coup'], force: 2 }]
+}, new Set(dates)).pistes.map(p => p.nom);
+const salveDe = n => Array.from({ length: n }, (_, i) => `2024-06-${String(i + 1).padStart(2, '0')}`);
+
+test('un nom entre « » est contrôlé comme les autres', () => {
+  const r = valider({ synthese: 'x', pistes: [],
+    themes: [{ nom: '« dépression »', quoi: 'y', intensite: 2, serie: [], preuves: DEUX },
+             { nom: 'ton « trouble anxieux »', quoi: 'y', intensite: 2, serie: [], preuves: DEUX },
+             { nom: 'les « petits riens »', quoi: 'y', intensite: 2, serie: [], preuves: DEUX }],
+    schemas: [{ nom: 'la « crise » du dimanche', declencheur: 'le dimanche', reaction: 'ça monte', comportement: 'sortir',
+      effet: 'ça passe', cout: 'ça revient', fonction: 'fuir', force: 1, preuves: DEUX, jours: TROIS }],
+    carte: { noeuds: [{ nom: '« insomnie »', genre: 'corps', poids: 2, jours: TROIS },
+                      { nom: '« les anxios »', genre: 'dependance', poids: 2, jours: TROIS },
+                      { nom: 'le canal', genre: 'lieu', poids: 2, jours: TROIS }],
+             liens: [{ de: '« insomnie »', vers: 'le canal', quoi: 'x', force: 1 },
+                     { de: '« les anxios »', vers: 'le canal', quoi: 'y ramène', force: 1 }] } }, DATES);
+  assert.deepEqual(r.themes.map(t => t.nom), ['les « petits riens »']);
+  assert.deepEqual(r.schemas, []);
+  assert.deepEqual(r.carte.noeuds.map(n => n.nom).sort(), ['le canal', '« les anxios »']);
+});
+
+test('une piste entre « » passe par le verrou du mot lourd, libellé de sa légende compris', () => {
+  const LEGENDE = [{ note: 1, label: 'Grosse crise', descr: 'rien ne tient debout' },
+                   { note: 7, label: 'Léger', descr: 'on avance' }];
+  // Le libellé part bien au modèle, entre « »…
+  const c = corpusPour({ rows: MOIS_ZEROS, ancres: LEGENDE });
+  assert.ok(c.texte.includes('1 = « Grosse crise — rien ne tient debout »'));
+  // … et le reprendre comme nom de piste ne le rend pas ordinaire.
+  for (const nom of ['« dépression »', 'ta « grosse crise »', 'ta « phase basse »']) {
+    assert.deepEqual(pisteSur(salveDe(6), nom), [], `${nom} sur une salve de six jours`);
+    assert.deepEqual(pisteSur(salveDe(10), nom), [], `${nom} sur une seule salve de dix jours`);
+    assert.deepEqual(pisteSur(PDATES, nom), [nom], `${nom} sur dix journées en deux retours`);
+  }
+  // Un nom ordinaire, entre « » ou non, n'a que le verrou des cinq journées.
+  assert.deepEqual(pisteSur(salveDe(6), 'les « petits riens »'), ['les « petits riens »']);
+  assert.deepEqual(pisteSur(salveDe(6), 'la peur de décevoir'), ['la peur de décevoir']);
+});
+
+test('« épisode » n’emporte plus la lettre qui suit : « épisode dépressif » est un mot lourd', () => {
+  for (const nom of ['épisode dépressif', 'épisodes dépressifs', 'épisode dissociatif', 'Épisode dépressif',
+                     'episode depressif', 'épisode de déprime', 'épisode d’angoisse', 'le bureau anxiogène']) {
+    assert.equal(nomLourd(nom), true, nom);
+  }
+  for (const nom of ['épisodes de fou rire', 'l’épisode du parapluie', 'les anxios', 'l’anxio avant de sortir',
+                     'tes anxiolytiques', 'tes antidépresseurs', 'la psychologue', 'le psychiatre']) {
+    assert.equal(nomLourd(nom), false, nom);
+  }
+  const r = valider({ synthese: 'x', pistes: [],
+    themes: [{ nom: 'épisode dépressif', quoi: 'y', intensite: 2, serie: [], preuves: DEUX },
+             { nom: 'épisodes de fou rire', quoi: 'y', intensite: 2, serie: [], preuves: DEUX }],
+    carte: { noeuds: [{ nom: 'épisode dissociatif', genre: 'corps', poids: 2, jours: TROIS },
+                      { nom: 'le canal', genre: 'lieu', poids: 2, jours: TROIS },
+                      { nom: 'Léa', genre: 'personne', poids: 2, jours: TROIS }],
+             liens: [{ de: 'épisode dissociatif', vers: 'le canal', quoi: 'x', force: 1 },
+                     { de: 'Léa', vers: 'le canal', quoi: 'y emmène', force: 1 }] } }, DATES);
+  assert.deepEqual(r.themes.map(t => t.nom), ['épisodes de fou rire']);
+  assert.deepEqual(r.carte.noeuds.map(n => n.nom).sort(), ['Léa', 'le canal']);
+  // Une piste peut porter le mot, mais seulement derrière son verrou.
+  assert.deepEqual(pisteSur(salveDe(6), 'épisode dépressif'), []);
+  assert.deepEqual(pisteSur(PDATES, 'épisode dépressif'), ['épisode dépressif']);
 });
