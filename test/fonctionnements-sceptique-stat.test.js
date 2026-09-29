@@ -194,6 +194,51 @@ test('BASCULE — une note très inerte sans rupture (φ = 0,7, le haut du profi
   assert.ok(par100j <= 0.5, `${par100j.toFixed(2)} bascules / 100 j sur un nul à φ = 0,7`);
 });
 
+/*
+ * UN CREUX DE DEUX SEMAINES EN BORD DE FENÊTRE N'EST PAS UN CHANGEMENT DE NIVEAU.
+ * Rejouée chaque jour sur un vrai journal, la fenêtre datait « ta note a changé
+ * de niveau » sur des creux passagers à quatorze jours de la fin, puis la phrase
+ * disparaissait. Le même creux au milieu n'était presque jamais daté.
+ * AR(1) φ = 0,3, σ = 1,3, notes entières autour de 6,4 ; 300 tirages.
+ */
+const noteAR = (graine, T, decale) => { const r = mulberry32(graine); let e = 0; const v = []; for (let t = 0; t < T; t++) { e = 0.3 * e + Math.sqrt(1 - 0.09) * 1.3 * normale(r); v.push(clipRound(6.4 + e + decale(t), 0, 10)); } return v; };
+const tauxDate = (decale, { amont = 0 } = {}) => {
+  let dates = 0;
+  for (let s = 1; s <= 300; s++) {
+    const v = noteAR(s * 7919, 180 + amont, decale);
+    const T = table(180, t => ({ note: v[t + amont] }));
+    if (amont) T.amont = v.slice(0, amont).map((note, t) => ({ date: addDays(dateDe(0), t - amont), note, sommeil_h: null }));
+    if (items(analyserTable(T), 'bascule').some(b => b.variable === 'note')) dates++;
+  }
+  return dates / 300;
+};
+
+test('BASCULE — un creux de 15 jours (−1,7) en fin de fenêtre n’est daté que dans 5 % des tirages au plus', () => {
+  const t = tauxDate(t => (t >= 165 ? -1.7 : 0));
+  assert.ok(t <= 0.05, `creux final daté ${(100 * t).toFixed(1)} % des fois`);
+});
+
+test('BASCULE — le même creux au milieu de la fenêtre : 5 % au plus, comme en fin', () => {
+  const t = tauxDate(t => (t >= 80 && t < 95 ? -1.7 : 0));
+  assert.ok(t <= 0.05, `creux du milieu daté ${(100 * t).toFixed(1)} % des fois`);
+});
+
+test('BASCULE — un vrai palier de 60 jours (−1,7) reste daté dans au moins 70 % des tirages', () => {
+  const t = tauxDate(t => (t >= 120 ? -1.7 : 0));
+  assert.ok(t >= 0.7, `palier daté ${(100 * t).toFixed(1)} % des fois`);
+});
+
+test('BASCULE — le début de la fenêtre n’est plus un bord : on lit les jours d’avant, et on ne rend que ce qui est dedans', () => {
+  // Un palier qui commence au 20e jour de la fenêtre, avec 90 jours lus avant.
+  const avec = tauxDate(t => (t >= 90 + 20 ? -1.7 : 0), { amont: 90 });
+  assert.ok(avec >= 0.7, `palier au 20e jour, avec l’amont : daté ${(100 * avec).toFixed(1)} % des fois`);
+  // Et une rupture située AVANT la fenêtre n'est jamais rendue.
+  const v = noteAR(11, 270, t => (t >= 45 ? -2.5 : 0));
+  const T = table(180, t => ({ note: v[t + 90] }));
+  T.amont = v.slice(0, 90).map((note, t) => ({ date: addDays(dateDe(0), t - 90), note, sommeil_h: null }));
+  for (const b of items(analyserTable(T), 'bascule')) assert.ok(b.date >= T.de && b.date <= T.a, b.date);
+});
+
 /* ================================================================== */
 /* LES MOTS ABSOLUS : robuste à trouver, fragile à montrer              */
 /* ================================================================== */

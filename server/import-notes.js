@@ -22,6 +22,7 @@
  */
 
 import { db, rebuildEntryText, OWNER } from './db.js';
+import { jourLocal, heureLocale, zoneCourante } from './temps.js';
 
 /* ---------- dates ---------- */
 
@@ -733,13 +734,37 @@ export function inspectNotes(text, userId = OWNER, ctx = {}) {
 /* ---------- ecriture ---------- */
 
 /**
+ * 21H00 LOCALE, VRAIMENT.
+ *
+ * Le commentaire d'applyNotes le disait depuis le debut, le code ecrivait
+ * `T21:00:00.000Z` : 23 h a Paris l'ete, 22 h l'hiver. Toute note importee
+ * tombait donc « la nuit », et « ca s'ecrit la nuit » comptait des heures que
+ * personne n'a vecues. Plus loin a l'est, 21 h UTC tombait meme le lendemain.
+ *
+ * L'heure reste une CONVENTION, et `source = 'import'` le dit : un moteur qui
+ * lit l'heure d'un moment doit l'ignorer (fonctionnements.joursSurveilles).
+ * Deux passes suffisent a retomber sur 21:00 autour d'un changement d'heure.
+ */
+export function vingtEtUneHeures(date, zone = zoneCourante()) {
+  const voulu = Date.parse(`${date}T21:00:00.000Z`);
+  if (!Number.isFinite(voulu)) return `${date}T21:00:00.000Z`;
+  let ts = voulu;
+  for (let i = 0; i < 2; i++) {
+    const vu = Date.parse(`${jourLocal(ts, zone)}T${heureLocale(ts, zone)}:00.000Z`);
+    if (!Number.isFinite(vu)) return `${date}T21:00:00.000Z`;
+    ts += voulu - vu;
+  }
+  return new Date(ts).toISOString();
+}
+
+/**
  * Ecriture en une transaction. Un import a moitie applique laisserait un corpus
  * dont on ne sait plus ce qu'il contient, et le miroir mentirait sans le dire.
  *
- * L'horodatage est 21h00 heure locale du jour concerne : ces notes ont ete
- * ecrites le soir, et c'est l'ordre dans la journee qui compte, pas la minute.
- * Un ts a l'instant de l'import les ferait toutes remonter aujourd'hui dans le
- * fil, ce qui est exactement l'inverse du but.
+ * L'horodatage est 21h00 heure locale du jour concerne (vingtEtUneHeures) : ces
+ * notes ont ete ecrites le soir, et c'est l'ordre dans la journee qui compte,
+ * pas la minute. Un ts a l'instant de l'import les ferait toutes remonter
+ * aujourd'hui dans le fil, ce qui est exactement l'inverse du but.
  */
 export function applyNotes(entries, userId = OWNER) {
   const ins = db.prepare(
@@ -754,7 +779,7 @@ export function applyNotes(entries, userId = OWNER) {
     for (const e of entries ?? []) {
       if (!e?.date || !e?.text) continue;
       if (dejaImporte(userId, e.date).includes(e.text)) continue;   // deja colle
-      ins.run(userId, `${e.date}T21:00:00.000Z`, e.date, SOURCE, 'user', e.text);
+      ins.run(userId, vingtEtUneHeures(e.date), e.date, SOURCE, 'user', e.text);
       touchees.add(e.date);
       ecrites++;
     }
