@@ -3022,6 +3022,9 @@ export const routes = {
       .sort((a, b) => a.p - b.p)
       .slice(0, 6);
     const dernier = ser.length ? ser[ser.length - 1] : null;
+    // La même série que /api/state : depuis aujourd'hui s'il est noté, sinon
+    // depuis hier. `streak(ser)` sans date rendait 0 sur 1732 jours notés.
+    const auj = today();
     return {
       pistes: l?.contenu?.pistes ?? [],
       themes: (l?.contenu?.themes ?? []).map(t => ({ nom: t.nom, quoi: t.quoi, intensite: t.intensite })),
@@ -3033,7 +3036,7 @@ export const routes = {
         jours: rows.length,
         ecrites: rows.filter(r => r.text && r.text.trim()).length,
         reference: dernier?.reference ?? null,
-        serie: streak(ser)
+        serie: streak(ser, getEntry(auj, userId)?.note != null ? auj : addDays(auj, -1))
       }
     };
   },
@@ -4102,12 +4105,20 @@ export const routes = {
  * avec leurs denominateurs, on classe par leur ecart, et on s'arrete la.
  */
 function deplacements(rows, anchors, carnet, t) {
-  const recent = buildGraph(rows, anchors, { since: addDays(t, -90), carnet });
+  /*
+   * DEUX PÉRIODES QUI NE SE RECOUVRENT PAS. Les 90 derniers jours étaient
+   * comparés à « tout », qui les contient : avec 41 journées écrites sur 44
+   * dans les 90 jours, les deux ensembles étaient presque les mêmes et l'écart
+   * (0,028 au plus) ne mesurait aucun mouvement. On compare donc aux jours
+   * d'AVANT, et chaque côté doit avoir ses MIN_JOURS journées écrites.
+   */
+  const debut = addDays(t, -90);
+  const recent = buildGraph(rows, anchors, { since: debut, carnet });
   if (!recent.assez) return [];
-  const tout = buildGraph(rows, anchors, { carnet });
-  if (!tout.assez) return [];
+  const avant = buildGraph(rows.filter(r => r.date < debut), anchors, { carnet });
+  if (!avant.assez) return [];
 
-  const parMot = new Map(tout.noeuds.map(n => [n.mot, n]));
+  const parMot = new Map(avant.noeuds.map(n => [n.mot, n]));
   return recent.noeuds
     .filter(n => parMot.has(n.mot))
     .map(n => {
@@ -4115,9 +4126,9 @@ function deplacements(rows, anchors, carnet, t) {
       return {
         mot: n.mot,
         recentJours: n.jours, recentSur: recent.jours,
-        toutJours: g.jours, toutSur: tout.jours,
+        avantJours: g.jours, avantSur: avant.jours,
         // Ce nombre ne s'affiche pas : il ne sert qu'a classer.
-        ecart: (n.jours / recent.jours) - (g.jours / tout.jours)
+        ecart: (n.jours / recent.jours) - (g.jours / avant.jours)
       };
     })
     .sort((a, b) => Math.abs(b.ecart) - Math.abs(a.ecart))
