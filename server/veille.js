@@ -96,6 +96,10 @@ const SUICIDE = [
   'envie de me laisser mourir', 'envie de se laisser mourir',
   'me buter', 'autant mourir', 'm endormir pour toujours', 'dormir pour toujours'
 ];
+/* Le plan daté : « je vais me tuer ce soir », « ce soir j'en finis », « c'est
+   décidé, je me pends demain ». Nié (« je vais pas me tuer »), il ne compte pas. */
+const PLAN_PROCHE = /\b(?:ce soir|cette nuit|demain|maintenant) j en finis\b|\bj en finis (?:ce soir|cette nuit|demain|maintenant)\b|\b(?:je vais|je compte|j ai decide de|c est decide|ce soir je|cette nuit je)\b[^.;!?]{0,40}\b(?:me tuer|me pendre|me pends|me jeter|en finir|en finis|me suicider|me suicide|me foutre en l air|mourir|crever)\b|\b(?:me tuer|me pendre|me pends|en finir|en finis|me suicider|me suicide)\b[^.;!?]{0,30}\b(?:ce soir|cette nuit|maintenant|tout de suite|demain)\b/;
+const PLAN_NIE = /\bje (?:vais|compte) (?:pas|jamais|surtout pas|absolument pas)\b|\bje (?:ne )?(?:vais|compte) (?:pas|jamais)\b|\bpas (?:me tuer|en finir|me pendre)\b/;
 /* « TS » est une abréviation et pas un mot : elle ne se cherche qu'entourée de
    frontières, sans quoi « ts » attrape la moitié du dictionnaire. */
 const SUICIDE_SIGLES = /\bts\b/;
@@ -387,7 +391,15 @@ const BLESSURE_CERTAINE = [
  * tranche, et elle exclut du même coup l'accident de cuisine — « je me suis
  * coupé le doigt » reste un doigt, et reste possible, pas certain.
  */
-const BLESSURE_CERTAINE_RE = /\bme suis (?:taille|taillee|coupe|coupee|entaille|entaillee|brule|brulee|scarifie|scarifiee|lacere|laceree) (?:les? |la |le |mes |mon |ma )?(?:bras|avant bras|jambes?|cuisses?|poignets?|ventre|peau|mollets?|chevilles?|hanches?|epaules?)\b|\bje me (?:taille|coupe|entaille|brule) les (?:bras|cuisses|jambes|poignets)\b/;
+/* Le geste AU PRÉSENT et le petit mot glissé au milieu : « je viens de me
+   couper les bras », « je me suis ouvert le bras », « je me suis encore coupé
+   les poignets » ne donnaient RIEN -- la liste attendait le participe collé à
+   « me suis », et ne connaissait ni « ouvert » ni « les veines ». */
+const PARTIE_DU_CORPS = '(?:les? |la |le |mes |mon |ma )?(?:bras|avant bras|jambes?|cuisses?|poignets?|ventre|peau|mollets?|chevilles?|hanches?|epaules?|veines?)';
+const BLESSURE_CERTAINE_RE = new RegExp(
+  `\\bme suis (?:(?:encore|a nouveau|de nouveau|deja|re) )?(?:taille|taillee|coupe|coupee|recoupe|recoupee|entaille|entaillee|brule|brulee|scarifie|scarifiee|lacere|laceree|ouvert|ouverte) ${PARTIE_DU_CORPS}\\b`
+  + `|\\bje me (?:taille|coupe|entaille|brule|ouvre) les (?:bras|cuisses|jambes|poignets|veines)\\b`
+  + `|\\bje viens de (?:me |m )(?:couper|tailler|taillader|entailler|bruler|scarifier|ouvrir|lacerer) ${PARTIE_DU_CORPS}\\b`);
 
 /**
  * Ce qui peut être un accident. Ne compte qu'accompagné d'un contexte de crise
@@ -399,6 +411,15 @@ const BLESSURE_POSSIBLE = [
   'me suis fait mal', 'me suis fait du mal', 'me suis frappe', 'me suis cogne',
   'j ai saigne', 'ca saignait', 'entaille', 'entailles', 'coupures'
 ];
+/* « je me suis encore coupé » : le mot glissé au milieu cassait la liste. */
+const BLESSURE_POSSIBLE_RE = /\bme suis (?:(?:encore|a nouveau|de nouveau|re) )?(?:coupe|coupee|recoupe|recoupee|brule|brulee)\b/;
+/*
+ * L'ACCIDENT DIT. Une coupure ambiguë, récente, sans crise écrite autour, donnait
+ * RIEN -- même « je me suis coupé ce soir, ça saigne ». Elle donne désormais un
+ * jaune, sauf quand le texte dit l'accident : la cuisine reste une cuisine,
+ * même quand on s'y coupe « encore ».
+ */
+const ACCIDENT = /\b(?:cuisin\w*|en coupant|legumes?|oignons?|pain|tomates?|viande|mandoline|bricol\w*|en me rasant|rasage|rasoir de|tombe\w*|chute|velo|accident|papier|verre casse|conserve|jardin\w*|au travail|au boulot)\b/;
 
 /**
  * LE CONTEXTE QUI FAIT BASCULER UNE BLESSURE POSSIBLE EN ROUGE.
@@ -623,7 +644,9 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
   const phrases = String(texte).split(/(?<=[.!?…])\s+|\n+/).filter(p => p.trim());
   const ctx = norm(contexteDuJour) + ' ' + t;
   const enCrise = !!dedans(ctx, CONTEXTE_CRISE);
-  const texteNommeUneBlessure = !!(dedans(t, BLESSURE_CERTAINE) || BLESSURE_CERTAINE_RE.test(t) || dedans(t, BLESSURE_POSSIBLE) || IMPARFAIT.test(t) || NOM_BLESSURE.test(t));
+  const texteNommeUneBlessure = !!(dedans(t, BLESSURE_CERTAINE) || BLESSURE_CERTAINE_RE.test(t) || dedans(t, BLESSURE_POSSIBLE) || BLESSURE_POSSIBLE_RE.test(t) || IMPARFAIT.test(t) || NOM_BLESSURE.test(t));
+  const accidentDit = ACCIDENT.test(t);
+  const tSansHyperbole = t.replace(HYPERBOLE, ' ');
 
   const motifs = [];
   const poser = (genre, niveau, mot, p) => {
@@ -640,7 +663,7 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
     const phraseAuPasse = estPasse(np, aujourdhui) && !estRecent(np, aujourdhui);
     for (const prop of propositions(np)) {
       const certaine = dedans(prop, BLESSURE_CERTAINE) ?? BLESSURE_CERTAINE_RE.exec(prop)?.[0] ?? null;
-      const possible = certaine ? null : dedans(prop, BLESSURE_POSSIBLE);
+      const possible = certaine ? null : (dedans(prop, BLESSURE_POSSIBLE) ?? BLESSURE_POSSIBLE_RE.exec(prop)?.[0] ?? null);
       const imparfait = IMPARFAIT.test(prop);
       const recent = estRecent(prop, aujourdhui), passe = estPasse(prop, aujourdhui) || suivanteAuPasse(i);
       /* LA REPRISE : « et là j'ai recommencé » est une blessure d'aujourd'hui dès que le texte en a nommé une. */
@@ -656,7 +679,9 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
         if (pasUnActe) { poser('evoque_passe', 'jaune', mot, p); continue; }
         if (recent) {
           // un mot ambigu, récent : rouge s'il y a la crise, ou une répétition (« coupé 3 fois depuis hier »)
-          if (certaine || enCrise || /\b\d+ fois\b|\bencore\b|\ba nouveau\b/.test(prop)) poser('blessure', 'rouge', mot, p);
+          // qui n'est pas un accident dit ; sinon jaune, sauf l'accident dit -- plutôt jaune que rien
+          if (certaine || enCrise || (/\b\d+ fois\b|\bencore\b|\ba nouveau\b/.test(prop) && !accidentDit)) poser('blessure', 'rouge', mot, p);
+          else if (possible && !accidentDit && !imparfait) poser('blessure', 'jaune', mot, p);
           continue;
         }
         if (passe) { poser('evoque_passe', 'jaune', mot, p); continue; }
@@ -738,6 +763,15 @@ export function niveauDuTexte(texte, { contexteDuJour = '', aujourdhui = null } 
     /* L'objet ET la proximité, dans la même phrase : c'est la paire qui
        distingue un objet mentionné d'un objet tenu. */
     const objet = dedans(np, MOYEN);
+    /* L'INTENTION DATÉE ET LE MOYEN PRÊT : un ROUGE. « je vais me tuer ce soir,
+       j'ai la corde » ne donnait qu'un jaune « suicide » -- l'idée, sans voir le
+       plan. Le plan peut être dans une autre phrase que le moyen : on les lit
+       sur tout le texte, et le moyen doit être à soi, prêt (« j'ai la corde »). */
+    if (objet && PLAN_PROCHE.test(tSansHyperbole) && !PLAN_NIE.test(tSansHyperbole)
+        && new RegExp(`\\b(?:j ai|j ai achete|j ai prepare|j ai sorti|j ai pris|je tiens|je garde) (?:la |le |les |l |une |un |des |mon |ma |mes )?(?:${MOYEN.join('|')})\\b`).test(np)
+        && !TIERS.test(np)) {
+      poser('moyen', 'rouge', objet, p);
+    }
     if (objet) {
       // Un tiers qui tient un couteau, une négation, un souvenir : pas un geste.
       const pasLui = TIERS.test(np) || NEGATION.test(np) || estPasse(np, aujourdhui);

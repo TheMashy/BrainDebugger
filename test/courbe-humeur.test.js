@@ -339,7 +339,9 @@ test('un rangé retiré du contexte ne fait jamais tomber un acte de la personne
     dire(u, d, '21:02', acte);
     rangerMessage(id, {}, u);
     const [mo] = J.momentsDuJour(d, u, { zone: 'UTC' });
-    assert.equal(mo.veille?.niveau, 'jaune', `« ${acte} » : plutôt jaune que rien, pour un acte`);
+    // jaune au moins -- rouge quand l'acte se suffit à lui-même (le geste et
+    // la partie du corps : « je viens de me couper les bras »)
+    assert.ok(['jaune', 'rouge'].includes(mo.veille?.niveau), `« ${acte} » : plutôt jaune que rien, pour un acte`);
     assert.ok(mo.veille.genres.includes('blessure'), `genres : ${mo.veille.genres}`);
   }
 });
