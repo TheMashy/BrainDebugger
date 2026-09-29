@@ -3004,9 +3004,9 @@ export const routes = {
     const { rows, series: ser } = series(userId);
     const l = getLecture(userId);
     const ecarts = comparaisons(rows, allEvents(userId))
-      // Les plus gros ecarts d'abord : une vue « simplifiee » qui rend
-      // vingt-deux comparaisons dans l'ordre du calcul n'a rien simplifie.
-      .sort((a, b) => Math.abs(b.ecart) - Math.abs(a.ecart))
+      // Les mieux établies d'abord (p), et non plus les plus gros écarts : trier
+      // par |écart| mettait en tête le plus petit groupe, le plus extrême par hasard.
+      .sort((a, b) => a.p - b.p)
       .slice(0, 6);
     const dernier = ser.length ? ser[ser.length - 1] : null;
     return {
