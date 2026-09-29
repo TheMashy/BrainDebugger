@@ -841,7 +841,8 @@ export function prisesBlock(prises) {
     : '   [il t\u2019a ouvert le sujet]';
   const lignes = liste.map(p => {
     const l = [`${p.nom} — ${p.n} journées où c'est écrit`
-      + (p.compare ? ` ; ${p.recent} sur ses ${p.recent_sur} dernières, ${p.avant} sur les ${p.avant_sur} d'avant` : '')
+      // Les deux fenêtres, seulement si elles se comparent et que l'écart tient (prises.js).
+      + (p.compare && p.pente_p < 0.05 ? ` ; ${p.recent} sur ses ${p.recent_sur} dernières, ${p.avant} sur les ${p.avant_sur} d'avant` : '')
       + etat(p)];
     const av = p.avant_ca?.[0];
     if (av) l.push(`  ça tombe surtout sur la journée écrite d'après « ${neutraliser(av.nom)} » — ${av.apres} fois sur ${av.sur}`);

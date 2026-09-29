@@ -99,7 +99,10 @@ const V_BOIRE = ou(/\b(?:bu|boire|bois|boit|sifle|siffle|descendu|vide|fini|ench
    n'en est pas. */
 const SANS_ALCOOL = /\b(?:d eau|de l eau|de flotte|de la flotte|de jus|de lait|de the|de tisane|de cafe|de coca|de soda|de sirop|d orange|de citronnade|de limonade|de menthe|de grenadine|de kefir|de kombucha|de bouillon|de smoothie)\b|\bbu (?:un |une |deux |trois |quatre |cinq |six |plusieurs |quelques |\d+ |mon |ma |mes |des |du |de la |de l |l )?(?:cafes?|the|jus|lait|eau|flotte|sodas?|coca|smoothies?|infusions?|tisanes?|chocolat|bouillon)\b|\bde shampoing\b|\bde lessive\b|\bd huile\b|\bde vinaigre\b|\bde gel douche\b|\bsans alcool\b/;
 const V_FUMER = ou(/\b(?:fume|fumer|fumais|refume|tire|roule|grille|taffe|taffes|clope)\b/, V_REPRISE);
-const V_PRENDRE = ou(/\b(?:pris|reprends|repris|prends|sniffe|snife|gobe|tape|consomme|avale|shoote|injecte|dose|sous)\b/, V_REPRISE);
+/* « je viens de prendre », et pas « prendre » seul : l'infinitif nu compterait
+   « je dois prendre rendez-vous pour le seresta ». Le présent immédiat, lui,
+   ne raconte qu'une prise qui vient d'avoir lieu. */
+const V_PRENDRE = ou(/\b(?:pris|reprends|repris|prends|sniffe|snife|gobe|tape|consomme|avale|shoote|injecte|dose|sous)\b|\bviens de (?:re)?prendre\b/, V_REPRISE);
 
 /* LE VERBE DE FUMÉE SANS OBJET. « j'ai fumé hier soir », « on a fumé »,
    « j'ai refumé », « quelques lattes » : c'est la façon courante d'écrire le
@@ -109,9 +112,15 @@ const V_PRENDRE = ou(/\b(?:pris|reprends|repris|prends|sniffe|snife|gobe|tape|co
    et le moteur décide plus loin, sur ce que le reste du dossier nomme, à qui
    ces jours vont. « je vais fumer », « envie de fumer » n'y sont pas : c'est
    l'intention, relevée comme signe. */
-const FUMEE_NUE = /\b(?:j ai|on a|je me suis) (?:re)?fume\b|\b(?:quelques|deux|trois|des|plusieurs|une) (?:lattes?|taffes?)\b/;
+/* L'ADVERBE ENTRE LES DEUX, ET LE PRÉSENT. « j'ai un peu fumé », « j'ai
+   beaucoup fumé », « je fume pas mal » : la tournure collée (« j'ai fumé »)
+   était la seule lue, et un journal réel a ainsi affiché « le plus long sans :
+   13 jours » sur une série où la consommation était écrite trois fois. Pas de
+   « déjà » : « j'ai déjà fumé » raconte le plus souvent une expérience de vie
+   (« une fois au lycée »), pas un soir. */
+const FUMEE_NUE = /\b(?:j ai|on a|je me suis) (?:(?:un peu|beaucoup|pas mal|trop|encore|bien|enormement) )?(?:re)?fume\b|\bje suis en train de fumer\b|\bje fume (?:encore|pas mal|beaucoup|trop)\b|\b(?:quelques|deux|trois|des|plusieurs|une) (?:lattes?|taffes?)\b/;
 /* Ce qui se fume sans être fumé : la cuisine, la colère, le café. */
-const FUMEE_SAUF = /\b(?:saumon|poisson|jambon|lard|fromage|tofu|paprika|the|viande|magret|truite|hareng|haddock|sel|gouda|piment|poitrine|maquereau) fume\b|\bfume (?:une|un|le|la|les|des|du|mon|ma|mes) (?:cotes?|magrets?|poissons?|saumon|viandes?|truites?|poulets?|jambon|fromages?|poitrine|travers|steak|filets?|maquereau|sardines?|brisket)\b|\bfume (?:au|a la|a l) (?:barbecue|bois|hetre|chene|sciure|fumoir)\b|\bfume (?:de|par) (?:rage|colere)\b|\b(?:un|le|mon|au|du) latte\b|\bfumer la moquette\b|\bfume (?:pas|plus|jamais)\b/;
+const FUMEE_SAUF = /\b(?:saumon|poisson|jambon|lard|fromage|tofu|paprika|the|viande|magret|truite|hareng|haddock|sel|gouda|piment|poitrine|maquereau) fume\b|\bfume (?:une|un|le|la|les|des|du|mon|ma|mes) (?:cotes?|magrets?|poissons?|saumon|viandes?|truites?|poulets?|jambon|fromages?|poitrine|travers|steak|filets?|maquereau|sardines?|brisket)\b|\bfume (?:au|a la|a l) (?:barbecue|bois|hetre|chene|sciure|fumoir)\b|\bfume (?:de|par) (?:rage|colere)\b|\b(?:un|le|mon|au|du) latte\b|\bfumer la moquette\b|\bfume (?:pas(?! mal)|plus|jamais)\b/;
 
 /* UN POSSESSIF APRÈS LE NOM. La garde tiers de `veille.js` veut un verbe
    après le proche (« mon frère a bu ») ; « la reprise de la weed de mon
@@ -139,7 +148,7 @@ export const FAMILLES = [
     verbe: ou(V_FUMER, /\b(?:vape|vapote|lattes?)\b/),
     /* « j'ai fait un bang » : « fait » ne peut pas entrer dans V_FUMER (« le
        chien a fait un pet »), il lui faut sa tournure entière. */
-    franc: /\b(?:beuh|bedo|bedos|spliff|spliffs|ganja)\b|\b(?:un|deux|trois|quatre|des|plusieurs) joints?\b|\bdefonce(?:e|es)? (?:a|au) (?:la beuh|shit|cannabis)\b|\bj ai (?:fait|tape|tire|pris) (?:un|deux|trois|des|plusieurs|quelques) bangs?\b/ },
+    franc: /\b(?:beuh|bedo|bedos|spliff|spliffs|ganja)\b|\b(?:un|deux|trois|quatre|des|plusieurs|\d+) joints?\b|\bdefonce(?:e|es)? (?:a|au) (?:la beuh|shit|cannabis)\b|\bj ai (?:fait|tape|tire|pris) (?:un|deux|trois|des|plusieurs|quelques) bangs?\b/ },
 
   { cle: 'stimulants', nom: 'les stimulants', sym: 'eclair',
     mots: /\b(?:coke|cocaine|md|mdma|ecsta|ecstasy|taz|speed|amphet|amphetamines|meth|crack|3 ?mmc|4 ?mmc|cathinones|ket|ketamine)\b/,
@@ -147,7 +156,10 @@ export const FAMILLES = [
     franc: /\b(?:une|des|deux|trois|quelques|plusieurs) (?:traces?|rails?)\b|\bsniffe\b|\bsous (?:coke|md|mdma|ecsta|speed|ket|ketamine)\b/ },
 
   { cle: 'calmants', nom: 'les calmants', sym: 'gelule',
-    mots: /\b(?:xanax|lexomil|valium|temesta|seresta|benzo|benzos|zolpidem|stilnox|imovane|somnifere|somniferes|anxiolytique|anxiolytiques|codeine|tramadol|oxycodone|morphine|heroine|opium|subutex|methadone|lyrica|pregabaline)\b/,
+    /* « anxio(s) » : l'abréviation que les gens écrivent vraiment. La famille
+       connaissait « anxiolytique » et pas elle — sur un journal réel, treize
+       journées de prise écrites n'apparaissaient nulle part. */
+    mots: /\b(?:anxio|anxios|oxazepam|xanax|lexomil|valium|temesta|seresta|benzo|benzos|zolpidem|stilnox|imovane|somnifere|somniferes|anxiolytique|anxiolytiques|codeine|tramadol|oxycodone|morphine|heroine|opium|subutex|methadone|lyrica|pregabaline)\b/,
     verbe: V_PRENDRE,
     /* UN TRAITEMENT SUIVI N'EST PAS UNE PRISE. Compter les jours où quelqu'un
        prend le somnifère qu'on lui a prescrit, et les lui remettre sous les
@@ -155,7 +167,10 @@ export const FAMILLES = [
        parfois faire arrêter un traitement. Le regard en arrière annule la
        garde : « plus que prescrit », « sans ordonnance » comptent, eux. */
     sauf: /(?<!plus que )(?<!pas )\b(?:prescrit|prescrite|sur ordonnance|mon traitement|ma dose habituelle|comme prevu)\b/,
-    franc: /\bheroine\b|\bsubutex\b|\bmethadone\b|\btrop de (?:xanax|lexomil|valium|cachets|comprimes)\b|\bplus que (?:la dose|prescrit|prevu)\b|\bsans ordonnance\b/ },
+    /* Un nombre collé au produit (« 6 anxios », « deux seresta ») ne veut rien
+       dire d'autre. Pas « plein d » : « envie de prendre plein d'anxios » n'est
+       pas une prise, et la garde d'intention plus bas vaut aussi pour `franc`. */
+    franc: /\b(?:un|une|deux|trois|quatre|cinq|six|sept|huit|dix|douze|\d+) (?:anxios?|xanax|seresta|lexomil|valium|temesta)\b|\bheroine\b|\bsubutex\b|\bmethadone\b|\btrop de (?:xanax|lexomil|valium|cachets|comprimes)\b|\bplus que (?:la dose|prescrit|prevu)\b|\bsans ordonnance\b/ },
 
   { cle: 'tabac', nom: 'la cigarette', sym: 'clope',
     mots: /\b(?:clope|clopes|cigarette|cigarettes|tabac|nicotine|vape|puff|puffs|cigare)\b/,
@@ -321,6 +336,7 @@ const MOT_NOMBRE = new Map([
   ['quelques', PLUSIEURS], ['plusieurs', PLUSIEURS], ['des', PLUSIEURS]
 ]);
 const QUANTIF = `(?:${[...MOT_NOMBRE.keys()].join('|')}|\\d{1,3})`;
+const ORDINAL = /^(?:deuxieme|troisieme|quatrieme|cinquieme|second|seconde)$/;
 
 /**
  * Ce que la phrase dit de la quantité, pour les mots d'une famille.
@@ -333,7 +349,12 @@ export function combienDit(q, motsRe) {
   const noms = motsRe.source.replace(/^\\b|\\b$/g, '');
   // Le quantifieur colle au mot, avec au plus un adjectif entre les deux :
   // « deux gros joints » oui, « deux heures après le joint » non.
-  const re = new RegExp(`\\b(${QUANTIF})\\s+([a-z]+s?\\s+)?(?:${noms})s?\\b`, 'g');
+  /* ET UNE FRACTION N'EST PAS UN COMPTE. « 1/3 de verre de gin » se lisait
+     « 3 de verre » — le « de » passait pour l'adjectif, et rien n'arrêtait
+     le « / » — soit trois verres, et une semaine en rouge pour une fraction
+     de verre. Pas de chiffre, de barre ni de virgule juste
+     avant ; pas de « de » à la place de l'adjectif. */
+  const re = new RegExp(`(?<![\\d/.,])\\b(${QUANTIF})\\s+((?!de\\b|d\\b)[a-z]+s?\\s+)?(?:${noms})s?\\b`, 'g');
   for (const m of q.matchAll(re)) {
     /*
      * L'ORDINAL GAGNE SUR L'ARTICLE QUI LE PRÉCÈDE. « un deuxième joint » :
@@ -342,6 +363,9 @@ export function combienDit(q, motsRe) {
      * rendait 1 — c'est-à-dire l'inverse de ce qu'elle dit.
      */
     const milieu = (m[2] ?? '').trim();
+    /* L'ORDINAL NE COMPTE QUE COLLÉ AU PRODUIT. « la troisième semaine
+       xanax » dit depuis combien de temps, pas trois cachets. */
+    if (milieu && ORDINAL.test(m[1])) continue;
     const mot = MOT_NOMBRE.has(milieu) ? milieu : m[1];
     const v = MOT_NOMBRE.has(mot) ? MOT_NOMBRE.get(mot) : Number(mot);
     if (v === PLUSIEURS) { if (haut == null || haut === 1) haut = PLUSIEURS; continue; }
@@ -411,10 +435,25 @@ export function familleDuSuivi(s) {
     sien: true,
     genre: s.genre === 'traitement' ? 'traitement' : 'reduire',
     mots: new RegExp(`\\b(?:${alt})\\b`),
+    liste: mots,
     verbe: V_PRENDRE,
     franc: new RegExp(`\\b${NOMBRE}\\s+(?:${alt})s?\\b`)
   };
 }
+
+/*
+ * UN SUIVI QUI RECOUVRE LES CALMANTS LES REMPLACE.
+ *
+ * « anxio » est dans les deux : la famille écrite à la main et le suivi que la
+ * personne a déclaré. Compter les deux donnait deux lignes pour les mêmes
+ * jours, dont une avec un record « sans » — son choix « traitement »
+ * contourné. Quand un suivi recouvre la famille (dans un sens ou dans
+ * l'autre : « anxio », « seresta 10 »), c'est lui qui compte, seul.
+ */
+const CALMANTS = FAMILLES.find(f => f.cle === 'calmants');
+const MOTS_CALMANTS = CALMANTS.mots.source.replace(/^\\b\(\?:|\)\\b$/g, '').split('|');
+const recouvreCalmants = f => !!f?.sien
+  && (MOTS_CALMANTS.some(m => f.mots.test(m)) || (f.liste ?? []).some(m => CALMANTS.mots.test(m)));
 
 /** La famille qu'une phrase NOMME — le mot y est, sans qu'on sache si elle
     l'a pris. Sert au rattachement des signes et à la lecture des repères. */
@@ -424,8 +463,33 @@ const MOTS_G = new Map(FAMILLES.filter(f => f.mots).map(f => [f.cle, new RegExp(
 /* Les gardes propres à la lecture longue : un souvenir raconté n'est pas un
    jour de prise. `veille.js` a les siennes (tiers, négation, hyperbole,
    intention) et on les réutilise telles quelles — voir GARDES_SUBSTANCE. */
-const SOUVENIR = /\b(?:a l epoque|quand j etais|il y a (?:des annees|un an|deux ans|longtemps)|dans ma jeunesse|avant je|je buvais|je fumais|j en prenais|pendant des annees|a l adolescence|au lycee|en soiree etudiante)\b/;
+/* « je devais boire » raconte une obligation d'avant ; « je devais en prendre
+   QU'UN » raconte l'écart de ce soir, et doit compter — c'est le jour de perte
+   de contrôle qu'on voudrait le moins perdre. */
+const SOUVENIR = /\b(?:a l epoque|quand j etais|il y a (?:des annees|un an|deux ans|longtemps)|dans ma jeunesse|avant je|je buvais|je fumais|j en prenais|pendant des annees|a l adolescence|au lycee|en soiree etudiante|je devais (?:me )?(?:boire|fumer|prendre)(?! (?:qu|que|juste|seulement|un|une)\b))\b/;
+/* UNE ANNÉE NOMMÉE N'EST UN SOUVENIR QUE SI ELLE EST PASSÉE. Un souvenir
+   daté (« en 2019 je devais boire de la vodka ») a été la preuve affichée
+   sous l'alcool d'un journal réel, et fixait « dernière fois il y a… » ; « en 2026 j'ai bu trois bières », écrit en 2026,
+   reste un jour de prise. On compare donc à l'année de l'entrée. */
+const ANNEE_NOMMEE = /\ben (?:(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) )?((?:19|20)\d\d)\b/g;
 const QUESTION = /\?\s*$/;
+/*
+ * LE PROJET N'EST PAS LA PRISE — ET CE QUI EST FAIT RESTE FAIT.
+ *
+ * « demain midi on ira boire un verre », « samedi on va boire trois bières,
+ * ça va être cool », « j'ai envie d'un joint » : sur un journal réel, la
+ * carte « l'alcool » entière (cinq jours, une flèche qui monte, deux
+ * semaines en rouge) reposait sur des projets de ce genre. La garde
+ * d'intention existait, mais `franc` en était exempté et un simple « j'ai »
+ * la désarmait (« j'ai rendez-vous demain »).
+ *
+ * `CONSO_FAITE` est ce qui la désarme désormais : un acte accompli nommé par
+ * son verbe. « j'ai bu trois verres, ça va être dur demain », « j'aimerais
+ * arrêter mais j'ai fumé deux joints » comptent toujours — rater ces soirs-là
+ * serait pire que compter un projet.
+ */
+const PROJET = /\bdemain\b|\bca va etre\b|\bj aimerais\b|\bje voudrais\b|\baller (?:prendre|boire|fumer)\b|\bje vais (?:boire|fumer|prendre|me prendre)\b|\benvie d(?:e|un|une)?\b/;
+const CONSO_FAITE = /\bj (?:en )?ai (?:(?:\w+ ){0,2})(?:bu|fume|refume|pris|repris|picole|avale|gobe|sniffe)\b|\bje me suis (?:\w+ )?(?:bourre|bourree|pris|envoye|mis)\b|\bhier\b|\bje viens de\b/;
 
 /* ------------------------------------------------------------------ *
  * LES SIGNES. Chacun rend la phrase qui l'a allumé — jamais un verdict nu.
@@ -437,9 +501,25 @@ const QUESTION = /\?\s*$/;
  * qui est écrit, pas ce que ça vaut.
  * ------------------------------------------------------------------ */
 const SUBSTANCE_NOMMEE = '(?:weed|beuh|shit|cannabis|joints?|clopes?|cigarettes?|tabac|vape|alcool|picole|bieres?|vin|coke|md|xanax)';
+/*
+ * CE QUI SE PREND, POUR LES SIGNES QUI NE VALENT QU'AVEC LUI.
+ *
+ * « j'ai arrêté d'aller à la salle », « le manque de sommeil », « obsédé par
+ * le fait de rater mes examens » : sur un journal réel, sept des dix-sept
+ * signes allumés étaient de ce genre — sans rapport avec une consommation —
+ * et c'étaient eux que la carte citait. La phrase citée est ce qui rend le chiffre
+ * crédible ; une citation hors sujet ruine toutes les autres. Ces tournures
+ * ne comptent donc qu'avec ce qui se prend derrière — liste plus large que
+ * SUBSTANCE_NOMMEE (« verre », « anxio », « cachets »), parce qu'elle sert
+ * à garder des signes, pas à compter des jours.
+ */
+const SUB = '(?:weed|beuh|shit|cannabis|joints?|clopes?|cigarettes?|tabac|nicotine|alcool|bieres?|vin|verres?|coke|anxios?|xanax|cachets?|medocs?|comprimes?)';
 export const SIGNES = [
   { id: 'arreter', dit: 'vouloir arrêter',
-    re: /\b(?:j ai arrete|je veux arreter|je voulais arreter|j essaie d arreter|j essaye d arreter|je dois arreter|il faut que j arrete|je devrais arreter|j arrete|sevrage|desintox|je tiens (?:bon|le coup)|(?:zero|sans) (?:alcool|drogue) depuis|sobre depuis|j ai tenu \d+ jours)\b/ },
+    /* « j'ai arrêté » seul, ou suivi de ce qui se prend. « j'ai arrêté de
+       picoler », « d'en prendre », « de me droguer » restent : c'est le signe
+       le plus encourageant du panneau, et le rater coûte plus que tout. */
+    re: new RegExp(`\\b(?:j ai arrete(?=\\s*[.,;!?…]|\\s*$| (?:de |d )(?:boire|fumer|prendre|picoler|consommer|me droguer|en (?:prendre|boire|fumer))\\b| (?:la |le |les |l |de la |du |mes |ma |mon )?${SUB}\\b)|je veux arreter|je voulais arreter|j essaie d arreter|j essaye d arreter|je dois arreter|il faut que j arrete|je devrais arreter|j arrete|sevrage|desintox|je tiens (?:bon|le coup)|(?:zero|sans) (?:alcool|drogue) depuis|sobre depuis|j ai tenu \\d+ jours)\\b`) },
   /* LA REPRISE, BORNÉE. « j'ai repris » s'allumait sur « j'ai repris le
      sport », « je suis retombé » sur « retombé sur mes pieds », « j'ai craqué »
      sur « j'ai craqué et j'ai pleuré » — et chacun devenait « tu as craqué »
@@ -451,13 +531,18 @@ export const SIGNES = [
   { id: 'craque', dit: 'repris après un arrêt',
     re: new RegExp(`\\b(?:j ai craque(?! (?:pour|sur|devant|nerveusement|en larmes|en voyant)\\b)(?! (?:et|puis) (?:j ai )?(?:pleure|chiale|fondu|sanglote|hurle|crie)\\b)|j ai replonge|j ai pas tenu|j ai rechute|ca a recommence|j ai pas reussi a (?:arreter|tenir)|j ai (?:refume|rebu|recraque|resniffe|retouche)|reprise (?:de la|de l|du|des) ${SUBSTANCE_NOMMEE}|je suis retombe(?:e)?(?=\\s*[.,;!…?]|\\s*$| dedans\\b)|j ai repris(?=\\s*[.,;!…?]|\\s*$| (?:la |le |les |de la |du |des |l )?${SUBSTANCE_NOMMEE}\\b))\\b`) },
   { id: 'manque', dit: 'l’envie',
-    re: /\b(?:en manque|le manque|j en ai envie|envie de (?:boire|fumer|prendre|sniffer|me defoncer)|je pense qu a (?:ca|boire|fumer)|obsede par|il me faut|je tiens plus|j y pense tout le temps|craving)\b/ },
+    /* « prendre » n'est une envie que de ce qui se prend (« envie de prendre
+       de la distance » n'en est pas une) ; « le manque » que seul, ou de ce
+       qui se prend (« le manque de sommeil » n'en est pas un). */
+    re: new RegExp(`\\b(?:en manque|le manque(?= de ${SUB}|\\s*$|\\s*[.,;!]| (?:me|m|est|c est)\\b)|j en ai envie|envie de (?:boire|fumer|refumer|sniffer|me defoncer)|envie de (?:re)?prendre (?:un |une |des |de la |du |de l |plein d |mes |tou[ts] mes )?${SUB}|je pense qu a (?:ca|boire|fumer)|obsede par (?:la |le |l )?${SUB}|il me faut|je tiens plus|j y pense tout le temps|craving)\\b`) },
   { id: 'plus_que_prevu', dit: 'plus que prévu',
     /* « encore une fois » et « j'ai fini par » y étaient et s'allumaient sur
        tout — « encore une fois j'ai oublié mes clés » n'est pas une perte de
        contrôle. Ce qui compte, c'est l'écart entre ce qu'on avait prévu et ce
-       qu'on a fait ; il faut donc que la phrase dise les deux. */
-    re: /\b(?:plus que prevu|je voulais (?:juste|juste en prendre|m arreter)|j ai pas su m arreter|j ai fini par (?:en |y )?(?:reprendre|boire|fumer|craquer|ceder|remettre)|comme d habitude j ai|je devais (?:en )?(?:prendre|boire) (?:qu )?un)\b/ },
+       qu'on a fait ; il faut donc que la phrase dise les deux. « je voulais
+       juste » seul y était encore, et rendait toutes les autres inutiles :
+       « je voulais juste te le dire » était cité sous « plus que prévu ». */
+    re: /\b(?:plus que prevu|je voulais (?:juste en prendre|m arreter)|je voulais (?:juste )?(?:un|une) (?:verre|biere|joint|taffe|clope)|j ai pas su m arreter|j ai fini par (?:en |y )?(?:reprendre|boire|fumer|craquer|ceder|remettre)|comme d habitude j ai|je devais (?:en )?(?:prendre|boire) (?:qu )?un)\b/ },
   { id: 'cache', dit: 'sans le dire',
     re: /\b(?:en cachette|personne (?:le )?sait|j ai menti|je (?:l )?ai cache|sans (?:le )?dire a|tout seul dans ma chambre|avant de (?:rentrer|sortir) j ai)\b/ }
 ];
@@ -500,12 +585,15 @@ function empreinte(t) {
  * declarees : les six ecrites a la main ne bougent qu'avec le code, et le
  * processus redemarre quand le code change.
  */
-function luDuTexte(texte, siennes = [], sceau = '') {
+function luDuTexte(texte, siennes = [], sceau = '', annee = null) {
   const t = String(texte ?? '');
-  const cle = sceau ? `${sceau}|${empreinte(t)}` : empreinte(t);
+  // L'année de l'entrée entre dans la clé : « en 2025 » est un souvenir écrit
+  // en 2026, pas écrit en 2025 (voir ANNEE_NOMMEE).
+  const an = Number.isFinite(annee) ? annee : new Date().getUTCFullYear();
+  const cle = `${an}|${sceau ? `${sceau}|${empreinte(t)}` : empreinte(t)}`;
   let v = MEMO.get(cle);
   if (!v) {
-    v = { prises: prisesDuTexte(t, siennes), signes: signesDuTexte(t) };
+    v = { prises: prisesDuTexte(t, siennes, an), signes: signesDuTexte(t) };
     if (MEMO.size >= MEMO_MAX) MEMO.delete(MEMO.keys().next().value);
     MEMO.set(cle, v);
   }
@@ -537,10 +625,11 @@ const sceauDe = siennes => siennes.length
  *   `lus` : les mots de la famille effectivement lus (« md », « xanax »),
  *   pour que la vue puisse rendre ce qui a été écrit plutôt que la catégorie.
  */
-export function prisesDuTexte(texte, siennes = []) {
+export function prisesDuTexte(texte, siennes = [], annee = null) {
   const out = new Map();
   const brut = String(texte ?? '');
   if (!brut.trim()) return out;
+  const an = Number.isFinite(annee) ? annee : new Date().getUTCFullYear();   // l'année de l'entrée, pour ANNEE_NOMMEE
   /*
    * LES SIENNES PASSENT EN DERNIER, ET C'EST VOULU.
    *
@@ -550,7 +639,8 @@ export function prisesDuTexte(texte, siennes = []) {
    * Seul l'ordre de la boucle change, et il ne change rien au resultat -- deux
    * familles peuvent compter la meme phrase, chacune pour elle.
    */
-  const familles = siennes.length ? [...FAMILLES, ...siennes] : FAMILLES;
+  const familles = !siennes.length ? FAMILLES
+    : [...(siennes.some(recouvreCalmants) ? FAMILLES.filter(f => f !== CALMANTS) : FAMILLES), ...siennes];
   for (const phrase of brut.split(/(?<=[.!?…])\s+|\n+/)) {
     const np = norm(phrase);
     if (!np.trim()) continue;
@@ -562,6 +652,9 @@ export function prisesDuTexte(texte, siennes = []) {
       if (TIERS_APRES.test(q) && !/\b(?:je|j ai|moi|on a)\b/.test(q)) continue;
       if (GARDES_SUBSTANCE.negation.test(q)) continue;
       if (SOUVENIR.test(q)) continue;
+      if ([...q.matchAll(ANNEE_NOMMEE)].some(m => +m[1] < an)) continue;
+      /* Pour toutes les familles, `franc` compris : voir PROJET. */
+      if ((PROJET.test(q) || GARDES_SUBSTANCE.intention.test(q)) && !CONSO_FAITE.test(q)) continue;
       for (const f of familles) {
         if (f.sauf?.test(q)) continue;               // « un verre d'eau » n'est pas un verre
         const franc = f.franc.test(q);
@@ -570,20 +663,13 @@ export function prisesDuTexte(texte, siennes = []) {
          * « j'ai envie de boire » n'est pas « j'ai bu » : l'envie est un signe,
          * pas un jour de prise. Elle est relevée plus bas, sur le même texte.
          *
-         * ET LA GARDE VAUT AUSSI QUAND `franc` EST VRAI, POUR LES FAMILLES
-         * DÉCLARÉES. Leur `franc` est « un nombre collé au produit », et
-         * `NOMBRE` contient « un | une » : « envie de prendre UN anxio ce soir »
-         * le satisfaisait donc, et sautait cette ligne. Mesuré : la phrase
-         * comptait comme un jour de prise — un soir de médicament inventé, sur
-         * un traitement. L'en-tête de `familleDuSuivi` promettait exactement le
-         * contraire ; c'est ici que la promesse se tient.
-         *
-         * Les six familles écrites à la main gardent l'exemption : leur `franc`
-         * liste des tournures qui ne peuvent rien vouloir dire d'autre
-         * (« bourré », « gueule de bois »), pas un nombre suivi d'un mot.
+         * LA GARDE VAUT AUSSI QUAND `franc` EST VRAI, POUR TOUTES LES FAMILLES
+         * (plus haut, avant cette boucle). Les six écrites à la main en étaient
+         * exemptées, au motif que leur `franc` ne contenait pas « un nombre
+         * suivi d'un mot » — or celui de l'alcool et du cannabis en contient
+         * justement : « envie de prendre UN anxio ce soir », « on va boire
+         * TROIS bières » comptaient comme des jours de prise.
          */
-        if ((!franc || f.sien) && GARDES_SUBSTANCE.intention.test(q)
-            && !/\bj ai\b|\bje me suis\b|\bhier\b/.test(q)) continue;
         if (!out.has(f.cle)) out.set(f.cle,
           { phrase: phrase.trim().slice(0, 200), signes: [], lus: [], combien: null, mentions: 0 });
         const vu = out.get(f.cle);
@@ -776,15 +862,29 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   for (const e of rows) {
     const t = e.text;
     if (!String(t ?? '').trim()) continue;
-    const lu = luDuTexte(t, siennes, sceau);
+    const lu = luDuTexte(t, siennes, sceau, +String(e.date).slice(0, 4));
     for (const [cle, v] of lu.prises) poser(cle, e.date, v.phrase, v.lus, 'ecrit', v.combien);
     signaler(e.date, lu.signes);
   }
 
+  /*
+   * « TOUS LES JOURS DEPUIS MAI ». Un repère qui nomme une famille et dit
+   * « quotidien » ouvre une période, jusqu'au repère d'arrêt suivant. Dedans,
+   * une semaine écrite où la famille n'est jamais nommée ne vaut pas 0 : elle
+   * a dit que c'était tous les jours, et un journal réel dessinait ces
+   * semaines-là « 0 jour sur 4 écrites ». On ne sait pas — donc null.
+   */
+  const quotidiens = [];               // [{ cle, date, arret }] triés plus bas
   for (const r of reperes ?? []) {
     const date = String(r?.date ?? '').slice(0, 10);
     if (!DATE.test(date) || !String(r.label ?? '').trim()) continue;
-    const lu = luDuTexte(r.label, siennes, sceau);
+    {
+      const nl = norm(r.label);
+      const arret = ARRET.test(nl);
+      if (arret || /\bquotidien(?:ne)?s?\b/.test(nl))
+        for (const cle of nomme(nl)) quotidiens.push({ cle, date, arret });
+    }
+    const lu = luDuTexte(r.label, siennes, sceau, +date.slice(0, 4));
     let fams = [...lu.prises.keys()];
     /* Un repère de consommation qui ne fait que nommer — « cannabis », posé
        comme période — est une déclaration, pas une phrase à garder : on le
@@ -808,13 +908,66 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   const recents = ecrits.slice(-SEUILS_PRISES.fenetre);
   const avants = ecrits.slice(-2 * SEUILS_PRISES.fenetre, -SEUILS_PRISES.fenetre);
   const seuilBas = medianeMoins(noteDe);
+  /*
+   * =====================================================================
+   *  DEUX FENÊTRES NE SE COMPARENT QUE SI ELLES ONT ÉTÉ ÉCRITES PAREIL.
+   *
+   * Mesuré sur un journal réel : la fenêtre d'avant couvrait 474 jours civils
+   * en quatorze notes courtes (médiane 415 caractères), la récente 31 jours
+   * de conversations (médiane ~1450). Or la détection suit la longueur du
+   * texte — une journée longue nomme plus de choses. La flèche « ça monte »
+   * mesurait donc le changement de manière d'écrire, et la personne la lisait
+   * comme une escalade.
+   *
+   * Deux conditions, chacune dans un facteur trois : le RYTHME (jours civils
+   * par journée écrite — pas l'étendue brute, qui punirait une fenêtre
+   * d'avant de dix journées face à une récente de trente écrites au même
+   * rythme) et la LONGUEUR médiane du texte. Pas de critère de « plus grand
+   * trou » : quelqu'un qui écrit un jour sur douze, irrégulièrement, en a
+   * presque toujours un, et c'est à lui que la comparaison sert.
+   *
+   * Et même comparable, un écart ne se dit que s'il tient : `pente_p` est le
+   * test exact bilatéral (deux fois le plus petit des deux unilatéraux). La
+   * vue et le compagnon ne rendent la flèche qu'en dessous de 0,05.
+   * =====================================================================
+   */
+  const longueur = new Map();
+  for (const e of rows) longueur.set(e.date, (longueur.get(e.date) ?? 0) + String(e.text ?? '').trim().length);
+  const rythme = a => a.length ? (jours(a[0], a.at(-1)) + 1) / a.length : 0;
+  const medLong = a => {
+    const v = a.map(d => longueur.get(d) ?? 0).sort((x, y) => x - y);
+    return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : 0;
+  };
+  const facteur3 = (x, y) => x > 0 && y > 0 && x / y >= 1 / 3 && x / y <= 3;
+  const comparable = avants.length >= SEUILS_PRISES.min_compare
+    && facteur3(rythme(avants), rythme(recents)) && facteur3(medLong(avants), medLong(recents));
+
+  /*
+   * LES CALMANTS, QUAND ELLE SUIT DÉJÀ SON TRAITEMENT : voir recouvreCalmants.
+   * La détection les a déjà retirés ; on s'assure qu'aucune ligne n'en naît.
+   */
+  const calmantsSuivis = siennes.find(recouvreCalmants);
+  // Une phrase qui nomme « anxio » parle alors du suivi, pour les signes aussi.
+  if (calmantsSuivis) alias.set(CALMANTS.cle, calmantsSuivis.cle);
 
   const prises = [], ecartees = [];
   for (const f of [...FAMILLES, ...siennes]) {
     if (eteintes.has(f.cle)) continue;
+    if (f === CALMANTS && calmantsSuivis) continue;
     const v = vues.get(f.cle);
     if (!v) continue;
     const soigne = (genreDe.get(f.cle) ?? f.genre) === 'traitement';
+    /*
+     * ET SANS SUIVI, LES CALMANTS SE COMPTENT SANS RECORD NI PENTE.
+     *
+     * « anxio » est le plus souvent un traitement. Tant qu'elle n'a pas dit
+     * vouloir le réduire (un suivi « calmants » explicite), on ne sait pas si
+     * c'en est un — et un record « 14 jours sans » posé sur un soir de
+     * silence, c'est exactement ce qu'un traitement ne doit jamais lire. On
+     * garde les jours et le combien : « combien, quand », pas « est-ce que ça
+     * monte ».
+     */
+    const sansRecord = soigne || (f === CALMANTS && genreDe.get(f.cle) !== 'reduire');
     v.jours.sort();
     if (v.jours.length < SEUILS_PRISES.min_jours) {
       /* « ce n'est pas une habitude » posait l'étiquette que le seuil de trois
@@ -893,10 +1046,19 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
        * des deux erreurs.
        * =================================================================
        */
-      compare: soigne ? false : avants.length >= SEUILS_PRISES.min_compare,
+      compare: sansRecord ? false : comparable,
+      pente_p: sansRecord || !comparable ? null : (() => {
+        const r = recents.filter(d => set.has(d)).length, a = avants.filter(d => set.has(d)).length;
+        return Math.min(1, 2 * Math.min(fisher(r, recents.length, a, avants.length),
+                                        fisher(a, avants.length, r, recents.length)));
+      })(),
       depuis: fin && v.jours.at(-1) ? jours(v.jours.at(-1), fin) : null,
-      series: soigne ? [] : seriesSans(v.jours, ecrits, fin),
-      signes: soigne ? [] : signesRetenus(v.jours, signesParJour, ecrits, f.cle, alias),
+      series: sansRecord ? [] : seriesSans(v.jours, ecrits, fin),
+      /* Les calmants sans suivi ne reçoivent que les signes qui les nomment :
+         « repris après un arrêt » muet sur la chose ne se colle pas sous ce qui
+         est peut-être une ordonnance (voir `sansRecord`). */
+      signes: soigne ? [] : signesRetenus(v.jours, signesParJour, ecrits, f.cle, alias,
+                                          { muets: !sansRecord }),
       avant_ca: ceQuiVientAvant(v.jours, carte, suite),
       apres_ca: leLendemain(v.jours, suite, noteDe, seuilBas)
     });
@@ -1005,6 +1167,19 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
       if (i == null) continue;
       n[i] = (n[i] ?? 0) + 1;
       if (plusieursFois(v?.combien?.get(d) ?? null)) fort[i] = true;
+    }
+    /* Les semaines muettes d'une période « quotidienne » déclarée : inconnues. */
+    const marques = quotidiens.filter(q => q.cle === p.cle || alias.get(q.cle) === p.cle)
+      .sort((a, b) => a.date < b.date ? -1 : 1);
+    for (let k = 0; k < marques.length; k++) {
+      if (marques[k].arret) continue;
+      const de = marques[k].date;
+      const stop = marques.slice(k + 1).find(q => q.arret)?.date ?? null;
+      semaines.forEach((s, i) => {
+        if (n[i] !== 0) return;
+        const finS = addDays(s.de, 6);
+        if (finS >= de && (stop == null || s.de < stop)) n[i] = null;
+      });
     }
     p.par_semaine = n;
     p.plusieurs_semaine = fort;
@@ -1136,7 +1311,7 @@ function voisins(joursPrise, ecrits) {
  * objectif deux mois avant le premier jour compté, parle bien de la
  * cigarette, et on le dit (`rattache: 'nomme'`).
  */
-function signesRetenus(joursPrise, signesParJour, ecrits, cle, alias = new Map()) {
+function signesRetenus(joursPrise, signesParJour, ecrits, cle, alias = new Map(), { muets = true } = {}) {
   const proches = voisins(joursPrise, ecrits);
   /* Un seul par signe, LE PLUS RÉCENT : on gardait le premier, et « j'ai
      repris la weed » écrit hier restait derrière un « j'ai refumé » d'il y a
@@ -1158,8 +1333,14 @@ function signesRetenus(joursPrise, signesParJour, ecrits, cle, alias = new Map()
        * autres. Une phrase muette sur la famille reste partagée : c'est
        * l'honnêteté du cas, pas une approximation.
        */
-      const dedans = [...luDuTexte(s.phrase).prises.keys()].map(k => alias.get(k) ?? k);
+      /* Ce que la phrase NOMME compte aussi, pas seulement ce qu'elle fait
+         compter : « envie de prendre un xanax » ne compte plus comme une
+         prise (c'est un projet), et se retrouvait donc « muette », citée sous
+         le cannabis. */
+      const dedans = [...new Set([...luDuTexte(s.phrase).prises.keys(), ...nomme(norm(s.phrase))])]
+        .map(k => alias.get(k) ?? k);
       if (dedans.length && !dedans.includes(cle)) continue;
+      if (!muets && !dedans.includes(cle)) continue;
       out.set(s.id, pres ? { ...s, quand: d } : { ...s, quand: d, rattache: 'nomme' });
     }
   return [...out.values()].sort((a, b) => a.quand < b.quand ? -1 : 1);
