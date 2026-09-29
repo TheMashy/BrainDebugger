@@ -181,6 +181,51 @@ test('le corpus prend TOUT le journal, sans fenêtre', () => {
   assert.ok(c.etendue >= 1);
 });
 
+/*
+ * LE CORPUS NE COUPAIT PLUS QUE PAR HABITUDE. Sur un vrai journal (44 journées,
+ * 120 000 signes), le modèle ne recevait qu'un quart du texte, la journée la
+ * plus longue à 4 %, et le budget restait rempli aux trois quarts.
+ */
+const phraseSynthetique = i => `journée ${i} : le matin au travail, puis la soirée chez moi à ranger. `;
+const journeeDe = (i, n) => {
+  let t = '';
+  while (t.length < n) t += phraseSynthetique(i);
+  return t.slice(0, n);
+};
+
+test('un journal de 120 000 signes part en entier, même avec une journée de 23 000', () => {
+  const rows = Array.from({ length: 44 }, (_, i) => ({
+    date: `2026-08-${String((i % 28) + 1).padStart(2, '0')}`.replace('2026-08', i < 28 ? '2026-08' : '2026-09'),
+    note: 6, text: journeeDe(i, i === 10 ? 23000 : 2250)
+  }));
+  const total = rows.reduce((a, r) => a + r.text.length, 0);
+  assert.ok(total > 115000 && total < 125000, `fixture : ${total}`);
+  const c = corpusPour({ rows });
+  assert.equal(c.dates.size, 44);
+  assert.ok(c.texte.includes(rows[10].text), 'la journée longue a été coupée');
+  assert.doesNotMatch(c.texte, /signes non lus/);
+  assert.match(c.texte, /Aucune n'est coupée/);
+});
+
+test('au-delà du seuil, un plafond commun sous le budget, et la fin des journées est là', () => {
+  const rows = Array.from({ length: 40 }, (_, i) => ({
+    date: new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10),
+    note: 5, text: journeeDe(i, 10000) + ` FIN${i}`
+  }));
+  const c = corpusPour({ rows });
+  assert.equal(c.dates.size, 40, 'toutes les journées tiennent au plafond commun');
+  const bloc = c.texte.split('\n\n———\n\n').find(b => b.startsWith('SES JOURNÉES'));
+  const lignes = bloc.split('\n\n').slice(1);
+  const lus = lignes.map(l => l.replace(/^\[[^\]]*\] /, '').replace(/ \[… \d+ signes non lus …\] /, ''));
+  const cap = lus[0].length;
+  assert.ok(lus.every(t => t.length === cap), 'le plafond n’est pas commun');
+  assert.ok(lus.reduce((a, t) => a + t.length + 24, 0) <= 45000, 'budget dépassé');
+  assert.ok(cap > 900, `le plafond reste à ${cap}`);
+  for (let i = 0; i < 40; i++) assert.ok(lignes[i].endsWith(`FIN${i}`), `la fin de la journée ${i} manque`);
+  assert.match(bloc, new RegExp(`40 journées coupées à ${cap} signes`));
+  assert.match(bloc, /signes non lus sur 400\d{3}/);
+});
+
 test('le corpus dit l’écart-type des mois, pas seulement la moyenne', () => {
   // Deux mois à 6 de moyenne, l'un plat et l'autre entre 1 et 10, ne racontent
   // pas la même chose — et c'est exactement le signal d'une instabilité.
@@ -362,7 +407,8 @@ test('le corpus transmet les comparaisons, et les calcule sur toute la fenêtre'
   const rows = Array.from({ length: 300 }, (_, i) => {
     const d = new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10);
     const dim = (new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay() + 6) % 7 === 6;
-    return { date: d, note: dim ? 3 : 7, text: 'x'.repeat(dim ? 20 : 400) };
+    // Au-dessus du seuil sans coupe : l'échantillon ne doit PAS être toute la fenêtre.
+    return { date: d, note: dim ? 3 : 7, text: 'x'.repeat(dim ? 20 : 700) };
   });
   const c = corpusPour({ rows });
   const dim = c.comparaisons.find(x => x.phrase.includes('dimanche'));

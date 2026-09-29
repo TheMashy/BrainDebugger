@@ -97,30 +97,96 @@ const CAR_PAR_JOUR = 900;
 export const BUDGET_COMPLET = 1_800_000;
 const CAR_PAR_JOUR_COMPLET = 4000;
 
+/*
+ * EN DESSOUS DE CE SEUIL, TOUT PART, SANS COUPE.
+ *
+ * Le budget coupait chaque journée à ses 900 premiers signes alors qu'il
+ * n'était rempli qu'aux trois quarts : sur un vrai journal, le modèle ne
+ * recevait qu'un quart du texte, et la journée la plus longue n'était vue qu'à
+ * 4 %. Or c'est dans la suite des soirées longues que se trouve l'essentiel
+ * de ce qui pèse. 160 000 signes font environ 45 000 jetons, bien sous ce que
+ * la requête prévoit déjà (soixante-dix à quatre-vingt mille) : on n'a aucune
+ * raison d'en couper un seul.
+ */
+export const SEUIL_SANS_COUPE = 160_000;
+// Ce que coûte une journée en plus de son texte : sa date, sa note, les sauts.
+const PAR_JOUR = 24;
+
 const jourDe = d => Date.parse(d + 'T00:00:00Z');
 const decaler = (d, n) => new Date(jourDe(d) + n * 86400000).toISOString().slice(0, 10);
 
 /**
- * Choisit les journees a transmettre.
- *
- * Pas les N dernieres : sur cinq ans, les cent dernieres journees ne disent
- * rien de ce qui revient. Pas non plus un tirage uniforme, qui noie les
- * journees denses -- celles qui portent le plus de texte sont celles ou il s'est
- * passe quelque chose. On prend donc les plus ecrites, PUIS on reordonne par
- * date : le modele doit lire une chronologie, pas un palmares.
+ * LE PLAFOND COMMUN : le plus grand c tel que Σ min(longueur, c) + 24 par
+ * journée tienne dans le budget. On remplit « par niveau » : les journées
+ * courtes passent entières, les longues sont toutes coupées à la même hauteur.
+ * Un plafond fixe (900) laissait un quart du budget vide tout en coupant les
+ * soirées longues à moins de 10 %.
  */
-export function choisirJours(rows, budget = BUDGET, carParJour = CAR_PAR_JOUR) {
+export function plafondCommun(longueurs, budget) {
+  const n = longueurs.length;
+  if (!n) return 0;
+  const cout = c => longueurs.reduce((a, l) => a + Math.min(l, c), 0) + PAR_JOUR * n;
+  const max = Math.max(...longueurs);
+  if (cout(max) <= budget) return max;
+  let lo = 0, hi = max;                    // cout(lo) <= budget < cout(hi)
+  if (cout(0) > budget) return 0;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (cout(mid) <= budget) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * Choisit les journees a transmettre, et la hauteur a laquelle les couper.
+ *
+ * D'abord TOUTES, coupees au plafond commun, tant que ce plafond reste lisible
+ * (au moins `carMin` signes par journee). Au-dela seulement on trie : pas les
+ * N dernieres -- sur cinq ans, les cent dernieres journees ne disent rien de ce
+ * qui revient ; pas un tirage uniforme, qui noie les journees denses. On prend
+ * les plus ecrites, PUIS on reordonne par date : le modele doit lire une
+ * chronologie, pas un palmares. Le reste du budget releve ensuite leur plafond.
+ *
+ * @returns {{jours: object[], cap: number}}
+ */
+export function decouper(rows, budget = BUDGET, carMin = CAR_PAR_JOUR) {
   const ecrites = rows.filter(r => r.text && r.text.trim());
+  const tous = plafondCommun(ecrites.map(r => r.text.length), budget);
+  if (ecrites.length && tous >= carMin) {
+    return { jours: [...ecrites].sort((a, b) => a.date.localeCompare(b.date)), cap: tous };
+  }
   const par = [...ecrites].sort((a, b) => b.text.length - a.text.length);
   const gardees = [];
   let total = 0;
   for (const r of par) {
-    const taille = Math.min(r.text.length, carParJour) + 24;
+    const taille = Math.min(r.text.length, carMin) + PAR_JOUR;
     if (total + taille > budget) continue;      // continue, pas break : une
     total += taille;                            // journee courte peut encore tenir
     gardees.push(r);
   }
-  return gardees.sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    jours: gardees.sort((a, b) => a.date.localeCompare(b.date)),
+    cap: Math.max(carMin, plafondCommun(gardees.map(r => r.text.length), budget))
+  };
+}
+
+export function choisirJours(rows, budget = BUDGET, carParJour = CAR_PAR_JOUR) {
+  return decouper(rows, budget, carParJour).jours;
+}
+
+/**
+ * UNE JOURNEE COUPEE GARDE SA FIN.
+ *
+ * La tete seule, c'etait le debut de chaque soiree et jamais ce qui arrive
+ * apres. On garde 60 % en tete et 40 % en fin, et le trou se dit : un modele
+ * qui ne sait pas qu'il manque un morceau le raconte comme s'il n'existait pas.
+ */
+export function couperJour(texte, cap) {
+  if (texte.length <= cap) return texte;
+  const tete = Math.round(cap * 0.6);
+  const fin = cap - tete;
+  const nonLus = texte.length - tete - fin;
+  return `${texte.slice(0, tete)} [… ${nonLus} signes non lus …] ${texte.slice(texte.length - fin)}`;
 }
 
 /** Le resume mois par mois des notes : cinq ans tiennent en soixante lignes. */
@@ -221,7 +287,12 @@ export function corpusPour({ rows, events = [], carnet = [], motifs = [], object
   const dans = () => true;
 
   const fenetre = rows.slice();
-  const gardees = choisirJours(fenetre, budget, carParJour);
+  const ecritesToutes = fenetre.filter(r => r.text?.trim());
+  const signesTous = ecritesToutes.reduce((a, r) => a + r.text.length, 0);
+  // Sous le seuil, tout part en entier ; au-dessus, un plafond commun.
+  const { jours: gardees, cap } = signesTous <= SEUIL_SANS_COUPE
+    ? { jours: [...ecritesToutes].sort((a, b) => a.date.localeCompare(b.date)), cap: Infinity }
+    : decouper(fenetre, budget, carParJour);
   const dates = new Set(gardees.map(r => r.date));
 
   const blocs = [];
@@ -237,10 +308,26 @@ ${mois.map(m => `${m.mois} | ${m.n} | ${m.med} | ${m.moy} | ${m.ecart} | ${m.bas
   }
 
   if (gardees.length) {
-    blocs.push(`SES JOURNÉES ÉCRITES. ${gardees.length} journées sur les ${fenetre.filter(r => r.text?.trim()).length} qui portent du texte sur cette période — les plus fournies, remises dans l'ordre.
+    /*
+     * LA COUPE SE DIT. « 44 journées sur les 44 » alors que chacune était
+     * amputée des neuf dixièmes laissait le modèle croire qu'il avait tout lu
+     * -- et la consigne des nœuds lui demande « toutes les journées ».
+     */
+    const coupees = gardees.filter(r => r.text.length > cap);
+    const lus = gardees.reduce((a, r) => a + Math.min(r.text.length, cap), 0);
+    const tete = gardees.length === ecritesToutes.length
+      ? `${gardees.length} journées, toutes celles qui portent du texte`
+      : `${gardees.length} journées sur les ${ecritesToutes.length} qui portent du texte — les plus fournies, remises dans l'ordre`;
+    const nonLus = signesTous - lus;
+    const coupe = !nonLus ? `Aucune n'est coupée : tu as tout le texte.`
+      : coupees.length
+        ? `${coupees.length} journée${coupees.length > 1 ? 's' : ''} coupée${coupees.length > 1 ? 's' : ''} à ${cap} signes (le début et la fin sont gardés), ${nonLus} signes non lus sur ${signesTous}.`
+        : `${nonLus} signes non lus sur ${signesTous}.`;
+    const etendue = `Le texte va du ${gardees[0].date} au ${gardees.at(-1).date}.`;
+    blocs.push(`SES JOURNÉES ÉCRITES. ${tete}. ${coupe} ${etendue}
 
 ${gardees.map(r => `[${r.date}${r.note !== null && r.note !== undefined ? ` · ${r.note}/10` : ''}] ${
-  r.text.length > carParJour ? r.text.slice(0, carParJour) + '…' : r.text}`).join('\n\n')}`);
+  couperJour(r.text, cap)}`).join('\n\n')}`);
   }
 
   const ev = events.filter(e => dans(e.fin ?? e.date));
@@ -421,7 +508,7 @@ haut. Un nom seul sur une carte est un mot ; avec sa phrase, c'est quelque chose
 reconnaît.
 
 Chaque nœud porte SES JOURNÉES : toutes les dates du corpus où cette chose apparaît. Pas
-un échantillon, pas les trois plus parlantes — toutes celles que tu as vues. Ce sont elles
+un échantillon, pas les trois plus parlantes — toutes celles que tu as vues dans ce corpus. Ce sont elles
 qui donnent son épaisseur au nœud, et c'est ce qui fait la différence entre une carte et un
 schéma : sans ses dates, un nœud affirme (« le sommeil compte chez toi ») ; avec, il rend
 compte (« le sommeil, ces journées-là »). La première se croit sur parole, la seconde se
@@ -740,7 +827,7 @@ const OUTIL = {
                 jours: {
                   type: 'array',
                   description: "Les journées du corpus où cette chose apparaît — TOUTES celles que tu "
-                    + "as vues, pas un échantillon : ce sont elles qui donnent son épaisseur au nœud. "
+                    + "as vues dans ce corpus, pas un échantillon : ce sont elles qui donnent son épaisseur au nœud. "
                     + "Des dates AAAA-MM-JJ présentes dans le corpus ; les autres seront retirées.",
                   items: { type: 'string' }
                 }
