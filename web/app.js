@@ -5416,7 +5416,7 @@ function surveillesMarkup(C, schemas, { nu = false } = {}) {
   if (!C) return '';
   if (!C.n) return '';
   const tete = nu ? '' : `<div class="lechead"><div class="fonctete"><div class="k faint"
-      title="Des comptes contre les autres jours de la même période, jamais des causes. « net » veut dire que le hasard n’explique pas l’écart (test exact de Fisher à 5 %) ; sans « net », c’est un compte à regarder, pas une conclusion.">Les jours à surveiller, ce qui revient autour</div>
+      title="Des comptes contre les autres journées écrites de la même période, jamais des causes. « net » veut dire que le hasard n’explique pas l’écart (test exact de Fisher à 5 %, corrigé pour le nombre de comptes, et qui doit tenir en comptant chaque grappe de jours une seule fois) ; sans « net », c’est un compte à regarder, pas une conclusion.">Les jours à surveiller, ce qui revient autour</div>
     <span class="lecmeta faint">${C.rythme ? esc(C.rythme) : `${C.n} ${C.n > 1 ? 'jours' : 'jour'} sur la période`}</span></div></div>`;
   if (C.manque) return `<section class="surv">${tete}<p class="sub" style="max-width:62ch">${esc(C.manque)}</p></section>`;
   const jours = C.jours.slice(-40).map(j => `<button class="fjour ${j.niveau}" data-fonct-jour="${esc(j.date)}" title="${esc(j.genres.map(g => SURV_GENRE[g] ?? g).join(' · '))}">${esc(fmtDay(j.date).replace(/ \d{4}$/, ''))}</button>`).join('');
@@ -5433,7 +5433,7 @@ function surveillesMarkup(C, schemas, { nu = false } = {}) {
   const carte = p => `<article class="fonctcarte survcarte${p.appui?.net ? ' net' : ''}">
       <div class="survquoi">${esc(p.quoi)}${p.appui?.net ? '<span class="survnet">net</span>' : ''}</div>
       <p class="fonctphr">${esc(p.phrase)}</p>
-      ${p.appui?.sur && p.appui?.hors_sur ? fonctBarres({ n: p.appui.n, d: p.appui.sur, lab: 'jours à surveiller', txt: `${p.appui.n} / ${p.appui.sur}` }, { n: p.appui.hors_n, d: p.appui.hors_sur, lab: 'les autres', txt: `${p.appui.hors_n} / ${p.appui.hors_sur}` }) : ''}
+      ${p.appui?.sur && p.appui?.hors_sur ? fonctBarres({ n: p.appui.n, d: p.appui.sur, lab: p.cle === 'heure' ? 'passages signalés' : 'jours à surveiller', txt: `${p.appui.n} / ${p.appui.sur}` }, { n: p.appui.hors_n, d: p.appui.hors_sur, lab: p.cle === 'heure' ? 'tes autres messages' : 'les autres', txt: `${p.appui.hors_n} / ${p.appui.hors_sur}` }) : ''}
     </article>`;
   const nets = C.phrases.filter(p => p.appui?.net), flous = C.phrases.filter(p => !p.appui?.net);
   const phrases = nets.length ? `<div class="fonctgrille">${nets.map(carte).join('')}</div>` : '';
@@ -5627,6 +5627,38 @@ function jaugesMarkup(jauges, manques) {
   }).join('')}</div>`;
 }
 
+/*
+ * « RIEN NE SE DÉTACHE » NE PARLE QUE DE CE QUI A ÉTÉ COMPTÉ.
+ *
+ * La ligne était en dur : « un coucher ni très régulier ni très irrégulier …
+ * les six comptes ont été faits » — affirmé sur un journal sans un seul
+ * coucher, à trois lignes de la jauge « Aucune nuit mesurée ». Le serveur dit
+ * maintenant, mécanisme par mécanisme, ce qu'il a calculé (`F.cherche`) : la
+ * ligne ne nomme que ceux-là, et les autres passent sous « pas encore regardé ».
+ */
+const RIEN_DIT = [
+  ['bascule_note', 'pas de bascule nette de la note', 'les bascules de la note'],
+  ['bascule_sommeil', 'pas de bascule nette du sommeil', 'les bascules du sommeil'],
+  ['liens', 'pas de lien confirmé au comptage', 'les liens d’un jour sur le lendemain'],
+  ['rythme', 'pas de forme de semaine', 'la forme de la semaine'],
+  ['regularite', 'un coucher ni très régulier ni très irrégulier', 'la régularité du coucher'],
+  ['inertie', 'une note qui ne colle pas à la veille sans non plus en repartir', 'la note d’un jour à l’autre'],
+  ['mots', 'des mots absolus qui ne suivent pas la note', 'les mots absolus'],
+];
+function rienTenu(cherche) {
+  if (!cherche) return 'Aucun compte ne se détache pour l’instant.';
+  const faits = RIEN_DIT.filter(([k]) => cherche[k]?.calcule);
+  const reste = RIEN_DIT.filter(([k]) => !cherche[k]?.calcule);
+  const dit = faits.map(([, d]) => d).join(', ');
+  const tete = faits.length
+    ? `${dit[0].toUpperCase()}${dit.slice(1)}. ${reste.length ? `Ces ${faits.length} comptes-là ont été faits` : 'Tous les comptes ont été faits'} pour l’instant, et aucun ne se détache.`
+    : 'Rien n’a encore pu être compté.';
+  const pas = reste.length
+    ? ` Pas encore regardé : ${reste.map(([k, , quoi]) => cherche[k]?.raison ? `${quoi} (${cherche[k].raison})` : quoi).join(', ')}.`
+    : '';
+  return tete + pas;
+}
+
 function fonctionnementsMarkup(F, { nu = false } = {}) {
   if (!F) return '';
   const p = F.periode;
@@ -5691,10 +5723,7 @@ function fonctionnementsMarkup(F, { nu = false } = {}) {
    * Elle remonte donc ici, une fois, à la place du doublon : la ligne fermée
    * dit qu'il n'y a rien, la ligne ouverte dit ce qu'on a regardé.
    */
-  const RIEN_TENU = 'Pas de bascule nette, pas de lien confirmé au comptage, pas de forme de '
-    + 'semaine ; un coucher ni très régulier ni très irrégulier, une note qui ne colle pas à la '
-    + 'veille sans non plus en repartir, des mots absolus qui ne suivent pas la note. Les six '
-    + 'comptes ont été faits pour l’instant, et aucun ne se détache.';
+  const RIEN_TENU = rienTenu(F.cherche);
   const rien = F.items.length ? '' : `<p class="sub fonctrien">${esc(RIEN_TENU)}</p>`;
   const manques = jaugesMarkup(F.jauges, F.manques);
   const exclus = `<details class="fonctexclus"><summary>Ce qu'on ne montre pas, et pourquoi</summary><ul>${

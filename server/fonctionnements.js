@@ -56,7 +56,8 @@ export const SEUILS = {
   rythme: { t: 2.9, min_dedans: 12, min_dehors: 24 },   // local : 2,9 = Bonferroni sur quatre variables (frise calibrée à 2,3 pour UN item) ; effectifs = un journal de 60 j à 30 % de trous
   regularite: { haute: 1.30, basse: 0.95 },     // banc : classes.regularity (quantiles 95/5 du témoin, écart-type du coucher observé)
   inertie: { haute: 0.44, basse: -0.02 },       // banc : classes.autocorr (quantiles 95/5 du témoin, AR(1) de la note)
-  rupture: { note: 4.5, sommeil: 3.0, min_seg: 14, ecart_min: { note: 1.0, sommeil_h: 1.0 }, z_saut: 3.5, fenetre_pente: 90 },   // sommeil = banc (pheno.penalite) ; note = local, DURCI après le banc (frise calibrée à 3,5) parce qu'une fausse bascule de note coûte cher ; ecart_min = local
+  rupture: { note: 4.5, sommeil: 3.0, min_seg: 14, ecart_min: { note: 1.0, sommeil_h: 1.0 }, z_saut: 3.5, fenetre_pente: 90,   // sommeil = banc (pheno.penalite) ; note = local, DURCI après le banc (frise calibrée à 3,5) parce qu'une fausse bascule de note coûte cher ; ecart_min = local
+             bord: 28, amont: 90 },   // local : bord = une bascule de NOTE à moins de 28 j d'un bord de la table ne se date pas (un creux de 15 j en fin de fenêtre était daté 150 fois sur 300, contre 5 au milieu) ; amont = jours lus AVANT la fenêtre pour que son début ne soit plus un bord. Le sommeil garde sa pénalité du banc tant qu'il n'est pas recalibré (calibrer.mjs) sur de vraies nuits
   lien: { seuil: 0.35, stabilite: 0.6, boots: 40, lambda: 2, min_lignes: 40,   // banc : var.seuil_var, stabilité et bootstrap de la méthode var
           min_groupe: 10, effet_min: 0.15, fisher_p: 0.05 },                     // local : le comptage montré n'existe pas au banc — à y ajouter
   mots: { r: 0.3, min_jours: 15, min_mots: 20 },   // local : r = CALIBRAGE par défaut de la méthode langage ; min_jours/min_mots ABAISSÉS (25/30 → 15/20) : un journal écrit en messages courts ne franchissait jamais la barre
@@ -521,27 +522,52 @@ function inertie(T) {
   return [];
 }
 
-/** LES BASCULES : là où le sommeil ou la note ont changé de niveau, avec l'avant, l'après, et combien de jours on compare. */
+/**
+ * LES BASCULES : là où le sommeil ou la note ont changé de niveau, avec l'avant, l'après, et combien de jours on compare.
+ *
+ * UN CREUX DE DEUX SEMAINES EN BORD DE FENÊTRE N'EST PAS UN CHANGEMENT DE NIVEAU.
+ * Rejouée jour après jour sur un vrai journal, la fenêtre de 180 jours a daté
+ * des bascules de la note dont la plupart n'ont tenu que quelques jours avant
+ * de disparaître sans un mot — « autour du 3 mars, ta note a changé de niveau :
+ * 6 avant, 4,5 après », puis plus rien. C'étaient des creux passagers, datés
+ * à quatorze jours de la fin (exactement min_seg) : le même creux au milieu de
+ * la fenêtre n'était daté que 7 fois sur 300, en fin de fenêtre 150 fois sur
+ * 300. Une bascule de note se date donc à 28 jours au moins de chaque bord :
+ * une vraie baisse se dit deux semaines plus tard, un creux passager ne se dit plus.
+ *
+ * Le bord du DÉBUT n'a pas à être un bord : on lit `T.amont` (les jours d'avant
+ * la fenêtre, voir `fonctionnements`) pour que la coupure y ait un « avant »,
+ * et on ne rend que les bascules situées dans la fenêtre.
+ *
+ * L'amont et les bords ne valent que pour la NOTE : la statistique de
+ * segmentation bouge avec la longueur de la série, et le sommeil garde sa
+ * pénalité du banc, mesurée sur la fenêtre seule, tant qu'il n'est pas recalibré.
+ */
 function bascules(T) {
-  const items = [], N = T.jours.length;
+  const items = [];
   for (const [k, pen] of [['sommeil_h', SEUILS.rupture.sommeil], ['note', SEUILS.rupture.note]]) {
-    const v = T.jours.map(j => j[k]);
-    if (v.filter(fini).length < SEUILS.min_nuits) continue;
+    if (T.jours.filter(j => fini(j[k])).length < SEUILS.min_nuits) continue;
+    const amont = k === 'note' ? (T.amont ?? []) : [], A = amont.length;
+    const J = A ? [...amont, ...T.jours] : T.jours, N = J.length;
+    const v = J.map(j => j[k]);
     for (const t of ruptures(v, { penalite: pen, min_seg: SEUILS.rupture.min_seg })) {
+      if (t < A) continue;   // avant la fenêtre : lu pour servir d'« avant », pas rendu
+      if (k === 'note' && (t < SEUILS.rupture.bord || N - t < SEUILS.rupture.bord)) continue;
       const avant = v.slice(Math.max(0, t - 14), t), apres = v.slice(t, Math.min(N, t + 14));
       const ma = moyenne(avant), mb = moyenne(apres); if (ma == null || mb == null) continue;
       const d = mb - ma;
       if (Math.abs(d) < SEUILS.rupture.ecart_min[k]) continue;   // un changement qu'on ne voit pas à l'œil ne se dit pas
       const nA = avant.filter(fini).length, nB = apres.filter(fini).length;
       const unite = k === 'sommeil_h' ? ['nuit', 'nuits'] : ['journée notée', 'journées notées'];
-      const proche = items.find(it => it.variable === k && Math.abs(it.t - t) <= 7);
+      const proche = items.find(it => it.variable === k && Math.abs(it.t - (t - A)) <= 7);
       if (proche) { if (Math.abs(d) <= Math.abs(proche.appui.ecart)) continue; items.splice(items.indexOf(proche), 1); }
+      const date = J[t].date;
       items.push({
-        type: 'bascule', cle: `bascule:${k}:${T.jours[t].date}`, variable: k, date: T.jours[t].date, t,
+        type: 'bascule', cle: `bascule:${k}:${date}`, variable: k, date, t: t - A,
         sens: k === 'sommeil_h' ? (d < 0 ? 'nuits plus courtes' : 'nuits plus longues') : (d < 0 ? 'note plus basse' : 'note plus haute'),
-        phrase: `Autour du ${jourLisible(T.jours[t].date)}, ${nomDe(k)} a changé de niveau : ${fmt(k, ma)} avant, ${fmt(k, mb)} après (${pl(nA, unite[0], unite[1])} dans les deux semaines d’avant, ${nB} dans les deux semaines d’après).`,
+        phrase: `Autour du ${jourLisible(date)}, ${nomDe(k)} a changé de niveau : ${fmt(k, ma)} avant, ${fmt(k, mb)} après (${pl(nA, unite[0], unite[1])} dans les deux semaines d’avant, ${nB} dans les deux semaines d’après).`,
         appui: { avant: ma, apres: mb, ecart: d, n_avant: nA, n_apres: nB },
-        jours: [T.jours[t].date], force: Math.min(1, Math.abs(d) / 2.5),
+        jours: [date], force: Math.min(1, Math.abs(d) / 2.5),
       });
     }
   }
@@ -626,7 +652,7 @@ function mots(T) {
   for (const j of hautes) for (const m of j.absolus_mots ?? []) exces.set(m, (exces.get(m) ?? 0) - 1);
   const tops = [...exces].filter(([, e]) => e > 0).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([w]) => w);
   const cite = tops.length ? ` (${tops.map(w => `« ${w} »`).join(', ')})` : '';
-  return [{ type: 'mots', cle: 'mots:absolus', phrase: `Tes mots absolus${cite} sont plus nombreux les jours où ta note est la plus basse : ${fmt('absolus', tauxBas)}, contre ${fmt('note', tauxHaut)} les jours où elle est la plus haute (${n} journées écrites).`, appui: { r, n, bas: tauxBas, haut: tauxHaut, mots: tops }, jours: basses.map(j => j.date), force: Math.min(1, Math.abs(r) / 0.6) }];
+  return [{ type: 'mots', cle: 'mots:absolus', phrase: `Tes mots absolus${cite} sont plus nombreux les jours où ta note est la plus basse : ${fmt('absolus', tauxBas)}, contre ${fmt('absolus', tauxHaut)} les jours où elle est la plus haute (${n} journées écrites).`, appui: { r, n, bas: tauxBas, haut: tauxHaut, mots: tops }, jours: basses.map(j => j.date), force: Math.min(1, Math.abs(r) / 0.6) }];
 }
 
 /* ------------------------------------------------------------------ */
@@ -637,6 +663,47 @@ export const EXCLUS = [
   { type: 'alertes', raison: 'Deviner une bascule avant qu’elle arrive n’était juste que 4 fois sur 100 à l’essai, avec une note par jour. Une alerte fausse 96 fois sur 100 n’est pas une alerte : on n’en montre pas.' },
   { type: 'couplage', raison: 'Le sens d’un lien sur une période courte (par exemple sommeil et note pendant les deux semaines qui suivent une bascule) n’était lisible que 11 fois sur 100 à l’essai. Trop peu pour l’écrire.' },
 ];
+
+/*
+ * CE QUI A VRAIMENT ÉTÉ CHERCHÉ, MÉCANISME PAR MÉCANISME.
+ *
+ * Quand rien ne se détache, l'écran le disait en énumérant tout : « un coucher
+ * ni très régulier ni très irrégulier » — sur un journal qui n'avait AUCUN
+ * coucher, à trois lignes de la jauge « Aucune nuit mesurée ». La régularité
+ * n'avait pas été calculée (il faut 30 couchers), la bascule du sommeil non
+ * plus, et la page affirmait un fait sur le sommeil sans une donnée. On rend
+ * donc, pour chaque mécanisme, s'il a été calculé et sinon pourquoi — les
+ * mêmes conditions que ses propres premières lignes — pour que l'écran ne dise
+ * « rien de net » que de ce qui a été compté.
+ */
+function ceQuiAEteCherche(T, assez) {
+  const combien = k => T.jours.filter(j => fini(j[k])).length;
+  const notes = combien('note'), nuits = combien('sommeil_h'), couchers = combien('coucher');
+  const oui = { calcule: true, raison: null }, non = raison => ({ calcule: false, raison });
+  if (!assez) {
+    const r = `${pl(notes, 'journée notée', 'journées notées')}, ${pl(nuits, 'nuit mesurée', 'nuits mesurées')} : pas assez pour compter`;
+    return Object.fromEntries(['bascule_note', 'bascule_sommeil', 'liens', 'rythme', 'regularite', 'inertie', 'mots'].map(k => [k, non(r)]));
+  }
+  const V = T.variables.filter(k => combien(k) >= SEUILS.min_notes);
+  const liensOk = V.length >= 2 && T.jours.length - 1 >= SEUILS.lien.min_lignes;
+  const rythmeOk = ['note', 'sommeil_h', 'coucher', 'ecran_min'].some(k => {
+    const enWe = j => (k === 'coucher' ? j.sortie : j.we);
+    return T.jours.filter(j => enWe(j) && fini(j[k])).length >= SEUILS.rythme.min_dedans
+        && T.jours.filter(j => !enWe(j) && fini(j[k])).length >= SEUILS.rythme.min_dehors;
+  });
+  const v = T.jours.map(j => j.note), { phi, paires } = ar1(v);
+  const inertieOk = notes >= SEUILS.min_notes && phi != null && paires >= SEUILS.min_paires;
+  const { n: nMots } = spearman(T.jours.map(j => j.absolus), v);
+  return {
+    bascule_note: notes >= SEUILS.min_nuits ? oui : non(`${pl(notes, 'journée notée', 'journées notées')} sur ${SEUILS.min_nuits}`),
+    bascule_sommeil: nuits >= SEUILS.min_nuits ? oui : non(`${pl(nuits, 'nuit mesurée', 'nuits mesurées')} sur ${SEUILS.min_nuits}`),
+    liens: liensOk ? oui : non(V.length < 2 ? `${V.length} série d’au moins ${SEUILS.min_notes} jours` : `${T.jours.length} jours sur ${SEUILS.lien.min_lignes + 1}`),
+    rythme: rythmeOk ? oui : non('trop peu de jours de chaque côté de la semaine'),
+    regularite: couchers >= SEUILS.min_nuits ? oui : non(`${pl(couchers, 'coucher', 'couchers')} sur ${SEUILS.min_nuits}`),
+    inertie: inertieOk ? oui : non(`${pl(paires, 'lendemain noté', 'lendemains notés')} sur ${SEUILS.min_paires}`),
+    mots: nMots >= SEUILS.mots.min_jours ? oui : non(`${pl(nMots, 'journée écrite et notée', 'journées écrites et notées')} sur ${SEUILS.mots.min_jours}`),
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* L'entrée                                                             */
@@ -715,13 +782,18 @@ export function analyserTable(T) {
   return {
     periode: { de: T.de, a: T.a, jours: T.jours.length, nourries: T.nourries ?? null,
                elargie: !!T.elargie, mesure_depuis: T.mesure_depuis ?? null,
-               notes, nuits, nuits_dites: nuitsDites, ecrans, textes },
-    assez, items, manques, jauges, exclus: EXCLUS,
+               notes, nuits, nuits_dites: nuitsDites, ecrans, textes, couchers },
+    assez, items, manques, jauges, exclus: EXCLUS, cherche: ceQuiAEteCherche(T, assez),
     series: { dates: T.jours.map(j => j.date), note: T.jours.map(j => j.note), sommeil_h: T.jours.map(j => j.sommeil_h), coucher: T.jours.map(j => j.coucher), we: T.jours.map(j => j.we), nourri: T.jours.map(j => !!j.nourri) },
   };
 }
 export function fonctionnements(userId = OWNER, opts = {}) {
   const T = tableDe(userId, opts);
+  // Les jours d'AVANT la fenêtre, pour les bascules seulement (voir `bascules`) :
+  // sans eux, le premier mois de la fenêtre est un bord, et un creux qui s'y
+  // trouve n'a pas d'« avant » à qui se comparer.
+  const marge = SEUILS.rupture.amont, depuis = addDays(T.de, -marge);
+  T.amont = tableDe(userId, { jours: marge, jusquA: addDays(T.de, -1) }).jours.filter(j => j.date >= depuis);
   return { ...analyserTable(T), surveilles: joursSurveilles(T, userId) };
 }
 
@@ -731,10 +803,11 @@ export function fonctionnements(userId = OWNER, opts = {}) {
 /* La veille marque des jours (rouge : une blessure, une surdose ;      */
 /* jaune : le suicide évoqué, un moyen à portée, un excès, le réel qui  */
 /* se décolle). Ici on regarde ce qui REVIENT autour de ces jours-là,   */
-/* compté contre les autres jours de la même période : la nuit d'avant  */
-/* était-elle courte, le coucher tard, la note de la veille basse ; à   */
-/* quelle heure ça s'écrit ; le week-end ou pas ; les mots absolus ; et */
-/* à quel rythme ça revient. Ce sont des comptes, pas des causes — on   */
+/* compté contre les autres JOURNÉES ÉCRITES de la période : la nuit   */
+/* d'avant était-elle courte, le coucher tard, la note de la veille     */
+/* basse ; à quelle heure ça s'écrit ; le week-end ou pas ; les mots    */
+/* absolus ; et à quel rythme ça revient. Ce sont des comptes, pas des */
+/* causes — on                                                          */
 /* ne dit jamais que la nuit courte a FAIT le jour rouge, on dit qu'ils  */
 /* vont ensemble 5 fois sur 7, contre 40 sur 150. Un souvenir raconté   */
 /* (« évoqué ») n'est pas un jour à surveiller.                          */
@@ -743,64 +816,219 @@ export function fonctionnements(userId = OWNER, opts = {}) {
    lui en était écarté. L'envie de se faire du mal, écrite, compte aussi. */
 const GENRES_SURVEILLES = new Set(['blessure', 'surdose', 'suicide', 'moyen', 'en_main', 'envie_mal', 'substance', 'dereel']);
 function heureDe(ts) {
+  if (ts == null || ts === '') return null;   // sans instant, pas d'heure — pas celle de 1970
   try { const s = new Date(ts).toLocaleTimeString('fr-FR', { timeZone: process.env.TZ || 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false }); const m = /^(\d{2}):(\d{2})/.exec(s); return m ? +m[1] + +m[2] / 60 : null; } catch { return null; }
 }
-export function joursSurveilles(T, userId = OWNER, { veille = veilleDuJour, messages = messagesForDate, niveau = niveauDuTexte } = {}) {
+/*
+ * UNE HEURE QUI N'A PAS ÉTÉ VÉCUE NE SE COMPTE PAS.
+ *
+ * « Ça s'écrit la nuit » comptait des notes importées, horodatées par
+ * convention (import-notes.js), un seul message chacune — 23 h 00 à Paris
+ * l'été, toujours dans la plage 22 h → 5 h : une nuit que personne n'a vécue.
+ * Un message rangé au carnet (un courrier collé, un recollage) n'a pas non plus
+ * l'heure de la journée. Les deux restent lus par la veille, puisque le signe
+ * vient de leur TEXTE ; ils ne donnent simplement pas d'heure.
+ */
+const heureVecue = m => m.source !== 'import' && !m.rangee;
+const LA_NUIT = h => h >= 22 || h < 5;
+/*
+ * `genresSurveilles` : la liste des genres qui font un jour à surveiller. Par
+ * défaut GENRES_SURVEILLES ; elle ne se passe que pour les tests (un genre
+ * ajouté par la veille doit pouvoir s'éprouver ici avant que la liste l'ait).
+ */
+export function joursSurveilles(T, userId = OWNER, { veille = veilleDuJour, messages = messagesForDate, niveau = niveauDuTexte, genresSurveilles = GENRES_SURVEILLES } = {}) {
   const N = T.jours.length, parDate = new Map(T.jours.map((j, i) => [j.date, i]));
   const jours = [];
+  /*
+   * LES JOURNÉES ÉCRITES, parce que la veille ne marque qu'un jour où l'on a
+   * écrit. Comparer les jours à surveiller à « tous les autres jours », c'était
+   * les comparer surtout à des jours sans un mot, pris dans d'autres saisons :
+   * « ta note de la veille était basse 4 fois sur 20, contre 50 sur 150 » ne
+   * disait rien des jours à surveiller, seulement de la période où l'on écrit.
+   * Le même filtre que `veilleDuJour` : au moins un message de la personne, non vide.
+   */
+  const ecrits = new Set();
+  const heuresAutres = new Map();   // date → heures des messages vécus des journées écrites non marquées
+  const heuresGraves = new Map();   // date marquée → heures de TOUS ses passages signalés au niveau le plus grave
   for (const j of T.jours) {
+    const lus = (messages(j.date, userId) ?? []).filter(m => m.role === 'user' && m.text?.trim());
+    if (lus.length) ecrits.add(j.date);
     const v = veille(j.date, userId);
-    if (!v?.niveau) continue;
-    const genres = (v.motifs ?? []).map(m => m.genre).filter(g => GENRES_SURVEILLES.has(g));
-    if (!genres.length) continue;
-    // L'heure du premier message qui porte le signe.
-    let heure = null;
-    for (const m of messages(j.date, userId)) {
-      if (m.role !== 'user' || !m.text?.trim()) continue;
-      const r = plafondCourrier(m.text, niveau(m.text, { aujourdhui: j.date }), j.date);   // un courrier collé : comme dans la veille du jour
-      if (r?.niveau && r.motifs.some(x => GENRES_SURVEILLES.has(x.genre))) { heure = heureDe(m.ts); break; }
+    const genres = v?.niveau ? (v.motifs ?? []).map(m => m.genre).filter(g => genresSurveilles.has(g)) : [];
+    if (!genres.length) {
+      const hs = lus.filter(heureVecue).map(m => heureDe(m.ts)).filter(fini);
+      if (hs.length) heuresAutres.set(j.date, hs);
+      continue;
     }
-    jours.push({ date: j.date, niveau: v.niveau, genres: [...new Set(genres)], heure });
+    ecrits.add(j.date);   // un jour marqué a été écrit, même si on ne voit pas ses messages d'ici
+    /*
+     * L'HEURE DU PASSAGE LE PLUS GRAVE, pas du premier. Le premier message
+     * signalé pouvait être un faux positif de l'après-midi, alors que le rouge
+     * de la journée était écrit à l'aube. Le contexte de la journée entière
+     * passe à `niveau`, comme dans `veilleDuJour` : c'est lui qui fait basculer
+     * une blessure possible en rouge. Rouge d'abord : l'heure du jour vient des
+     * passages au niveau le plus grave de la journée, et d'eux seuls.
+     *
+     * Le texte rangé au carnet, comme dans la veille de qualite/veille : il y
+     * est lu, mais plafonné au jaune « évoqué » (qui n'est pas un signe
+     * surveillé) et tenu hors du contexte de la journée. Ici de même : hors du
+     * contexte, et sans heure. Tant que cette veille n'est pas fusionnée,
+     * `messagesForDate` ne rend pas le champ `rangee` : les deux filtres ne
+     * retirent alors rien, ici comme dans la veille d'aujourd'hui. À GARDER ALIGNÉ.
+     */
+    const contexteDuJour = lus.filter(m => !m.rangee).map(m => m.text).join(' ');
+    const signes = [];   // { h, g } : chaque passage vécu qui porte un signe surveillé
+    for (const m of lus) {
+      if (!heureVecue(m)) continue;
+      const h = heureDe(m.ts); if (!fini(h)) continue;
+      const r = plafondCourrier(m.text, niveau(m.text, { contexteDuJour, aujourdhui: j.date }), j.date);   // un courrier collé : comme dans la veille du jour
+      if (!r?.niveau) continue;
+      const vus = (r.motifs ?? []).filter(x => genresSurveilles.has(x.genre));
+      if (!vus.length) continue;
+      signes.push({ h, g: vus.some(x => (x.niveau ?? r.niveau) === 'rouge') ? 2 : 1 });
+    }
+    const grave = Math.max(0, ...signes.map(s => s.g));
+    const lesGraves = signes.filter(s => s.g === grave).map(s => s.h);
+    if (lesGraves.length) heuresGraves.set(j.date, lesGraves);
+    // L'heure qu'on rend pour le jour : le premier de ses passages les plus
+    // graves. Elle ne sert qu'à le dire ; le compte de l'heure, plus bas, prend
+    // TOUS ces passages, jamais « le premier ».
+    jours.push({ date: j.date, niveau: v.niveau, genres: [...new Set(genres)], heure: lesGraves[0] ?? null });
   }
   const n = jours.length;
   if (n < 3) return { n, jours, phrases: [], manque: n ? `${pl(n, 'jour à surveiller', 'jours à surveiller')} sur la période : il en faut 3 pour compter ce qui revient autour.` : null };
 
   const set = new Set(jours.map(j => j.date));
-  const phrases = [];
-  const compte = (cle, quoi, dans, hors, texteDans, texteHors) => {
-    // dans / hors : [n, sur] ; on ne compare qu'avec au moins 5 de chaque côté, et on dit si c'est net (Fisher ≤ 5 %).
-    if (dans[1] < 3 || hors[1] < 5) return;
-    const p = fisher(dans[0], dans[1], hors[0], hors[1]);
-    const net = p <= 0.05 && dans[0] / dans[1] > hors[0] / hors[1];
-    phrases.push({ cle, quoi, phrase: `${texteDans} ${dans[0]} fois sur ${dans[1]} — contre ${hors[0]} sur ${hors[1]} ${texteHors}.${net ? '' : ' Trop peu pour trancher.'}`, appui: { n: dans[0], sur: dans[1], hors_n: hors[0], hors_sur: hors[1], net, p: Math.round(p * 1000) / 1000 } });
+  // Les grappes : des jours à surveiller à 3 jours ou moins l'un de l'autre. Un
+  // jour isolé est sa propre grappe.
+  const tri = jours.map(j => j.date).sort();
+  const unites = [[tri[0]]], ecarts = [];
+  for (let i = 1; i < tri.length; i++) {
+    const e = Math.round((Date.parse(tri[i] + 'T00:00:00Z') - Date.parse(tri[i - 1] + 'T00:00:00Z')) / 864e5);
+    ecarts.push(e);
+    if (e <= 3) unites.at(-1).push(tri[i]); else unites.push([tri[i]]);
+  }
+  const enGrappe = unites.filter(u => u.length > 1), grappes = enGrappe.length, dansGrappes = enGrappe.reduce((s, u) => s + u.length, 0);
+
+  /*
+   * « NET » APRÈS TOUS LES COMPTES, ET GRAPPE PAR GRAPPE.
+   *
+   * Jusqu'à six comptes sont faits ici, chacun à 5 % : sur une longue fenêtre,
+   * « tes mots absolus dépassent ta médiane 13 fois sur 20 — contre 8 sur 25 »
+   * sortait « net » à p ≈ 0,03, grâce à deux vieilles journées courtes.
+   * On corrige donc pour le nombre de comptes (Holm) avant de dire « net ».
+   * Et presque tous les jours à surveiller pouvaient tomber dans deux grappes :
+   * compter chaque jour comme indépendant gonflait l'écart. Il doit tenir aussi
+   * quand chaque grappe compte pour UNE unité (elle vaut « oui » si la majorité
+   * de ses jours le vaut), avec au moins 5 unités. Un compte qui n'est pas net
+   * reste visible, dans le repli : rien de ce qui est compté ne disparaît.
+   */
+  const comptes = [];
+  const compte = (cle, quoi, [dans, hors, parJour], texteDans, texteHors, { sur = '', horsG = hors } = {}) => {
+    // dans / hors : [n, sur] ; on ne compare qu'avec au moins 5 de chaque côté.
+    // horsG : l'autre côté du compte par grappe, dans la MÊME unité (le jour)
+    // quand `hors` compte autre chose (l'heure compte des messages).
+    if (dans[1] < 5 || hors[1] < 5) return;
+    // Un jour vaut oui/non, ou une PART (l'heure : la part de ses passages
+    // écrits la nuit). Une grappe vaut alors la part moyenne de ses jours, et la
+    // somme des grappes s'arrondit en défaveur de l'écart.
+    let gOui = 0, gSur = 0;
+    for (const u of unites) {
+      const vals = u.map(d => parJour.get(d)).filter(x => x != null); if (!vals.length) continue;
+      gSur++;
+      gOui += typeof vals[0] === 'number' ? moyenne(vals) : (2 * vals.filter(Boolean).length > vals.length ? 1 : 0);
+    }
+    gOui = Math.floor(gOui + 1e-9);
+    comptes.push({ cle, quoi, dans, hors, horsG, texteDans, texteHors, sur, p: fisher(dans[0], dans[1], hors[0], hors[1]),
+                   g: [gOui, gSur], pG: gSur && horsG[1] ? fisher(gOui, gSur, horsG[0], horsG[1]) : 1 });
   };
   const v = k => T.jours.map(j => j[k]);
   const medS = mediane(v('sommeil_h')), medC = mediane(v('coucher')), medN = mediane(v('note')), medA = mediane(v('absolus'));
   const deuxGroupes = (pred) => {
-    let dn = 0, ds = 0, hn = 0, hs = 0;
-    for (const j of T.jours) { const r = pred(j); if (r == null) continue; if (set.has(j.date)) { ds++; if (r) dn++; } else { hs++; if (r) hn++; } }
-    return [[dn, ds], [hn, hs]];
+    let dn = 0, ds = 0, hn = 0, hs = 0; const parJour = new Map();
+    for (const j of T.jours) {
+      if (!ecrits.has(j.date)) continue;   // le jour cible est une journée écrite ; sa veille peut ne pas l'être
+      const r = pred(j); if (r == null) continue;
+      if (set.has(j.date)) { ds++; if (r) dn++; parJour.set(j.date, !!r); } else { hs++; if (r) hn++; }
+    }
+    return [[dn, ds], [hn, hs], parJour];
   };
-  if (medS != null) { const [d, h] = deuxGroupes(j => fini(j.sommeil_h) ? j.sommeil_h < medS : null); compte('nuit_courte', 'la nuit d’avant', d, h, `La nuit qui ouvre un jour à surveiller est plus courte que ta médiane (${fmt('sommeil_h', medS)})`, 'les autres jours'); }
-  if (medC != null) { const [d, h] = deuxGroupes(j => { const i = parDate.get(j.date); const c = i > 0 ? T.jours[i - 1].coucher : null; return fini(c) ? c > medC : null; }); compte('coucher_tard', 'le coucher de la veille', d, h, `La veille d’un jour à surveiller, tu t’es couché plus tard que ta médiane (${fmt('coucher', medC)})`, 'les autres veilles'); }
-  if (medN != null) { const [d, h] = deuxGroupes(j => { const i = parDate.get(j.date); const x = i > 0 ? T.jours[i - 1].note : null; return fini(x) ? x < medN : null; }); compte('note_veille', 'la note de la veille', d, h, `La veille d’un jour à surveiller, ta note était sous ta médiane (${fmt('note', medN)})`, 'les autres veilles'); }
-  { const [d, h] = deuxGroupes(j => j.we === 1); compte('week_end', 'le jour de la semaine', d, h, 'Un jour à surveiller tombe le week-end', 'les autres jours (deux sur sept attendus)'); }
-  if (medA != null) { const [d, h] = deuxGroupes(j => fini(j.absolus) ? j.absolus > medA : null); compte('absolus', 'les mots absolus', d, h, `Un jour à surveiller, tes mots absolus dépassent ta médiane`, 'les autres jours écrits'); }
-  // L'heure : la nuit (22 h → 5 h), sans groupe de comparaison — un simple compte.
-  const heures = jours.map(j => j.heure).filter(fini);
-  if (heures.length >= 3) { const nuit = heures.filter(h => h >= 22 || h < 5).length; phrases.push({ cle: 'heure', quoi: 'l’heure', phrase: `Ce qui fait un jour à surveiller s’écrit la nuit (22 h → 5 h) ${nuit} fois sur ${heures.length}.`, appui: { n: nuit, sur: heures.length, net: null } }); }
+  if (medS != null) compte('nuit_courte', 'la nuit d’avant', deuxGroupes(j => fini(j.sommeil_h) ? j.sommeil_h < medS : null), `La nuit qui ouvre un jour à surveiller est plus courte que ta médiane (${fmt('sommeil_h', medS)})`, 'les autres journées écrites');
+  if (medC != null) compte('coucher_tard', 'le coucher de la veille', deuxGroupes(j => { const i = parDate.get(j.date); const c = i > 0 ? T.jours[i - 1].coucher : null; return fini(c) ? c > medC : null; }), `La veille d’un jour à surveiller, tu t’es couché plus tard que ta médiane (${fmt('coucher', medC)})`, 'les autres veilles de journées écrites');
+  if (medN != null) compte('note_veille', 'la note de la veille', deuxGroupes(j => { const i = parDate.get(j.date); const x = i > 0 ? T.jours[i - 1].note : null; return fini(x) ? x < medN : null; }), `La veille d’un jour à surveiller, ta note était sous ta médiane (${fmt('note', medN)})`, 'les autres veilles de journées écrites');
+  compte('week_end', 'le jour de la semaine', deuxGroupes(j => j.we === 1), 'Un jour à surveiller tombe le week-end', 'les autres journées écrites');
+  if (medA != null) compte('absolus', 'les mots absolus', deuxGroupes(j => fini(j.absolus) ? j.absolus > medA : null), `Un jour à surveiller, tes mots absolus dépassent ta médiane`, 'les autres journées écrites');
+  /*
+   * L'HEURE, CONTRE L'HEURE OÙ TU ÉCRIS D'HABITUDE. « 5 fois sur 20 la nuit »
+   * n'avait aucun point de comparaison, chez quelqu'un qui écrit un message sur
+   * quatre entre 22 h et 5 h les autres jours. On compare donc à la part
+   * nocturne de ses messages des autres journées écrites (heure vécue
+   * seulement) — et sans cette comparaison, on se tait.
+   *
+   * LA MÊME RÈGLE DES DEUX CÔTÉS. Ce qui fait un jour à surveiller, ce sont ses
+   * passages au niveau le plus grave de la journée (rouge d'abord) ; dans une
+   * autre journée écrite, rien n'est signalé, et tous ses messages sont à son
+   * niveau le plus haut. On compte donc, des deux côtés, TOUS les passages de ce
+   * niveau : les passages signalés contre les messages des autres journées.
+   * Retenir UN passage par jour marqué — le premier des plus graves — et le
+   * comparer à tous les messages, c'était favoriser la nuit : le premier passage
+   * d'une journée tombe plus souvent avant 5 h que n'importe lequel, et chez qui
+   * écrit à 1 h, 3 h, 4 h puis l'après-midi, dix jours marqués sortaient
+   * « nets » sans que l'heure les distingue en rien.
+   *
+   * Grappe par grappe, la même règle encore : chaque jour vaut la PART de ces
+   * passages écrite la nuit (marqué : ses passages signalés ; autre journée :
+   * ses messages). Pas « la majorité » : un seul passage signalé est « de nuit »
+   * une fois sur quatre chez qui écrit un message sur quatre la nuit, une
+   * journée de huit messages presque jamais — et une rafale de passages dans
+   * une même séance nocturne passait alors pour un écart. Simulé sans aucun lien
+   * entre l'heure et le signe (deux séances de quatre messages par jour, 30 % la
+   * nuit ; le signe : trois messages d'une même séance), la majorité laissait
+   * sortir 10 à 16 % de faux « nets » à 5 % ; la part, 2 % au plus.
+   */
+  {
+    const partLaNuit = hs => hs.filter(LA_NUIT).length / hs.length;
+    const autresJours = [...heuresAutres.entries()].filter(([d]) => ecrits.has(d) && !set.has(d)).map(([, hs]) => hs);
+    const autres = autresJours.flat(), graves = [...heuresGraves.values()].flat();
+    const parJour = new Map([...heuresGraves].map(([d, hs]) => [d, partLaNuit(hs)]));
+    const horsG = [Math.ceil(autresJours.reduce((s, hs) => s + partLaNuit(hs), 0) - 1e-9), autresJours.length];
+    compte('heure', 'l’heure', [[graves.filter(LA_NUIT).length, graves.length], [autres.filter(LA_NUIT).length, autres.length], parJour],
+      'Ce qui fait un jour à surveiller s’écrit la nuit (22 h → 5 h)', 'de tes messages des autres journées écrites',
+      { sur: ` passages signalés (${pl(heuresGraves.size, 'jour', 'jours')})`, horsG });
+  }
+  const phrases = [];
+  const m = comptes.length;
+  let tient = true;   // Holm : le k-ième plus petit p passe à 5 % / (m − k), et le premier qui échoue arrête tout
+  comptes.slice().sort((a, b) => a.p - b.p).forEach((c, rang) => {
+    c.seuil = 0.05 / (m - rang);
+    if (!(c.p <= c.seuil)) tient = false;
+    const sens = c.dans[0] / c.dans[1] > c.hors[0] / c.hors[1], sensG = c.g[1] > 0 && c.horsG[1] > 0 && c.g[0] / c.g[1] > c.horsG[0] / c.horsG[1];
+    c.net = tient && sens && sensG && c.g[1] >= 5 && c.pG <= c.seuil;
+  });
+  for (const c of comptes) {
+    const { dans, hors, net } = c;
+    phrases.push({ cle: c.cle, quoi: c.quoi,
+      phrase: `${c.texteDans} ${dans[0]} fois sur ${dans[1]}${c.sur} — contre ${hors[0]} sur ${hors[1]} ${c.texteHors}.${net ? ` L’écart tient sur les ${pl(m, 'compte regardé', 'comptes regardés')}, même en comptant chaque grappe de jours une seule fois.` : ' Trop peu pour trancher.'}`,
+      appui: { n: dans[0], sur: dans[1], hors_n: hors[0], hors_sur: hors[1], net, p: Math.round(c.p * 1000) / 1000,
+               comptes: m, seuil: Math.round(c.seuil * 10000) / 10000, grappes: { n: c.g[0], sur: c.g[1], hors_n: c.horsG[0], hors_sur: c.horsG[1], p: Math.round(c.pG * 1000) / 1000 } } });
+  }
   // Le lendemain : la note remonte-t-elle ?
   { let dif = []; for (const j of jours) { const i = parDate.get(j.date); if (i == null || i + 1 >= N) continue; const a = T.jours[i].note, b = T.jours[i + 1].note; if (fini(a) && fini(b)) dif.push(b - a); }
     if (dif.length >= 3) { const md = mediane(dif); phrases.push({ cle: 'lendemain', quoi: 'le lendemain', phrase: `Le lendemain d’un jour à surveiller, ta note bouge de ${md > 0 ? '+' : ''}${String(Math.round(md * 10) / 10).replace('.', ',')} en médiane (${pl(dif.length, 'lendemain noté', 'lendemains notés')}).`, appui: { n: dif.length, mediane: md, net: null } }); } }
-  // Le rythme : l'écart médian entre deux jours à surveiller, et les grappes (à 3 jours ou moins).
-  const dates = jours.map(j => Date.parse(j.date + 'T00:00:00Z')).sort((a, b) => a - b);
-  const ecarts = []; let grappes = 0, dansGrappe = false;
-  for (let i = 1; i < dates.length; i++) { const e = Math.round((dates[i] - dates[i - 1]) / 864e5); ecarts.push(e); if (e <= 3) { if (!dansGrappe) grappes++; dansGrappe = true; } else dansGrappe = false; }
+  /*
+   * LE RYTHME, RAPPORTÉ AUX JOURNÉES ÉCRITES. « 20 jours à surveiller sur 180
+   * jours » se lisait comme un jour sur neuf ; si l'on n'a écrit que 40 jours,
+   * c'est une journée écrite sur deux. Le calendrier reste entre parenthèses, et on dit
+   * combien de ces jours tiennent dans des grappes plutôt que « des jours qui se suivent ».
+   */
   const ecartMed = mediane(ecarts);
-  const rythme = ecartMed != null ? `${pl(n, 'jour à surveiller', 'jours à surveiller')} sur ${N} jours, ${pl(ecartMed, 'jour d’écart', 'jours d’écart')} en médiane${grappes ? `, ${pl(grappes, 'grappe', 'grappes')} de jours qui se suivent` : ''}.` : null;
+  const rythme = ecartMed != null
+    ? `${pl(n, 'jour à surveiller', 'jours à surveiller')} sur ${pl(ecrits.size, 'journée écrite', 'journées écrites')} (${N} jours)`
+      + `${grappes ? `, dont ${dansGrappes} dans ${pl(grappes, 'grappe', 'grappes')} (écarts ≤ 3 j)` : ''} ; ${pl(ecartMed, 'jour d’écart', 'jours d’écart')} en médiane.`
+    : null;
   // Ce qui s'écrit ces jours-là : les genres, comptés.
   const parGenre = {}; for (const j of jours) for (const g of j.genres) parGenre[g] = (parGenre[g] ?? 0) + 1;
-  return { n, jours, rythme, ecart_median: ecartMed, grappes, genres: parGenre, phrases, manque: null };
+  return { n, jours, rythme, ecrites: ecrits.size, ecart_median: ecartMed, grappes, dans_grappes: dansGrappes, genres: parGenre, phrases, manque: null };
 }
 
 /* Ce que la machine dit À SON COMPTE ne nomme jamais un trouble, une cause, un
