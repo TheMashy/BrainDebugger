@@ -1962,6 +1962,10 @@ export function corpusDuJournal(userId, rows = series(userId).rows,
     rows, events: allEvents(userId), carnet, complet,
     motifs: allMotifs(userId), objectifs: allObjectifs(userId),
     amplitudes: amplitudes(userId),
+    // Sa légende (0, 2, 5, 8…) : sans elle le modèle lit une échelle générique,
+    // et un 0 se fond dans les « ≤3 ». Envoyée seulement depuis que le nom
+    // d'une piste lourde exige huit journées et deux retours (lecture.js).
+    ancres: allAnchors(userId),
     // La consigne lui demande d'en reprendre les noms ; la validation, elle, ne
     // se contente pas de le demander : elle verifie ce qui a ete repris et fait
     // suivre les couleurs.

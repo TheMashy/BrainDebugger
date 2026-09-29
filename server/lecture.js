@@ -192,8 +192,25 @@ export function couperJour(texte, cap) {
   return `${texte.slice(0, tete)} [… ${nonLus} signes non lus …] ${texte.slice(texte.length - fin)}`;
 }
 
+/**
+ * LES SEUILS DU TABLEAU, DANS SON ÉCHELLE À LUI.
+ *
+ * « ≤3 » confondait une journée à 3 et une journée à 0 -- or 0, dans sa propre
+ * légende, n'est pas « un peu plus bas que 3 ». Avec des ancres, la colonne
+ * basse s'arrête à son ancre basse non nulle, et le plancher a sa colonne à
+ * lui. Sans ancres, le tableau reste celui d'avant (≤3, ≥8).
+ */
+export function seuilsDe(ancres = []) {
+  const notes = (ancres ?? []).map(a => Number(a?.note)).filter(Number.isFinite);
+  if (!notes.length) return { bas: 3, plancher: null, haut: 8 };
+  const plancher = Math.min(...notes);
+  const nonNulles = notes.filter(n => n > 0);
+  const bas = nonNulles.length ? Math.min(...nonNulles) : 3;
+  return { bas, plancher: plancher < bas ? plancher : null, haut: 8 };
+}
+
 /** Le resume mois par mois des notes : cinq ans tiennent en soixante lignes. */
-function parMois(rows) {
+function parMois(rows, seuils = seuilsDe()) {
   const m = new Map();
   for (const r of rows) {
     if (r.note === null || r.note === undefined) continue;
@@ -212,8 +229,25 @@ function parMois(rows) {
     const et = Math.sqrt(notes.reduce((a, b) => a + (b - moy) ** 2, 0) / notes.length);
     return { mois, n: notes.length, med, moy: Math.round(moy * 100) / 100,
              ecart: Math.round(et * 100) / 100,
-             bas: notes.filter(x => x <= 3).length, haut: notes.filter(x => x >= 8).length };
+             bas: notes.filter(x => x <= seuils.bas).length,
+             plancher: seuils.plancher == null ? null : notes.filter(x => x === seuils.plancher).length,
+             haut: notes.filter(x => x >= seuils.haut).length };
   });
+}
+
+/**
+ * SA LÉGENDE, TELLE QU'IL L'A ÉCRITE. Sans elle, le modèle lit une échelle
+ * générique : un 5 y devient tiède, alors que chez lui c'est « ça roule ».
+ * Elle part entre guillemets, comme ses mots, et la consigne dit qu'elle ne
+ * devient jamais un nom qu'on pose sur lui -- une ancre peut porter un mot
+ * lourd, et c'est son mot, pas un constat de la machine.
+ */
+function legendeDe(ancres = []) {
+  const a = (ancres ?? []).filter(x => Number.isFinite(Number(x?.note)) && (x.label || x.descr))
+    .sort((x, y) => y.note - x.note);
+  if (!a.length) return null;
+  return `SON ÉCHELLE, SA LÉGENDE À LUI (à citer entre guillemets, jamais à transformer en nom pour lui) :
+${a.map(x => `${x.note} = « ${[x.label, x.descr].filter(Boolean).join(' — ')} »`).join('\n')}`;
 }
 
 /**
@@ -280,7 +314,7 @@ ${parties.join('\n\n')}`;
  * @returns {{texte: string, dates: Set<string>, jours: number, depuis: string|null}}
  */
 export function corpusPour({ rows, events = [], carnet = [], motifs = [], objectifs = [],
-                             amplitudes = [], precedente = null, complet = false }) {
+                             amplitudes = [], precedente = null, complet = false, ancres = [] }) {
   const budget = complet ? BUDGET_COMPLET : BUDGET;
   const carParJour = complet ? CAR_PAR_JOUR_COMPLET : CAR_PAR_JOUR;
   // Tout, sans borne. Le budget de caracteres fait deja le tri -- et il le fait
@@ -300,14 +334,17 @@ export function corpusPour({ rows, events = [], carnet = [], motifs = [], object
 
   const blocs = [];
 
-  const mois = parMois(fenetre);
+  const seuils = seuilsDe(ancres);
+  const mois = parMois(fenetre, seuils);
   if (mois.length) {
-    blocs.push(`SES NOTES, MOIS PAR MOIS (0-10). « écart » est l'écart-type du mois :
+    const legende = legendeDe(ancres);
+    const plancher = seuils.plancher != null;
+    blocs.push(`${legende ? `${legende}\n\n` : ''}SES NOTES, MOIS PAR MOIS (0-10). « écart » est l'écart-type du mois :
 deux mois à 6 de moyenne, l'un plat et l'autre entre 1 et 10, ne racontent pas
 la même chose.
 
-mois | journées | médiane | moyenne | écart | ≤3 | ≥8
-${mois.map(m => `${m.mois} | ${m.n} | ${m.med} | ${m.moy} | ${m.ecart} | ${m.bas} | ${m.haut}`).join('\n')}`);
+mois | journées | médiane | moyenne | écart | ≤${seuils.bas}${plancher ? ` | =${seuils.plancher}` : ''} | ≥${seuils.haut}
+${mois.map(m => `${m.mois} | ${m.n} | ${m.med} | ${m.moy} | ${m.ecart} | ${m.bas}${plancher ? ` | ${m.plancher}` : ''} | ${m.haut}`).join('\n')}`);
   }
 
   if (gardees.length) {

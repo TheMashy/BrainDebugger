@@ -665,3 +665,50 @@ test('les retours de la lecture découpent comme ceux de la carte', async () => 
     assert.deepEqual(retours(jours, 14), reprises(jours, 14));
   }
 });
+
+/* ------------------------- son échelle, dans ses mots -------------------------
+ *
+ * Le tableau mensuel comptait « ≤3 » : un 0, qui dans sa propre légende n'a pas
+ * le sens d'un 3, s'y fondait. Les libellés ci-dessous sont synthétiques.
+ */
+const ANCRES = [
+  { note: 8, label: 'Haut', descr: 'tout roule' },
+  { note: 5, label: 'Moyen', descr: 'calme, rien à signaler' },
+  { note: 2, label: 'Bas', descr: 'soirées lourdes' },
+  { note: 0, label: 'Plancher', descr: 'le fond' }
+];
+const MOIS_ZEROS = [
+  ...Array.from({ length: 10 }, (_, i) => ({ date: `2024-02-${String(i + 1).padStart(2, '0')}`,
+    note: [0, 0, 0, 0, 1, 2, 3, 5, 8, 9][i], text: '' })),
+  { date: '2024-02-20', note: 6, text: 'une journée' }
+];
+
+test('ses ancres arrivent entre « », et le plancher a sa colonne', () => {
+  const c = corpusPour({ rows: MOIS_ZEROS, ancres: ANCRES });
+  for (const a of ANCRES) assert.ok(c.texte.includes(`${a.note} = « ${a.label} — ${a.descr} »`), a.label);
+  assert.match(c.texte, /SON ÉCHELLE, SA LÉGENDE À LUI/);
+  assert.match(c.texte, /mois \| journées \| médiane \| moyenne \| écart \| ≤2 \| =0 \| ≥8/);
+  const l = c.texte.split('\n').find(x => x.startsWith('2024-02 |')).split(' | ');
+  assert.equal(Number(l[5]), 6, '≤2 : quatre zéros, un 1, un 2');
+  assert.equal(Number(l[6]), 4, '=0 : les quatre journées au plancher');
+  assert.equal(Number(l[7]), 2);
+});
+
+test('sans ancres, le tableau reste celui d’avant', () => {
+  const c = corpusPour({ rows: MOIS_ZEROS });
+  assert.doesNotMatch(c.texte, /SON ÉCHELLE/);
+  assert.match(c.texte, /mois \| journées \| médiane \| moyenne \| écart \| ≤3 \| ≥8/);
+  const l = c.texte.split('\n').find(x => x.startsWith('2024-02 |')).split(' | ');
+  assert.deepEqual(l.slice(5).map(Number), [7, 2]);
+});
+
+test('le corpus du journal transmet ses ancres', async () => {
+  const { setAnchor, setNote } = await import('../server/db.js');
+  for (const a of ANCRES) setAnchor(a.note, a.label, a.descr, OWNER);
+  setNote('2026-01-03', 0, OWNER);
+  setNote('2026-01-04', 6, OWNER);
+  api.invalidate(OWNER);
+  const c = api.corpusDuJournal(OWNER);
+  assert.ok(c.texte.includes('0 = « Plancher — le fond »'));
+  assert.match(c.texte, /≤2 \| =0 \| ≥8/);
+});
