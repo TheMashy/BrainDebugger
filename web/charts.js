@@ -226,7 +226,7 @@ export function bandMarkup(band) {
     const back = d.reference !== null && d.reference !== undefined && d.note >= d.reference;
     const mark = back && !returned;
     if (back) returned = true;
-    return `<i class="${mark ? 'ret' : ''}" style="background:${deltaColor(d.delta ?? 0)}"
+    return `<i class="${mark ? 'ret' : ''}" style="background:${deltaColor(d.ecart ?? d.delta ?? 0)}"
       data-tip="${esc(`${d.date} — ${d.note}/10${mark ? '\nretour à la référence' : ''}`)}"></i>`;
   }).join('')}</div>`;
 }

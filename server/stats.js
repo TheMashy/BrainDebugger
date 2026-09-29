@@ -29,6 +29,28 @@ export function median(sorted) {
 }
 
 /**
+ * LA MÉDIANE INTERPOLÉE, POUR DES NOTES ENTIÈRES.
+ *
+ * La médiane ordinaire de notes entières saute d'un point entier en un jour :
+ * quand la part des 6 dans l'année passe sous la moitié, la référence tombe de
+ * 6 à 5, et un même 5 change de couleur du jour au lendemain sans que rien
+ * n'ait changé dans la vie de personne. Ici chaque note occupe sa classe
+ * [v − 0,5 ; v + 0,5[ et l'on interpole dans la classe médiane :
+ * L − 0,5 + (n/2 − F) / f, avec F les notes sous L et f les notes égales à L.
+ * Une journée de plus dans la fenêtre la déplace de quelques millièmes.
+ *
+ * @param {number[]} sorted  trié par ordre croissant
+ */
+export function medianeLisse(sorted) {
+  const n = sorted.length;
+  if (n === 0) return null;
+  const L = sorted[Math.ceil(n / 2) - 1];
+  let F = 0, f = 0;
+  for (const v of sorted) { if (v < L) F++; else if (v === L) f++; }
+  return L - 0.5 + (n / 2 - F) / f;
+}
+
+/**
  * Contraste facon tableur : signe(x) * x^2 / 2.5, borne a +/-10.
  * Formule d'origine de l'utilisateur, avec x = note - 5 (centre fixe).
  * Ecrase les journees proches du centre, fait ressortir les extremes.
@@ -61,6 +83,7 @@ export const DEFAULT_ETALON = 5.7;        // valeur calee a la main dans le tabl
 export function buildSeries(rows, { etalon = null } = {}) {
   const withNote = rows.filter(r => r.note !== null && r.note !== undefined);
   const globalMedian = median(withNote.map(r => r.note).sort((a, b) => a - b)) ?? 5;
+  const globalLisse = medianeLisse(withNote.map(r => r.note).sort((a, b) => a - b)) ?? 5;
 
   // Etalon : constante de calage du cumul. Repli sur la mediane globale si non
   // fourni -- c'est ce qu'un utilisateur ferait a la main, en moins approximatif.
@@ -81,6 +104,18 @@ export function buildSeries(rows, { etalon = null } = {}) {
 
     const reference = window.length >= MIN_REFERENCE_POINTS ? median(window) : globalMedian;
     const delta = reference === null ? 0 : row.note - reference;
+    /*
+     * DEUX RÉFÉRENCES, ET CE N'EST PAS UN DOUBLON.
+     *
+     * `reference` (médiane entière) reste celle des épisodes, du plancher, de
+     * l'énergie et du compagnon : « revenu à sa référence » veut dire une note
+     * atteinte, et une référence à 6,31 exigerait un 7 — des retours rallongés
+     * de plusieurs jours, affichés un soir bas. `referenceLisse` ne sert qu'aux
+     * COULEURS (calendrier, grille de l'année, journée), par `ecart` : c'est
+     * là qu'un saut d'un point en un jour se voyait.
+     */
+    const referenceLisse = window.length >= MIN_REFERENCE_POINTS ? medianeLisse(window) : globalLisse;
+    const ecart = row.note - referenceLisse;
 
     const cFixed = contrast(row.note - 5);
     const cRelative = contrast(delta);
@@ -99,6 +134,8 @@ export function buildSeries(rows, { etalon = null } = {}) {
       referencePoints: window.length,
       referenceIsFallback: window.length < MIN_REFERENCE_POINTS,
       delta: Math.round(delta * 1000) / 1000,
+      referenceLisse: Math.round(referenceLisse * 1000) / 1000,
+      ecart: Math.round(ecart * 1000) / 1000,
       midValue: Math.round((row.note - eta) * 1000) / 1000,   // "MID-VALUE" du tableur
       contrastFixed: cFixed,
       contrastRelative: cRelative,
@@ -224,7 +261,7 @@ export function followUp(series, date, n = 14) {
   for (let k = 1; k <= n; k++) {
     const d = addDays(date, k);
     const s = byDate.get(d);
-    out.push(s ? { date: d, note: s.note, delta: s.delta, reference: s.reference } : { date: d, note: null });
+    out.push(s ? { date: d, note: s.note, delta: s.delta, ecart: s.ecart, reference: s.reference } : { date: d, note: null });
   }
   return out;
 }

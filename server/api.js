@@ -17,7 +17,7 @@ import {
 } from './db.js';
 import { usageFor, record as recordUsage, serieUsage, profilUsage, FENETRES,
          coutsParMessage } from './usage.js';
-import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
+import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, medianeLisse, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
 import { compteRendu, intervalle } from './compte-rendu.js';
 import { debutDuRapport, unites, messagesDuRapport, choixParDefaut, assembler, notesDuRapport,
@@ -1838,7 +1838,7 @@ function decorerCarte(lecture, byDate, parJour = new Map()) {
       noeuds: c.noeuds.map(n => {
         const jours = (n.jours ?? []).map(d => {
           const j = byDate.get(d);
-          return { d, e: j?.delta ?? null };
+          return { d, e: j?.ecart ?? null };
         });
         /*
          * LES OCCURRENCES, EN TOUTES LETTRES.
@@ -2398,6 +2398,9 @@ export const routes = {
         date: j,
         note: e?.note ?? null,
         delta: pt?.delta ?? null,
+        // La couleur lit l'écart à la référence lissée (stats.js) : un même 5
+        // ne change plus de couleur parce que la médiane entière a sauté.
+        ecart: pt?.ecart ?? null,
         texte: !!(e?.text && e.text.trim()),
         /*
          * LE SIGNE DE VEILLE, SUR LE RUBAN DU MOIS.
@@ -2497,7 +2500,7 @@ export const routes = {
     if (similar?.items?.length) {
       similar.items = similar.items.slice().sort((a, b) => b.date.localeCompare(a.date));
     }
-    return { date, note, jour, calendrier, reference, delta: cur?.delta ?? null,
+    return { date, note, jour, calendrier, reference, delta: cur?.delta ?? null, ecart: cur?.ecart ?? null,
              floored: false, floor, yesterday, episodes: ep, similar, textCount,
              reperes: reperesDuJour(date, userId),
              amplitude: amplitude(date, userId),
@@ -2738,9 +2741,19 @@ export const routes = {
      * journal -- il n'y a pas d'ecart, donc pas de couleur. On ne colorie pas ce
      * qu'on ne sait pas.
      */
+    /*
+     * UNE SEULE BASE POUR TOUTE LA FRISE : la médiane (lissée) du journal
+     * entier. Chaque période se lisait contre l'année qui la précédait : une
+     * période dure de 2024 (27 journées à 3 ou moins) posée après une année
+     * basse sortait la plus claire de la frise. Des barres posées côte à côte
+     * doivent se comparer à la même chose.
+     */
+    const base = medianeLisse(ser.map(x => x.note).sort((a, b) => a - b));
+    const ecartBase = n => (n === null || n === undefined || base === null)
+      ? null : Math.round((n - base) * 1000) / 1000;
     const couverture = (debut, fin) => ser
       .filter(x => x.date >= debut && x.date <= fin)
-      .map(x => ({ date: x.date, delta: x.delta ?? null }));
+      .map(x => ({ date: x.date, delta: ecartBase(x.note) }));
 
     const jours = (a, b) => Math.round(
       (Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000) + 1;
@@ -2756,7 +2769,7 @@ export const routes = {
         id: e.id, date: e.date, label: e.label,
         theme: e.theme ?? themeDe(e.label),
         teinte: e.teinte ?? null, fort: e.fort ? 1 : 0,
-        ecart: byDate.get(e.date)?.delta ?? null,
+        ecart: ecartBase(byDate.get(e.date)?.note),
         note: byDate.get(e.date)?.note ?? null
       })),
       periodes: periodes.map((e, i) => {
@@ -4283,7 +4296,7 @@ export async function retisser(body, send, userId = OWNER) {
   send('corpus', {
     journees: rows.length,
     ecrites: ecrites.length,
-    jours: [...corpus.dates].sort().map(d => ({ d, e: byDate.get(d)?.delta ?? null })),
+    jours: [...corpus.dates].sort().map(d => ({ d, e: byDate.get(d)?.ecart ?? null })),
     reperes: allEvents(userId).length,
     motifs: allMotifs(userId).length,
     carnet: carnet.length,
