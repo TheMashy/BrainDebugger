@@ -128,6 +128,33 @@ const FUMEE_SAUF = /\b(?:saumon|poisson|jambon|lard|fromage|tofu|paprika|the|via
    elle-même : « j'ai fumé la weed de mon frère » reste à elle. */
 const TIERS_APRES = /\b(?:weed|beuh|shit|cannabis|joints?|clopes?|cigarettes?|tabac|alcool|bieres?|vin|coke|md|xanax|picole) (?:de|du|a) (?:mon frere|ma soeur|mon pere|ma mere|mon pote|ma pote|mon ami|mon amie|mon copain|ma copine|mon mec|ma meuf|mon ex|mon coloc|ma coloc|mes potes|mes amis|mes parents)\b/;
 
+/*
+ * LE `franc` DES CALMANTS, FABRIQUÉ — pour pouvoir en retirer les mots d'un
+ * suivi (voir `famillesPour`) sans perdre les autres.
+ *
+ * Un nombre collé au cachet ne veut rien dire d'autre qu'une prise… sauf la
+ * boîte (« une boîte de 30 »), le reste (« il me reste 3 »), la consigne
+ * (« passer à 1 », « 2 chaque soir ») : la semaine se colorait en rouge sur
+ * un stock. Pas « plein d » : une envie, même chiffrée ou massive, n'est pas
+ * une prise. Les tournures sans produit (« plus que prescrit ») ne comptent
+ * plus pour la famille quand la proposition nomme le suivi qui la recouvre :
+ * c'est alors lui qu'elles concernent.
+ */
+const CACHETS_COMPTES = ['anxio', 'anxios', 'xanax', 'seresta', 'lexomil', 'valium', 'temesta'];
+const CALMANTS_FRANCS = ['heroine', 'subutex', 'methadone'];
+const CACHETS_TROP = ['xanax', 'lexomil', 'valium'];
+function francCalmants(couvert = () => false, suivis = []) {
+  const garde = l => l.filter(m => !couvert(m));
+  const alt = [];
+  const c = garde(CACHETS_COMPTES);
+  if (c.length) alt.push(`(?<!\\b(?:boite|plaquette|reste|passe a|de) )\\b(?:un|une|deux|trois|quatre|cinq|six|sept|huit|dix|douze|\\d+) (?:${c.join('|')})\\b(?! (?:par jour|chaque|tous les)\\b)`);
+  for (const m of garde(CALMANTS_FRANCS)) alt.push(`\\b${m}\\b`);
+  alt.push(`\\btrop de (?:${[...garde(CACHETS_TROP), 'cachets', 'comprimes'].join('|')})\\b`);
+  const sansSuivi = suivis.length ? `^(?!.*(?:${suivis.map(s => s.mots.source).join('|')}))(?=.*` : '(?=.*';
+  alt.push(`${sansSuivi}\\b(?:plus que (?:la dose|prescrit|prevu)|sans ordonnance)\\b)`);
+  return new RegExp(alt.join('|'));
+}
+
 export const FAMILLES = [
   { cle: 'alcool', nom: 'l’alcool', sym: 'verre',
     mots: /\b(?:alcool|biere|bieres|vin|vodka|whisky|rhum|gin|pastis|ricard|champagne|tequila|jaeger|shot|shots|pinte|pintes|verre|verres|bouteille|bouteilles|apero|aperitif)\b/,
@@ -167,10 +194,14 @@ export const FAMILLES = [
        parfois faire arrêter un traitement. Le regard en arrière annule la
        garde : « plus que prescrit », « sans ordonnance » comptent, eux. */
     sauf: /(?<!plus que )(?<!pas )\b(?:prescrit|prescrite|sur ordonnance|mon traitement|ma dose habituelle|comme prevu)\b/,
-    /* Un nombre collé au produit (« 6 anxios », « deux seresta ») ne veut rien
-       dire d'autre. Pas « plein d » : « envie de prendre plein d'anxios » n'est
-       pas une prise, et la garde d'intention plus bas vaut aussi pour `franc`. */
-    franc: /\b(?:un|une|deux|trois|quatre|cinq|six|sept|huit|dix|douze|\d+) (?:anxios?|xanax|seresta|lexomil|valium|temesta)\b|\bheroine\b|\bsubutex\b|\bmethadone\b|\btrop de (?:xanax|lexomil|valium|cachets|comprimes)\b|\bplus que (?:la dose|prescrit|prevu)\b|\bsans ordonnance\b/ },
+    /* LA BOÎTE, L'ORDONNANCE, LE PROGRAMME NE SONT PAS LA PRISE. « il me reste
+       trois cachets », « le médecin veut que je passe à un » : la phrase compte
+       des cachets qu'on n'a pas avalés. Levée par un acte accompli, comme le
+       projet (voir CONSO_FAITE). */
+    hors: /\b(?:je dois|il faut que je|il me reste|ma psy|mon psy|le medecin|mon medecin|racheter?|rachete|rendez vous|rdv)\b/,
+    /* Un nombre collé au produit (« 6 anxios », « deux seresta ») — voir
+       `francCalmants`. */
+    franc: francCalmants() },
 
   { cle: 'tabac', nom: 'la cigarette', sym: 'clope',
     mots: /\b(?:clope|clopes|cigarette|cigarettes|tabac|nicotine|vape|puff|puffs|cigare)\b/,
@@ -354,7 +385,8 @@ export function combienDit(q, motsRe) {
      le « / » — soit trois verres, et une semaine en rouge pour une fraction
      de verre. Pas de chiffre, de barre ni de virgule juste
      avant ; pas de « de » à la place de l'adjectif. */
-  const re = new RegExp(`(?<![\\d/.,])\\b(${QUANTIF})\\s+((?!de\\b|d\\b)[a-z]+s?\\s+)?(?:${noms})s?\\b`, 'g');
+  // Ni ce qui reste dans la boîte, ni la consigne : « il me reste 3 », « passer à 1 ».
+  const re = new RegExp(`(?<![\\d/.,])(?<!\\b(?:reste|boite de|plaquette de|passe a) )\\b(${QUANTIF})\\s+((?!de\\b|d\\b)[a-z]+s?\\s+)?(?:${noms})s?\\b`, 'g');
   for (const m of q.matchAll(re)) {
     /*
      * L'ORDINAL GAGNE SUR L'ARTICLE QUI LE PRÉCÈDE. « un deuxième joint » :
@@ -442,22 +474,48 @@ export function familleDuSuivi(s) {
 }
 
 /*
- * UN SUIVI QUI RECOUVRE LES CALMANTS LES REMPLACE.
+ * UN SUIVI QUI RECOUVRE LES CALMANTS PREND SES MOTS — ET SEULEMENT EUX.
  *
  * « anxio » est dans les deux : la famille écrite à la main et le suivi que la
  * personne a déclaré. Compter les deux donnait deux lignes pour les mêmes
  * jours, dont une avec un record « sans » — son choix « traitement »
  * contourné. Quand un suivi recouvre la famille (dans un sens ou dans
- * l'autre : « anxio », « seresta 10 »), c'est lui qui compte, seul.
+ * l'autre : « anxio », « seresta 10 »), c'est lui qui compte ces mots-là.
+ *
+ * Mais retirer la famille entière taisait tout le reste : avec un suivi
+ * « somnifère », l'héroïne, le tramadol, quatre xanax ne se comptaient plus
+ * nulle part. On garde donc les calmants, moins les mots du suivi.
  */
 const CALMANTS = FAMILLES.find(f => f.cle === 'calmants');
 const MOTS_CALMANTS = CALMANTS.mots.source.replace(/^\\b\(\?:|\)\\b$/g, '').split('|');
-const recouvreCalmants = f => !!f?.sien
-  && (MOTS_CALMANTS.some(m => f.mots.test(m)) || (f.liste ?? []).some(m => CALMANTS.mots.test(m)));
+/* Un mot des calmants que le suivi couvre : il le lit (« anxio » lit
+   « anxios » par son `franc`), ou il le contient (« seresta 10 »). */
+const couvre = (s, m) => s.mots.test(m) || s.mots.test(m.replace(/s$/, ''))
+  || (s.liste ?? []).some(l => new RegExp(`\\b${m}s?\\b`).test(l));
+const recouvreCalmants = f => !!f?.sien && MOTS_CALMANTS.some(m => couvre(f, m));
+const REDUITS = new Map();
+/** Les familles lues pour un jeu de suivis : les calmants privés des mots
+    qu'un suivi recouvre, puis les suivis eux-mêmes. */
+function famillesPour(siennes) {
+  if (!siennes.length) return FAMILLES;
+  const sur = siennes.filter(recouvreCalmants);
+  if (!sur.length) return [...FAMILLES, ...siennes];
+  const k = sur.map(s => s.mots.source).join('|');
+  if (!REDUITS.has(k)) {
+    const couvert = m => sur.some(s => couvre(s, m));
+    const reste = MOTS_CALMANTS.filter(m => !couvert(m));
+    const mots = reste.length ? new RegExp(`\\b(?:${reste.join('|')})\\b`) : null;
+    if (REDUITS.size >= 64) REDUITS.clear();
+    REDUITS.set(k, mots && { ...CALMANTS, mots, motsG: new RegExp(mots.source, 'g'),
+                             franc: francCalmants(couvert, sur) });
+  }
+  const reduit = REDUITS.get(k);
+  return [...FAMILLES.flatMap(f => f !== CALMANTS ? [f] : reduit ? [reduit] : []), ...siennes];
+}
 
 /** La famille qu'une phrase NOMME — le mot y est, sans qu'on sache si elle
     l'a pris. Sert au rattachement des signes et à la lecture des repères. */
-const nomme = np => FAMILLES.filter(f => f.mots?.test(np) && !f.sauf?.test(np)).map(f => f.cle);
+const nomme = (np, fams = FAMILLES) => fams.filter(f => f.mots?.test(np) && !f.sauf?.test(np)).map(f => f.cle);
 const MOTS_G = new Map(FAMILLES.filter(f => f.mots).map(f => [f.cle, new RegExp(f.mots.source, 'g')]));
 
 /* Les gardes propres à la lecture longue : un souvenir raconté n'est pas un
@@ -487,9 +545,40 @@ const QUESTION = /\?\s*$/;
  * son verbe. « j'ai bu trois verres, ça va être dur demain », « j'aimerais
  * arrêter mais j'ai fumé deux joints » comptent toujours — rater ces soirs-là
  * serait pire que compter un projet.
+ *
+ * DEUX FORCES DE PROJET. Le futur qui porte sur la chose (« on va boire »,
+ * « je vais prendre », « ça va être »), et l'infinitif en tête (« boire deux
+ * bières, ça va être sympa ») valent pour toute la proposition. Le reste —
+ * « demain », « j'aimerais », « envie d'un joint » — ne vaut que dans le
+ * morceau entre deux virgules qui nomme ce qui se prend : « quatre bières ce
+ * soir, demain je me lève tôt », « pris trois cachets, j'aimerais dormir »,
+ * « envie de rien, trois joints » racontent un soir, et la première version
+ * de cette garde les taisait. L'envie ne compte que de ce qui se prend
+ * (« envie de dormir » n'est pas un projet de consommation).
  */
-const PROJET = /\bdemain\b|\bca va etre\b|\bj aimerais\b|\bje voudrais\b|\baller (?:prendre|boire|fumer)\b|\bje vais (?:boire|fumer|prendre|me prendre)\b|\benvie d(?:e|un|une)?\b/;
-const CONSO_FAITE = /\bj (?:en )?ai (?:(?:\w+ ){0,2})(?:bu|fume|refume|pris|repris|picole|avale|gobe|sniffe)\b|\bje me suis (?:\w+ )?(?:bourre|bourree|pris|envoye|mis)\b|\bhier\b|\bje viens de\b/;
+const PROJET_FORT = /\bca va etre\b|^(?:et |puis |alors )?(?:boire|fumer|prendre|picoler|reprendre|refumer)\b|\baller (?:prendre|boire|fumer)\b|\b(?:je vais|on va|on ira|j irai|je compte|on compte) (?:me |se |en )?(?:boire|fumer|prendre|reprendre|picoler|bourrer)\b/;
+/* Ce qui se prend, nommé : les mots de toutes les familles écrites à la main,
+   plus ce qu'on écrit sans nommer de produit. Sert aussi aux signes (SUB). */
+const PRODUITS = [...new Set([...FAMILLES.filter(f => f.mots && f.cle !== 'argent')
+  .flatMap(f => f.mots.source.split(/\\b/).filter(x => x.startsWith('(?:') && x.endsWith(')')))
+  .flatMap(x => x.slice(3, -1).split('|')),
+  'picole', 'drogue', 'drogues', 'fumette', 'cachet', 'cachets', 'medoc', 'medocs', 'comprime', 'comprimes',
+  'anxio', 'anxios', 'petard', 'petards', 'trace', 'traces', 'rail', 'rails', 'taffe', 'taffes', 'latte', 'lattes'])];
+const PRODUIT = `(?:${PRODUITS.join('|')})`;
+const PROJET_FAIBLE = new RegExp(`\\bdemain\\b|\\bj aimerais\\b|\\bje voudrais\\b|\\benvie (?:de (?:boire|fumer|prendre|reprendre|me defoncer|sniffer|picoler|me bourrer)|d (?:un |une )(?:petit |petite |gros |grosse |bon |bonne |autre )?${PRODUIT}\\b|d en (?:prendre|reprendre|boire|fumer)\\b|de (?:la |l |du |des )?${PRODUIT}\\b)`);
+const PREND = /\b(?:boire|bu|bois|fumer|fume|prendre|pris|prends|picoler|picole|avaler|avale|gober|gobe|sniffer|sniffe)\b/;
+const CONSO_FAITE = new RegExp([
+  /\bj (?:en )?ai (?:(?:\w+ ){0,2})(?:bu|fume|refume|pris|repris|picole|avale|gobe|sniffe)\b/,
+  /\bon a (?:(?:\w+ ){0,2})(?:bu|fume|refume|pris|picole)\b/,
+  /\bje me suis (?:\w+ )?(?:bourre|bourree|pris|envoye|mis)\b/,
+  /\bje suis (?:\w+ )?(?:bourre|bourree|defonce|defoncee|pete|petee|ivre|dechire|dechiree|torche|torchee)\b/,
+  /\bgueule de bois\b|\bhier\b|\bje viens de\b/,
+  // Le présent de l'acte, sauf s'il est daté d'un autre jour ou conditionnel.
+  /(?<!\b(?:demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|si) )\bje (?:bois|fume|prends)\b(?! (?:rendez|rdv|soin|le temps|l air|une douche|un bain|sur moi)\b)/,
+  // Le participe nu : « pris 3 cachets », « avalé deux… », « 6 anxios avalés ».
+  /^(?:la |bon |deja )?(?:bu|pris|avale|gobe|fume|sniffe)s? (?:\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|dix|des|du|de la|mes|ma)\b/,
+  /\b(?:\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|dix) \w+ (?:avalee?s?|pris|gobee?s?|bus|fumee?s?)\b/
+].map(r => r.source).join('|'));
 
 /* ------------------------------------------------------------------ *
  * LES SIGNES. Chacun rend la phrase qui l'a allumé — jamais un verdict nu.
@@ -513,13 +602,16 @@ const SUBSTANCE_NOMMEE = '(?:weed|beuh|shit|cannabis|joints?|clopes?|cigarettes?
  * SUBSTANCE_NOMMEE (« verre », « anxio », « cachets »), parce qu'elle sert
  * à garder des signes, pas à compter des jours.
  */
-const SUB = '(?:weed|beuh|shit|cannabis|joints?|clopes?|cigarettes?|tabac|nicotine|alcool|bieres?|vin|verres?|coke|anxios?|xanax|cachets?|medocs?|comprimes?)';
+/* Construite sur les mots des familles (PRODUITS) : la première liste, écrite
+   à part, oubliait la md, le lexomil, les somnifères, la picole — et « envie de
+   prendre un lexomil » n'était plus une envie. */
+const SUB = PRODUIT;
 export const SIGNES = [
   { id: 'arreter', dit: 'vouloir arrêter',
     /* « j'ai arrêté » seul, ou suivi de ce qui se prend. « j'ai arrêté de
        picoler », « d'en prendre », « de me droguer » restent : c'est le signe
        le plus encourageant du panneau, et le rater coûte plus que tout. */
-    re: new RegExp(`\\b(?:j ai arrete(?=\\s*[.,;!?…]|\\s*$| (?:de |d )(?:boire|fumer|prendre|picoler|consommer|me droguer|en (?:prendre|boire|fumer))\\b| (?:la |le |les |l |de la |du |mes |ma |mon )?${SUB}\\b)|je veux arreter|je voulais arreter|j essaie d arreter|j essaye d arreter|je dois arreter|il faut que j arrete|je devrais arreter|j arrete|sevrage|desintox|je tiens (?:bon|le coup)|(?:zero|sans) (?:alcool|drogue) depuis|sobre depuis|j ai tenu \\d+ jours)\\b`) },
+    re: new RegExp(`\\b(?:j ai arrete(?=\\s*[.,;!?…]|\\s*$| (?:de |d )(?:boire|fumer|prendre|picoler|consommer|me droguer|en (?:prendre|boire|fumer))\\b| (?:la |le |les |l |de la |du |mes |ma |mon )?${SUB}\\b| (?:depuis|il y a|completement|net|pour de bon|ca fait)\\b)|je veux arreter|je voulais arreter|j essaie d arreter|j essaye d arreter|je dois arreter|il faut que j arrete|je devrais arreter|j arrete|sevrage|desintox|je tiens (?:bon|le coup)|(?:zero|sans) (?:alcool|drogue) depuis|sobre depuis|j ai tenu \\d+ jours)\\b`) },
   /* LA REPRISE, BORNÉE. « j'ai repris » s'allumait sur « j'ai repris le
      sport », « je suis retombé » sur « retombé sur mes pieds », « j'ai craqué »
      sur « j'ai craqué et j'ai pleuré » — et chacun devenait « tu as craqué »
@@ -534,15 +626,16 @@ export const SIGNES = [
     /* « prendre » n'est une envie que de ce qui se prend (« envie de prendre
        de la distance » n'en est pas une) ; « le manque » que seul, ou de ce
        qui se prend (« le manque de sommeil » n'en est pas un). */
-    re: new RegExp(`\\b(?:en manque|le manque(?= de ${SUB}|\\s*$|\\s*[.,;!]| (?:me|m|est|c est)\\b)|j en ai envie|envie de (?:boire|fumer|refumer|sniffer|me defoncer)|envie de (?:re)?prendre (?:un |une |des |de la |du |de l |plein d |mes |tou[ts] mes )?${SUB}|je pense qu a (?:ca|boire|fumer)|obsede par (?:la |le |l )?${SUB}|il me faut|je tiens plus|j y pense tout le temps|craving)\\b`) },
+    re: new RegExp(`\\b(?:en manque|le manque(?= de ${SUB}|\\s*$|\\s*[.,;!]| (?:me|m|est|c est|se fait|physique|revient)\\b)|j en ai envie|envie de (?:boire|fumer|refumer|sniffer|me defoncer)|envie de (?:re)?prendre (?:un |une |des |de la |du |de l |plein d |mes |tou[ts] mes )?${SUB}|je pense qu a (?:ca|boire|fumer)|obsede par (?:la |le |l )?${SUB}|il me faut|je tiens plus|j y pense tout le temps|craving)\\b`) },
   { id: 'plus_que_prevu', dit: 'plus que prévu',
     /* « encore une fois » et « j'ai fini par » y étaient et s'allumaient sur
        tout — « encore une fois j'ai oublié mes clés » n'est pas une perte de
        contrôle. Ce qui compte, c'est l'écart entre ce qu'on avait prévu et ce
        qu'on a fait ; il faut donc que la phrase dise les deux. « je voulais
        juste » seul y était encore, et rendait toutes les autres inutiles :
-       « je voulais juste te le dire » était cité sous « plus que prévu ». */
-    re: /\b(?:plus que prevu|je voulais (?:juste en prendre|m arreter)|je voulais (?:juste )?(?:un|une) (?:verre|biere|joint|taffe|clope)|j ai pas su m arreter|j ai fini par (?:en |y )?(?:reprendre|boire|fumer|craquer|ceder|remettre)|comme d habitude j ai|je devais (?:en )?(?:prendre|boire) (?:qu )?un)\b/ },
+       « je voulais juste te le dire » était cité sous « plus que prévu ».
+       « je voulais juste boire un verre » dit l'écart, lui : il reste. */
+    re: new RegExp(`\\b(?:plus que prevu|je voulais (?:juste en prendre|m arreter)|je voulais (?:juste )?(?:un|une) (?:verre|biere|joint|taffe|clope)|je voulais juste (?:en )?(?:boire|fumer)(?! (?:un |une |de l |de la |du )?(?:eau|cafe|the|jus|tisane|lait|soda|coca)\\b)|je voulais juste (?:en )?prendre (?:un |une |des |deux |de la |du )?${SUB}|j ai pas su m arreter|j ai fini par (?:en |y )?(?:reprendre|boire|fumer|craquer|ceder|remettre)|comme d habitude j ai|je devais (?:en )?(?:prendre|boire) (?:qu )?un)\\b`) },
   { id: 'cache', dit: 'sans le dire',
     re: /\b(?:en cachette|personne (?:le )?sait|j ai menti|je (?:l )?ai cache|sans (?:le )?dire a|tout seul dans ma chambre|avant de (?:rentrer|sortir) j ai)\b/ }
 ];
@@ -639,8 +732,9 @@ export function prisesDuTexte(texte, siennes = [], annee = null) {
    * Seul l'ordre de la boucle change, et il ne change rien au resultat -- deux
    * familles peuvent compter la meme phrase, chacune pour elle.
    */
-  const familles = !siennes.length ? FAMILLES
-    : [...(siennes.some(recouvreCalmants) ? FAMILLES.filter(f => f !== CALMANTS) : FAMILLES), ...siennes];
+  const familles = famillesPour(siennes);
+  // Un morceau entre deux virgules qui nomme ce qui se prend (voir PROJET_FORT).
+  const prend = x => PREND.test(x) || familles.some(f => f.mots?.test(x) || f.franc.test(x));
   for (const phrase of brut.split(/(?<=[.!?…])\s+|\n+/)) {
     const np = norm(phrase);
     if (!np.trim()) continue;
@@ -653,10 +747,22 @@ export function prisesDuTexte(texte, siennes = [], annee = null) {
       if (GARDES_SUBSTANCE.negation.test(q)) continue;
       if (SOUVENIR.test(q)) continue;
       if ([...q.matchAll(ANNEE_NOMMEE)].some(m => +m[1] < an)) continue;
-      /* Pour toutes les familles, `franc` compris : voir PROJET. */
-      if ((PROJET.test(q) || GARDES_SUBSTANCE.intention.test(q)) && !CONSO_FAITE.test(q)) continue;
+      /* Pour toutes les familles, `franc` compris : voir PROJET_FORT. Un
+         morceau de deux mots au plus qui ne nomme rien (« demain ») se lit avec
+         le suivant : « demain, trois bières » reste un projet. */
+      const faite = CONSO_FAITE.test(q);
+      if (!faite) {
+        const morceaux = [];
+        for (const m of q.split(/\s*,\s*/)) {
+          const avant = morceaux.length && morceaux.at(-1).split(' ').length <= 2 && !prend(morceaux.at(-1)) ? morceaux.pop() + ' ' : '';
+          morceaux.push(avant + m);
+        }
+        if (PROJET_FORT.test(q) || GARDES_SUBSTANCE.intention.test(q)
+            || morceaux.some(m => PROJET_FAIBLE.test(m) && prend(m))) continue;
+      }
       for (const f of familles) {
         if (f.sauf?.test(q)) continue;               // « un verre d'eau » n'est pas un verre
+        if (f.hors?.test(q) && !faite) continue;     // « il me reste 3 cachets »
         const franc = f.franc.test(q);
         if (!franc && !(f.mots?.test(q) && f.verbe?.test(q))) continue;
         /*
@@ -698,7 +804,7 @@ export function prisesDuTexte(texte, siennes = [], annee = null) {
         /* `MOTS_G` est figee sur les familles ecrites a la main. Une famille
            declaree fabrique la sienne a la volee : sans ca, `lus` resterait
            vide et la vue afficherait la categorie au lieu du mot ecrit. */
-        const g = MOTS_G.get(f.cle) ?? (f.mots ? new RegExp(f.mots.source, 'g') : null);
+        const g = f.motsG ?? MOTS_G.get(f.cle) ?? (f.mots ? new RegExp(f.mots.source, 'g') : null);
         for (const m of (g ? q.match(g) : null) ?? []) if (!lus.includes(m)) lus.push(m);
       }
     }
@@ -815,6 +921,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
     .filter(s => s?.actif && !dejaLa.has(String(s.cle)))
     .map(familleDuSuivi).filter(Boolean);
   const sceau = sceauDe(siennes);
+  const lues = famillesPour(siennes);   // les calmants moins les mots d'un suivi qui les recouvre
   /*
    * DÉSACTIVER VAUT POUR LES SIX FAMILLES ÉCRITES À LA MAIN, AUSSI.
    *
@@ -882,7 +989,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
       const nl = norm(r.label);
       const arret = ARRET.test(nl);
       if (arret || /\bquotidien(?:ne)?s?\b/.test(nl))
-        for (const cle of nomme(nl)) quotidiens.push({ cle, date, arret });
+        for (const cle of nomme(nl, lues)) quotidiens.push({ cle, date, arret });
     }
     const lu = luDuTexte(r.label, siennes, sceau, +date.slice(0, 4));
     let fams = [...lu.prises.keys()];
@@ -942,18 +1049,9 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   const comparable = avants.length >= SEUILS_PRISES.min_compare
     && facteur3(rythme(avants), rythme(recents)) && facteur3(medLong(avants), medLong(recents));
 
-  /*
-   * LES CALMANTS, QUAND ELLE SUIT DÉJÀ SON TRAITEMENT : voir recouvreCalmants.
-   * La détection les a déjà retirés ; on s'assure qu'aucune ligne n'en naît.
-   */
-  const calmantsSuivis = siennes.find(recouvreCalmants);
-  // Une phrase qui nomme « anxio » parle alors du suivi, pour les signes aussi.
-  if (calmantsSuivis) alias.set(CALMANTS.cle, calmantsSuivis.cle);
-
   const prises = [], ecartees = [];
   for (const f of [...FAMILLES, ...siennes]) {
     if (eteintes.has(f.cle)) continue;
-    if (f === CALMANTS && calmantsSuivis) continue;
     const v = vues.get(f.cle);
     if (!v) continue;
     const soigne = (genreDe.get(f.cle) ?? f.genre) === 'traitement';
@@ -1058,7 +1156,7 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
          « repris après un arrêt » muet sur la chose ne se colle pas sous ce qui
          est peut-être une ordonnance (voir `sansRecord`). */
       signes: soigne ? [] : signesRetenus(v.jours, signesParJour, ecrits, f.cle, alias,
-                                          { muets: !sansRecord }),
+                                          { muets: !sansRecord, lues, siennes, sceau }),
       avant_ca: ceQuiVientAvant(v.jours, carte, suite),
       apres_ca: leLendemain(v.jours, suite, noteDe, seuilBas)
     });
@@ -1191,13 +1289,15 @@ export function analyserPrises(entrees, { carte = null, aujourdhui = null, reper
   /* L'ordre : ce qui a des signes d'abord, puis ce qui monte, puis le
      nombre. Le tabac, constant et sans signe, ne doit pas occuper la
      première ligne pendant que les stimulants doublent en silence. */
-  const pente = p => !p.compare ? 0
+  const pente = p => !(p.compare && p.pente_p < SEUILS_PRISES.p) ? 0   // la flèche que la vue dit, pas une autre
     : p.recent / Math.max(1, p.recent_sur) - p.avant / Math.max(1, p.avant_sur);
   /* Une reprise NUE (« j'ai craqué ») ne nomme pas ce qui a craqué : la
      rattacher à la famille la plus proche sans regarder le genre écrirait
      « tu as repris » sous un médicament prescrit. Les traitements sortent du
-     panier avant le rattachement. */
-  rattacherReprises(prises.filter(p => p.genre !== 'traitement'), signesParJour, ecrits);
+     panier avant le rattachement — et les calmants sans suivi « réduire »,
+     qui sont peut-être une ordonnance (voir `sansRecord`). */
+  rattacherReprises(prises.filter(p => p.genre !== 'traitement'
+    && !(p.cle === CALMANTS.cle && genreDe.get(p.cle) !== 'reduire')), signesParJour, ecrits);
   prises.sort((a, b) => (b.signes.length - a.signes.length) || (pente(b) - pente(a)) || (b.n - a.n));
 
   return {
@@ -1311,7 +1411,8 @@ function voisins(joursPrise, ecrits) {
  * objectif deux mois avant le premier jour compté, parle bien de la
  * cigarette, et on le dit (`rattache: 'nomme'`).
  */
-function signesRetenus(joursPrise, signesParJour, ecrits, cle, alias = new Map(), { muets = true } = {}) {
+function signesRetenus(joursPrise, signesParJour, ecrits, cle, alias = new Map(),
+                       { muets = true, lues = FAMILLES, siennes = [], sceau = '' } = {}) {
   const proches = voisins(joursPrise, ecrits);
   /* Un seul par signe, LE PLUS RÉCENT : on gardait le premier, et « j'ai
      repris la weed » écrit hier restait derrière un « j'ai refumé » d'il y a
@@ -1320,7 +1421,7 @@ function signesRetenus(joursPrise, signesParJour, ecrits, cle, alias = new Map()
   for (const d of [...signesParJour.keys()].sort())
     for (const s of signesParJour.get(d) ?? []) {
       const pres = proches.has(d);
-      const nommee = nomme(norm(s.phrase)).includes(cle);
+      const nommee = nomme(norm(s.phrase), lues).includes(cle);
       if (!pres && !nommee) continue;
       /*
        * UNE PHRASE QUI NOMME UNE AUTRE FAMILLE NE PARLE PAS DE CELLE-CI.
@@ -1337,7 +1438,7 @@ function signesRetenus(joursPrise, signesParJour, ecrits, cle, alias = new Map()
          compter : « envie de prendre un xanax » ne compte plus comme une
          prise (c'est un projet), et se retrouvait donc « muette », citée sous
          le cannabis. */
-      const dedans = [...new Set([...luDuTexte(s.phrase).prises.keys(), ...nomme(norm(s.phrase))])]
+      const dedans = [...new Set([...luDuTexte(s.phrase, siennes, sceau).prises.keys(), ...nomme(norm(s.phrase), lues)])]
         .map(k => alias.get(k) ?? k);
       if (dedans.length && !dedans.includes(cle)) continue;
       if (!muets && !dedans.includes(cle)) continue;

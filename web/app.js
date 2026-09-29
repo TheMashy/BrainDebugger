@@ -4733,7 +4733,7 @@ function priseMarkup(p) {
      1 sur 14 » se lisait « ça monte », et c'était le hasard. */
   const tient = p.compare && p.pente_p < 0.05;
   const ecart = tient ? taux('recent', 'recent_sur') - taux('avant', 'avant_sur') : 0;
-  const tendance = !tient ? null : Math.abs(ecart) < 0.02 ? 'pareil' : ecart > 0 ? 'monte' : 'baisse';
+  const tendance = !tient ? null : ecart > 0 ? 'monte' : 'baisse';   // un écart qui tient au test n'est jamais « pareil »
 
   return `<article class="prise">
     <header>
