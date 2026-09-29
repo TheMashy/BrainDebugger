@@ -150,7 +150,13 @@ const LEXIQUES = {
      */
     3: ['perdu', 'perdue', 'je sais plus', 'sais pas quoi faire', 'aucune idee',
         'desoriente', 'desorientee', 'egare', 'egaree'],
-    2: ['je sais pas', 'sais plus ou', 'ou je vais', 'ou j en suis', 'quoi faire',
+    /*
+     * « je sais pas » n'y est plus. C'etait l'entree la plus frequente de tout
+     * le lexique sur un vrai journal (91 fois) : un tic de langage, pas un etat,
+     * et elle tirait chaque passage vers le bas. « je sais plus » et « sais pas
+     * quoi faire » disent, eux, qu'on est perdu -- ils restent.
+     */
+    2: ['sais plus ou', 'ou je vais', 'ou j en suis', 'quoi faire',
         'dans quel sens', 'ca flotte', 'je flotte', 'a la derive', 'plus de reperes',
         'plus de cap', 'confus', 'confuse', 'flou', 'brouillard', 'melange'],
     1: ['bizarre', 'etrange', 'incertain', 'hesite', 'peut-etre']
@@ -197,27 +203,123 @@ export const SCENES = ['drift', 'brume', 'abyss', 'eclipse', 'voidwell', 'monoli
  */
 export const MOTS_MINIMUM = 25;
 
-const compte = (texte, mot) => {
-  // Racine + terminaison possible, jamais la sous-chaine : « mort » ne doit pas
-  // se declencher sur « amortir », ni « vide » sur « evider ».
-  const r = new RegExp(`(^|[^a-z0-9])${mot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(e?s?)($|[^a-z0-9])`, 'g');
-  let n = 0;
-  while (r.exec(texte) !== null) n++;
-  return n;
-};
+/*
+ * Chaque entree compilee UNE fois. Racine + terminaison possible, jamais la
+ * sous-chaine : « mort » ne doit pas se declencher sur « amortir », ni « vide »
+ * sur « evider ». La borne de droite est regardee sans etre mangee -- sinon
+ * « mort mort » ne comptait qu'une fois.
+ */
+const ENTREES = Object.entries(LEXIQUES).flatMap(([scene, lex]) =>
+  Object.entries(lex).flatMap(([poids, liste]) => liste.map(brut => {
+    const mot = norm(brut);
+    return { scene, poids: Number(poids), mot,
+             re: new RegExp(`(^|[^a-z0-9])(${mot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:e?s?))(?=$|[^a-z0-9])`, 'g') };
+  })));
 
-/** Ce qu'un texte pese pour chaque scene, avant toute ponderation. */
+/*
+ * LA NEGATION, ET SEULEMENT SUR CE QUI VA BIEN.
+ *
+ * « ça va pas du tout » sortait en CALME (+0,75, soit ≈8,5 sur une reference
+ * de 6), « je suis pas bien » aussi. Une negation dans les deux mots d'avant,
+ * ou un « pas » juste apres, retourne donc un mot du calme ou de l'espoir.
+ *
+ * Elle n'efface JAMAIS un mot lourd. Le premier essai traitait « plus » comme
+ * une negation : « de plus en plus triste » perdait la moitie de sa tristesse
+ * et « je me sens plus angoisse » ne comptait plus rien. « plus » ne nie donc
+ * que dans la forme « ne … plus », et seulement devant un mot du calme.
+ *
+ * TROIS FORMES QUE LA FENETRE DE DEUX MOTS NE VOYAIT PAS.
+ *
+ * « pas du tout motive » met trois mots entre la negation et le mot : il
+ * sortait a +0,69, lu vers le haut. « du tout » ne compte donc pour aucun mot,
+ * ou qu'il soit place, et « plus du tout » nie sans son « ne » (aucune autre
+ * lecture n'est possible).
+ *
+ * Perdre ou manquer d'une chose, c'est ne pas l'avoir : « perdu tout espoir »,
+ * « perte de confiance », « manque de joie » retournent le mot qui suit, comme
+ * une negation.
+ *
+ * Et devant l'espoir, la joie ou la confiance, un « plus » seul nie aussi :
+ * a l'oral, « j'ai plus d'espoir » dit qu'il n'y en a plus, bien plus souvent
+ * qu'il n'en dit davantage. Le doute se paie d'un mot qui ne compte pas, pas
+ * d'un desespoir lu vers le haut. Devant le calme (« je me sens plus calme »),
+ * le comparatif reste la lecture courante : la regle du « ne … plus » y tient.
+ */
+const SCENES_NIABLES = new Set(['brume', 'aube']);
+const NIE = new Set(['pas', 'jamais', 'aucun', 'aucune', 'sans']);
+const DEJA_NEGATIF = /^(?:pas|plus|jamais|aucun|sans|rien)\b/;
+const PRIVE = /^(?:perdu|perdue|perdus|perdues|perdre|perds|perd|perdant|perte|pertes|manque|manques|manquer|manquais|manquait)$/;
+// Ce qui peut se glisser entre « perdu » et ce qu'on a perdu.
+const ENTRE_PRIVE = new Set(['de', 'd', 'du', 'des', 'tout', 'toute', 'tous', 'toutes', 'la', 'l', 'le',
+  'les', 'mon', 'ma', 'mes', 'ton', 'ta', 'tes', 'son', 'sa', 'ses', 'un', 'une', 'peu', 'beaucoup', 'en', 'cruellement']);
+
+function nie(t, v) {
+  if (!SCENES_NIABLES.has(v.scene) || DEJA_NEGATIF.test(v.mot)) return false;
+  const brut = t.slice(0, v.s).match(/[a-z0-9]+/g) ?? [];
+  // « pas du tout motive », « pas du tout tres motive » : se lisent « pas motive ».
+  const avant = [];
+  for (let i = 0; i < brut.length; i++) {
+    if (brut[i] === 'du' && brut[i + 1] === 'tout') {
+      if (avant.at(-1) === 'plus') avant[avant.length - 1] = 'pas';   // « plus du tout »
+      i++;
+      continue;
+    }
+    avant.push(brut[i]);
+  }
+  const deux = avant.slice(-2);
+  if (deux.some(m => NIE.has(m))) return true;
+  if (deux.includes('plus') && (v.scene === 'aube' || avant.slice(-5).some(m => m === 'n' || m === 'ne'))) return true;
+  // « perdu tout espoir », « manque de confiance » : trois mots en arriere au plus.
+  for (let i = avant.length - 1; i >= Math.max(0, avant.length - 4); i--) {
+    if (PRIVE.test(avant[i])) return true;
+    if (!ENTRE_PRIVE.has(avant[i])) break;
+  }
+  const apres = t.slice(v.f).match(/[a-z0-9]+/g)?.[0] ?? '';
+  if (apres === 'pas') return true;
+  // « bien trop », « bien plus », « bien moins » : un intensif, pas du calme.
+  if (v.mot === 'bien' && /^(?:plus|trop|moins)$/.test(apres)) return true;
+  return false;
+}
+
+/**
+ * Ce qu'un texte pese pour chaque scene, avant toute ponderation.
+ *
+ * LA PLUS LONGUE CORRESPONDANCE GAGNE. Le lexique liste deja le feminin et le
+ * pluriel alors que la terminaison les accepte : « contente » comptait 4 et
+ * « content » 2, « anxios » 6 et « anxio » 3. Et une expression se cumulait
+ * avec ses morceaux : « envie de mourir » donnait aussi le « envie de » de
+ * l'espoir. Un meme bout de texte n'est compte qu'une fois -- sauf quand deux
+ * scenes le lisent a egalite (« pleure » est chagrin ET relachement).
+ *
+ * `retenues` dit quel mot a ete retenu pour quelle scene : `pencheDe` en a
+ * besoin pour ne donner une valence qu'aux mots qui en portent une.
+ */
 export function scoresDe(texte) {
   const t = ' ' + norm(texte).replace(/[’']/g, ' ') + ' ';
-  const scores = {};
-  for (const [scene, lex] of Object.entries(LEXIQUES)) {
-    let s = 0;
-    for (const [poids, liste] of Object.entries(lex)) {
-      for (const mot of liste) s += compte(t, norm(mot)) * Number(poids);
+  const vus = [];
+  for (const e of ENTREES) {
+    e.re.lastIndex = 0;
+    let x;
+    while ((x = e.re.exec(t)) !== null) {
+      const s = x.index + x[1].length;
+      vus.push({ scene: e.scene, poids: e.poids, mot: e.mot, s, f: s + x[2].length });
     }
-    if (s) scores[scene] = s;
   }
-  return { scores, mots: (t.match(/[a-z0-9]+/g) ?? []).length };
+  vus.sort((a, b) => (b.f - b.s) - (a.f - a.s) || b.poids - a.poids || a.s - b.s);
+  const retenues = [], occupes = [];
+  for (const v of vus) {
+    const chevauche = occupes.some(p => p.s < v.f && v.s < p.f
+      && !(p.s === v.s && p.f === v.f && p.scene !== v.scene));
+    if (chevauche) continue;
+    // Un mot nie occupe quand meme sa place : « pas plutot bien » ne doit pas
+    // rendre son « bien » par la petite porte.
+    occupes.push(v);
+    if (!nie(t, v)) retenues.push(v);
+  }
+  const scores = {};
+  for (const v of retenues) scores[v.scene] = (scores[v.scene] ?? 0) + v.poids;
+  return { scores, mots: (t.match(/[a-z0-9]+/g) ?? []).length,
+           retenues: retenues.sort((a, b) => a.s - b.s).map(({ scene, poids, mot }) => ({ scene, poids, mot })) };
 }
 
 /**

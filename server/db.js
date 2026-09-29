@@ -1111,8 +1111,8 @@ export function rembobiner(id, userId = OWNER) {
 export function recentMessages(limit = 80, userId = OWNER) {
   const since = getSettings(userId).chatSince;
   const rows = since
-    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion, via, repli FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
-    : db.prepare('SELECT id, ts, date, source, role, text, reflexion, via, repli FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
+    ? db.prepare('SELECT id, ts, date, source, role, text, reflexion, via, repli, COALESCE(rangee,0) AS rangee FROM messages WHERE user_id = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, since, limit)
+    : db.prepare('SELECT id, ts, date, source, role, text, reflexion, via, repli, COALESCE(rangee,0) AS rangee FROM messages WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT ?').all(userId, limit);
   return avecApercus(rows.reverse(), userId);
 }
 
@@ -1161,7 +1161,7 @@ export const joursEcrits = (userId = OWNER) => db.prepare(
 
 export function messagesForDate(date, userId = OWNER) {
   const rows = db.prepare(
-    'SELECT id, ts, source, role, text, via FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
+    'SELECT id, ts, source, role, text, via, COALESCE(rangee,0) AS rangee FROM messages WHERE user_id = ? AND date = ? ORDER BY ts ASC'
   ).all(userId, date);
   return avecApercus(rows, userId);
 }

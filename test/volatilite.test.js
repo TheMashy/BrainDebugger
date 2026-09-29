@@ -204,3 +204,45 @@ test('la borne de droite dit où elle EST, pas où on croit qu’elle est', () =
   const b2 = [...net.matchAll(/<span title="([^"]*)">([^<]*)<\/span>/g)].map(m => m[2]);
   assert.equal(b2.at(-1), '06:30');
 });
+
+test('un relevé et une lecture ne sont jamais reliés par un trait', () => {
+  /*
+   * Un trait entre un chiffre posé par la personne et une estimation lue dans
+   * ses mots ferait passer l'une pour la suite de l'autre. Relevé, lu, lu,
+   * relevé : un seul segment, entre les deux lectures.
+   */
+  const html = dessine([H('09:00', 6, 'releve'), H('12:00', 4), H('15:00', 5), H('21:00', 3, 'releve')],
+                       poste('08:00', '23:00'));
+  const trait = /<path d="(M[^"]*)" fill="none"/.exec(html);
+  assert.ok(trait, 'plus aucun trait');
+  assert.equal((trait[1].match(/M/g) ?? []).length, 1);
+  assert.equal((trait[1].match(/L/g) ?? []).length, 1, `trait : ${trait[1]}`);
+  assert.equal(cercles(html).length, 4, 'un point a disparu');
+  // Deux relevés qui se suivent, eux, se relient.
+  const deux = dessine([H('09:00', 6, 'releve'), H('21:00', 3, 'releve')], poste('08:00', '23:00'));
+  assert.match(deux, /<path d="M[\d.]+ [\d.]+L[\d.]+ [\d.]+" fill="none"/);
+});
+
+test('une estimation du compagnon est un point creux, reliée à rien d’autre qu’à ses pareilles', () => {
+  /*
+   * Le compagnon pose parfois un relevé : c'est son hypothèse, pas la parole de
+   * la personne. Plein veut dire « posé par toi » — son point est donc creux, il
+   * ne se relie ni à un relevé ni à une lecture des mots, et le pied ne dit pas
+   * « relevé à la main ».
+   */
+  const html = dessine([H('09:00', 6, 'releve'), H('12:00', 4, 'modele'), H('15:00', 5, 'modele'), H('18:00', 5),
+                        H('21:00', 3, 'releve')], poste('08:00', '23:00'));
+  const ronds = cercles(html);
+  assert.equal(ronds.length, 5);
+  assert.deepEqual(ronds.map(c => c.fill === 'var(--bg)'), [false, true, true, true, false]);
+  const trait = /<path d="(M[^"]*)" fill="none"/.exec(html);
+  assert.ok(trait, 'plus aucun trait');
+  // Un seul segment : entre les deux estimations du compagnon.
+  assert.equal((trait[1].match(/M/g) ?? []).length, 1);
+  assert.equal((trait[1].match(/L/g) ?? []).length, 1, `trait : ${trait[1]}`);
+  assert.match(html, /\(estimé par le compagnon\)/);
+
+  const seul = dessine([H('12:00', 4, 'modele'), H('15:00', 5, 'modele')], poste('08:00', '23:00'));
+  assert.doesNotMatch(seul, /relevé à la main|lu dans tes mots/);
+  assert.match(seul, /estimé par le compagnon<\/span>/);
+});

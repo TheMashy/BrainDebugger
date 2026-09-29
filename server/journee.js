@@ -11,7 +11,8 @@
  * un résumé qu'on aurait fabriqué à sa place — et une paraphrase de ce qu'on a
  * écrit un mauvais soir n'a aucune raison d'être plus juste que la phrase.
  */
-import { messagesForDate, relevesDuJour, getEntry, OWNER } from './db.js';
+import { db, messagesForDate, relevesDuJour, getEntry, allEntries, OWNER } from './db.js';
+import { buildSeries } from './stats.js';
 import { readMood, scoresDe, SENS, DEFAUT } from './mood.js';
 import { themeDe, THEMES, DEFAUT as DEFAUT_THEME } from '../web/reperes.js';
 /*
@@ -193,12 +194,55 @@ export const AMPLITUDE_ESTIMEE = 3;
  */
 export const MOTS_PENCHE = 4;
 
+/*
+ * CE QUI PORTE UN SENS, ET CE QUI N'EN PORTE PAS.
+ *
+ * La lecture penchait vers le bas, et pas parce que les journées l'étaient.
+ * L'aube et la pluie n'avaient aucune valence mais comptaient au dénominateur :
+ * « la joie et la gratitude » pesait 0 tout en diluant le reste. Et le
+ * monolithe lisait un rendez-vous comme une humeur : une phrase qui disait se
+ * sentir bien en sortant d'une séance sortait plus bas que la même phrase où
+ * la séance était remplacée par un film.
+ *
+ * D'où trois règles. Seuls les mots AFFECTIFS de l'aube penchent vers le haut
+ * (l'espoir, la joie, la gratitude…) ; « matin », « demain », « réveil » ou
+ * « envie de » disent une heure ou une tournure, pas un état, et n'entrent
+ * nulle part. Le monolithe (l'épreuve, les rendez-vous) et la pluie (le
+ * relâchement, qui peut arriver un très bon jour) sortent du numérateur ET du
+ * dénominateur. Le reste garde le signe de SIGNE.
+ */
+const AUBE_AFFECTIVE = new Set([
+  'espoir', 'espere', 'esperer', 'joie', 'joyeux', 'joyeuse', 'gratitude',
+  'reconnaissant', 'reconnaissante', 'bonheur', 'confiance', 'confiant', 'confiante',
+  'motive', 'motivee', 'enthousiaste', 'ca s arrange', 'ca va aller'
+]);
+const SANS_VALENCE = new Set(['monolith', 'pluie']);
+
+function valenceDe({ scene, mot }) {
+  if (scene === 'aube') return AUBE_AFFECTIVE.has(mot) ? 0.8 : null;
+  if (SANS_VALENCE.has(scene)) return null;
+  return SIGNE[scene] ?? null;
+}
+
+/*
+ * LA DENSITÉ DE RÉFÉRENCE. 0,35 avait été réglé sur des totaux comptés en
+ * double (« contente » valait deux fois « content », une expression s'ajoutait
+ * à ses morceaux). `scoresDe` ne compte plus qu'une fois chaque bout de texte :
+ * sur un vrai journal, les totaux ont baissé de 17 %, et la constante suit
+ * (0,35 × 0,83) pour qu'un même passage garde la même intensité.
+ */
+export const DENSITE_PLEINE = 0.29;
+
 export function pencheDe(texte) {
-  const { scores, mots } = scoresDe(texte);
-  const total = Object.values(scores).reduce((a, b) => a + b, 0);
+  const { retenues, mots } = scoresDe(texte);
+  let total = 0, somme = 0;
+  for (const r of retenues) {
+    const v = valenceDe(r);
+    if (v == null) continue;
+    total += r.poids;
+    somme += v * r.poids;
+  }
   if (!total || mots < MOTS_PENCHE) return null;
-  let somme = 0;
-  for (const [scene, v] of Object.entries(scores)) somme += (SIGNE[scene] ?? 0) * v;
   const sens = somme / total;
   /*
    * La densité, et pas le score brut : trois mots lourds dans une phrase de
@@ -206,7 +250,7 @@ export function pencheDe(texte) {
    * sont une incise. Sans elle, un long texte plutôt neutre finirait aussi
    * chargé qu'un cri de deux lignes.
    */
-  const densite = Math.min(1, total / (mots * 0.35));
+  const densite = Math.min(1, total / (mots * DENSITE_PLEINE));
   /*
    * ET UNE PRUDENCE SUR LES PASSAGES TRES COURTS.
    *
@@ -252,11 +296,45 @@ export function estimationDe(charge, reference = 5) {
  */
 export const MAX_THEMES_MOMENT = 2;
 
+/**
+ * LE THÈME D'UNE PHRASE DE JOURNAL — pas celui d'un libellé de repère.
+ *
+ * `themeDe` est taillé pour « départ à Londres » ou « décès de mamie ». Sur des
+ * phrases de journal, des tournures courantes y tombaient à plat : « en train
+ * de » (le train) et « ça fait partie de » (partie) donnaient l'avion du
+ * voyage, et « je suis perdu » ou une somme d'argent perdue, l'icône du
+ * DEUIL — une étiquette grave que la personne n'a pas écrite, posée sur
+ * « désorienté » ou sur une perte d'argent. Une seule icône pareille
+ * discrédite toutes les autres.
+ *
+ * On retire ces tournures AVANT de demander le thème, et seulement ici : les
+ * libellés de repères passent toujours par `themeDe`, inchangé (« parti à
+ * Londres » reste un voyage). Une perte d'argent garde son mot « argent » :
+ * c'est le « perdu » qu'on enlève, pas ce dont on parle.
+ */
+const TOURNURES = [
+  /\ben train d(?:e|u|es)?\b/g,
+  /\b(?:fait|font|faire|faisait) partie\b/g,
+  /\b(?:une|des|ma|mes|sa|ses) parties?\b/g,
+  /\bpoint de depart\b/g,
+  /\btrip hop\b/g,
+  /\b(?:je suis|j etais|je me sens|je me sentais|suis|me sens) (?:(?:un peu|completement|trop|tellement|vraiment|tout|toute|si|tres) )?perdue?s?\b/g,
+  /\bme suis perdue?s?\b/g,
+  /\bperdu(?= (?:(?:pas mal|beaucoup|un peu|plein|trop) )?(?:de |d |du |des |mon |ma |mes |tout mon |tout le )?(?:thunes?|argent|fric|sous|temps|poids|kilos?)\b)/g
+];
+
+export function themeDuJournal(p) {
+  let t = ' ' + String(p ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ') + ' ';
+  for (const re of TOURNURES) t = t.replace(re, ' ');
+  return themeDe(t);
+}
+
 export function themesDuTexte(texte, max = MAX_THEMES_MOMENT) {
   const compte = new Map();
   for (const p of String(texte ?? '').split(/(?<=[.!?…])\s+|\n+/)) {
     if (p.trim().length < 8) continue;
-    const t = themeDe(p);
+    const t = themeDuJournal(p);
     if (t === DEFAUT_THEME) continue;          // le défaut n'est pas un sujet
     compte.set(t, (compte.get(t) ?? 0) + 1);
   }
@@ -295,13 +373,52 @@ export function themesDuTexte(texte, max = MAX_THEMES_MOMENT) {
  * a été évoqué » et « un objet était à portée » sont deux jaunes, et ce ne sont
  * pas le même moment.
  */
-function veilleDuMoment(textes, date) {
-  const contexteDuJour = textes.join(' ');
+function veilleDuMoment(msgs, date) {
+  /*
+   * UN MESSAGE RANGÉ RESTE LU, MAIS IL NE RACONTE PAS CE JOUR-LÀ.
+   *
+   * Ranger un message au carnet dit qu'il « ne raconte pas ce jour-là » : une
+   * lettre de médecin collée pour être gardée, une vieille entrée recollée.
+   * Une lettre qui disait des antécédents faisait sortir sa ligne ROUGE, sur
+   * la foi de ce qu'un autre avait écrit sur des années passées.
+   *
+   * La veille ne perd jamais un texte : un message rangé est lu comme les
+   * autres. Mais tout ce qu'elle y trouve redescend au seul jaune « évoqué,
+   * passé » — la règle du bandeau du jour, pour que la ligne et le bandeau
+   * disent la même chose du même message —, et il n'entre pas dans le
+   * contexte : sans quoi il ferait encore passer au rouge une coupure ambiguë
+   * écrite par la personne le même soir.
+   *
+   * MAIS UN ACTE DE LA PERSONNE NE RETOMBE JAMAIS À RIEN. Une coupure que la
+   * veille classe ambiguë ne passe au rouge qu'avec un contexte de crise, et
+   * sans ce contexte elle ne donne RIEN. Si la crise n'était écrite QUE dans le
+   * message rangé, la retirer du contexte effaçait la marque de ce que la
+   * personne venait d'écrire elle-même, ce soir-là. On relit donc chaque
+   * message non rangé AUSSI avec le contexte complet : ce qui n'y est rouge que
+   * grâce au rangé reste marqué, en jaune et sous son propre genre. Plutôt
+   * jaune que rien, pour un acte.
+   */
+  const contexteDuJour = msgs.filter(m => !m.rangee).map(m => m.text).join(' ');
+  const contexteComplet = msgs.map(m => m.text).join(' ');
   const motifs = [];
-  for (const t of textes) {
-    const r = niveauDuTexte(t, { contexteDuJour, aujourdhui: date });
-    if (!r.niveau) continue;
-    for (const m of r.motifs) if (!motifs.some(x => x.genre === m.genre)) motifs.push(m);
+  // Un genre, une fois — et à son niveau le plus grave : un jaune vu d'abord
+  // n'éteint pas le rouge du même genre écrit plus tard dans le moment.
+  const ajouter = m => {
+    const deja = motifs.find(x => x.genre === m.genre);
+    if (!deja) motifs.push(m);
+    else if (m.niveau === 'rouge') deja.niveau = 'rouge';
+  };
+  for (const m of msgs) {
+    const r = niveauDuTexte(m.text, { contexteDuJour, aujourdhui: date });
+    if (m.rangee) {
+      if (r.motifs.length) ajouter({ genre: 'evoque_passe', niveau: 'jaune' });
+      continue;
+    }
+    for (const x of r.motifs) ajouter({ genre: x.genre, niveau: x.niveau });
+    if (contexteComplet === contexteDuJour) continue;
+    // `ajouter` ne fait que monter : un genre déjà rouge ou déjà jaune le reste.
+    for (const x of niveauDuTexte(m.text, { contexteDuJour: contexteComplet, aujourdhui: date }).motifs)
+      if (x.niveau === 'rouge') ajouter({ genre: x.genre, niveau: 'jaune' });
   }
   if (!motifs.length) return null;
   return {
@@ -311,6 +428,35 @@ function veilleDuMoment(textes, date) {
       .slice().sort((a, b) => (b.niveau === 'rouge' ? 1 : 0) - (a.niveau === 'rouge' ? 1 : 0))
       .map(m => m.genre))]
   };
+}
+
+/**
+ * LES MESSAGES D'UNE JOURNÉE, REGROUPÉS EN MOMENTS — sans rien en lire encore.
+ * `momentsDuJour` et `calibrationDesMots` découpent de la même façon : une
+ * estimation qu'on vérifie doit être celle qu'on affiche.
+ */
+function grouperEnMoments(msgs) {
+  const moments = [];
+  for (const m of msgs) {
+    const t = Date.parse(m.ts);
+    // Un message sans instant lisible garde son texte : il rejoint le moment en
+    // cours, ou en ouvre un à l'heure du précédent. On perd son heure, pas sa
+    // phrase — et surtout pas les autres.
+    if (Number.isNaN(t)) {
+      const d0 = moments[moments.length - 1];
+      if (d0) d0.msgs.push(m);
+      else moments.push({ debut: NaN, fin: NaN, msgs: [m] });
+      continue;
+    }
+    const dernier = moments[moments.length - 1];
+    if (dernier && t - dernier.fin <= TROU_MOMENT) {
+      dernier.msgs.push(m);
+      dernier.fin = t;
+    } else {
+      moments.push({ debut: t, fin: t, msgs: [m] });
+    }
+  }
+  return moments;
 }
 
 export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), reference = null } = {}) {
@@ -325,29 +471,28 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
    */
   const releves = relevesDuJour(date, userId);
   const msgs = messagesForDate(date, userId).filter(m => m.role === 'user' && m.text?.trim());
-  const moments = [];
-  for (const m of msgs) {
-    const t = Date.parse(m.ts);
-    // Un message sans instant lisible garde son texte : il rejoint le moment en
-    // cours, ou en ouvre un à l'heure du précédent. On perd son heure, pas sa
-    // phrase — et surtout pas les autres.
-    if (Number.isNaN(t)) {
-      const d0 = moments[moments.length - 1];
-      if (d0) { d0.textes.push(m.text); d0.ids.push(m.id); }
-      else moments.push({ debut: NaN, fin: NaN, textes: [m.text], ids: [m.id] });
-      continue;
-    }
-    const dernier = moments[moments.length - 1];
-    if (dernier && t - dernier.fin <= TROU_MOMENT) {
-      dernier.textes.push(m.text);
-      dernier.fin = t;
-      dernier.ids.push(m.id);
-    } else {
-      moments.push({ debut: t, fin: t, textes: [m.text], ids: [m.id] });
-    }
-  }
-  return moments.map(mo => {
-    const texte = mo.textes.join(' ');
+  const idsDuJour = new Set(msgs.map(m => m.id));
+  /*
+   * LES MOTS NE DONNENT UN CHIFFRE QUE S'ILS ONT PROUVÉ QU'ILS SUIVENT LES SIENS.
+   * Voir `calibrationDesMots` : tant que ce n'est pas le cas, pas d'estimation
+   * par les mots, nulle part — ni chiffre ni flèche.
+   */
+  const calibre = calibrationDesMots(userId).ok;
+  return grouperEnMoments(msgs).map(mo => {
+    const ids = mo.msgs.map(m => m.id);
+    const veille = veilleDuMoment(mo.msgs, date);
+    /*
+     * CE QUI RACONTE LA JOURNÉE, ET CE QUI Y A SEULEMENT ÉTÉ COLLÉ.
+     *
+     * La phrase, les sujets, la pente et l'estimation ne lisent que les
+     * messages de la personne qui racontent CE jour : pas ceux qu'elle a
+     * rangés au carnet. Un moment fait uniquement de messages rangés ne reste
+     * que s'il porte un signe de veille — la veille, elle, a tout lu.
+     */
+    const propres = mo.msgs.filter(m => !m.rangee);
+    if (!propres.length && !veille) return null;
+    const textes = propres.map(m => m.text);
+    const texte = textes.join(' ');
     /*
      * LA NOTE N'ENTRE PAS ICI, et c'est délibéré. `readMood` s'en sert pour
      * infléchir la scène — utile pour peindre le décor du jour, faux pour une
@@ -370,12 +515,47 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
     // La phrase qu'on affichera, sortie une seule fois : le moment rend aussi le
     // message d'où elle vient, et les deux doivent parler de la MÊME phrase.
     const coeur = coeurDe(texte);
-    // Le relevé le plus proche DANS la fenêtre du moment, pas le plus proche
-    // tout court : un relevé du matin ne dit rien d'un moment de minuit.
-    const pose = releves.find(r => {
+    /*
+     * LE RELEVÉ DU MOMENT : D'ABORD CELUI QUI EST ANCRÉ À UN DE SES MESSAGES.
+     *
+     * On ne rattachait que par l'heure, et on prenait le PREMIER. Deux défauts :
+     * un relevé daté de travers (voir `reparerLesNotesDites`) ne retrouvait plus
+     * son moment, et quand la personne écrit « 3/10 » puis « 2/10 » une minute
+     * après, le 3 cachait le 2 — alors que c'est elle qui s'est reprise. On
+     * prend donc le DERNIER relevé ancré au moment, et à défaut le dernier
+     * relevé posé dans sa fenêtre qui n'appartient à aucun autre message du
+     * jour (celui qu'on pose en répondant à une question du compagnon).
+     * Un relevé du matin ne dit toujours rien d'un moment de minuit.
+     *
+     * ET LA PAROLE DE LA PERSONNE AVANT L'HYPOTHÈSE DU COMPAGNON. « Le dernier
+     * gagne » ne vaut qu'entre ses propres chiffres : en direct, sa note dite
+     * est posée avant que le compagnon ancre son relevé au MÊME message, qui
+     * arrivait donc toujours dernier — et son « 5 » cachait le « 2 » qu'elle
+     * venait d'écrire. C'est la plainte même : « ramène tes 1/10 à 5-6 ».
+     * Même chose quand elle touche l'échelle : son relevé est ancré au message
+     * du compagnon, donc trouvé par la fenêtre, et il passe quand même avant
+     * celui que le compagnon a ancré au message à elle. Le relevé du compagnon
+     * ne sert qu'en l'absence de tout chiffre à elle.
+     */
+    const ancres = releves.filter(r => ids.includes(r.message_id));
+    const fenetre = releves.filter(r => {
+      if (idsDuJour.has(r.message_id)) return false;
       const t = Date.parse(r.ts);
       return t >= mo.debut - TROU_MOMENT && t <= mo.fin + TROU_MOMENT;
     });
+    const deToi = r => r.source === 'toi';
+    const pose = ancres.filter(deToi).at(-1) ?? fenetre.filter(deToi).at(-1)
+      ?? ancres.at(-1) ?? fenetre.at(-1);
+    /*
+     * PAS DE CHIFFRE LU DANS LES MOTS SUR UN MOMENT QUE LA VEILLE A MARQUÉ.
+     *
+     * Sur un vrai journal, 23 des 26 moments marqués sortaient à 5,5 ou 6 pour
+     * une référence de 6 — dont un moment rouge à ≈6, et un autre tracé à
+     * ≈8,5 sur la courbe. Une estimation rassurante posée sur le pire moment
+     * de la journée est la pire erreur que cette ligne puisse faire. Un relevé
+     * posé par la personne, lui, reste : c'est sa parole.
+     */
+    const parLesMots = calibre && !veille && penche != null;
     return {
       heure: heureDe(mo.debut, zone),
       ts: Number.isNaN(mo.debut) ? null : new Date(mo.debut).toISOString(),
@@ -383,16 +563,19 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
       sens: force > 0 ? (SENS[scene] ?? null) : null,
       charge,
       coeur,
+      // Que des messages rangés : pas de phrase à montrer, et la page le dit.
+      // Posé seulement quand c'est vrai : la forme d'un moment ordinaire ne change pas.
+      ...(propres.length ? {} : { rangeSeul: true }),
       /*
        * LES MESSAGES DE LA PHRASE AFFICHÉE. Cliquer un moment doit désigner CE
        * passage-là ; avec les seuls `ids`, un moment de dix messages allumait
        * la colonne entière — le défaut que `messagesDuCoeur` tient fermé.
        */
-      coeurIds: messagesDuCoeur(coeur, mo.textes, mo.ids),
-      messages: mo.ids.length,
+      coeurIds: coeur ? messagesDuCoeur(coeur, textes, propres.map(m => m.id)) : [],
+      messages: ids.length,
       // Les mêmes que ceux des sujets : c'est par eux que les deux colonnes se
       // répondent, et non par l'heure qu'elles affichent l'une et l'autre.
-      ids: mo.ids,
+      ids,
       /*
        * DE QUOI ON PARLAIT, ET S'IL Y A À SURVEILLER.
        *
@@ -404,13 +587,216 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
        * veille est la seule chose qu'on ne veut jamais manquer en relisant.
        */
       themes: themesDuTexte(texte),
-      veille: veilleDuMoment(mo.textes, date),
+      veille,
       estime: pose
-        ? { valeur: pose.valeur, dApres: 'releve' }
-        : penche == null ? null
-          : { valeur: estimationDe(penche, ref), dApres: 'mots' }
+        // « releve » veut dire posé par la personne : c'est ce qui s'affiche plein.
+        ? { valeur: pose.valeur, dApres: pose.source === 'toi' ? 'releve' : 'modele' }
+        : parLesMots ? { valeur: estimationDe(penche, ref), dApres: 'mots' } : null
     };
-  }).map(x => ({ ...x, note }));
+  }).filter(Boolean).map(x => ({ ...x, note }));
+}
+
+/*
+ * =====================================================================
+ * LES MOTS ONT-ILS LE DROIT DE DONNER UN CHIFFRE ?
+ *
+ * L'estimation « ≈ x/10 » tirée des mots avait l'air d'une mesure sur
+ * l'échelle de la personne, sans que personne ait jamais vérifié qu'elle en
+ * soit une. Sur un vrai journal (43 journées notées) : aucun lien mesurable
+ * avec la note du jour (Spearman 0,2, non significatif), une erreur moyenne
+ * égale à celle d'un chiffre constant, et ses « 1/10 » écrits en toutes
+ * lettres lus 5 ou 6. La courbe écrasait précisément les pics qu'on vient voir.
+ *
+ * On confronte donc la lecture à ce que la personne a dit elle-même : la note
+ * de chaque journée écrite, et chaque relevé qu'elle a posé, face à
+ * l'estimation que les mots en auraient tirée. Trois conditions, toutes :
+ *   - au moins 20 paires : en dessous, aucune conclusion ne tient ;
+ *   - un lien franc (Spearman ≥ 0,4) et qui ne doit rien au hasard
+ *     (permutation, p < 0,05), mesuré sur les ÉCARTS à la référence et non
+ *     sur les niveaux — une tendance des notes ne prouve rien des mots ;
+ *   - une erreur moyenne PLUS PETITE que celle du meilleur chiffre constant
+ *     (la référence, recalée de l'écart médian) — sinon afficher la
+ *     référence ferait aussi bien, et sans rien prétendre.
+ * Tant qu'une seule manque, les mots ne donnent aucun chiffre. Ce n'est pas un
+ * verdict sur les mots de quelqu'un : c'est dire que ce lexique-là ne sait
+ * pas encore les lire.
+ * =====================================================================
+ */
+export const CALIBRATION = { paires: 20, rho: 0.4, p: 0.05, tirages: 2000, jours: 400 };
+
+const rangs = v => {
+  const o = v.map((x, i) => [x, i]).sort((a, b) => a[0] - b[0]);
+  const r = new Array(v.length);
+  for (let i = 0; i < o.length;) {
+    let j = i;
+    while (j + 1 < o.length && o[j + 1][0] === o[i][0]) j++;
+    for (let k = i; k <= j; k++) r[o[k][1]] = (i + j) / 2;
+    i = j + 1;
+  }
+  return r;
+};
+const pearson = (x, y) => {
+  const n = x.length;
+  const mx = x.reduce((a, b) => a + b, 0) / n, my = y.reduce((a, b) => a + b, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) { num += (x[i] - mx) * (y[i] - my); dx += (x[i] - mx) ** 2; dy += (y[i] - my) ** 2; }
+  return dx && dy ? num / Math.sqrt(dx * dy) : 0;
+};
+
+/** Le test de permutation, déterministe : la même base rend toujours le même verdict. */
+function permutation(rx, ry, rho, tirages) {
+  let graine = 0x9e3779b9;
+  const alea = () => {
+    graine = (graine + 0x6d2b79f5) | 0;
+    let t = Math.imul(graine ^ (graine >>> 15), 1 | graine);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const y = ry.slice();
+  let au_moins = 0;
+  for (let k = 0; k < tirages; k++) {
+    for (let i = y.length - 1; i > 0; i--) {
+      const j = Math.floor(alea() * (i + 1));
+      [y[i], y[j]] = [y[j], y[i]];
+    }
+    if (pearson(rx, y) >= rho) au_moins++;
+  }
+  return (1 + au_moins) / (1 + tirages);
+}
+
+function calibrer(userId, cleNotes) {
+  // La série ne dépend que des notes : un message de plus ne la recalcule pas.
+  const deja = _series.get(userId);
+  const ser = deja?.cle === cleNotes ? deja.ser : buildSeries(allEntries(userId));
+  _series.set(userId, { cle: cleNotes, ser });
+  // La référence d'un jour est celle de la série À CE JOUR-LÀ, calculée sur les
+  // jours d'avant : c'est ce que la page utilise, et elle n'inclut pas la note
+  // qu'on cherche à retrouver.
+  const refAvant = date => {
+    let r = null;
+    for (const s of ser) { if (s.date > date) break; r = s; }
+    return r?.reference ?? 5;
+  };
+  const noteDe = new Map(ser.map(s => [s.date, s.note]));
+  const msgs = db.prepare(
+    "SELECT id, ts, date, text FROM messages WHERE user_id = ? AND role = 'user' " +
+    "AND COALESCE(rangee, 0) = 0 AND text IS NOT NULL AND TRIM(text) <> '' ORDER BY ts ASC"
+  ).all(userId);
+  const parJour = new Map();
+  for (const m of msgs) {
+    if (!parJour.has(m.date)) parJour.set(m.date, []);
+    parJour.get(m.date).push(m);
+  }
+  const relevesParMessage = new Map();
+  for (const r of db.prepare("SELECT message_id, valeur FROM releves WHERE user_id = ? AND source = 'toi' ORDER BY ts ASC").all(userId))
+    relevesParMessage.set(r.message_id, r.valeur);          // le dernier gagne
+
+  /*
+   * Chaque texte n'est lu qu'une fois d'un calcul à l'autre : un message de
+   * plus ne change que la journée où il tombe, et relire quatre cents journées
+   * à chaque message coûterait des secondes. On ne garde que ce qui a servi.
+   */
+  const avant = _penches.get(userId) ?? new Map();
+  const lues = new Map();
+  const lire = t => {
+    if (!lues.has(t)) lues.set(t, avant.has(t) ? avant.get(t) : pencheDe(t));
+    return lues.get(t);
+  };
+  const paires = [];
+  for (const date of [...parJour.keys()].sort().slice(-CALIBRATION.jours)) {
+    const jour = parJour.get(date);
+    const ref = refAvant(date);
+    const note = noteDe.get(date);
+    if (note != null) {
+      const p = lire(jour.map(m => m.text).join(' '));
+      if (p != null) paires.push({ estime: estimationDe(p, ref), vrai: note, ref });
+    }
+    for (const mo of grouperEnMoments(jour)) {
+      const dits = mo.msgs.map(m => relevesParMessage.get(m.id)).filter(v => v != null);
+      if (!dits.length) continue;
+      const p = lire(mo.msgs.map(m => m.text).join(' '));
+      if (p != null) paires.push({ estime: estimationDe(p, ref), vrai: dits.at(-1), ref });
+    }
+  }
+  _penches.set(userId, lues);
+  return jugerLesPaires(paires);
+}
+
+/**
+ * LE VERDICT, SUR DES PAIRES { estime, vrai, ref } — rien d'autre.
+ *
+ * Séparé de la lecture du journal pour que chaque porte puisse être éprouvée
+ * seule : une porte qu'aucun test ne ferme jamais n'est pas une porte.
+ */
+export function jugerLesPaires(paires) {
+  const n = paires.length;
+  const res = { ok: false, paires: n, rho: null, p: null, erreur: null, erreurConstante: null };
+  if (n < CALIBRATION.paires) return { ...res, raison: 'trop peu de paires' };
+  /*
+   * L'ÉCART, PAS LE NIVEAU. Corréler l'estimation à la note laissait passer des
+   * mots sans aucune information : sur des notes qui dérivent lentement, la
+   * référence (une médiane sur un an, en retard sur la tendance) portait à
+   * elle seule le lien, et un penchant triste constant corrigeait ce retard.
+   * Trois phrases tristes interchangeables, tirées au hasard, passaient ainsi
+   * le garde-fou vingt fois sur vingt. On retire donc la tendance des deux
+   * côtés, et on demande aux mots ce qu'eux seuls prétendent dire : de combien
+   * ce moment s'écarte de la référence. Le test de permutation porte sur ces
+   * écarts-là, pas sur les niveaux.
+   */
+  const rx = rangs(paires.map(x => x.estime - x.ref)), ry = rangs(paires.map(x => x.vrai - x.ref));
+  const rho = pearson(rx, ry);
+  const erreur = paires.reduce((a, x) => a + Math.abs(x.estime - x.vrai), 0) / n;
+  /*
+   * Et face au MEILLEUR chiffre constant, pas à la référence brute : la
+   * référence décalée de l'écart médian (le retard sur la tendance, corrigé).
+   * Un penchant constant ne fait jamais mieux que ça.
+   */
+  const ecarts = paires.map(x => x.vrai - x.ref).sort((a, b) => a - b);
+  const decalage = n % 2 ? ecarts[(n - 1) / 2] : (ecarts[n / 2 - 1] + ecarts[n / 2]) / 2;
+  const erreurConstante = paires.reduce((a, x) => a + Math.abs(x.ref + decalage - x.vrai), 0) / n;
+  const arrondi = v => Math.round(v * 1000) / 1000;
+  Object.assign(res, { rho: arrondi(rho), erreur: arrondi(erreur), erreurConstante: arrondi(erreurConstante) });
+  if (rho < CALIBRATION.rho) return { ...res, raison: 'lien trop faible' };
+  const p = permutation(rx, ry, rho, CALIBRATION.tirages);
+  res.p = arrondi(p);
+  if (p >= CALIBRATION.p) return { ...res, raison: 'lien possiblement dû au hasard' };
+  if (erreur >= erreurConstante) return { ...res, raison: 'pas mieux qu’un chiffre constant' };
+  return { ...res, ok: true, raison: null };
+}
+
+/*
+ * Mis en cache par personne, et recalculé dès que ce qu'il lit bouge : un
+ * message, une note, un relevé, un rangement. La signature coûte trois
+ * agrégats ; le calcul, lui, relit jusqu'à quatre cents journées.
+ */
+const _calibration = new Map();
+const _penches = new Map();
+const _series = new Map();
+
+export function calibrationDesMots(userId = OWNER) {
+  /*
+   * Des sommes qui dépendent de la PLACE de chaque chose : échanger les notes
+   * de deux jours, réécrire un message à longueur égale ou le déplacer à une
+   * autre date gardaient les mêmes compte, somme et maximum — et le cache
+   * servait une calibration périmée.
+   */
+  const cleNotes = JSON.stringify(
+    db.prepare('SELECT COUNT(note) n, SUM(note) s, MIN(date) a, MAX(date) d, '
+      + 'SUM(note * CAST(julianday(date) AS INTEGER)) p FROM entries WHERE user_id = ?').get(userId));
+  const cle = JSON.stringify([
+    db.prepare("SELECT COUNT(*) n, MAX(id) m, SUM(LENGTH(text)) l, SUM(COALESCE(rangee, 0)) r, "
+      + "SUM(id * LENGTH(text)) il, SUM(id * CAST(julianday(date) AS INTEGER)) d, SUM(id * unicode(text)) u, "
+      + "SUM(id * unicode(substr(text, -1))) z, SUM(id * CAST(julianday(ts) * 86400 AS INTEGER) % 1000003) t "
+      + "FROM messages WHERE user_id = ? AND role = 'user'").get(userId),
+    cleNotes,
+    db.prepare('SELECT COUNT(*) n, MAX(id) m, SUM(valeur) s, SUM(id * valeur) iv, SUM(message_id * valeur) mv '
+      + "FROM releves WHERE user_id = ? AND source = 'toi'").get(userId)
+  ]);
+  const vu = _calibration.get(userId);
+  if (vu?.cle === cle) return vu.res;
+  const res = calibrer(userId, cleNotes);
+  _calibration.set(userId, { cle, res });
+  return res;
 }
 
 /**
@@ -427,7 +813,10 @@ export function momentsDuJour(date, userId = OWNER, { zone = zoneCourante(), ref
 export const MIN_THEME = 2;
 
 export function thematiquesDuJour(date, userId = OWNER, { max = 5 } = {}) {
-  const msgs = messagesForDate(date, userId).filter(m => m.role === 'user' && m.text?.trim());
+  // Un message rangé au carnet ne raconte pas ce jour-là : il ne lui donne pas
+  // ses thèmes (sur un vrai journal, une seule lettre collée fournissait six des
+  // treize phrases « soin » d'une journée).
+  const msgs = messagesForDate(date, userId).filter(m => m.role === 'user' && m.text?.trim() && !m.rangee);
   if (!msgs.length) return [];
   const compte = new Map();
   const preuve = new Map();
@@ -436,7 +825,7 @@ export function thematiquesDuJour(date, userId = OWNER, { max = 5 } = {}) {
     // message entier il ne rendrait qu'un seul thème pour dix minutes de récit.
     for (const p of String(m.text).split(/(?<=[.!?…])\s+|\n+/)) {
       if (p.trim().length < 8) continue;
-      const t = themeDe(p);
+      const t = themeDuJournal(p);
       if (t === 'jalon') continue;          // le défaut n'est pas un thème
       compte.set(t, (compte.get(t) ?? 0) + 1);
       if (!preuve.has(t)) preuve.set(t, p.trim().slice(0, 120));
@@ -501,15 +890,15 @@ function phrasesDe(texte) {
  *
  * Le second signal est la BASCULE : le lexique d'ambiance est beaucoup plus
  * riche que celui des thèmes, et dans un journal, un virage d'humeur EST un
- * changement de sujet. « j'étais content de moi » puis « je me sens vide, j'ai
- * plus envie de rien » est très exactement la frontière qu'on vient chercher en
- * relisant une journée.
+ * changement de sujet. Une phrase fière de sa journée suivie d'une phrase qui
+ * dit le vide et l'absence d'envie est très exactement la frontière qu'on vient
+ * chercher en relisant une journée.
  */
 export const BASCULE = 0.45;
 
 function themeOuNull(p) {
   if (p.length < 8) return null;
-  const t = themeDe(p);
+  const t = themeDuJournal(p);
   return t === DEFAUT_THEME ? null : t;
 }
 
@@ -585,7 +974,7 @@ function decouperEnBlocs(lues) {
  * gauche, et un unique bloc n'est plus une étiquette mais le repère de la
  * journée d'aujourd'hui — celui qui manquait au jour en cours.
  */
-function blocsEnSujets(fondus, ref, zone = null, min = 2) {
+function blocsEnSujets(fondus, ref, zone = null, min = 2, calibre = false) {
   const sujets = fondus.map(b => {
     const t = b.phrases.map(x => x.texte).join(' ');
     const penche = pencheDe(t);
@@ -602,7 +991,9 @@ function blocsEnSujets(fondus, ref, zone = null, min = 2) {
        * et la page se tait. Un chiffre constant affiché sur la moitié des blocs
        * aurait l'air de dire quelque chose, ce qui est pire que le silence.
        */
-      estime: penche == null ? null : { valeur: estimationDe(penche, ref), dApres: 'mots' }
+      // Et pas d'estimation tant que les mots n'ont pas prouvé qu'ils suivent
+      // les chiffres de la personne : voir `calibrationDesMots`.
+      estime: penche == null || !calibre ? null : { valeur: estimationDe(penche, ref), dApres: 'mots' }
     };
     if (zone) {
       const ts = b.phrases.find(x => x.ts)?.ts ?? null;
@@ -649,11 +1040,11 @@ function blocsEnSujets(fondus, ref, zone = null, min = 2) {
   return sujets.slice(0, MAX_SUJETS);
 }
 
-export function sujetsDuTexte(texte, ref = 5) {
+export function sujetsDuTexte(texte, ref = 5, { calibre = false } = {}) {
   const phrases = phrasesDe(texte);
   if (!phrases.length) return [];
   const lues = phrases.map(p => ({ texte: p, theme: themeOuNull(p), penche: pencheDe(p) }));
-  return blocsEnSujets(decouperEnBlocs(lues), ref);
+  return blocsEnSujets(decouperEnBlocs(lues), ref, null, 2, calibre);
 }
 
 /**
@@ -669,8 +1060,11 @@ export function sujetsDuTexte(texte, ref = 5) {
 export function sujetsDuJour(date, userId = OWNER, { reference = null, zone = zoneCourante() } = {}) {
   const e = getEntry(date, userId);
   const ref = reference ?? e?.note ?? 5;
-  const msgs = messagesForDate(date, userId).filter(m => m.role === 'user' && m.text?.trim());
-  if (!msgs.length) return sujetsDuTexte(e?.text ?? '', ref);
+  // Les messages rangés au carnet n'en sont pas : `entries.text`, sur lequel on
+  // retombe, les a déjà retirés — les deux chemins lisent la même journée.
+  const msgs = messagesForDate(date, userId).filter(m => m.role === 'user' && m.text?.trim() && !m.rangee);
+  const calibre = calibrationDesMots(userId).ok;
+  if (!msgs.length) return sujetsDuTexte(e?.text ?? '', ref, { calibre });
 
   const lues = [];
   for (const m of msgs)
@@ -678,7 +1072,7 @@ export function sujetsDuJour(date, userId = OWNER, { reference = null, zone = zo
       lues.push({ texte: p, theme: themeOuNull(p), penche: pencheDe(p), ts: m.ts, id: m.id });
   // min = 1 : à partir de messages horodatés, même un seul bloc mérite son heure
   // et son icône — c'est ce qui rend le jour en cours marqué comme les autres.
-  return blocsEnSujets(decouperEnBlocs(lues), ref, zone, 1);
+  return blocsEnSujets(decouperEnBlocs(lues), ref, zone, 1, calibre);
 }
 
 /**
@@ -690,25 +1084,35 @@ export function sujetsDuJour(date, userId = OWNER, { reference = null, zone = zo
  * l'affichage privilégie la mesure quand elle existe — « ce qui est rempli est
  * mesuré, ce qui est contouré est déclaré », la règle vaut aussi ici.
  */
-export function volatiliteDuJour(date, userId = OWNER, { zone = zoneCourante() } = {}) {
+export function volatiliteDuJour(date, userId = OWNER, { zone = zoneCourante(), reference = null } = {}) {
   const rel = relevesDuJour(date, userId)
-    .map(r => ({ heure: heureDe(r.ts, zone), ts: r.ts, valeur: r.valeur, quoi: r.quoi ?? null }));
-  const mo = momentsDuJour(date, userId, { zone });
+    .map(r => ({ heure: heureDe(r.ts, zone), ts: r.ts, valeur: r.valeur, quoi: r.quoi ?? null, source: r.source ?? 'modele' }));
+  /*
+   * LA MÊME RÉFÉRENCE QUE LA LISTE. La référence tombait ici : la courbe se
+   * calait donc sur la note du soir — ce que `momentsDuJour` interdit
+   * justement —, et un même moment était lu ≈5,5 dans la liste et ≈7,5 sur
+   * la courbe. Sur un vrai journal, un moment marqué « suicide » y était tracé
+   * à ≈8,5.
+   */
+  const mo = momentsDuJour(date, userId, { zone, reference });
   const v = rel.map(r => r.valeur);
   /*
-   * LES HUMEURS : UN POINT PAR MOMENT QUE L'IA A ÉVALUÉ.
+   * LES HUMEURS : CHAQUE RELEVÉ À SON HEURE, ET LA LECTURE LÀ OÙ IL N'Y EN A PAS.
    *
-   * C'est ce que « ce qui a bougé » doit montrer — non pas une charge abstraite
-   * de −1 à +1, mais la note même que la lecture a posée sur chaque moment, sur
-   * dix, EXACTEMENT la valeur de la pastille ≈ du fil à gauche. Un point existe
-   * donc parce qu'un moment a été lu et estimé, et la courbe colle enfin à
-   * l'humeur de la journée. Quand un relevé tombe dans la fenêtre du moment,
-   * `estime` le préfère déjà (dApres: 'releve') : la mesure prime sur la lecture,
-   * ici comme partout.
+   * Un point par relevé, posé à SON instant : quand la personne écrit « 3/10 »
+   * puis « 2/10 » une minute après, les deux apparaissent — on ne cache jamais
+   * la valeur la plus basse derrière la première. Les moments sans relevé
+   * gardent l'estimation lue dans leurs mots, EXACTEMENT la valeur de la
+   * pastille ≈ du fil à gauche, quand les mots ont le droit d'en donner une
+   * (voir `calibrationDesMots`).
    */
-  const humeurs = mo
-    .filter(m => m.estime)
-    .map(m => ({ heure: m.heure, ts: m.ts, valeur: m.estime.valeur, dApres: m.estime.dApres }));
+  const quand = h => { const t = Date.parse(h.ts); return Number.isNaN(t) ? Infinity : t; };
+  const humeurs = [
+    // Plein pour ce que la personne a posé, creux pour ce que le compagnon a estimé.
+    ...rel.map(r => ({ heure: r.heure, ts: r.ts, valeur: r.valeur, dApres: r.source === 'toi' ? 'releve' : 'modele' })),
+    ...mo.filter(m => m.estime?.dApres === 'mots')
+      .map(m => ({ heure: m.heure, ts: m.ts, valeur: m.estime.valeur, dApres: 'mots' }))
+  ].sort((a, b) => quand(a) - quand(b));
   return {
     releves: rel,
     charges: mo.map(m => ({ heure: m.heure, ts: m.ts, charge: m.charge, scene: m.scene })),

@@ -579,7 +579,9 @@ export function recentMemory(date, userId = OWNER, texte = null) {
 export function ambiance(userId = OWNER) {
   // Du plus ancien au plus recent : `readMoodFil` fait decroitre le poids en
   // remontant, et l'ordre est ce qui le lui dit.
-  const msgs = recentMessages(80, userId).filter(m => m.role === 'user').map(m => m.text);
+  // Un message rangé au carnet « ne raconte pas ce jour-là » : il ne teint pas
+  // le décor non plus.
+  const msgs = recentMessages(80, userId).filter(m => m.role === 'user' && !m.rangee).map(m => m.text);
   const t = today();
   const note = getEntry(t, userId)?.note ?? null;
   const { series: ser } = series(userId);
@@ -691,9 +693,9 @@ export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
 /**
  * UNE NOTE ECRITE DANS LA CONVERSATION DEVIENT UN RELEVE.
  *
- * « ressenti avant de m'endormir 1/10 la » : ecrit noir sur blanc, et absent
- * partout. Le compagnon a bien un outil pour poser un releve, mais c'est LUI
- * qui decide de s'en servir — hors ligne, distrait, ou simplement occupe a
+ * Un « 1/10 » ecrit au coucher, noir sur blanc, restait absent partout. Le
+ * compagnon a bien un outil pour poser un releve, mais c'est LUI qui
+ * decide de s'en servir — hors ligne, distrait, ou simplement occupe a
  * repondre, il ne le fait pas. Ce qui est ecrit en toutes lettres ne doit
  * dependre de personne.
  *
@@ -708,16 +710,62 @@ export function noterBornesDites(texte, userId = OWNER, quand = Date.now()) {
  * note : `addReleve` est ancre au message, et on regarde d'abord s'il en porte
  * deja un.
  *
+ * ET IL PORTE L'HEURE DU MESSAGE, pas celle de la lecture. `quand` manquait :
+ * relus apres coup, les « 1/10 » de septembre etaient tous dates de la nuit
+ * de la relecture, et plus aucun ne retrouvait son moment -- la courbe
+ * affichait a la place une devinette tiree des mots, precisement sur les pires
+ * moments. Sans `quand` (le chemin en direct), le relevé est de maintenant,
+ * comme le message.
+ *
  * @returns {boolean} vrai si un releve a ete pose.
  */
-export function noterNoteDite(texte, messageId, date, userId = OWNER) {
+export function noterNoteDite(texte, messageId, date, userId = OWNER, quand = undefined) {
   if (!messageId || !date) return false;
   const n = noteDiteDans(texte);
   if (!n) return false;
   if (relevesDuMessage(messageId, userId).length) return false;
   const r = addReleve({ messageId, date, valeur: n.valeur, quoi: n.extrait,
-                        source: 'toi', userId });
+                        source: 'toi', userId, quand });
   return !!r;
+}
+
+/**
+ * LES NOTES DITES DEJA RELUES A LA MAUVAISE HEURE, REMISES A LA LEUR.
+ *
+ * Avant que `noterNoteDite` recoive `quand`, la relecture du journal a pose des
+ * relevés datés de l'instant ou elle tournait. On les rend a leur message : son
+ * instant, et sa journée (un message range sur la soirée qu'il terminait
+ * emmene son relevé avec lui).
+ *
+ * PAS EN SQL AVEUGLE. « source 'toi' et posé plus d'une heure apres le message »
+ * attraperait aussi les relevés que la personne pose en touchant l'echelle
+ * (`poserCeQuIlDit`) : ancrés a un message, légitimement posés des heures plus
+ * tard, et leur heure est la bonne. On ne touche qu'aux relevés qui SONT une
+ * note dite : un message de la personne, dont l'extracteur relit aujourd'hui
+ * exactement le même extrait et le même chiffre. Idempotent : un relevé déjà a
+ * sa place n'est pas réécrit.
+ *
+ * @returns {number} combien de relevés ont été remis a leur heure.
+ */
+export function reparerLesNotesDites() {
+  const lignes = db.prepare(
+    `SELECT r.id, r.ts, r.date, r.valeur, r.quoi, m.ts AS mts, m.date AS mdate, m.text
+       FROM releves r JOIN messages m ON m.id = r.message_id AND m.user_id = r.user_id
+      WHERE r.source = 'toi' AND m.role = 'user'`
+  ).all();
+  const maj = db.prepare('UPDATE releves SET ts = ?, date = ? WHERE id = ?');
+  let n = 0;
+  for (const r of lignes) {
+    if (!r.mts || !r.mdate) continue;
+    const ts = normaliserTs(r.mts);
+    if (r.ts === ts && r.date === r.mdate) continue;
+    const dite = noteDiteDans(r.text);
+    if (!dite || dite.valeur !== r.valeur) continue;
+    if (String(r.quoi ?? '').trim() !== String(dite.extrait ?? '').trim()) continue;
+    maj.run(ts, r.mdate, r.id);
+    n++;
+  }
+  return n;
 }
 
 /**
@@ -934,7 +982,7 @@ export function relireLesBornesDites(userId = OWNER) {
 export function relireLesNotesDites(userId = OWNER) {
   let poses = 0;
   for (const msg of tousMessagesUtilisateur(userId)) {
-    if (noterNoteDite(msg.text, msg.id, msg.date, userId)) poses++;
+    if (noterNoteDite(msg.text, msg.id, msg.date, userId, normaliserTs(msg.ts) ?? undefined)) poses++;
   }
   return poses;
 }
