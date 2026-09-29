@@ -70,7 +70,7 @@ export function phraseEntiere(message, extrait, max = 400) {
 }
 
 /* Les genres qui parlent d'un geste ou d'une prise AU PRÉSENT. */
-export const GENRES_PRESENT = ['suicide', 'blessure', 'en_main', 'moyen',
+export const GENRES_PRESENT = ['suicide', 'envie_mal', 'blessure', 'en_main', 'moyen',
                                'substance', 'surdose', 'dereel'];
 /* Et celui qui parle du passé. Il ne se mélange jamais aux autres. */
 export const GENRE_PASSE = 'evoque_passe';

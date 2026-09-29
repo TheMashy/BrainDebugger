@@ -16,7 +16,8 @@ import { readFileSync } from 'node:fs';
 import { niveauDuTexte } from '../server/veille.js';
 
 const CAS = JSON.parse(readFileSync(new URL('./veille-cas.json', import.meta.url), 'utf-8'));
-const obtenu = c => niveauDuTexte(c.phrase, { aujourdhui: c.aujourdhui ?? '2026-09-05' }).niveau ?? 'rien';
+const lu = c => niveauDuTexte(c.phrase, { aujourdhui: c.aujourdhui ?? '2026-09-05', contexteDuJour: c.contexte ?? '' });
+const obtenu = c => lu(c).niveau ?? 'rien';
 
 test('aucune crise présente n’est rétrogradée (les rouges attendus restent rouges)', () => {
   const rates = CAS.filter(c => c.attendu === 'rouge' && obtenu(c) !== 'rouge');
@@ -44,4 +45,14 @@ test('CE QUI EST ATTENDU JAUNE EST JAUNE', () => {
    */
   const rates = CAS.filter(c => c.attendu === 'jaune' && obtenu(c) === 'rien');
   assert.deepEqual(rates.map(c => `${c.phrase} → rien (attendu jaune) — ${c.pourquoi}`), []);
+});
+
+test('LE BON GENRE, PAS SEULEMENT LA BONNE COULEUR', () => {
+  /*
+   * « l'envie de se faire du mal est écrite » et « le suicide a été évoqué »
+   * sont deux jaunes, et ce ne sont pas la même journée. Un cas qui dit son
+   * genre doit le porter.
+   */
+  const faux = CAS.filter(c => c.genre && !lu(c).motifs.some(m => m.genre === c.genre));
+  assert.deepEqual(faux.map(c => `${c.phrase} → ${lu(c).motifs.map(m => m.genre).join(', ') || 'rien'} (attendu ${c.genre})`), []);
 });

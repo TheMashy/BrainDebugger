@@ -109,3 +109,15 @@ test('chez Jarvis : grave, une question, ou une façon de parler', async () => {
     assert.equal(graveMajordome(t), 'demander', t);
   }
 });
+
+test('chez Jarvis, un acte de surdose reste grave même avec une envie ou un nom nu à côté', async () => {
+  /* Toutes les phrases sont inventées. L'acte écrit au participe, ou après un
+     « overdose » nu, faisait passer la réponse de « grave » à « demander ». */
+  const { graveMajordome } = await import('../server/gravite.js');
+  for (const t of ['envie de mourir, toute la boîte avalée', 'envie de dormir alors pris 8 xanax',
+                   'je voudrais dormir, toute la plaquette avalée', "overdose, j'ai avalé toute la plaquette",
+                   "une od je crois, j'ai pris 12 xanax", 'aidez moi overdose', "je suis à deux doigts de l'overdose",
+                   'overdose de xanax je me sens partir']) {
+    assert.equal(graveMajordome(t), 'grave', t);
+  }
+});

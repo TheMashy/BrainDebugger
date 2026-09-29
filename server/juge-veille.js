@@ -62,6 +62,7 @@ export const SENS_VERDICT = {
 };
 
 import { demanderOutil } from './chat.js';
+import { auPasse, plafondCourrier } from './veille.js';
 
 export const CONSIGNE = `Tu relis UN passage d'un journal intime qu'un détecteur de mots a signalé.
 
@@ -181,10 +182,13 @@ export function signeTientEncore(verdict) {
 export function passagesDuJour(date, messages, niveau, contexteDuJour = null) {
   const msgs = (messages ?? []).filter(m => m.role === 'user' && m.text?.trim());
   if (!msgs.length) return [];
-  const ctx = contexteDuJour ?? msgs.map(m => m.text).join(' ');
+  // Comme `veilleDuJour` : un texte rangé au carnet n'est pas le contexte du jour,
+  // et ce qu'il porte ne monte pas plus haut qu'un jaune « évoqué ».
+  const ctx = contexteDuJour ?? msgs.filter(m => !m.rangee).map(m => m.text).join(' ');
   const out = [];
   msgs.forEach((m, i) => {
-    const r = niveau(m.text, { contexteDuJour: ctx, aujourdhui: date });
+    let r = plafondCourrier(m.text, niveau(m.text, { contexteDuJour: ctx, aujourdhui: date }), date);
+    if (m.rangee) r = auPasse(r);
     if (!r?.niveau) return;
     out.push({
       messageId: m.id, date, texte: m.text,

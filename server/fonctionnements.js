@@ -38,7 +38,7 @@
  *    recalibrer dans tools/banc-approches/calibrer.mjs — pas ici.
  */
 import { allEntries, activiteEntre, mesuresEntre, messagesForDate, OWNER } from './db.js';
-import { veilleDuJour, niveauDuTexte } from './veille.js';
+import { veilleDuJour, niveauDuTexte, plafondCourrier } from './veille.js';
 import { nuitDuJour, rythmeUtilisateur, MIN_NUIT, MAX_NUIT } from './nuits.js';
 import { jourLocal } from './temps.js';
 import { addDays } from './stats.js';
@@ -739,7 +739,9 @@ export function fonctionnements(userId = OWNER, opts = {}) {
 /* vont ensemble 5 fois sur 7, contre 40 sur 150. Un souvenir raconté   */
 /* (« évoqué ») n'est pas un jour à surveiller.                          */
 /* ------------------------------------------------------------------ */
-const GENRES_SURVEILLES = new Set(['blessure', 'surdose', 'suicide', 'moyen', 'substance', 'dereel']);
+/* « en main » est le seul rouge qui se suffit à lui-même : un jour qui n'a que
+   lui en était écarté. L'envie de se faire du mal, écrite, compte aussi. */
+const GENRES_SURVEILLES = new Set(['blessure', 'surdose', 'suicide', 'moyen', 'en_main', 'envie_mal', 'substance', 'dereel']);
 function heureDe(ts) {
   try { const s = new Date(ts).toLocaleTimeString('fr-FR', { timeZone: process.env.TZ || 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false }); const m = /^(\d{2}):(\d{2})/.exec(s); return m ? +m[1] + +m[2] / 60 : null; } catch { return null; }
 }
@@ -755,7 +757,7 @@ export function joursSurveilles(T, userId = OWNER, { veille = veilleDuJour, mess
     let heure = null;
     for (const m of messages(j.date, userId)) {
       if (m.role !== 'user' || !m.text?.trim()) continue;
-      const r = niveau(m.text, { aujourdhui: j.date });
+      const r = plafondCourrier(m.text, niveau(m.text, { aujourdhui: j.date }), j.date);   // un courrier collé : comme dans la veille du jour
       if (r?.niveau && r.motifs.some(x => GENRES_SURVEILLES.has(x.genre))) { heure = heureDe(m.ts); break; }
     }
     jours.push({ date: j.date, niveau: v.niveau, genres: [...new Set(genres)], heure });

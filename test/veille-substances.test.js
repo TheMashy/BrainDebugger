@@ -30,6 +30,12 @@ test('un usage, un tiers, une négation, une hyperbole : rien', () => {
   assert.deepEqual(faux.map(c => `${c.phrase} → ${niveau(c)} (${obtenu(c).motifs.map(m => m.genre + ':' + m.mot).join(', ')})`), []);
 });
 
+test('le genre attendu est celui qui est posé', () => {
+  // « je pourrais prendre toute la plaquette » : un jaune « suicide », pas un souvenir de surdose.
+  const faux = CAS.filter(c => c.genre && !obtenu(c).motifs.some(m => m.genre === c.genre));
+  assert.deepEqual(faux.map(c => `${c.phrase} → ${obtenu(c).motifs.map(m => m.genre).join(', ') || 'rien'} (attendu ${c.genre})`), []);
+});
+
 test('la preuve est la phrase qui a déclenché le signe', () => {
   const r = niveauDuTexte('Journée normale au boulot. Ce soir j’ai trop bu, je sais plus pourquoi. Demain réunion.');
   assert.equal(r.niveau, 'jaune');
