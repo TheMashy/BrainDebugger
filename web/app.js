@@ -4750,8 +4750,23 @@ async function renderSettings() {
           Tout est dans un fichier SQLite sur ce disque. Aucun compte, aucun serveur, aucune synchro.
         </p>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn" id="export">${ico('sortir')}Exporter en JSON</button>
+          <button class="btn" id="jsonVoir" aria-expanded="false">${ico('oeil')}Voir le JSON</button>
+          <button class="btn" id="export">${ico('sortir')}Télécharger le JSON</button>
+          <a class="btn" href="/api/export" target="_blank" rel="noopener">${ico('fleche')}Ouvrir dans un onglet</a>
           <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">${ico('partir')}Se déconnecter</button></form>
+        </div>
+        ${/* LE JSON SE LIT ICI, SANS RIEN TÉLÉCHARGER. Une section à la fois
+              (journées, messages, repères, ancres), un filtre qui garde les
+              objets contenant le mot tapé, et « copier » pour emporter
+              exactement ce qu'on voit. Rien ne sort de la machine. */''}
+        <div class="jsonvue" id="jsonVue" hidden>
+          <div class="jsonbarre">
+            <div class="jsononglets" id="jsonOnglets" role="tablist"></div>
+            <input type="search" id="jsonFiltre" placeholder="Filtrer (un mot, une date…)" aria-label="Filtrer le JSON">
+            <button class="btn" id="jsonCopier">Copier</button>
+          </div>
+          <p class="sub jsoncompte" id="jsonCompte"></p>
+          <pre class="jsonpre mono" id="jsonPre"></pre>
         </div>
       </div>
 
@@ -4905,6 +4920,8 @@ async function renderSettings() {
     }
   });
 
+  wireJsonVue();
+
   $('#export').addEventListener('click', async () => {
     const data = await api('/api/export');
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -4913,6 +4930,73 @@ async function renderSettings() {
     a.download = `braindebugger-${S.today}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  });
+}
+
+/*
+ * LE VISUALISEUR DU JSON, DANS « TES DONNÉES ».
+ *
+ * L'export ne se lisait qu'en le téléchargeant puis en l'ouvrant ailleurs. Ici
+ * on le lit sur place : une section à la fois, un filtre, et « copier » qui
+ * emporte exactement les objets affichés. L'affichage est plafonné pour que la
+ * page reste fluide sur des années de messages ; la copie, elle, prend tout ce
+ * que le filtre garde.
+ */
+const JSON_SECTIONS = [
+  ['entries', 'Journées'], ['messages', 'Messages'], ['events', 'Repères'], ['anchors', 'Ancres'],
+];
+const JSON_AFFICHES = 400;
+const sansAccent = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+function wireJsonVue() {
+  const btn = $('#jsonVoir'), vue = $('#jsonVue');
+  if (!btn || !vue) return;
+  const etat = { data: null, section: 'entries', filtre: '', gardes: [] };
+
+  const dessiner = () => {
+    $('#jsonOnglets').innerHTML = JSON_SECTIONS.map(([cle, nom]) =>
+      `<button role="tab" data-jsonsection="${cle}" aria-selected="${etat.section === cle}">
+        ${nom} <span class="faint">${(etat.data[cle] ?? []).length}</span></button>`).join('');
+    const tout = etat.data[etat.section] ?? [];
+    const f = sansAccent(etat.filtre.trim());
+    etat.gardes = f ? tout.filter(x => sansAccent(JSON.stringify(x)).includes(f)) : tout;
+    const vus = etat.gardes.slice(0, JSON_AFFICHES);
+    $('#jsonCompte').textContent = `${etat.gardes.length} objet${etat.gardes.length > 1 ? 's' : ''}`
+      + (f ? ` sur ${tout.length}` : '')
+      + (etat.gardes.length > vus.length ? ` · ${vus.length} affichés (« Copier » prend tout)` : '');
+    $('#jsonPre').textContent = JSON.stringify(vus, null, 2);
+  };
+
+  btn.addEventListener('click', async () => {
+    const ouvrir = vue.hidden;
+    vue.hidden = !ouvrir;
+    btn.setAttribute('aria-expanded', String(ouvrir));
+    if (!ouvrir || etat.data) return;
+    $('#jsonPre').textContent = 'Chargement…';
+    try { etat.data = await api('/api/export'); }
+    catch (err) { $('#jsonPre').textContent = err.message; return; }
+    dessiner();
+  });
+
+  $('#jsonOnglets').addEventListener('click', e => {
+    const o = e.target.closest('[data-jsonsection]');
+    if (!o || !etat.data) return;
+    etat.section = o.dataset.jsonsection;
+    dessiner();
+  });
+
+  let deb;
+  $('#jsonFiltre').addEventListener('input', e => {
+    clearTimeout(deb);
+    deb = setTimeout(() => { etat.filtre = e.target.value; if (etat.data) dessiner(); }, 200);
+  });
+
+  $('#jsonCopier').addEventListener('click', async () => {
+    if (!etat.data) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(etat.gardes, null, 2));
+      toast(`${etat.gardes.length} objet${etat.gardes.length > 1 ? 's' : ''} copié${etat.gardes.length > 1 ? 's' : ''}`);
+    } catch { toast('Copie refusée par le navigateur — sélectionne le texte à la main.'); }
   });
 }
 
