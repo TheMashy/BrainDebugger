@@ -595,7 +595,11 @@ async function renderTonight() {
   });
 
   const input = $('#input');
-  input.oninput = () => autoSize(input);
+  // Le brouillon gardé en local revient tant qu'il n'a pas été envoyé. On ne
+  // l'impose que si le champ est vide : on n'écrase jamais une saisie en cours.
+  const brouillon = Brouillon.lire();
+  if (brouillon && !input.value) { input.value = brouillon; autoSize(input); }
+  input.oninput = () => { autoSize(input); Brouillon.ecrire(input.value); };
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
 
@@ -980,6 +984,31 @@ function prendreAura(date) {
 }
 
 /**
+ * LE BROUILLON DU COMPOSEUR, GARDÉ EN LOCAL.
+ *
+ * Ce que tu tapes dans le champ est écrit au fil de la frappe dans le
+ * `localStorage` du navigateur — c'est-à-dire sur CE PC, dans CE navigateur, et
+ * nulle part ailleurs : aucune requête, aucun serveur, aucune synchro. Si la
+ * page est rechargée ou que l'onglet meurt avant l'envoi, la phrase est encore
+ * là au retour. À l'envoi (ou sur un champ vidé à la main), on efface.
+ *
+ * `localStorage` et non `sessionStorage` : le brouillon doit survivre à la
+ * fermeture de l'onglet, c'est tout l'intérêt. Chaque accès est sous try/catch
+ * car le mode privé peut refuser l'écriture — on perd alors le filet, pas l'app.
+ */
+const BROUILLON_CLE = 'bd.brouillon';
+const Brouillon = {
+  lire() { try { return localStorage.getItem(BROUILLON_CLE) ?? ''; } catch { return ''; } },
+  ecrire(v) {
+    try {
+      if (v) localStorage.setItem(BROUILLON_CLE, v);
+      else localStorage.removeItem(BROUILLON_CLE);
+    } catch { /* mode privé : pas de filet, tant pis */ }
+  },
+  effacer() { try { localStorage.removeItem(BROUILLON_CLE); } catch { /* mode privé */ } },
+};
+
+/**
  * L'historique est atténué à l'ouverture, et redevient net dès qu'on remonte.
  *
  * C'est ce que fait l'œil de toute façon : en arrivant on regarde le bas, pas
@@ -1203,6 +1232,7 @@ async function send() {
 
   input.value = '';
   input.style.height = 'auto';
+  Brouillon.effacer();   // la phrase est partie : le brouillon n'a plus lieu d'être
   $('#send').disabled = true;
   PetTalk.stop();
 
