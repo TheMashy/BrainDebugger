@@ -34,6 +34,7 @@ import { veilleDuJour, DIT as VEILLE_DIT, AIDE as VEILLE_AIDE } from './veille.j
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
+import { correlations } from './correlations.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
 // cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
 // de web/reperes.js.
@@ -1035,6 +1036,23 @@ export const routes = {
    * cherche ce que la PERSONNE a écrit, jamais les réponses du compagnon.
    */
   'GET /api/chercher': ({ query, userId }) => chercher(query.q ?? '', userId),
+
+  /**
+   * CORRÉLER LE LOG DES JOURNÉES À LEUR NOTE -- la recherche stat « profonde ».
+   *
+   * La recherche rend des jours ; celle-ci rend un LIEN : les mots du log entier
+   * de chaque journée mis en face de la note de ce jour, sur tout le corpus. Les
+   * `rows` sont déjà en cache (c'est `series()` qui les garde) -- rien n'est
+   * recalculé ni relu sur le disque, on ne fait que corréler ce qui est là.
+   *
+   * Tout reste sur la machine : aucune donnée ne sort, c'est du calcul local sur
+   * la base locale.
+   */
+  'GET /api/correle': ({ query, userId }) => {
+    const { rows } = series(userId);
+    const min = Math.max(2, Math.min(30, Number(query?.min) || 4));
+    return correlations(rows, { min, limit: 15 });
+  },
 
   /** Serie compacte pour les courbes : tableaux paralleles, ~5x plus leger que des objets. */
   'GET /api/series': ({ userId }) => {

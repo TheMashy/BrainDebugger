@@ -3715,6 +3715,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
             grille de sept colonnes, parce qu'on y arrive d'une preuve et qu'on
             veut voir où ce jour tombe dans sa semaine. */''}
       ${moi ? moiRechercheMarkup() : ''}
+      ${moi ? moiCorrelMarkup() : ''}
       ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
       ${veilleBanner(m.jour?.veille)}
@@ -4382,6 +4383,20 @@ function wireMirror() {
     if (e.target.closest('[data-lecture]')) { MIRROR_DATE = null; return renderLecture(); }
     // Effacer la recherche : on replie la barre et on revient à la journée.
     if (e.target.closest('#rechClear')) { RECH = { q: '', data: null }; return rejouer(MIRROR_DATE, { garderCal: true }); }
+    // Un mot corrélé cliqué part dans la barre de recherche : on a vu le lien,
+    // on va lire les journées qui le portent. Pas de nouveau rendu — on remplit
+    // le champ et on laisse son écouteur (débattu) faire la recherche.
+    const ct = e.target.closest('[data-correlterme]');
+    if (ct) {
+      const inp = $('#rechInput');
+      if (inp) {
+        inp.value = ct.dataset.correlterme;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.focus();
+        $('.moirech')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      return;
+    }
     const g = e.target.closest('[data-goto]');
     if (g) return rejouer(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
@@ -4410,6 +4425,7 @@ function wireMirror() {
   // « Ma carte ») : frappe débattue, Entrée, effacer. Les clics sur un résultat
   // portent [data-goto] et passent par le gestionnaire ci-dessus.
   wireRechercheMoi();
+  wireCorrelMoi();
 }
 
 /* ============================= vue : carte =============================
@@ -6187,6 +6203,14 @@ const jourCivil = () => S?.jourCivil ?? S?.today;
  */
 let RECH = { q: '', data: null };
 
+/*
+ * LES CORRÉLATIONS : ce qui revient dans tes bonnes journées, et dans les
+ * mauvaises. On ne charge qu'à l'ouverture du volet — c'est une question qu'on
+ * se pose, pas un chiffre qu'on surveille — et on garde la réponse tant qu'on
+ * reste dans « Moi ».
+ */
+let CORREL = { data: null, charge: false };
+
 /* Surligne le terme cherché dans un extrait. Comme `highlight`, on cherche sur
    une copie aplatie de MÊME longueur (accents retirés), pour que les positions
    restent valides sur le texte d'origine et que « fatigue » éclaire « fatigué ». */
@@ -6272,6 +6296,57 @@ function wireRechercheMoi() {
   // Recherche à la frappe, mais espacée : on ne tire pas à chaque lettre.
   let deb;
   input.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(lancer, 250); });
+}
+
+/*
+ * LE VOLET DES CORRÉLATIONS.
+ *
+ * Replié par défaut : c'est la recherche stat « profonde », on la déplie quand
+ * on vient la chercher. Deux colonnes — ce qui tire la note vers le haut, ce
+ * qui la tire vers le bas — chaque mot pris sur le LOG ENTIER des journées, pas
+ * sur la seule note. Un clic sur un mot le rejoue dans la recherche au-dessus :
+ * on voit le lien, puis on va lire les jours qui le portent.
+ */
+function moiCorrelMarkup() {
+  return `<details class="moicorrel" id="correlBox"${CORREL.charge ? ' open' : ''}>
+    <summary class="correlsum">${ico('loupe', 14)} Ce qui va avec tes bonnes et tes mauvaises journées</summary>
+    <div id="correlRes" class="correlres">${CORREL.data ? correlResultatsMarkup(CORREL.data) : '<p class="sub" style="margin:8px 2px">…</p>'}</div>
+  </details>`;
+}
+
+function correlResultatsMarkup(d) {
+  if (!d?.assez) {
+    const manque = d ? d.min * 2 : 8;
+    return `<p class="sub" style="margin:8px 2px">Il faut au moins ${manque} journées à la fois notées et écrites pour y voir un lien — tu en as ${d?.nJours ?? 0}. Écris et note encore un peu, ça viendra.</p>`;
+  }
+  const ligne = x => `<li class="correlmot" data-correlterme="${esc(x.terme)}" title="Chercher « ${esc(x.terme)} » dans tout ce que tu as écrit">
+    <b>${esc(x.terme)}</b>
+    <span class="correlecart mono">${x.ecart > 0 ? '+' : ''}${x.ecart}</span>
+    <span class="faint">· ${x.jours} j</span>
+  </li>`;
+  const col = (titre, items, vide) => `<div class="correlcol">
+    <h4 class="correlh">${titre}</h4>
+    ${items.length ? `<ul>${items.map(ligne).join('')}</ul>` : `<p class="sub">${vide}</p>`}
+  </div>`;
+  return `<p class="sub" style="margin:8px 2px">Sur ${d.nJours} journées écrites et notées (note moyenne ${d.base}). Écart de note des jours qui portent chaque mot.</p>
+    <div class="correlcols">
+      ${col('↑ tes meilleures journées', d.hausses, 'rien de net')}
+      ${col('↓ tes journées plus basses', d.baisses, 'rien de net')}
+    </div>`;
+}
+
+/** Charge les corrélations à la première ouverture du volet, puis les garde. */
+function wireCorrelMoi() {
+  const box = $('#correlBox'), res = $('#correlRes');
+  if (!box || !res) return;
+  box.addEventListener('toggle', async () => {
+    if (!box.open || CORREL.charge) return;
+    CORREL.charge = true;
+    res.innerHTML = `<p class="sub" style="margin:8px 2px">Calcul sur tout ton journal…</p>`;
+    try { CORREL.data = await api('/api/correle'); }
+    catch (err) { CORREL.charge = false; res.innerHTML = `<p class="warn" style="margin:10px 2px">${esc(err.message)}</p>`; return; }
+    res.innerHTML = correlResultatsMarkup(CORREL.data);
+  });
 }
 
 const VIEWS = {

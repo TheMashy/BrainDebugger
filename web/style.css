@@ -3065,6 +3065,32 @@ table.grid td.cell.aveille:hover { outline-width: 2.5px; z-index: 4; }
   border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; margin-left: 4px; white-space: nowrap;
 }
 
+/* Corrélations : le volet replié par défaut, les deux colonnes dessous. Les
+   mots sont cliquables — ils repartent dans la recherche juste au-dessus. */
+.moicorrel { margin: 0 0 16px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel); }
+.correlsum {
+  display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer;
+  font-size: 13px; color: var(--ink-dim); list-style: none; user-select: none;
+}
+.correlsum::-webkit-details-marker { display: none; }
+.correlsum:hover { color: var(--ink); }
+.moicorrel[open] .correlsum { border-bottom: 1px solid var(--line-soft); color: var(--ink); }
+.correlres { padding: 2px 12px 12px; }
+.correlcols { display: flex; gap: 18px; flex-wrap: wrap; }
+.correlcol { flex: 1 1 190px; min-width: 0; }
+.correlh { margin: 10px 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-dim); letter-spacing: .02em; }
+.correlcol ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.correlmot {
+  display: flex; align-items: baseline; gap: 7px; padding: 6px 9px; border-radius: 7px;
+  cursor: pointer; border: 1px solid transparent;
+}
+.correlmot:hover { background: var(--panel-2); border-color: var(--line-soft); }
+.correlmot b { color: var(--ink); font-weight: 600; font-size: 14px; }
+.correlecart { font-size: 12.5px; color: var(--ink-dim); }
+.correlcol:first-child .correlecart { color: var(--accent); }
+.correlcol:last-child .correlecart { color: var(--warn); }
+.correlmot .faint { font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+
 /* ==================================================================
    QUANTIFIED SELF — l'inventaire de ce qu'une autre application envoie.
    ================================================================== */
