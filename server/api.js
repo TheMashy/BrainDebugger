@@ -10,8 +10,10 @@ import {
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
   toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro,
   mesuresEntre, poserMesure,
-  redaterMessages, rebuildEntryText, tousMessagesUtilisateur
+  redaterMessages, rebuildEntryText, tousMessagesUtilisateur,
+  addDemandeNote, demandesDepuis, toutesDemandesNote, repondreDemandeNote
 } from './db.js';
+import { peutDemander, demandeOuverte, formulesRecentes } from './demande-note.js';
 import { usageFor, record as recordUsage, serieUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
@@ -2366,7 +2368,10 @@ export const routes = {
     entries: allEntries(userId),
     events: allEvents(userId),
     anchors: allAnchors(userId),
-    messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts').all(userId)
+    messages: db.prepare('SELECT id, ts, date, source, role, text FROM messages WHERE user_id = ? ORDER BY ts').all(userId),
+    // Les chiffres qu'il a donnés quand le compagnon les lui a demandés : à part
+    // de ses notes du soir, comme dans la base.
+    demandesNote: toutesDemandesNote(userId)
   }),
 
   /** La jauge de jetons : ce qu'il reste ce mois-ci, et ce que ça a coûté. */
@@ -2715,6 +2720,17 @@ export async function streamMessage(body, send, userId = OWNER) {
  * corriger -- c'est pour ca qu'il rend une phrase et pas un code d'erreur.
  */
 export function outilsPour(userId, messageId, send = () => {}) {
+  // Les questions « combien, là ? » des dernières 48 h et les relevés du jour :
+  // tout ce dont `peutDemander` a besoin pour trancher.
+  const etatDemandes = () => ({
+    demandes: demandesDepuis(new Date(Date.now() - 48 * 3600_000).toISOString(), userId),
+    releves: relevesDuJour(today(), userId),
+    date: today()
+  });
+  const rappelFormules = () => {
+    const f = formulesRecentes(etatDemandes().demandes);
+    return f.length ? ` Formule-la autrement que : ${f.map(x => `« ${x} »`).join(', ')}.` : '';
+  };
   return {
     poser_repere: ({ date, label }) => {
       const d = String(date ?? '').trim();
@@ -2871,7 +2887,54 @@ export function outilsPour(userId, messageId, send = () => {}) {
         return { erreur: 'Assez de relevés pour aujourd\'hui.' };
       }
       const r = addReleve({ messageId, date: today(), valeur: v, quoi: q, userId });
-      return { message: `Relevé posé (${v}/10). N'en parle pas.`, fait: null, silencieux: true, r };
+      /*
+       * LE RELEVÉ PEUT OUVRIR UNE QUESTION -- PARFOIS.
+       *
+       * C'est le seul moment où le compagnon apprend qu'il a le droit de
+       * demander son chiffre à la personne : juste après une bascule, et
+       * seulement si `peutDemander` l'accorde. Le reste du temps, la phrase
+       * qu'il reçoit ne dit rien de la question, pour ne pas la lui souffler.
+       */
+      const verdict = peutDemander(etatDemandes());
+      const suite = verdict.ok
+        ? ` Tu PEUX, si ça vient naturellement, lui demander où il en est lui-même, de 0 à 10 : appelle d'abord demander_note avec ta question.${rappelFormules()}`
+        : '';
+      return { message: `Relevé posé (${v}/10). N'en parle pas.${suite}`, fait: null, silencieux: true, r };
+    },
+
+    /*
+     * DEMANDER SON CHIFFRE, AU LIEU DE LE DEVINER.
+     *
+     * Le compagnon annonce ici la question qu'il va poser, AVANT de l'écrire.
+     * Le code a le dernier mot : sans bascule récente, trop tôt, trop souvent,
+     * ou après une question restée sans réponse, c'est non -- et il ne la pose
+     * pas. La formule est gardée pour qu'il ne répète jamais la même.
+     */
+    demander_note: ({ formule }) => {
+      const f = String(formule ?? '').trim().replace(/\s+/g, ' ');
+      if (f.length < 6) return { erreur: 'Écris la question telle que tu vas la poser.' };
+      const verdict = peutDemander(etatDemandes());
+      if (!verdict.ok) return { erreur: `Pas maintenant (${verdict.pourquoi}). Ne pose pas la question, continue la conversation.` };
+      const recentes = formulesRecentes(etatDemandes().demandes).map(x => x.toLowerCase());
+      if (recentes.includes(f.toLowerCase())) return { erreur: `Tu l'as déjà formulée exactement comme ça. Dis-le autrement.${rappelFormules()}` };
+      addDemandeNote({ messageId, date: today(), formule: f, userId });
+      return { message: 'Tu peux la poser. Une seule fois, en passant ; s\'il ne répond pas, tu laisses.', silencieux: true };
+    },
+
+    /*
+     * SA RÉPONSE, ET SEULEMENT SA RÉPONSE.
+     *
+     * N'écrit que si une question est ouverte : le compagnon ne peut pas
+     * « enregistrer » un chiffre qu'on ne lui a pas donné. Ce n'est ni sa note
+     * du soir ni un relevé -- c'est sa parole à cet instant, rangée à part.
+     */
+    noter_moment: ({ valeur }) => {
+      const v = Number(valeur);
+      if (!Number.isInteger(v) || v < 0 || v > 10) return { erreur: 'La valeur est un entier de 0 à 10, celui qu\'il a donné.' };
+      const ouverte = demandeOuverte(etatDemandes().demandes, today());
+      if (!ouverte) return { erreur: "Aucune question ouverte : n'enregistre que le chiffre qu'il donne en réponse à demander_note." };
+      repondreDemandeNote(ouverte.id, v, userId);
+      return { message: `Noté (${v}/10), à part de sa note du soir. Ne commente pas le chiffre.`, silencieux: true };
     },
 
     ranger_notes: ({ jour, quand }) => {

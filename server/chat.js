@@ -174,6 +174,18 @@ Seulement quand ça bascule vraiment. Un relevé par message ferait une courbe d
 bavardage. Et tu n'en parles jamais : pas de « je dirais que tu es à 3 là », pas de commentaire
 sur ce que tu viens de relever. Tu poses, et tu continues.
 
+PARFOIS, TU LUI DEMANDES SON CHIFFRE AU LIEU DE LE DEVINER
+Juste après un relevé, la réponse de relever_humeur peut te dire que tu as le droit de lui
+demander où il en est, lui, de 0 à 10. Seulement à ce moment-là, et seulement si elle le dit.
+Tu appelles d'abord demander_note avec la question exacte que tu vas poser ; si l'outil refuse,
+tu ne la poses pas. Si elle passe : une question courte, glissée dans ta réponse, à ta manière
+du moment — jamais la même formule deux fois, jamais un questionnaire. Tu ne donnes JAMAIS ton
+propre chiffre, tu ne compares pas le sien à quoi que ce soit.
+
+Quand il répond par un chiffre, tu l'enregistres avec noter_moment, et tu continues sur ce
+qu'il vit, pas sur le nombre. Ce n'est pas sa note du soir : celle-là, il la pose seul. S'il ne
+répond pas, élude, ou répond à côté, tu laisses tomber — pas de relance, jamais.
+
 QUAND IL TE COLLE DU TEXTE QUI N'EST PAS SA JOURNÉE
 Il peut t'apporter des notes prises ailleurs : un vieux carnet recopié, un journal tenu
 autre part, un compte rendu, des pages entières. Ce n'est pas sa journée d'aujourd'hui, et
@@ -1364,6 +1376,34 @@ Tu poses le releve et tu continues la conversation.`,
         quoi: { type: 'string', description: 'Une phrase courte : a quoi tu le vois, dans ce qu\'elle vient de dire.' }
       },
       required: ['valeur', 'quoi']
+    }
+  },
+
+  demander_note: {
+    description: `A appeler AVANT de demander a la personne ou elle en est elle-meme, de 0 a 10. Ne
+s'utilise que juste apres relever_humeur, et seulement si sa reponse t'y autorise. Tu passes la
+question exacte que tu vas lui poser. Si l'outil refuse, tu ne poses PAS la question et tu
+continues la conversation normalement. Varie la formule : jamais deux fois la meme.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        formule: { type: 'string', description: 'La question, telle que tu vas l\'ecrire dans ta reponse.' }
+      },
+      required: ['formule']
+    }
+  },
+
+  noter_moment: {
+    description: `Enregistre le chiffre que la personne vient de donner EN REPONSE a ta question
+(demander_note). Uniquement le chiffre qu'elle a dit elle-meme, jamais une estimation. Ce n'est ni
+sa note du jour ni un releve : c'est sa parole a cet instant, rangee a part. Tu ne commentes pas
+le chiffre.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        valeur: { type: 'integer', description: 'Le chiffre qu\'elle a donne, de 0 a 10.' }
+      },
+      required: ['valeur']
     }
   },
 

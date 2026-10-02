@@ -239,6 +239,23 @@ CREATE INDEX IF NOT EXISTS idx_releves_jour ON releves(user_id, date);
 -- pas de champ « appliquer ». L'absence de chemin rend la faute impossible,
 -- pas seulement deconseillee.
 
+-- LES QUESTIONS « COMBIEN, LA, TOUT DE SUITE ? ». Quand un releve signale une
+-- bascule, le compagnon peut parfois DEMANDER au lieu de deviner. La reponse
+-- est la parole de la personne a cet instant : ni sa note du soir (une fois
+-- par jour, posee seule), ni un releve (le jugement du compagnon). Meme regle
+-- que plus haut : aucun chemin vers « entries ».
+CREATE TABLE IF NOT EXISTS demandes_note (
+  id         INTEGER PRIMARY KEY,
+  user_id    TEXT NOT NULL DEFAULT '${OWNER}',
+  message_id INTEGER,
+  date       TEXT NOT NULL,          -- 'YYYY-MM-DD', le jour de la question
+  ts         TEXT NOT NULL,          -- ISO 8601, l'instant de la question
+  formule    TEXT NOT NULL,          -- la question telle qu'il l'a posee
+  reponse    INTEGER,                -- 0..10, NULL tant qu'il n'a pas repondu
+  repondu_ts TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_demandes_note ON demandes_note(user_id, ts);
+
 CREATE TABLE IF NOT EXISTS embeddings (   -- phase 2
   user_id TEXT NOT NULL DEFAULT '${OWNER}',
   date    TEXT NOT NULL,
@@ -757,6 +774,7 @@ export function deleteDay(date, userId = OWNER) {
   try {
     db.prepare('DELETE FROM messages WHERE user_id = ? AND date = ?').run(userId, date);
     db.prepare('DELETE FROM entries  WHERE user_id = ? AND date = ?').run(userId, date);
+    db.prepare('DELETE FROM demandes_note WHERE user_id = ? AND date = ?').run(userId, date);
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
   return true;
@@ -790,6 +808,8 @@ export function wipe(portee, userId = OWNER) {
       // Les notes seules : le texte reste, le journal ecrit survit.
       compte.notes = db.prepare('UPDATE entries SET note = NULL WHERE user_id = ? AND note IS NOT NULL').run(userId).changes;
       db.prepare("DELETE FROM entries WHERE user_id = ? AND note IS NULL AND (text IS NULL OR TRIM(text) = '')").run(userId);
+      // Les chiffres donnés en réponse au compagnon sont des chiffres : ils partent avec les notes.
+      db.prepare('DELETE FROM demandes_note WHERE user_id = ?').run(userId);
     } else if (portee === 'texte') {
       // Le texte seul : les notes restent, la courbe survit.
       // Le carnet part avec le texte, et le compte rendu le dit. Quelqu'un qui
@@ -808,6 +828,7 @@ export function wipe(portee, userId = OWNER) {
       db.prepare('DELETE FROM motif_vues WHERE motif_id IN (SELECT id FROM motifs WHERE user_id = ?)').run(userId);
       n('motifs',     'DELETE FROM motifs     WHERE user_id = ?', userId);
       n('embeddings', 'DELETE FROM embeddings WHERE user_id = ?', userId);
+      db.prepare('DELETE FROM demandes_note WHERE user_id = ?').run(userId);
       // Les reglages ne partent pas : le compagnon choisi, le timbre, la cle.
       // Remettre a zero son journal n'est pas redemander son prenom.
       db.prepare("DELETE FROM settings WHERE user_id = ? AND key = 'chatSince'").run(userId);
@@ -1270,6 +1291,34 @@ export function amplitudes(userId = OWNER, depuis = null) {
     GROUP BY date HAVING n >= 2 ORDER BY date ASC
   `).all(...(depuis ? [userId, depuis] : [userId]));
   return rows.map(r => ({ ...r, ecart: r.haut - r.bas }));
+}
+
+/* ---------- demandes de note (« combien, là, tout de suite ? ») ---------- */
+
+export function addDemandeNote({ messageId = null, date, formule, userId = OWNER,
+                                 quand = new Date().toISOString() }) {
+  const f = String(formule ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
+  const info = db.prepare(
+    'INSERT INTO demandes_note(user_id, message_id, date, ts, formule) VALUES(?,?,?,?,?)'
+  ).run(userId, messageId, date, quand, f);
+  return { id: Number(info.lastInsertRowid), date, ts: quand, formule: f, reponse: null };
+}
+
+/** Les demandes depuis `depuis` (ISO), tous jours confondus, dans l'ordre. */
+export const demandesDepuis = (depuis, userId = OWNER) =>
+  db.prepare('SELECT id, date, ts, formule, reponse, repondu_ts FROM demandes_note WHERE user_id = ? AND ts >= ? ORDER BY ts ASC')
+    .all(userId, depuis);
+
+export const toutesDemandesNote = (userId = OWNER) =>
+  db.prepare('SELECT id, date, ts, formule, reponse, repondu_ts FROM demandes_note WHERE user_id = ? ORDER BY ts ASC')
+    .all(userId);
+
+export function repondreDemandeNote(id, valeur, userId = OWNER, quand = new Date().toISOString()) {
+  const v = Math.round(Number(valeur));
+  if (!Number.isFinite(v) || v < 0 || v > 10) return null;
+  db.prepare('UPDATE demandes_note SET reponse = ?, repondu_ts = ? WHERE id = ? AND user_id = ?')
+    .run(v, quand, id, userId);
+  return { id, reponse: v, repondu_ts: quand };
 }
 
 /* ---------- mesures (quantified self) ---------- */

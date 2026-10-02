@@ -4944,6 +4944,7 @@ async function renderSettings() {
  */
 const JSON_SECTIONS = [
   ['entries', 'Journées'], ['messages', 'Messages'], ['events', 'Repères'], ['anchors', 'Ancres'],
+  ['demandesNote', 'Chiffres demandés'],
 ];
 const JSON_AFFICHES = 400;
 const sansAccent = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
