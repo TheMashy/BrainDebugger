@@ -29,6 +29,29 @@ export ANTHROPIC_API_KEY=sk-ant-...   # ou colle la clé dans Réglages
 
 Prérequis : **Node ≥ 22.5**.
 
+## La voix de Jarvis (Kokoro, optionnelle)
+
+Le compagnon peut parler avec une voix calculée **sur ta machine** : le texte ne sort pas.
+
+```bash
+npm install               # ajoute espeak-ng et onnxruntime-node (optionnels)
+npm run voix:installer    # ~350 Mo, une fois, dans data/kokoro/
+npm start                 # puis Réglages › La voix › Kokoro — Jarvis
+```
+
+Kokoro n'a pas de voix d'homme française. Le préréglage « Jarvis » prend le **timbre**
+d'une voix d'homme britannique et l'**intonation** de la voix française du modèle,
+sur un texte phonétisé en français. D'autres préréglages sont proposés : plus grave,
+plus profond, ou la voix française abaissée.
+
+**Carte graphique.** Le modèle tourne sur la carte graphique quand elle répond :
+DirectML sous Windows (rien à installer), CUDA sous Linux, CoreML sous macOS, WebGPU
+sinon. Sur processeur, une phrase prend environ une demi-seconde. Réglages indique
+ce qui calcule réellement.
+- `BD_KOKORO_GPU=cpu` force le processeur.
+- Sous Linux avec une carte NVIDIA (CUDA 12 et cuDNN 9 installés), installe avec
+  `npm install --onnxruntime-node-install=cuda12`.
+
 ## Importer un historique
 
 ```bash

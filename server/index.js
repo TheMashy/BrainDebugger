@@ -493,6 +493,12 @@ async function traiter(req, res) {
       const query = Object.fromEntries(url.searchParams);
       const body = req.method === 'POST' ? await readBody(req) : {};
       const out = await routes[key]({ query, body, req, userId: currentUser(req) });
+      // Une route peut rendre du son (la voix Kokoro) : un Buffer et son type.
+      if (out?.audio instanceof Buffer) {
+        res.writeHead(200, { 'Content-Type': out.type ?? 'audio/wav', 'Content-Length': out.audio.length,
+                             'Cache-Control': 'no-store' });
+        return res.end(out.audio);
+      }
       return json(res, out && out.error ? 400 : 200, out);
     } catch (err) {
       console.error(`[${key}]`, err);

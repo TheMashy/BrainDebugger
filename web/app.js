@@ -107,7 +107,8 @@ document.addEventListener('mouseover', e => {
 /** La voix du compagnon : un blip par syllabe (web/blips.js), pas de synthèse vocale. */
 // Les blips suivent la frappe lettre par lettre ; en voix parlée, c'est
 // `Parole` qui lit le flux, et les blips se taisent.
-const voixParlee = () => S.settings?.blipEnabled && S.settings?.voixMode === 'parole' && Parole.disponible();
+const voixParlee = () => S.settings?.blipEnabled && (
+  S.settings?.voixMode === 'kokoro' || (S.settings?.voixMode === 'parole' && Parole.disponible()));
 const speakChar = c => { if (!voixParlee()) Blip.tick(c, S.settings); };
 
 /**
@@ -625,6 +626,9 @@ async function renderTonight() {
 
   input.focus();
   prechauffer();
+  if (S.settings?.blipEnabled && S.settings?.voixMode === 'kokoro') {
+    fetch('/api/voix/kokoro/charger', { method: 'POST', headers: enTetes(true), body: '{}' }).catch(() => {});
+  }
 }
 
 /**
@@ -4627,7 +4631,22 @@ async function renderSettings() {
         <div class="voixmode" role="radiogroup" aria-label="Sa voix">
           <button data-voixmode="blips" aria-pressed="${s.voixMode !== 'parole'}">Blips</button>
           <button data-voixmode="parole" aria-pressed="${s.voixMode === 'parole'}"
-                  ${Parole.disponible() ? '' : 'disabled title="Ce navigateur ne sait pas lire à voix haute"'}>Voix parlée</button>
+                  ${Parole.disponible() ? '' : 'disabled title="Ce navigateur ne sait pas lire à voix haute"'}>Voix du navigateur</button>
+          <button data-voixmode="kokoro" aria-pressed="${s.voixMode === 'kokoro'}">Kokoro — Jarvis</button>
+        </div>
+        ${/* KOKORO : une voix calculee par le serveur, sur cette machine. Kokoro
+              n'a pas de voix d'homme francaise : les « Jarvis » sont des voix
+              britanniques qui lisent du francais, seules ou melees a la seule
+              voix francaise du modele. */''}
+        <div id="kokoroCfg" ${s.voixMode === 'kokoro' ? '' : 'hidden'}>
+          <p class="sub" id="kokoroEtat" style="margin:10px 0 0;font-size:12px">…</p>
+          <label class="field" style="margin-top:10px"><span>Préréglage</span>
+            <select id="kokoroPreset"><option value="">…</option></select></label>
+          <div class="row" style="gap:11px;margin-top:12px;align-items:flex-end">
+            <label class="field"><span>Débit <b class="mono" id="kd">${Number(s.kokoroDebit).toFixed(2)}</b></span>
+              <input type="range" id="kokoroDebit" min=".7" max="1.4" step=".05" value="${s.kokoroDebit}"></label>
+            <button class="btn" id="kokoroEssai" type="button">Écouter</button>
+          </div>
         </div>
         ${/* LA VOIX PARLEE. Seules les voix francaises sont proposees, les
               meilleures d'abord. Celles qui ne sont pas sur la machine le
@@ -4642,17 +4661,17 @@ async function renderSettings() {
             <button class="btn" id="paroleEssai" type="button">Écouter</button>
           </div>
         </div>
-        <div class="voicepick" id="voicepick" ${s.voixMode === 'parole' ? 'hidden' : ''}>
+        <div class="voicepick" id="voicepick" ${s.voixMode !== 'blips' ? 'hidden' : ''}>
           ${VOICES.map(v => `<button data-voice="${v.id}" aria-pressed="${s.blipVoice === v.id}">
             <b>${esc(v.name)}</b><span>${esc(v.hint)}</span></button>`).join('')}
         </div>
         <div class="row" style="gap:11px;margin-top:14px">
-          <label class="field" id="blipPitchBox" ${s.voixMode === 'parole' ? 'hidden' : ''}><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
+          <label class="field" id="blipPitchBox" ${s.voixMode !== 'blips' ? 'hidden' : ''}><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
             <input type="range" id="blipPitch" min=".6" max="1.6" step=".05" value="${s.blipPitch}"></label>
           <label class="field"><span>Volume <b class="mono" id="bv">${Math.round(s.blipVolume * 100)}%</b></span>
             <input type="range" id="blipVolume" min="0" max="1" step=".05" value="${s.blipVolume}"></label>
         </div>
-        <p class="sub" id="blipHint" style="margin:0;font-size:12px" ${s.voixMode === 'parole' ? 'hidden' : ''}>Clique un timbre pour l'écouter.</p>
+        <p class="sub" id="blipHint" style="margin:0;font-size:12px" ${s.voixMode !== 'blips' ? 'hidden' : ''}>Clique un timbre pour l'écouter.</p>
       </div>
     </div>
 
@@ -5014,16 +5033,39 @@ function wireVoixParlee() {
   });
   $('#paroleEssai')?.addEventListener('click', () => Parole.essayer(S.settings));
 
+  // Kokoro : ce que le serveur sait faire, et sinon ce qu'il manque, en clair.
+  api('/api/voix/kokoro').then(k => {
+    $('#kokoroPreset').innerHTML = k.presets.map(p =>
+      `<option value="${esc(p.id)}" ${p.id === (S.settings.kokoroPreset || k.defaut) ? 'selected' : ''}>${esc(p.nom)}</option>`).join('');
+    $('#kokoroEtat').innerHTML = k.disponible
+      ? `Calculée sur cette machine, ${k.calcul ? `par ta <b>${esc(k.calcul)}</b>` : `sur ta carte graphique si elle répond, sinon le processeur`} : le texte ne sort pas.`
+      : `<span style="color:var(--warn)">Pas encore installée — il manque ${esc(k.manque.join(', '))}.</span>
+         Dans le dossier de l'application : <span class="mono">npm install</span> puis
+         <span class="mono">npm run voix:installer</span> (~350 Mo, une fois), et redémarre.
+         En attendant, c'est la voix du navigateur qui parle.`;
+  }).catch(() => {});
+  $('#kokoroPreset')?.addEventListener('change', async e => {
+    await saveSettings({ kokoroPreset: e.target.value });
+    Parole.essayer(S.settings);
+  });
+  $('#kokoroDebit')?.addEventListener('input', e => { $('#kd').textContent = Number(e.target.value).toFixed(2); });
+  $('#kokoroDebit')?.addEventListener('change', async e => {
+    await saveSettings({ kokoroDebit: Number(e.target.value) });
+    Parole.essayer(S.settings);
+  });
+  $('#kokoroEssai')?.addEventListener('click', () => Parole.essayer(S.settings, 'Bonsoir. Je suis là, si vous voulez me raconter votre journée.'));
+
   for (const b of document.querySelectorAll('[data-voixmode]')) {
     b.addEventListener('click', async () => {
       const mode = b.dataset.voixmode;
       await saveSettings({ voixMode: mode });
       for (const x of document.querySelectorAll('[data-voixmode]')) x.setAttribute('aria-pressed', String(x === b));
       cfg.hidden = mode !== 'parole';
-      for (const id of ['#voicepick', '#blipPitchBox', '#blipHint']) { const el = $(id); if (el) el.hidden = mode === 'parole'; }
+      $('#kokoroCfg').hidden = mode !== 'kokoro';
+      for (const id of ['#voicepick', '#blipPitchBox', '#blipHint']) { const el = $(id); if (el) el.hidden = mode !== 'blips'; }
       // Le clic autorise l'audio : c'est le moment de faire entendre le choix.
-      if (mode === 'parole') Parole.essayer(S.settings);
-      else { Parole.stop(); Blip.preview(S.settings.blipVoice, S.settings); }
+      if (mode === 'blips') { Parole.stop(); Blip.preview(S.settings.blipVoice, S.settings); }
+      else Parole.essayer(S.settings);
     });
   }
 }
