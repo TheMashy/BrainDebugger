@@ -420,7 +420,9 @@ export const DEFAULT_SETTINGS = {
    * flux (voir web/parole.js). `paroleVoix` est le voiceURI choisi, vide pour
    * « la meilleure voix locale ». Le volume reste `blipVolume`.
    */
-  voixMode: 'blips',          // 'blips' | 'parole'
+  voixMode: 'blips',          // 'blips' | 'parole' | 'kokoro'
+  kokoroPreset: 'jarvis',     // voir PRESETS dans server/kokoro.js
+  kokoroDebit: 1,             // multiplie le debit du preset : 0.7 .. 1.4
   paroleVoix: '',
   paroleDebit: 1.05,          // 0.7 .. 1.5
   chatBackend: 'scripted',    // 'scripted' | 'anthropic' | 'ollama'

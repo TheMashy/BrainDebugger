@@ -14,6 +14,7 @@ import {
   addDemandeNote, demandesDepuis, toutesDemandesNote, repondreDemandeNote
 } from './db.js';
 import { peutDemander, peutDemanderSiBascule, demandeOuverte, formulesRecentes } from './demande-note.js';
+import { PRESETS as PRESETS_KOKORO, PRESET_DEFAUT as PRESET_KOKORO, manque as manqueKokoro, synthetiser, enWav, kokoro as chargerKokoro } from './kokoro.js';
 import { usageFor, record as recordUsage, serieUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
@@ -959,6 +960,36 @@ export const routes = {
   'POST /api/compagnon/prechauffer': async ({ userId }) => {
     try { return await prechaufferCompagnon(userId); }
     catch (err) { return { fait: false, pourquoi: String(err?.message ?? err).slice(0, 200) }; }
+  },
+
+  /*
+   * LA VOIX KOKORO. L'etat dit si elle est installee et ce qui manque ; la
+   * synthese rend une phrase en WAV. Les phrases passent une par une : deux
+   * syntheses en meme temps se partageraient le processeur et la premiere
+   * phrase -- celle qu'on attend -- arriverait plus tard.
+   */
+  'GET /api/voix/kokoro': () => {
+    const m = manqueKokoro();
+    return { disponible: !m.length, manque: m, defaut: PRESET_KOKORO,
+             presets: Object.entries(PRESETS_KOKORO).map(([id, p]) => ({ id, nom: p.nom })) };
+  },
+
+  // Charger le modele (une seconde ou deux) quand on ouvre « Parler », pas a
+  // la premiere phrase : sinon c'est la premiere reponse qui paie l'attente.
+  'POST /api/voix/kokoro/charger': async () => {
+    if (manqueKokoro().length) return { charge: false };
+    await chargerKokoro();
+    return { charge: true };
+  },
+
+  'POST /api/voix/kokoro': async ({ body }) => {
+    const texte = String(body.texte ?? '').trim().slice(0, 600);
+    if (!texte) return { error: 'rien à dire' };
+    const preset = PRESETS_KOKORO[body.preset] ? body.preset : PRESET_KOKORO;
+    const multiple = Math.max(0.7, Math.min(1.4, Number(body.debit) || 1));
+    const tour = fileKokoro.then(() => synthetiser(texte, { preset, debit: PRESETS_KOKORO[preset].debit * multiple }));
+    fileKokoro = tour.catch(() => {});
+    return { audio: enWav(await tour), type: 'audio/wav' };
   },
 
   'GET /api/models': () => ({ models: ANTHROPIC_MODELS, hasEnvKey: !!process.env.ANTHROPIC_API_KEY }),
@@ -2687,6 +2718,8 @@ function indicationDuTour(userId) {
  * en base : apres un redemarrage le cache est froid de toute facon.
  */
 const dernierAppelCompagnon = new Map();
+/** La file des syntheses Kokoro : une phrase a la fois, dans l'ordre d'arrivee. */
+let fileKokoro = Promise.resolve();
 export const PRECHAUFFE_APRES_MS = 4 * 60_000;
 
 export async function prechaufferCompagnon(userId = OWNER, maintenant = Date.now()) {

@@ -12,9 +12,12 @@
     "import": "node server/import-csv.js",
     "test": "node --test test/*.test.js",
     "banc:carte": "node tools/banc-carte/rapport.mjs",
-    "banc:synth": "node tools/banc-carte/banc.mjs"
+    "banc:synth": "node tools/banc-carte/banc.mjs",
+    "voix:installer": "node tools/voix-kokoro/installer.mjs"
   },
   "optionalDependencies": {
-    "@anthropic-ai/sdk": "^0.120.0"
+    "@anthropic-ai/sdk": "^0.120.0",
+    "espeak-ng": "^1.0.2",
+    "onnxruntime-node": "^1.30.0"
   }
 }

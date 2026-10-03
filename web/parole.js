@@ -110,6 +110,7 @@ export const Parole = {
   _actif: false,
   _reglages: null,
 
+  /** La voix du navigateur existe-t-elle ? (Kokoro, lui, dépend du serveur.) */
   disponible: () => !!synth(),
 
   /** Les voix, quand le navigateur a fini de les charger (il les charge tard). */
@@ -131,8 +132,14 @@ export const Parole = {
   },
 
   _dire(texte) {
-    const s = synth();
     const t = nettoyerPourVoix(texte);
+    if (!t) return;
+    if (this._reglages?.voixMode === 'kokoro') return this._direKokoro(t);
+    this._direNavigateur(t);
+  },
+
+  _direNavigateur(t) {
+    const s = synth();
     if (!s || !t) return;
     const u = new SpeechSynthesisUtterance(t);
     const v = this._choisir(this._reglages);
@@ -140,6 +147,44 @@ export const Parole = {
     u.rate = Number(this._reglages?.paroleDebit ?? 1.05);
     u.volume = Math.max(0, Math.min(1, Number(this._reglages?.blipVolume ?? 0.8)));
     s.speak(u);
+  },
+
+  /*
+   * KOKORO : LA VOIX CALCULÉE PAR LE SERVEUR, SUR CETTE MACHINE.
+   *
+   * Chaque phrase est demandée dès qu'elle est complète — le serveur les
+   * calcule une par une, dans l'ordre — et les sons se jouent à la file. La
+   * deuxième phrase se calcule donc pendant qu'on entend la première. Si le
+   * serveur ne sait pas (voix non installée), la phrase part par la voix du
+   * navigateur plutôt que de laisser un trou.
+   */
+  _file: Promise.resolve(),
+  _abandon: null,
+  _son: null,
+
+  _direKokoro(t) {
+    const abandon = this._abandon ??= new AbortController();
+    const r = this._reglages;
+    const requete = fetch('/api/voix/kokoro', {
+      method: 'POST', signal: abandon.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texte: t, preset: r?.kokoroPreset, debit: r?.kokoroDebit })
+    }).then(rep => rep.ok && /^audio\//.test(rep.headers.get('Content-Type') ?? '') ? rep.blob() : null)
+      .catch(() => null);
+    this._file = this._file.then(async () => {
+      const son = await requete;
+      if (abandon.signal.aborted) return;
+      if (!son) return this._direNavigateur(t);
+      const url = URL.createObjectURL(son);
+      const audio = this._son = new Audio(url);
+      audio.volume = Math.max(0, Math.min(1, Number(r?.blipVolume ?? 0.8)));
+      await new Promise(fin => {
+        audio.onended = audio.onerror = fin;
+        abandon.signal.addEventListener('abort', fin, { once: true });
+        audio.play().catch(fin);
+      });
+      URL.revokeObjectURL(url);
+    });
   },
 
   /** Une nouvelle réplique commence : on coupe la précédente. */
@@ -174,6 +219,11 @@ export const Parole = {
 
   stop() {
     synth()?.cancel();
+    this._abandon?.abort();
+    this._abandon = null;
+    this._son?.pause();
+    this._son = null;
+    this._file = Promise.resolve();
     this._tampon = '';
     this._premier = true;
     this._actif = false;
