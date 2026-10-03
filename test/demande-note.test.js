@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { peutDemander, demandeOuverte, formulesRecentes, MAX_PAR_JOUR } from '../server/demande-note.js';
+import { peutDemander, peutDemanderSiBascule, demandeOuverte, formulesRecentes, MAX_PAR_JOUR } from '../server/demande-note.js';
 
 const J = '2026-05-10';
 const at = (h, m = 0) => new Date(`${J}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`);
@@ -88,6 +88,15 @@ test('les formules récentes reviennent, la plus récente d’abord', () => {
     { ts: iso(8), formule: 'A' }, { ts: iso(12), formule: 'B' }, { ts: iso(16), formule: 'C' }
   ]);
   assert.deepEqual(f, ['C', 'B', 'A']);
+});
+
+test('avant le tour : accordée si une bascule arrivait, et rien d’autre n’est assoupli', () => {
+  assert.equal(peutDemanderSiBascule({ date: J, maintenant: at(20), releves: [] }).ok, true,
+    'sans relevé encore, la question serait accordée sur une bascule à venir');
+  assert.equal(peutDemanderSiBascule({ date: J, maintenant: at(17),
+    demandes: [{ date: J, ts: iso(14), reponse: 6 }] }).ok, false, 'les quatre heures tiennent toujours');
+  assert.equal(peutDemanderSiBascule({ date: J, maintenant: at(23),
+    demandes: [{ date: J, ts: iso(14), reponse: null }] }).ok, false, 'pas de relance non plus');
 });
 
 /* ---------------- le parcours, à travers les outils ---------------- */

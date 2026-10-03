@@ -6,6 +6,7 @@ import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
          NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
+import { Parole, classerVoix, voixParDefaut } from './parole.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { ico, ICO_VUE, ICO_ARCHETYPE, ICO_FAMILLE } from './icones.js';
@@ -104,7 +105,10 @@ document.addEventListener('mouseover', e => {
 });
 
 /** La voix du compagnon : un blip par syllabe (web/blips.js), pas de synthèse vocale. */
-const speakChar = c => Blip.tick(c, S.settings);
+// Les blips suivent la frappe lettre par lettre ; en voix parlée, c'est
+// `Parole` qui lit le flux, et les blips se taisent.
+const voixParlee = () => S.settings?.blipEnabled && S.settings?.voixMode === 'parole' && Parole.disponible();
+const speakChar = c => { if (!voixParlee()) Blip.tick(c, S.settings); };
 
 /**
  * La jauge de jetons. Un point coloré, rien de plus tant qu'on ne clique pas :
@@ -599,7 +603,7 @@ async function renderTonight() {
   // l'impose que si le champ est vide : on n'écrase jamais une saisie en cours.
   const brouillon = Brouillon.lire();
   if (brouillon && !input.value) { input.value = brouillon; autoSize(input); }
-  input.oninput = () => { autoSize(input); Brouillon.ecrire(input.value); };
+  input.oninput = () => { autoSize(input); Brouillon.ecrire(input.value); prechauffer(); };
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
 
@@ -620,6 +624,7 @@ async function renderTonight() {
   };
 
   input.focus();
+  prechauffer();
 }
 
 /**
@@ -996,6 +1001,22 @@ function prendreAura(date) {
  * fermeture de l'onglet, c'est tout l'intérêt. Chaque accès est sous try/catch
  * car le mode privé peut refuser l'écriture — on perd alors le filet, pas l'app.
  */
+/*
+ * CHAUFFER LE COMPAGNON AVANT QU'ON LUI PARLE.
+ *
+ * Le premier message d'une soiree partait a froid : le serveur faisait relire
+ * au modele tout son prompt avant la premiere lettre. On le previent donc des
+ * qu'on ouvre « Parler » ou qu'on commence a taper. Le serveur decide s'il y a
+ * vraiment quelque chose a chauffer (cache encore tiede, pas de modele
+ * distant…) ; ici on se contente de ne pas le lui demander a chaque lettre.
+ */
+let DERNIER_PRECHAUFFAGE = 0;
+function prechauffer() {
+  if (S?.settings?.chatBackend !== 'anthropic' || Date.now() - DERNIER_PRECHAUFFAGE < 60_000) return;
+  DERNIER_PRECHAUFFAGE = Date.now();
+  fetch('/api/compagnon/prechauffer', { method: 'POST', headers: enTetes(true), body: '{}' }).catch(() => {});
+}
+
 const BROUILLON_CLE = 'bd.brouillon';
 const Brouillon = {
   lire() { try { return localStorage.getItem(BROUILLON_CLE) ?? ''; } catch { return ''; } },
@@ -1235,6 +1256,7 @@ async function send() {
   Brouillon.effacer();   // la phrase est partie : le brouillon n'a plus lieu d'être
   $('#send').disabled = true;
   PetTalk.stop();
+  Parole.stop();
 
   GESTES = [];                        // les gestes du tour précédent ont fait leur temps
   FRAIS = new Set();                  // et les motifs qu'il avait reconnus aussi
@@ -1293,6 +1315,7 @@ async function send() {
         th.scrollTop = th.scrollHeight;
         majFil(th);
         Blip.reset();
+        if (voixParlee()) Parole.debut(S.settings);
         typing = PetTalk.startStream($('#art'), el.querySelector('.tx'),
                                      { onChar: speakChar, onPremier: () => finAttente(el) });
         return;
@@ -1328,12 +1351,14 @@ async function send() {
 
       if (ev === 'delta') {
         PetTalk.feed(data.text);
+        Parole.nourrir(data.text);       // sans effet hors voix parlée
         $('#thread').scrollTop = $('#thread').scrollHeight;
         return;
       }
 
       if (ev === 'done') {
         PetTalk.endStream();
+        Parole.fin();
         finAttente(EN_COURS);
         if (data.usage) { S.usage = data.usage; syncGauge(); }
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
@@ -1371,6 +1396,7 @@ async function send() {
     drawThread();                       // repose les horodatages définitifs
   } catch (err) {
     PetTalk.stop();
+  Parole.stop();
     EN_COURS = null;
     toast(String(err.message));
   } finally {
@@ -1403,6 +1429,7 @@ async function rembobiner(id) {
     return;
   }
   PetTalk.stop();
+  Parole.stop();
   try {
     const r = await api('/api/message/rembobiner', { id });
     S = await api('/api/state');
@@ -4593,21 +4620,39 @@ async function renderSettings() {
 
       <div class="card">
         <h2>La voix</h2>
-        <p class="sub">Un blip par syllabe. Pas de synthèse vocale.</p>
+        <p class="sub">Des blips, un par syllabe — ou une vraie voix qui lit ses réponses au fil de l'eau.</p>
         <label class="field"><span>
           <input type="checkbox" id="blipEnabled" ${s.blipEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
           Le compagnon fait du bruit quand il parle</span></label>
-        <div class="voicepick" id="voicepick">
+        <div class="voixmode" role="radiogroup" aria-label="Sa voix">
+          <button data-voixmode="blips" aria-pressed="${s.voixMode !== 'parole'}">Blips</button>
+          <button data-voixmode="parole" aria-pressed="${s.voixMode === 'parole'}"
+                  ${Parole.disponible() ? '' : 'disabled title="Ce navigateur ne sait pas lire à voix haute"'}>Voix parlée</button>
+        </div>
+        ${/* LA VOIX PARLEE. Seules les voix francaises sont proposees, les
+              meilleures d'abord. Celles qui ne sont pas sur la machine le
+              disent : le texte part chez leur editeur pour etre lu. */''}
+        <div id="paroleCfg" ${s.voixMode === 'parole' ? '' : 'hidden'}>
+          <label class="field" style="margin-top:12px"><span>Voix</span>
+            <select id="paroleVoix"><option value="">chargement des voix…</option></select></label>
+          <p class="sub" id="paroleNote" style="margin:4px 0 0;font-size:12px"></p>
+          <div class="row" style="gap:11px;margin-top:12px;align-items:flex-end">
+            <label class="field"><span>Débit <b class="mono" id="pd">${Number(s.paroleDebit).toFixed(2)}</b></span>
+              <input type="range" id="paroleDebit" min=".7" max="1.5" step=".05" value="${s.paroleDebit}"></label>
+            <button class="btn" id="paroleEssai" type="button">Écouter</button>
+          </div>
+        </div>
+        <div class="voicepick" id="voicepick" ${s.voixMode === 'parole' ? 'hidden' : ''}>
           ${VOICES.map(v => `<button data-voice="${v.id}" aria-pressed="${s.blipVoice === v.id}">
             <b>${esc(v.name)}</b><span>${esc(v.hint)}</span></button>`).join('')}
         </div>
         <div class="row" style="gap:11px;margin-top:14px">
-          <label class="field"><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
+          <label class="field" id="blipPitchBox" ${s.voixMode === 'parole' ? 'hidden' : ''}><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
             <input type="range" id="blipPitch" min=".6" max="1.6" step=".05" value="${s.blipPitch}"></label>
           <label class="field"><span>Volume <b class="mono" id="bv">${Math.round(s.blipVolume * 100)}%</b></span>
             <input type="range" id="blipVolume" min="0" max="1" step=".05" value="${s.blipVolume}"></label>
         </div>
-        <p class="sub" style="margin:0;font-size:12px">Clique un timbre pour l'écouter.</p>
+        <p class="sub" id="blipHint" style="margin:0;font-size:12px" ${s.voixMode === 'parole' ? 'hidden' : ''}>Clique un timbre pour l'écouter.</p>
       </div>
     </div>
 
@@ -4797,6 +4842,8 @@ async function renderSettings() {
   bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
   $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
 
+  wireVoixParlee();
+
   $('#voicepick')?.addEventListener('click', async e => {
     const b = e.target.closest('[data-voice]');
     if (!b) return;
@@ -4931,6 +4978,54 @@ async function renderSettings() {
     a.click();
     URL.revokeObjectURL(url);
   });
+}
+
+/** La carte « La voix » : le choix du mode, et les réglages de la voix parlée. */
+function wireVoixParlee() {
+  const cfg = $('#paroleCfg'), sel = $('#paroleVoix'), note = $('#paroleNote');
+  if (!cfg || !sel) return;
+
+  const dire = v => !v ? 'Aucune voix française sur ce navigateur.'
+    : v.localService ? 'Voix installée sur cette machine : le texte ne sort pas.'
+    : 'Voix en ligne : pour la lire, le navigateur envoie le texte à son éditeur (Google, Microsoft…).';
+
+  Parole.voix().then(toutes => {
+    const fr = classerVoix(toutes);
+    const defaut = voixParDefaut(toutes);
+    if (!fr.length) { sel.innerHTML = '<option value="">aucune voix française</option>'; note.textContent = dire(null); return; }
+    sel.innerHTML = `<option value="">la meilleure voix locale${defaut ? ` (${esc(defaut.name)})` : ''}</option>`
+      + fr.map(v => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === S.settings.paroleVoix ? 'selected' : ''}>
+          ${esc(v.name)}${v.localService ? '' : ' — en ligne'}</option>`).join('');
+    const choisie = fr.find(v => v.voiceURI === S.settings.paroleVoix) ?? defaut;
+    note.textContent = dire(choisie);
+  });
+
+  sel.addEventListener('change', async () => {
+    await saveSettings({ paroleVoix: sel.value });
+    const toutes = await Parole.voix();
+    note.textContent = dire(toutes.find(v => v.voiceURI === sel.value) ?? voixParDefaut(toutes));
+    Parole.essayer(S.settings);
+  });
+
+  $('#paroleDebit')?.addEventListener('input', e => { $('#pd').textContent = Number(e.target.value).toFixed(2); });
+  $('#paroleDebit')?.addEventListener('change', async e => {
+    await saveSettings({ paroleDebit: Number(e.target.value) });
+    Parole.essayer(S.settings);
+  });
+  $('#paroleEssai')?.addEventListener('click', () => Parole.essayer(S.settings));
+
+  for (const b of document.querySelectorAll('[data-voixmode]')) {
+    b.addEventListener('click', async () => {
+      const mode = b.dataset.voixmode;
+      await saveSettings({ voixMode: mode });
+      for (const x of document.querySelectorAll('[data-voixmode]')) x.setAttribute('aria-pressed', String(x === b));
+      cfg.hidden = mode !== 'parole';
+      for (const id of ['#voicepick', '#blipPitchBox', '#blipHint']) { const el = $(id); if (el) el.hidden = mode === 'parole'; }
+      // Le clic autorise l'audio : c'est le moment de faire entendre le choix.
+      if (mode === 'parole') Parole.essayer(S.settings);
+      else { Parole.stop(); Blip.preview(S.settings.blipVoice, S.settings); }
+    });
+  }
 }
 
 /*
@@ -6578,6 +6673,7 @@ async function go(v) {
   syncNav();
   $('#view').onclick = null;
   PetTalk.stop();
+  Parole.stop();
   $('#view').innerHTML = '<div class="empty">…</div>';
   try { await VIEWS[v](); }
   catch (err) { $('#view').innerHTML = `<div class="card"><h2>Erreur</h2><p class="sub">${esc(err.message)}</p></div>`; }

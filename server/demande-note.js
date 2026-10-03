@@ -74,3 +74,17 @@ export function demandeOuverte(demandes = [], date, maintenant = new Date()) {
 export const formulesRecentes = (demandes = []) =>
   [...demandes].sort((a, b) => b.ts.localeCompare(a.ts))
     .map(d => d.formule).filter(Boolean).slice(0, FORMULES_RAPPELEES);
+
+/**
+ * « Si une bascule arrivait maintenant, la question serait-elle accordée ? »
+ *
+ * Calculé AVANT le tour, pour que le compagnon puisse poser son relevé et
+ * annoncer sa question dans le même appel au lieu de deux appels en série.
+ * C'est la même règle, avec un relevé fictif posé à l'instant : rien d'autre
+ * n'est assoupli, et `demander_note` revérifie de toute façon au moment venu.
+ */
+export function peutDemanderSiBascule(etat) {
+  const maintenant = etat.maintenant ?? new Date();
+  return peutDemander({ ...etat, maintenant,
+    releves: [...(etat.releves ?? []), { ts: maintenant.toISOString() }] });
+}

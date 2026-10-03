@@ -414,6 +414,15 @@ export const DEFAULT_SETTINGS = {
   blipVoice: 'aa',            // identifiant de timbre (voir web/blips.js)
   blipPitch: 1,               // 0.6 .. 1.6
   blipVolume: 0.7,            // 0 .. 1
+  /*
+   * LA VOIX PARLEE, EN OPTION. Les blips restent le defaut ; `parole` fait lire
+   * les reponses par la synthese du navigateur, phrase par phrase pendant le
+   * flux (voir web/parole.js). `paroleVoix` est le voiceURI choisi, vide pour
+   * « la meilleure voix locale ». Le volume reste `blipVolume`.
+   */
+  voixMode: 'blips',          // 'blips' | 'parole'
+  paroleVoix: '',
+  paroleDebit: 1.05,          // 0.7 .. 1.5
   chatBackend: 'scripted',    // 'scripted' | 'anthropic' | 'ollama'
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'qwen2.5:7b',
@@ -427,11 +436,12 @@ export const DEFAULT_SETTINGS = {
    *
    * `anthropicModelChat` sert le COMPAGNON : tenir une conversation du soir.
    * Ca demande de la justesse et de la vitesse, pas la meme profondeur -- et
-   * ca tourne quarante fois par jour. Sonnet 5 par defaut : deux fois et demie
-   * moins cher en entree, deux fois et demie en sortie.
+   * ca tourne quarante fois par jour. Sonnet 5.5 par defaut : deux fois moins
+   * cher qu'Opus, plus rapide a ecrire que Sonnet 5 au meme prix, et a l'effort
+   * `low` il ne reflechit pas avant un message simple.
    */
   anthropicModel: 'claude-opus-5',
-  anthropicModelChat: 'claude-sonnet-5',
+  anthropicModelChat: 'claude-sonnet-5-5',
   /*
    * LA LECTURE DE FOND PART EN LOT, A MOITIE PRIX.
    *

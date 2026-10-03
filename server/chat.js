@@ -175,10 +175,11 @@ bavardage. Et tu n'en parles jamais : pas de « je dirais que tu es à 3 là »,
 sur ce que tu viens de relever. Tu poses, et tu continues.
 
 PARFOIS, TU LUI DEMANDES SON CHIFFRE AU LIEU DE LE DEVINER
-Juste après un relevé, la réponse de relever_humeur peut te dire que tu as le droit de lui
-demander où il en est, lui, de 0 à 10. Seulement à ce moment-là, et seulement si elle le dit.
-Tu appelles d'abord demander_note avec la question exacte que tu vas poser ; si l'outil refuse,
-tu ne la poses pas. Si elle passe : une question courte, glissée dans ta réponse, à ta manière
+Le dernier tour peut porter une INDICATION DU TOUR qui dit que la question est ouverte. Alors,
+si tu relèves une bascule à ce tour, appelle relever_humeur ET demander_note ensemble, dans le
+même tour, avec la question exacte que tu vas poser — ça t'évite de faire attendre ta réponse.
+Sans cette indication, la réponse de relever_humeur peut encore te l'accorder ; sinon, tu ne
+demandes rien. Si demander_note refuse, tu ne poses pas la question. Si elle passe : une question courte, glissée dans ta réponse, à ta manière
 du moment — jamais la même formule deux fois, jamais un questionnaire. Tu ne donnes JAMAIS ton
 propre chiffre, tu ne compares pas le sien à quoi que ce soit.
 
@@ -1006,6 +1007,10 @@ export async function testKey(settings) {
  * =====================================================================
  */
 export const CAPACITES = {
+  // Generation 5.5 : le repli serveur y existe sous sa forme `default`
+  // (Sonnet 5.5 se rabat sur Sonnet 5 pour les categories que le repli prend).
+  'claude-opus-5-5':   { pense: true, effort: true, repli: true },
+  'claude-sonnet-5-5': { pense: true, effort: true, repli: true },
   'claude-fable-5':    { pense: true, effort: true, repli: true },
   'claude-mythos-5':   { pense: true, effort: true, repli: true },
   'claude-opus-5':     { pense: true, effort: true, repli: true },
@@ -1050,10 +1055,24 @@ export const repliServeur = model =>
     : {};
 
 export const ANTHROPIC_MODELS = [
-  { id: 'claude-opus-5',   label: 'Opus 5',   note: 'le plus capable' },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'plus rapide, moins cher' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'le plus rapide' }
+  { id: 'claude-opus-5-5',   label: 'Opus 5.5',   note: 'le plus capable' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'rapide — conseillé pour le compagnon' },
+  { id: 'claude-haiku-4-5',  label: 'Haiku 4.5',  note: 'le plus rapide, plus sommaire' },
+  // La generation d'avant reste choisissable : quelqu'un qui l'a reglee la garde.
+  { id: 'claude-opus-5',     label: 'Opus 5',     note: 'génération précédente' },
+  { id: 'claude-sonnet-5',   label: 'Sonnet 5',   note: 'génération précédente' }
 ];
+
+/*
+ * LE MODELE DU COMPAGNON PAR DEFAUT : SONNET 5.5.
+ *
+ * Meme prix que Sonnet 5, et deux choses qui comptent pour une conversation :
+ * il produit son texte plus vite, et a l'effort `low` il saute la reflexion sur
+ * la plupart des messages simples -- la premiere lettre arrive donc sans le
+ * temps de pensee qui precedait meme un « salut ». Un seul endroit, parce que
+ * le defaut etait recopie a deux endroits de la boucle.
+ */
+export const MODELE_COMPAGNON = 'claude-sonnet-5-5';
 
 /**
  * Repond en streamant les fragments de texte au fur et a mesure.
@@ -1121,6 +1140,59 @@ export function assemblerPrompt({ memory = null, echos = null, history = [] } = 
   return { system, messages };
 }
 
+/*
+ * =====================================================================
+ * LE CACHE SE CHAUFFE AVANT LA PREMIERE PHRASE DE LA SOIREE.
+ *
+ * Le premier message apres une pause relit tout a froid : les schemas des
+ * outils, le prompt systeme et la memoire stable -- des milliers de jetons
+ * a ecrire en cache avant que la premiere lettre puisse partir. C'est le
+ * message ou l'on attend le plus, et c'est souvent le premier de la soiree.
+ *
+ * On envoie donc ce prefixe en avance, quand la personne ouvre « Parler » ou
+ * commence a taper, avec `max_tokens: 0` : l'API ecrit le cache et rend la
+ * main sans rien generer. Quand le vrai message part, il le relit.
+ *
+ * TOUT DOIT ETRE IDENTIQUE au vrai appel jusqu'au point de reprise : meme
+ * modele, memes outils, meme systeme, meme reflexion, meme effort. D'ou
+ * `assemblerPrompt` et `optionsDuModele` repris tels quels. Deux ecarts
+ * seulement, imposes par l'API : pas de streaming (refuse avec `max_tokens:
+ * 0`), et pas de cache automatique -- il poserait son point de reprise sur
+ * le message bidon, que la vraie requete ne contient pas.
+ * =====================================================================
+ */
+export async function prechaufferAnthropic(s, { memory = null, outils = null } = {}) {
+  const { client, source } = await anthropicClient(s);
+  const model = s.anthropicModelChat || MODELE_COMPAGNON;
+  const { system } = assemblerPrompt({ memory, history: [] });
+  const boite = outils ? outilsDispo(outils) : [];
+  try {
+    const final = await client.beta.messages.create({
+      ...optionsDuModele(model, { effort: s.anthropicEffort || 'low' }),
+      model,
+      max_tokens: 0,
+      system,
+      ...(boite.length ? { tools: boite } : {}),
+      messages: [{ role: 'user', content: 'préchauffage' }]
+    });
+    return { model: final.model, usage: readUsage(final) };
+  } catch (err) {
+    throw new Error(explainApiError(err, source));
+  }
+}
+
+/*
+ * L'ORDRE DANS LEQUEL ON EXECUTE DES OUTILS APPELES ENSEMBLE.
+ *
+ * Le compagnon peut poser un releve et annoncer sa question dans le meme
+ * tour, ce qui lui economise un aller-retour avant de parler. Mais
+ * `demander_note` n'est accorde qu'apres une bascule relevee : le releve
+ * doit donc passer d'abord, quel que soit l'ordre ou le modele les a ecrits.
+ */
+const ORDRE_OUTILS = { relever_humeur: 0, demander_note: 1 };
+export const ordonnerAppels = appels =>
+  [...appels].sort((a, b) => (ORDRE_OUTILS[a.name] ?? 2) - (ORDRE_OUTILS[b.name] ?? 2));
+
 export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null, echos = null) {
   const { client, source } = await anthropicClient(s);
 
@@ -1147,7 +1219,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
         // Repli serveur, MAIS SEULEMENT SI LE MODELE LE CONNAIT. Voir
         // `repliServeur` : demande a un modele qui ne le porte pas, il rend 400
         // et fait tomber tout le compagnon.
-        ...optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5',
+        ...optionsDuModele(s.anthropicModelChat || MODELE_COMPAGNON,
                            { effort: s.anthropicEffort || 'low' }),
         /*
          * LE COMPAGNON ET LA LECTURE N'ONT PAS BESOIN DE LA MEME TETE.
@@ -1163,7 +1235,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
          * defaut, deux fois et demie moins cher) et la lecture garde
          * `anthropicModel`. Deux reglages, parce que c'est deux metiers.
          */
-        model: s.anthropicModelChat || 'claude-sonnet-5',
+        model: s.anthropicModelChat || MODELE_COMPAGNON,
         max_tokens: 2048,
         /* `thinking` et `output_config` sont montes par `optionsDuModele`
            ci-dessus : ils n'existent pas sur tous les modeles du menu. */
@@ -1241,7 +1313,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
     // reflexion, que l'API exige de retrouver intacts au tour suivant.
     messages.push({ role: 'assistant', content: final.content });
     const resultats = [];
-    for (const appel of appels) {
+    for (const appel of ordonnerAppels(appels)) {
       const r = await executer(appel, outils);
       if (r.fait) faits.push(r.fait);
       resultats.push({

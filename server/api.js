@@ -13,7 +13,7 @@ import {
   redaterMessages, rebuildEntryText, tousMessagesUtilisateur,
   addDemandeNote, demandesDepuis, toutesDemandesNote, repondreDemandeNote
 } from './db.js';
-import { peutDemander, demandeOuverte, formulesRecentes } from './demande-note.js';
+import { peutDemander, peutDemanderSiBascule, demandeOuverte, formulesRecentes } from './demande-note.js';
 import { usageFor, record as recordUsage, serieUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
@@ -46,7 +46,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 // dessine une autre.
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
 import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock,
-         CARNET_CAR, ANTHROPIC_MODELS, testKey } from './chat.js';
+         CARNET_CAR, ANTHROPIC_MODELS, testKey, prechaufferAnthropic } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
@@ -951,6 +951,16 @@ export const routes = {
   },
 
   /** Les N dernieres journees ecrites, pour donner de la continuite au compagnon. */
+  /*
+   * Appele par la page quand on ouvre « Parler » ou qu'on commence a taper.
+   * Ne rend jamais d'erreur a l'ecran : un prechauffage rate coute un premier
+   * message un peu plus lent, pas un toast.
+   */
+  'POST /api/compagnon/prechauffer': async ({ userId }) => {
+    try { return await prechaufferCompagnon(userId); }
+    catch (err) { return { fait: false, pourquoi: String(err?.message ?? err).slice(0, 200) }; }
+  },
+
   'GET /api/models': () => ({ models: ANTHROPIC_MODELS, hasEnvKey: !!process.env.ANTHROPIC_API_KEY }),
 
   /** Vérifie la clé sans consommer de jetons (API des modèles, pas de génération). */
@@ -2637,6 +2647,64 @@ export async function retisser(body, send, userId = OWNER) {
   });
 }
 
+/*
+ * L'INDICATION DU TOUR : CE QUE LE COMPAGNON A LE DROIT DE DEMANDER, MAINTENANT.
+ *
+ * Elle part dans le dernier tour, avec les echos -- jamais dans le systeme, ou
+ * elle invaliderait le cache a chaque message. Deux cas seulement :
+ *   - une question « combien, la ? » serait accordee si une bascule arrivait :
+ *     le compagnon peut alors relever ET demander dans le meme appel, au lieu
+ *     d'enchainer deux allers-retours avant d'ecrire sa premiere lettre ;
+ *   - une question est ouverte : le chiffre qu'il donne se range avec
+ *     noter_moment.
+ * Le reste du temps, rien : une indication negative a chaque tour finirait
+ * par faire de la question un sujet.
+ */
+function indicationDuTour(userId) {
+  const etat = {
+    demandes: demandesDepuis(new Date(Date.now() - 48 * 3600_000).toISOString(), userId),
+    releves: relevesDuJour(today(), userId),
+    date: today()
+  };
+  if (demandeOuverte(etat.demandes, etat.date)) {
+    return "INDICATION DU TOUR — Tu lui as demandé son chiffre juste avant. S'il en donne un, range-le avec noter_moment.";
+  }
+  if (peutDemanderSiBascule(etat).ok) {
+    const f = formulesRecentes(etat.demandes);
+    return 'INDICATION DU TOUR — La question est ouverte : si tu relèves une bascule à ce tour, tu peux lui demander '
+      + 'son chiffre (relever_humeur et demander_note dans le même tour).'
+      + (f.length ? ` Pas avec ces mots-là : ${f.map(x => `« ${x} »`).join(', ')}.` : '');
+  }
+  return null;
+}
+
+/*
+ * QUAND LE COMPAGNON A PARLE POUR LA DERNIERE FOIS, PAR PERSONNE.
+ *
+ * Sert au prechauffage : un cache se garde cinq minutes et chaque lecture le
+ * prolonge. Tant qu'on parle, la conversation le tient chaud toute seule, et
+ * un prechauffage ne serait qu'une ecriture de plus a payer. En memoire et pas
+ * en base : apres un redemarrage le cache est froid de toute facon.
+ */
+const dernierAppelCompagnon = new Map();
+export const PRECHAUFFE_APRES_MS = 4 * 60_000;
+
+export async function prechaufferCompagnon(userId = OWNER, maintenant = Date.now()) {
+  const settings = getSettings(userId);
+  if (settings.chatBackend !== 'anthropic') return { fait: false, pourquoi: 'pas de modèle distant' };
+  if (usageFor(userId).exhausted) return { fait: false, pourquoi: 'enveloppe épuisée' };
+  const dernier = dernierAppelCompagnon.get(userId) ?? 0;
+  if (maintenant - dernier < PRECHAUFFE_APRES_MS) return { fait: false, pourquoi: 'déjà chaud' };
+  // On le note AVANT l'appel : deux onglets qui s'ouvrent ensemble ne doivent
+  // pas payer deux ecritures.
+  dernierAppelCompagnon.set(userId, maintenant);
+  const memoire = recentMemory(jourVecu(userId), userId, null);
+  const r = await prechaufferAnthropic(settings, { memory: memoire.stable, outils: outilsPour(userId, null) });
+  const u = r.usage;
+  recordUsage(userId, r.model, u.input, u.output, u.cacheLu, u.cacheEcrit, 'chat');
+  return { fait: true, cacheEcrit: u.cacheEcrit, cacheLu: u.cacheLu };
+}
+
 export async function streamMessage(body, send, userId = OWNER) {
   const pieces = piecesDe(body);
   let text = String(body.text ?? '').trim();
@@ -2663,9 +2731,11 @@ export async function streamMessage(body, send, userId = OWNER) {
   // reste de la memoire, parce qu'ils changent a chaque phrase et que le reste
   // tient la journee (voir `recentMemory`).
   const memoire = recentMemory(date, userId, text);
+  dernierAppelCompagnon.set(userId, Date.now());
+  const indication = indicationDuTour(userId);
   const r = await reply(history, settings, {
     memory: memoire.stable,
-    echos: memoire.echos,
+    echos: [memoire.echos, indication].filter(Boolean).join('\n\n---\n\n') || null,
     onText: chunk => send('delta', { text: chunk }),
     onPense: chunk => send('pense', { text: chunk }),
     exhausted: before.exhausted,

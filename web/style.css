@@ -3964,3 +3964,12 @@ a.btn { text-decoration: none; }
 
 /* Quand les groupes arrivent, les trouvailles s'effacent : elles ont servi. */
 .tissage:has(.tsgroupes) .tstrouves { opacity: 0; transition: opacity .6s; }
+
+/* La voix : blips ou voix parlée. Deux boutons, un seul enfoncé. */
+.voixmode { display: flex; gap: 6px; margin: 12px 0 4px; }
+.voixmode button {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line-soft); background: none;
+  color: var(--ink-dim); font-size: 13px; cursor: pointer;
+}
+.voixmode button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); border-color: var(--accent-dk); }
+.voixmode button:disabled { opacity: .45; cursor: not-allowed; }
