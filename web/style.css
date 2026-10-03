@@ -3065,6 +3065,52 @@ table.grid td.cell.aveille:hover { outline-width: 2.5px; z-index: 4; }
   border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; margin-left: 4px; white-space: nowrap;
 }
 
+/* Corrélations : le volet replié par défaut, les deux colonnes dessous. Les
+   mots sont cliquables — ils repartent dans la recherche juste au-dessus. */
+.moicorrel { margin: 0 0 16px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel); }
+.correlsum {
+  display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer;
+  font-size: 13px; color: var(--ink-dim); list-style: none; user-select: none;
+}
+.correlsum::-webkit-details-marker { display: none; }
+.correlsum:hover { color: var(--ink); }
+.moicorrel[open] .correlsum { border-bottom: 1px solid var(--line-soft); color: var(--ink); }
+.correlres { padding: 2px 12px 12px; }
+.correlcols { display: flex; gap: 18px; flex-wrap: wrap; }
+.correlcol { flex: 1 1 190px; min-width: 0; }
+.correlh { margin: 10px 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-dim); letter-spacing: .02em; }
+.correlcol ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.correlmot {
+  display: flex; align-items: baseline; gap: 7px; padding: 6px 9px; border-radius: 7px;
+  cursor: pointer; border: 1px solid transparent;
+}
+.correlmot:hover { background: var(--panel-2); border-color: var(--line-soft); }
+.correlmot b { color: var(--ink); font-weight: 600; font-size: 14px; }
+.correlecart { font-size: 12.5px; color: var(--ink-dim); }
+.correlcol:first-child .correlecart { color: var(--accent); }
+.correlcol:last-child .correlecart { color: var(--warn); }
+.correlmot .faint { font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+
+/* Le visualiseur du JSON, dans « Tes données ». */
+a.btn { text-decoration: none; }
+.jsonvue { margin-top: 14px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel); padding: 10px 12px; }
+.jsonbarre { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.jsononglets { display: flex; gap: 4px; flex-wrap: wrap; }
+.jsononglets button {
+  padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line-soft); background: none;
+  color: var(--ink-dim); font-size: 12.5px; cursor: pointer;
+}
+.jsononglets button[aria-selected="true"] { background: var(--panel-2); color: var(--ink); border-color: var(--accent-dk); }
+#jsonFiltre {
+  flex: 1 1 160px; min-width: 0; font-size: 13px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink);
+}
+.jsoncompte { margin: 8px 2px 6px; font-size: 12px; }
+.jsonpre {
+  margin: 0; max-height: 60vh; overflow: auto; font-size: 12px; line-height: 1.5;
+  color: var(--ink); white-space: pre; background: var(--bg); border-radius: 8px; padding: 10px;
+}
+
 /* ==================================================================
    QUANTIFIED SELF — l'inventaire de ce qu'une autre application envoie.
    ================================================================== */
@@ -3918,3 +3964,12 @@ table.grid td.cell.aveille:hover { outline-width: 2.5px; z-index: 4; }
 
 /* Quand les groupes arrivent, les trouvailles s'effacent : elles ont servi. */
 .tissage:has(.tsgroupes) .tstrouves { opacity: 0; transition: opacity .6s; }
+
+/* La voix : blips ou voix parlée. Deux boutons, un seul enfoncé. */
+.voixmode { display: flex; gap: 6px; margin: 12px 0 4px; }
+.voixmode button {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line-soft); background: none;
+  color: var(--ink-dim); font-size: 13px; cursor: pointer;
+}
+.voixmode button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); border-color: var(--accent-dk); }
+.voixmode button:disabled { opacity: .45; cursor: not-allowed; }

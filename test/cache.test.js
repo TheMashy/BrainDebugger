@@ -91,7 +91,7 @@ test('la fenêtre du fil est bornée, et la borne est un chiffre nommé', () => 
 test('le compagnon et la lecture n’ont pas le même modèle par défaut', () => {
   // Deux métiers : tenir une conversation du soir quarante fois par jour, et
   // relire quatre ans de journal une fois par semaine.
-  assert.equal(DEFAULT_SETTINGS.anthropicModelChat, 'claude-sonnet-5');
+  assert.equal(DEFAULT_SETTINGS.anthropicModelChat, 'claude-sonnet-5-5');
   assert.equal(DEFAULT_SETTINGS.anthropicModel, 'claude-opus-5');
   assert.notEqual(DEFAULT_SETTINGS.anthropicModelChat, DEFAULT_SETTINGS.anthropicModel);
 });
@@ -100,7 +100,7 @@ test('changer le modèle du compagnon ne touche pas celui de la lecture', () => 
   const s = setSettings({ anthropicModelChat: 'claude-haiku-4-5' }, OWNER);
   assert.equal(s.anthropicModelChat, 'claude-haiku-4-5');
   assert.equal(s.anthropicModel, 'claude-opus-5');
-  setSettings({ anthropicModelChat: 'claude-sonnet-5' }, OWNER);
+  setSettings({ anthropicModelChat: 'claude-sonnet-5-5' }, OWNER);
 });
 
 /* ============ CE QUE ÇA COÛTE ============ */

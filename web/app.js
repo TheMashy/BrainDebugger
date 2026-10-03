@@ -6,6 +6,7 @@ import { versGraphe, dessinerRelations, noeudAu, journeeAu, cadrer, recadrer,
          NOM_GENRE, TEINTE_GENRE, echelle } from './relations.js';
 import { toPNG, PetTalk } from './pet.js';
 import { VOICES, Blip } from './blips.js';
+import { Parole, classerVoix, voixParDefaut } from './parole.js';
 import { deltaColor, noteColor, noteScaleRGB, lineChart, dailyChart, bandMarkup, SATURATION, CADRE } from './charts.js';
 import { icone, iconeDe, themeDe, teinteDe, NOMS, ICONES, TEINTES_DECLAREES } from './reperes.js';
 import { ico, ICO_VUE, ICO_ARCHETYPE, ICO_FAMILLE } from './icones.js';
@@ -104,7 +105,10 @@ document.addEventListener('mouseover', e => {
 });
 
 /** La voix du compagnon : un blip par syllabe (web/blips.js), pas de synthèse vocale. */
-const speakChar = c => Blip.tick(c, S.settings);
+// Les blips suivent la frappe lettre par lettre ; en voix parlée, c'est
+// `Parole` qui lit le flux, et les blips se taisent.
+const voixParlee = () => S.settings?.blipEnabled && S.settings?.voixMode === 'parole' && Parole.disponible();
+const speakChar = c => { if (!voixParlee()) Blip.tick(c, S.settings); };
 
 /**
  * La jauge de jetons. Un point coloré, rien de plus tant qu'on ne clique pas :
@@ -595,7 +599,11 @@ async function renderTonight() {
   });
 
   const input = $('#input');
-  input.oninput = () => autoSize(input);
+  // Le brouillon gardé en local revient tant qu'il n'a pas été envoyé. On ne
+  // l'impose que si le champ est vide : on n'écrase jamais une saisie en cours.
+  const brouillon = Brouillon.lire();
+  if (brouillon && !input.value) { input.value = brouillon; autoSize(input); }
+  input.oninput = () => { autoSize(input); Brouillon.ecrire(input.value); prechauffer(); };
   input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   $('#send').onclick = send;
 
@@ -616,6 +624,7 @@ async function renderTonight() {
   };
 
   input.focus();
+  prechauffer();
 }
 
 /**
@@ -980,6 +989,47 @@ function prendreAura(date) {
 }
 
 /**
+ * LE BROUILLON DU COMPOSEUR, GARDÉ EN LOCAL.
+ *
+ * Ce que tu tapes dans le champ est écrit au fil de la frappe dans le
+ * `localStorage` du navigateur — c'est-à-dire sur CE PC, dans CE navigateur, et
+ * nulle part ailleurs : aucune requête, aucun serveur, aucune synchro. Si la
+ * page est rechargée ou que l'onglet meurt avant l'envoi, la phrase est encore
+ * là au retour. À l'envoi (ou sur un champ vidé à la main), on efface.
+ *
+ * `localStorage` et non `sessionStorage` : le brouillon doit survivre à la
+ * fermeture de l'onglet, c'est tout l'intérêt. Chaque accès est sous try/catch
+ * car le mode privé peut refuser l'écriture — on perd alors le filet, pas l'app.
+ */
+/*
+ * CHAUFFER LE COMPAGNON AVANT QU'ON LUI PARLE.
+ *
+ * Le premier message d'une soiree partait a froid : le serveur faisait relire
+ * au modele tout son prompt avant la premiere lettre. On le previent donc des
+ * qu'on ouvre « Parler » ou qu'on commence a taper. Le serveur decide s'il y a
+ * vraiment quelque chose a chauffer (cache encore tiede, pas de modele
+ * distant…) ; ici on se contente de ne pas le lui demander a chaque lettre.
+ */
+let DERNIER_PRECHAUFFAGE = 0;
+function prechauffer() {
+  if (S?.settings?.chatBackend !== 'anthropic' || Date.now() - DERNIER_PRECHAUFFAGE < 60_000) return;
+  DERNIER_PRECHAUFFAGE = Date.now();
+  fetch('/api/compagnon/prechauffer', { method: 'POST', headers: enTetes(true), body: '{}' }).catch(() => {});
+}
+
+const BROUILLON_CLE = 'bd.brouillon';
+const Brouillon = {
+  lire() { try { return localStorage.getItem(BROUILLON_CLE) ?? ''; } catch { return ''; } },
+  ecrire(v) {
+    try {
+      if (v) localStorage.setItem(BROUILLON_CLE, v);
+      else localStorage.removeItem(BROUILLON_CLE);
+    } catch { /* mode privé : pas de filet, tant pis */ }
+  },
+  effacer() { try { localStorage.removeItem(BROUILLON_CLE); } catch { /* mode privé */ } },
+};
+
+/**
  * L'historique est atténué à l'ouverture, et redevient net dès qu'on remonte.
  *
  * C'est ce que fait l'œil de toute façon : en arrivant on regarde le bas, pas
@@ -1203,8 +1253,10 @@ async function send() {
 
   input.value = '';
   input.style.height = 'auto';
+  Brouillon.effacer();   // la phrase est partie : le brouillon n'a plus lieu d'être
   $('#send').disabled = true;
   PetTalk.stop();
+  Parole.stop();
 
   GESTES = [];                        // les gestes du tour précédent ont fait leur temps
   FRAIS = new Set();                  // et les motifs qu'il avait reconnus aussi
@@ -1263,6 +1315,7 @@ async function send() {
         th.scrollTop = th.scrollHeight;
         majFil(th);
         Blip.reset();
+        if (voixParlee()) Parole.debut(S.settings);
         typing = PetTalk.startStream($('#art'), el.querySelector('.tx'),
                                      { onChar: speakChar, onPremier: () => finAttente(el) });
         return;
@@ -1298,12 +1351,14 @@ async function send() {
 
       if (ev === 'delta') {
         PetTalk.feed(data.text);
+        Parole.nourrir(data.text);       // sans effet hors voix parlée
         $('#thread').scrollTop = $('#thread').scrollHeight;
         return;
       }
 
       if (ev === 'done') {
         PetTalk.endStream();
+        Parole.fin();
         finAttente(EN_COURS);
         if (data.usage) { S.usage = data.usage; syncGauge(); }
         if (data.exhausted) toast("Enveloppe de jetons épuisée — le compagnon répond hors-ligne.");
@@ -1341,6 +1396,7 @@ async function send() {
     drawThread();                       // repose les horodatages définitifs
   } catch (err) {
     PetTalk.stop();
+  Parole.stop();
     EN_COURS = null;
     toast(String(err.message));
   } finally {
@@ -1373,6 +1429,7 @@ async function rembobiner(id) {
     return;
   }
   PetTalk.stop();
+  Parole.stop();
   try {
     const r = await api('/api/message/rembobiner', { id });
     S = await api('/api/state');
@@ -3685,6 +3742,7 @@ async function renderMirror(date, { garderCal = false } = {}) {
             grille de sept colonnes, parce qu'on y arrive d'une preuve et qu'on
             veut voir où ce jour tombe dans sa semaine. */''}
       ${moi ? moiRechercheMarkup() : ''}
+      ${moi ? moiCorrelMarkup() : ''}
       ${moi ? moisRuban(m, date) : calendarMarkup(m, date)}
       ${moi ? barre : ''}
       ${veilleBanner(m.jour?.veille)}
@@ -4352,6 +4410,20 @@ function wireMirror() {
     if (e.target.closest('[data-lecture]')) { MIRROR_DATE = null; return renderLecture(); }
     // Effacer la recherche : on replie la barre et on revient à la journée.
     if (e.target.closest('#rechClear')) { RECH = { q: '', data: null }; return rejouer(MIRROR_DATE, { garderCal: true }); }
+    // Un mot corrélé cliqué part dans la barre de recherche : on a vu le lien,
+    // on va lire les journées qui le portent. Pas de nouveau rendu — on remplit
+    // le champ et on laisse son écouteur (débattu) faire la recherche.
+    const ct = e.target.closest('[data-correlterme]');
+    if (ct) {
+      const inp = $('#rechInput');
+      if (inp) {
+        inp.value = ct.dataset.correlterme;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.focus();
+        $('.moirech')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      return;
+    }
     const g = e.target.closest('[data-goto]');
     if (g) return rejouer(g.dataset.goto);
     if (e.target.closest('#backToChat')) return go('tonight');
@@ -4380,6 +4452,7 @@ function wireMirror() {
   // « Ma carte ») : frappe débattue, Entrée, effacer. Les clics sur un résultat
   // portent [data-goto] et passent par le gestionnaire ci-dessus.
   wireRechercheMoi();
+  wireCorrelMoi();
 }
 
 /* ============================= vue : carte =============================
@@ -4547,21 +4620,39 @@ async function renderSettings() {
 
       <div class="card">
         <h2>La voix</h2>
-        <p class="sub">Un blip par syllabe. Pas de synthèse vocale.</p>
+        <p class="sub">Des blips, un par syllabe — ou une vraie voix qui lit ses réponses au fil de l'eau.</p>
         <label class="field"><span>
           <input type="checkbox" id="blipEnabled" ${s.blipEnabled ? 'checked' : ''} style="width:auto;margin-right:7px">
           Le compagnon fait du bruit quand il parle</span></label>
-        <div class="voicepick" id="voicepick">
+        <div class="voixmode" role="radiogroup" aria-label="Sa voix">
+          <button data-voixmode="blips" aria-pressed="${s.voixMode !== 'parole'}">Blips</button>
+          <button data-voixmode="parole" aria-pressed="${s.voixMode === 'parole'}"
+                  ${Parole.disponible() ? '' : 'disabled title="Ce navigateur ne sait pas lire à voix haute"'}>Voix parlée</button>
+        </div>
+        ${/* LA VOIX PARLEE. Seules les voix francaises sont proposees, les
+              meilleures d'abord. Celles qui ne sont pas sur la machine le
+              disent : le texte part chez leur editeur pour etre lu. */''}
+        <div id="paroleCfg" ${s.voixMode === 'parole' ? '' : 'hidden'}>
+          <label class="field" style="margin-top:12px"><span>Voix</span>
+            <select id="paroleVoix"><option value="">chargement des voix…</option></select></label>
+          <p class="sub" id="paroleNote" style="margin:4px 0 0;font-size:12px"></p>
+          <div class="row" style="gap:11px;margin-top:12px;align-items:flex-end">
+            <label class="field"><span>Débit <b class="mono" id="pd">${Number(s.paroleDebit).toFixed(2)}</b></span>
+              <input type="range" id="paroleDebit" min=".7" max="1.5" step=".05" value="${s.paroleDebit}"></label>
+            <button class="btn" id="paroleEssai" type="button">Écouter</button>
+          </div>
+        </div>
+        <div class="voicepick" id="voicepick" ${s.voixMode === 'parole' ? 'hidden' : ''}>
           ${VOICES.map(v => `<button data-voice="${v.id}" aria-pressed="${s.blipVoice === v.id}">
             <b>${esc(v.name)}</b><span>${esc(v.hint)}</span></button>`).join('')}
         </div>
         <div class="row" style="gap:11px;margin-top:14px">
-          <label class="field"><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
+          <label class="field" id="blipPitchBox" ${s.voixMode === 'parole' ? 'hidden' : ''}><span>Hauteur <b class="mono" id="bp">${s.blipPitch}</b></span>
             <input type="range" id="blipPitch" min=".6" max="1.6" step=".05" value="${s.blipPitch}"></label>
           <label class="field"><span>Volume <b class="mono" id="bv">${Math.round(s.blipVolume * 100)}%</b></span>
             <input type="range" id="blipVolume" min="0" max="1" step=".05" value="${s.blipVolume}"></label>
         </div>
-        <p class="sub" style="margin:0;font-size:12px">Clique un timbre pour l'écouter.</p>
+        <p class="sub" id="blipHint" style="margin:0;font-size:12px" ${s.voixMode === 'parole' ? 'hidden' : ''}>Clique un timbre pour l'écouter.</p>
       </div>
     </div>
 
@@ -4704,8 +4795,23 @@ async function renderSettings() {
           Tout est dans un fichier SQLite sur ce disque. Aucun compte, aucun serveur, aucune synchro.
         </p>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn" id="export">${ico('sortir')}Exporter en JSON</button>
+          <button class="btn" id="jsonVoir" aria-expanded="false">${ico('oeil')}Voir le JSON</button>
+          <button class="btn" id="export">${ico('sortir')}Télécharger le JSON</button>
+          <a class="btn" href="/api/export" target="_blank" rel="noopener">${ico('fleche')}Ouvrir dans un onglet</a>
           <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">${ico('partir')}Se déconnecter</button></form>
+        </div>
+        ${/* LE JSON SE LIT ICI, SANS RIEN TÉLÉCHARGER. Une section à la fois
+              (journées, messages, repères, ancres), un filtre qui garde les
+              objets contenant le mot tapé, et « copier » pour emporter
+              exactement ce qu'on voit. Rien ne sort de la machine. */''}
+        <div class="jsonvue" id="jsonVue" hidden>
+          <div class="jsonbarre">
+            <div class="jsononglets" id="jsonOnglets" role="tablist"></div>
+            <input type="search" id="jsonFiltre" placeholder="Filtrer (un mot, une date…)" aria-label="Filtrer le JSON">
+            <button class="btn" id="jsonCopier">Copier</button>
+          </div>
+          <p class="sub jsoncompte" id="jsonCompte"></p>
+          <pre class="jsonpre mono" id="jsonPre"></pre>
         </div>
       </div>
 
@@ -4735,6 +4841,8 @@ async function renderSettings() {
   bind('floor', 'floor', 'change', el => Number(el.value));
   bind('blipEnabled', 'blipEnabled', 'change', el => el.checked);
   $('#sustain')?.addEventListener('change', async e => { await saveSettings({ sustain: Number(e.target.value) }); renderSettings(); });
+
+  wireVoixParlee();
 
   $('#voicepick')?.addEventListener('click', async e => {
     const b = e.target.closest('[data-voice]');
@@ -4859,6 +4967,8 @@ async function renderSettings() {
     }
   });
 
+  wireJsonVue();
+
   $('#export').addEventListener('click', async () => {
     const data = await api('/api/export');
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -4867,6 +4977,122 @@ async function renderSettings() {
     a.download = `braindebugger-${S.today}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  });
+}
+
+/** La carte « La voix » : le choix du mode, et les réglages de la voix parlée. */
+function wireVoixParlee() {
+  const cfg = $('#paroleCfg'), sel = $('#paroleVoix'), note = $('#paroleNote');
+  if (!cfg || !sel) return;
+
+  const dire = v => !v ? 'Aucune voix française sur ce navigateur.'
+    : v.localService ? 'Voix installée sur cette machine : le texte ne sort pas.'
+    : 'Voix en ligne : pour la lire, le navigateur envoie le texte à son éditeur (Google, Microsoft…).';
+
+  Parole.voix().then(toutes => {
+    const fr = classerVoix(toutes);
+    const defaut = voixParDefaut(toutes);
+    if (!fr.length) { sel.innerHTML = '<option value="">aucune voix française</option>'; note.textContent = dire(null); return; }
+    sel.innerHTML = `<option value="">la meilleure voix locale${defaut ? ` (${esc(defaut.name)})` : ''}</option>`
+      + fr.map(v => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === S.settings.paroleVoix ? 'selected' : ''}>
+          ${esc(v.name)}${v.localService ? '' : ' — en ligne'}</option>`).join('');
+    const choisie = fr.find(v => v.voiceURI === S.settings.paroleVoix) ?? defaut;
+    note.textContent = dire(choisie);
+  });
+
+  sel.addEventListener('change', async () => {
+    await saveSettings({ paroleVoix: sel.value });
+    const toutes = await Parole.voix();
+    note.textContent = dire(toutes.find(v => v.voiceURI === sel.value) ?? voixParDefaut(toutes));
+    Parole.essayer(S.settings);
+  });
+
+  $('#paroleDebit')?.addEventListener('input', e => { $('#pd').textContent = Number(e.target.value).toFixed(2); });
+  $('#paroleDebit')?.addEventListener('change', async e => {
+    await saveSettings({ paroleDebit: Number(e.target.value) });
+    Parole.essayer(S.settings);
+  });
+  $('#paroleEssai')?.addEventListener('click', () => Parole.essayer(S.settings));
+
+  for (const b of document.querySelectorAll('[data-voixmode]')) {
+    b.addEventListener('click', async () => {
+      const mode = b.dataset.voixmode;
+      await saveSettings({ voixMode: mode });
+      for (const x of document.querySelectorAll('[data-voixmode]')) x.setAttribute('aria-pressed', String(x === b));
+      cfg.hidden = mode !== 'parole';
+      for (const id of ['#voicepick', '#blipPitchBox', '#blipHint']) { const el = $(id); if (el) el.hidden = mode === 'parole'; }
+      // Le clic autorise l'audio : c'est le moment de faire entendre le choix.
+      if (mode === 'parole') Parole.essayer(S.settings);
+      else { Parole.stop(); Blip.preview(S.settings.blipVoice, S.settings); }
+    });
+  }
+}
+
+/*
+ * LE VISUALISEUR DU JSON, DANS « TES DONNÉES ».
+ *
+ * L'export ne se lisait qu'en le téléchargeant puis en l'ouvrant ailleurs. Ici
+ * on le lit sur place : une section à la fois, un filtre, et « copier » qui
+ * emporte exactement les objets affichés. L'affichage est plafonné pour que la
+ * page reste fluide sur des années de messages ; la copie, elle, prend tout ce
+ * que le filtre garde.
+ */
+const JSON_SECTIONS = [
+  ['entries', 'Journées'], ['messages', 'Messages'], ['events', 'Repères'], ['anchors', 'Ancres'],
+  ['demandesNote', 'Chiffres demandés'],
+];
+const JSON_AFFICHES = 400;
+const sansAccent = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+function wireJsonVue() {
+  const btn = $('#jsonVoir'), vue = $('#jsonVue');
+  if (!btn || !vue) return;
+  const etat = { data: null, section: 'entries', filtre: '', gardes: [] };
+
+  const dessiner = () => {
+    $('#jsonOnglets').innerHTML = JSON_SECTIONS.map(([cle, nom]) =>
+      `<button role="tab" data-jsonsection="${cle}" aria-selected="${etat.section === cle}">
+        ${nom} <span class="faint">${(etat.data[cle] ?? []).length}</span></button>`).join('');
+    const tout = etat.data[etat.section] ?? [];
+    const f = sansAccent(etat.filtre.trim());
+    etat.gardes = f ? tout.filter(x => sansAccent(JSON.stringify(x)).includes(f)) : tout;
+    const vus = etat.gardes.slice(0, JSON_AFFICHES);
+    $('#jsonCompte').textContent = `${etat.gardes.length} objet${etat.gardes.length > 1 ? 's' : ''}`
+      + (f ? ` sur ${tout.length}` : '')
+      + (etat.gardes.length > vus.length ? ` · ${vus.length} affichés (« Copier » prend tout)` : '');
+    $('#jsonPre').textContent = JSON.stringify(vus, null, 2);
+  };
+
+  btn.addEventListener('click', async () => {
+    const ouvrir = vue.hidden;
+    vue.hidden = !ouvrir;
+    btn.setAttribute('aria-expanded', String(ouvrir));
+    if (!ouvrir || etat.data) return;
+    $('#jsonPre').textContent = 'Chargement…';
+    try { etat.data = await api('/api/export'); }
+    catch (err) { $('#jsonPre').textContent = err.message; return; }
+    dessiner();
+  });
+
+  $('#jsonOnglets').addEventListener('click', e => {
+    const o = e.target.closest('[data-jsonsection]');
+    if (!o || !etat.data) return;
+    etat.section = o.dataset.jsonsection;
+    dessiner();
+  });
+
+  let deb;
+  $('#jsonFiltre').addEventListener('input', e => {
+    clearTimeout(deb);
+    deb = setTimeout(() => { etat.filtre = e.target.value; if (etat.data) dessiner(); }, 200);
+  });
+
+  $('#jsonCopier').addEventListener('click', async () => {
+    if (!etat.data) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(etat.gardes, null, 2));
+      toast(`${etat.gardes.length} objet${etat.gardes.length > 1 ? 's' : ''} copié${etat.gardes.length > 1 ? 's' : ''}`);
+    } catch { toast('Copie refusée par le navigateur — sélectionne le texte à la main.'); }
   });
 }
 
@@ -6157,6 +6383,14 @@ const jourCivil = () => S?.jourCivil ?? S?.today;
  */
 let RECH = { q: '', data: null };
 
+/*
+ * LES CORRÉLATIONS : ce qui revient dans tes bonnes journées, et dans les
+ * mauvaises. On ne charge qu'à l'ouverture du volet — c'est une question qu'on
+ * se pose, pas un chiffre qu'on surveille — et on garde la réponse tant qu'on
+ * reste dans « Moi ».
+ */
+let CORREL = { data: null, charge: false };
+
 /* Surligne le terme cherché dans un extrait. Comme `highlight`, on cherche sur
    une copie aplatie de MÊME longueur (accents retirés), pour que les positions
    restent valides sur le texte d'origine et que « fatigue » éclaire « fatigué ». */
@@ -6242,6 +6476,57 @@ function wireRechercheMoi() {
   // Recherche à la frappe, mais espacée : on ne tire pas à chaque lettre.
   let deb;
   input.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(lancer, 250); });
+}
+
+/*
+ * LE VOLET DES CORRÉLATIONS.
+ *
+ * Replié par défaut : c'est la recherche stat « profonde », on la déplie quand
+ * on vient la chercher. Deux colonnes — ce qui tire la note vers le haut, ce
+ * qui la tire vers le bas — chaque mot pris sur le LOG ENTIER des journées, pas
+ * sur la seule note. Un clic sur un mot le rejoue dans la recherche au-dessus :
+ * on voit le lien, puis on va lire les jours qui le portent.
+ */
+function moiCorrelMarkup() {
+  return `<details class="moicorrel" id="correlBox"${CORREL.charge ? ' open' : ''}>
+    <summary class="correlsum">${ico('loupe', 14)} Ce qui va avec tes bonnes et tes mauvaises journées</summary>
+    <div id="correlRes" class="correlres">${CORREL.data ? correlResultatsMarkup(CORREL.data) : '<p class="sub" style="margin:8px 2px">…</p>'}</div>
+  </details>`;
+}
+
+function correlResultatsMarkup(d) {
+  if (!d?.assez) {
+    const manque = d ? d.min * 2 : 8;
+    return `<p class="sub" style="margin:8px 2px">Il faut au moins ${manque} journées à la fois notées et écrites pour y voir un lien — tu en as ${d?.nJours ?? 0}. Écris et note encore un peu, ça viendra.</p>`;
+  }
+  const ligne = x => `<li class="correlmot" data-correlterme="${esc(x.terme)}" title="Chercher « ${esc(x.terme)} » dans tout ce que tu as écrit">
+    <b>${esc(x.terme)}</b>
+    <span class="correlecart mono">${x.ecart > 0 ? '+' : ''}${x.ecart}</span>
+    <span class="faint">· ${x.jours} j</span>
+  </li>`;
+  const col = (titre, items, vide) => `<div class="correlcol">
+    <h4 class="correlh">${titre}</h4>
+    ${items.length ? `<ul>${items.map(ligne).join('')}</ul>` : `<p class="sub">${vide}</p>`}
+  </div>`;
+  return `<p class="sub" style="margin:8px 2px">Sur ${d.nJours} journées écrites et notées (note moyenne ${d.base}). Écart de note des jours qui portent chaque mot.</p>
+    <div class="correlcols">
+      ${col('↑ tes meilleures journées', d.hausses, 'rien de net')}
+      ${col('↓ tes journées plus basses', d.baisses, 'rien de net')}
+    </div>`;
+}
+
+/** Charge les corrélations à la première ouverture du volet, puis les garde. */
+function wireCorrelMoi() {
+  const box = $('#correlBox'), res = $('#correlRes');
+  if (!box || !res) return;
+  box.addEventListener('toggle', async () => {
+    if (!box.open || CORREL.charge) return;
+    CORREL.charge = true;
+    res.innerHTML = `<p class="sub" style="margin:8px 2px">Calcul sur tout ton journal…</p>`;
+    try { CORREL.data = await api('/api/correle'); }
+    catch (err) { CORREL.charge = false; res.innerHTML = `<p class="warn" style="margin:10px 2px">${esc(err.message)}</p>`; return; }
+    res.innerHTML = correlResultatsMarkup(CORREL.data);
+  });
 }
 
 const VIEWS = {
@@ -6388,6 +6673,7 @@ async function go(v) {
   syncNav();
   $('#view').onclick = null;
   PetTalk.stop();
+  Parole.stop();
   $('#view').innerHTML = '<div class="empty">…</div>';
   try { await VIEWS[v](); }
   catch (err) { $('#view').innerHTML = `<div class="card"><h2>Erreur</h2><p class="sub">${esc(err.message)}</p></div>`; }
