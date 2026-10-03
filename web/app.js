@@ -5038,7 +5038,7 @@ function wireVoixParlee() {
     $('#kokoroPreset').innerHTML = k.presets.map(p =>
       `<option value="${esc(p.id)}" ${p.id === (S.settings.kokoroPreset || k.defaut) ? 'selected' : ''}>${esc(p.nom)}</option>`).join('');
     $('#kokoroEtat').innerHTML = k.disponible
-      ? 'Calculée sur cette machine : le texte ne sort pas.'
+      ? `Calculée sur cette machine, ${k.calcul ? `par ta <b>${esc(k.calcul)}</b>` : `sur ta carte graphique si elle répond, sinon le processeur`} : le texte ne sort pas.`
       : `<span style="color:var(--warn)">Pas encore installée — il manque ${esc(k.manque.join(', '))}.</span>
          Dans le dossier de l'application : <span class="mono">npm install</span> puis
          <span class="mono">npm run voix:installer</span> (~350 Mo, une fois), et redémarre.

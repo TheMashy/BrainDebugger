@@ -14,7 +14,8 @@ import {
   addDemandeNote, demandesDepuis, toutesDemandesNote, repondreDemandeNote
 } from './db.js';
 import { peutDemander, peutDemanderSiBascule, demandeOuverte, formulesRecentes } from './demande-note.js';
-import { PRESETS as PRESETS_KOKORO, PRESET_DEFAUT as PRESET_KOKORO, manque as manqueKokoro, synthetiser, enWav, kokoro as chargerKokoro } from './kokoro.js';
+import { PRESETS as PRESETS_KOKORO, PRESET_DEFAUT as PRESET_KOKORO, manque as manqueKokoro, synthetiser, enWav, kokoro as chargerKokoro,
+         fournisseurActif, nomFournisseur, fournisseurs } from './kokoro.js';
 import { usageFor, record as recordUsage, serieUsage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
 import { inspectCSV, applyImport } from './import-csv.js';
@@ -971,6 +972,9 @@ export const routes = {
   'GET /api/voix/kokoro': () => {
     const m = manqueKokoro();
     return { disponible: !m.length, manque: m, defaut: PRESET_KOKORO,
+             // Ce qui calcule : connu une fois le modele charge, sinon ce qu'on essaiera.
+             calcul: fournisseurActif ? nomFournisseur(fournisseurActif) : null,
+             essaiera: fournisseurs().map(nomFournisseur),
              presets: Object.entries(PRESETS_KOKORO).map(([id, p]) => ({ id, nom: p.nom })) };
   },
 
@@ -979,7 +983,7 @@ export const routes = {
   'POST /api/voix/kokoro/charger': async () => {
     if (manqueKokoro().length) return { charge: false };
     await chargerKokoro();
-    return { charge: true };
+    return { charge: true, calcul: nomFournisseur(fournisseurActif) };
   },
 
   'POST /api/voix/kokoro': async ({ body }) => {

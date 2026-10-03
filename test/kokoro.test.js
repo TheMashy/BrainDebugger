@@ -11,8 +11,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
-  lireNpz, lireNpy, styleDe, versJetons, propositions, normaliserPhonemes, enWav,
-  phonemes, synthetiser, manque, PRESETS, PRESET_DEFAUT, VOIX_UTILES, VOCAB, TAUX
+  lireNpz, lireNpy, styleDe, abaisser, versJetons, propositions, normaliserPhonemes, enWav,
+  phonemes, synthetiser, manque, fournisseurs, PRESETS, PRESET_DEFAUT, VOIX_UTILES, VOCAB, TAUX
 } from '../server/kokoro.js';
 
 /** Un .npy float32 de forme (lignes, 1, 256). */
@@ -57,22 +57,42 @@ test('l’archive des voix se lit sans bibliothèque, et seulement ce qu’on de
   assert.throws(() => lireNpy(Buffer.from('pas un npy')), /numpy/);
 });
 
-test('le style : la ligne de la longueur de phrase, et le mélange pondéré', () => {
+test('le style : la ligne de la longueur de phrase, timbre et prosodie mêlés à part', () => {
   const v = new Map([['a', new Float32Array(510 * 256).map((_, k) => Math.floor(k / 256))],
                      ['b', new Float32Array(510 * 256).fill(100)]]);
-  // 10 jetons → ligne 9
-  assert.equal(styleDe(v, { a: 1 }, 10)[0], 9);
-  // 70 % de a (ligne 9) + 30 % de b (100) = 6.3 + 30
-  assert.ok(Math.abs(styleDe(v, { a: 0.7, b: 0.3 }, 10)[0] - 36.3) < 1e-4);
-  // au-delà de 510 jetons, la dernière ligne
-  assert.equal(styleDe(v, { a: 1 }, 9999)[0], 509);
-  assert.throws(() => styleDe(v, { zz: 1 }, 5), /absente/);
+  const tout = m => ({ timbre: m, prosodie: m });
+  assert.equal(styleDe(v, tout({ a: 1 }), 10)[0], 9, '10 jetons → ligne 9');
+  assert.ok(Math.abs(styleDe(v, tout({ a: 0.7, b: 0.3 }), 10)[0] - 36.3) < 1e-4, '70 % de 9 + 30 % de 100');
+  // Le timbre (0–127) d'une voix, la prosodie (128–255) d'une autre : c'est
+  // ce qui ôte l'accent sans changer de voix.
+  const s = styleDe(v, { timbre: { a: 1 }, prosodie: { b: 1 } }, 10);
+  assert.deepEqual([s[0], s[127], s[128], s[255]], [9, 9, 100, 100]);
+  assert.equal(styleDe(v, tout({ a: 1 }), 9999)[0], 509, 'au-delà de 510 jetons, la dernière ligne');
+  assert.throws(() => styleDe(v, tout({ zz: 1 }), 5), /absente/);
+});
+
+test('abaisser : plus grave, et la durée visée', () => {
+  const pcm = Float32Array.from({ length: 1000 }, (_, i) => Math.sin(i / 5));
+  const bas = abaisser(pcm, 0.8);
+  assert.equal(bas.length, 1250, 'synthétisé 1/0.8 fois plus vite, étiré d’autant');
+  assert.equal(abaisser(pcm, 1), pcm, 'facteur 1 : rien ne change');
+  const zeros = x => { let n = 0; for (let i = 1; i < 1000; i++) if (Math.sign(x[i]) !== Math.sign(x[i - 1])) n++; return n; };
+  assert.ok(zeros(bas) < zeros(pcm), 'la période s’allonge : la voix descend');
 });
 
 test('les préréglages n’utilisent que des voix qui existent, et Jarvis est le défaut', () => {
   assert.equal(PRESET_DEFAUT, 'jarvis');
   for (const v of VOIX_UTILES) assert.match(v, /^(bm|ff)_[a-z]+$/);
-  assert.ok(PRESETS.jarvis.melange.bm_george > PRESETS.jarvis.melange.ff_siwis, 'un homme d’abord');
+  assert.ok(PRESETS.jarvis.timbre.bm_george > (PRESETS.jarvis.timbre.ff_siwis ?? 0), 'un timbre d’homme');
+  assert.deepEqual(PRESETS.jarvis.prosodie, { ff_siwis: 1 }, 'une intonation française, pas britannique');
+});
+
+test('la carte graphique d’abord, le processeur toujours en dernier recours', () => {
+  assert.deepEqual(fournisseurs('win32', undefined), ['dml', 'webgpu', 'cpu']);
+  assert.deepEqual(fournisseurs('linux', undefined), ['cuda', 'webgpu', 'cpu']);
+  assert.deepEqual(fournisseurs('darwin', undefined), ['coreml', 'webgpu', 'cpu']);
+  assert.deepEqual(fournisseurs('win32', 'cpu'), ['cpu'], 'on peut s’en passer');
+  assert.deepEqual(fournisseurs('linux', 'webgpu'), ['webgpu', 'cpu'], 'un choix forcé garde le repli');
 });
 
 test('les jetons : chaque symbole connu, rien d’inventé', () => {
