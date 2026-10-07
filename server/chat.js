@@ -1454,6 +1454,8 @@ export const CAPACITES = {
   'claude-sonnet-4-6': { pense: true, effort: true, coupe: 'explicite' },
   // Haiku 4.5 : ni l'un ni l'autre. Sa pensee se pilote par `budget_tokens`,
   // que ce produit n'utilise pas, et l'effort y rend une erreur.
+  // Haiku 5.5 : on suppose le comportement de Sonnet 5 (a verifier sur l'API).
+  'claude-haiku-5-5':  { pense: true, effort: true, coupe: 'explicite' },
   'claude-haiku-4-5':  {}
 };
 
@@ -1553,7 +1555,8 @@ export const ANTHROPIC_MODELS = [
   { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'le plus capable, et moins cher qu’Opus 5' },
   { id: 'claude-opus-5',   label: 'Opus 5',   note: 'la génération d’avant' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'plus rapide, moins cher' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'le plus rapide' }
+  { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'le plus rapide' },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'la génération d’avant' }
 ].map(m => ({ ...m, penseToujours: capacitesDe(m.id).coupe === 'jamais' }));
 
 /**
