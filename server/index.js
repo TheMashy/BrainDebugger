@@ -591,6 +591,32 @@ async function traiter(req, res) {
     }
   }
 
+  /* ---------- UNE NOTE DICTÉE À JARVIS ----------
+   *
+   * « Il faut que Ctrl+Maj+Espace remplisse un système de notes, pour inscrire
+   * on the fly des infos sur BrainDebugger. » Ce qui est dit après ce
+   * raccourci n'est pas une demande à Jarvis : c'est une note, qui va AU
+   * CARNET par la même porte que le connecteur (`poserNote`, source
+   * « Jarvis »). Rien ne part au modèle. Un BrainDebugger d'avant répond 404.
+   */
+  if (req.method === 'POST'
+      && (url.pathname === '/api/machitool/note' || url.pathname === '/api/passerelle/note')) {
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    try {
+      const corps = await readBody(req);
+      const r = connecteur.poserNote({ texte: corps?.texte, source: 'Jarvis' },
+                                     userId, () => jourVecu(userId));
+      if (r.erreur) return json(res, 400, { error: r.erreur });
+      return json(res, 200, { ok: true, jour: r.note?.jour ?? null });
+    } catch (err) {
+      return json(res, err.statut ?? 400, { error: String(err.message ?? err).slice(0, 200) });
+    }
+  }
+
   /* ---------- LES TÂCHES DE FOND DE JARVIS ----------
    *
    * « Rechercher des choses sur le côté. » Machi Tool lance (POST) et vient

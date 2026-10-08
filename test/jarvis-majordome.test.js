@@ -27,7 +27,7 @@ process.env.ANTHROPIC_API_KEY = '';
 
 const J = await import('../server/jarvis.js');
 const { optionsDuModele } = await import('../server/chat.js');
-const { OWNER, recentMessages } = await import('../server/db.js');
+const { OWNER, recentMessages, allCarnet } = await import('../server/db.js');
 const P = await import('../server/passerelle.js');
 
 function fauxClient(texte = 'Tous les systèmes sont opérationnels.') {
@@ -275,6 +275,31 @@ test('POST /api/machitool/journal : les discussions de Jarvis vont au journal, m
     assert.equal(sienne?.role, 'user');
     assert.equal(reponse?.via, 'Jarvis');
     assert.ok(Date.parse(reponse.ts) > Date.parse(sienne.ts), 'sa phrase, puis la réponse');
+  } finally {
+    p.kill();
+  }
+});
+
+test('POST /api/machitool/note : Ctrl+Maj+Espace remplit le carnet, pas le fil', async () => {
+  // « Il faut que Ctrl+Maj+Espace remplisse un système de notes, pour inscrire
+  // on the fly des infos sur BrainDebugger. »
+  const cle = P.poserCle(OWNER);
+  const { p, base } = await serveur();
+  try {
+    const poster = (corps, entetes = {}) => fetch(base + '/api/machitool/note', {
+      method: 'POST', headers: { 'content-type': 'application/json', ...entetes }, body: JSON.stringify(corps)
+    });
+    assert.equal((await poster({ texte: 'coucou' })).status, 401, 'sans la clé, rien');
+    const auth = { authorization: 'Bearer ' + cle };
+    assert.equal((await poster({ texte: '  ' }, auth)).status, 400);
+    const r = await poster({ texte: 'note-témoin : rappeler le garage-témoin demain' }, auth);
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).ok, true);
+    const note = allCarnet(OWNER).find(n => n.texte === 'note-témoin : rappeler le garage-témoin demain');
+    assert.equal(note?.source, 'Jarvis');
+    assert.ok(note.jour, 'rangée dans la journée vécue');
+    assert.ok(!recentMessages(50, OWNER).some(m => m.text.includes('note-témoin')),
+              'une note n’est pas une parole dans le fil');
   } finally {
     p.kill();
   }
