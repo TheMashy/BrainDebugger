@@ -345,6 +345,24 @@ function usageDe(r) {
            cacheLu: u.cache_read_input_tokens ?? 0, cacheEcrit: u.cache_creation_input_tokens ?? 0 };
 }
 
+/**
+ * « QUAND JE FAIS CONTRÔLE SHIFT ESPACE, JE VEUX QUE JARVIS PUISSE RÉPONDRE AU
+ * LIEU DE DIRE NOTÉ, AUSSI QUE ÇA NOTE DANS BRAIN DEBUGGER. » Machi Tool a déjà
+ * posé la phrase au carnet (POST /api/machitool/note) avant de la lui passer :
+ * il y répond, sans la noter une seconde fois ni dire qu'il ne peut pas.
+ */
+export function consigneNotee(langue = 'fr') {
+  return langue === 'en'
+    ? 'They dictated this sentence with their note shortcut: it is ALREADY written, word for word, in '
+      + 'their BrainDebugger notebook. Do not note it again and never say you cannot take notes. Answer '
+      + 'it as you would anything else — a question gets its answer, a request gets done; a plain piece '
+      + 'of information gets one short sentence of acknowledgement, in character.'
+    : 'Cette phrase a été dictée avec son raccourci de notes : elle est DÉJÀ inscrite, mot pour mot, au '
+      + 'carnet de BrainDebugger. Ne la note pas une seconde fois et ne dis jamais que tu ne peux pas '
+      + 'noter. Réponds-y comme à n\'importe quoi d\'autre — une question reçoit sa réponse, une demande '
+      + 'se fait ; une simple information reçoit une courte phrase pour en prendre acte, dans ton style.';
+}
+
 export async function demanderAJarvis(client, { texte, historique = [], appellation = '', maintenant = '', langue = 'fr',
                                               outils = false, ecran = false, suite = null, resultats = null,
                                               navigation = false, memoire = false, preferences = [],
@@ -353,7 +371,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                                               application = false, routines = '',
                                               taches = false, projets = '',
                                               fichiers = false, windows = false, initiatives = false,
-                                              miseAJour = false, web = true, enAvance = null }) {
+                                              miseAJour = false, notee = false, web = true, enAvance = null }) {
   // une seule phrase d'avance par demande, la toute première qu'il écrit
   const avance = enAvance ? { libre: true, dire: enAvance } : null;
   let messages;
@@ -392,6 +410,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
              memoire ? consigneMemoire(langue, preferences, souvenirs) : '',
              taches ? consigneProjets(langue, projets) : '',
              outils && ouverts ? consigneOnglets(langue, ouverts) : '',
+             notee && !suite ? consigneNotee(langue) : '',
              maintenant ? (langue === 'en' ? `Now: ${maintenant}.` : `Maintenant : ${maintenant}.`) : '']
         .filter(Boolean).join('\n\n') }
   ].filter(b => b.text);
@@ -617,7 +636,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        navigation = false, memoire = false, preferences = [], spotify = false,
                                        onglets = false, fenetreAgenda = false, souvenirs = [], onglets_ouverts = '',
                                        application = false, routines = '', taches = false, projets = '',
-                                       fichiers = false, windows = false, initiatives = false, mise_a_jour = false },
+                                       fichiers = false, windows = false, initiatives = false, mise_a_jour = false,
+                                       notee = false },
                                      { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null,
                                        enAvance = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
@@ -678,7 +698,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     application: !!application, routines: String(routines ?? ''),
                                                     taches: !!taches, projets: String(projets ?? ''),
                                                     fichiers: !!(outils && fichiers), windows: !!(outils && windows),
-                                                    initiatives: !!initiatives, miseAJour: !!mise_a_jour, enAvance });
+                                                    initiatives: !!initiatives, miseAJour: !!mise_a_jour,
+                                                    notee: !!notee, enAvance });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   if (r.psy) {

@@ -160,6 +160,19 @@ test('Jarvis lance une tâche : l\'outil part chez Machi Tool, sans les mains su
   assert.ok(r.suite.length >= 2);
 });
 
+test('Ctrl+Maj+Espace : Jarvis sait que la phrase est déjà au carnet, et y répond', async () => {
+  // « Je veux que Jarvis puisse répondre au lieu de dire noté, aussi que ça
+  // note dans BrainDebugger. »
+  const c = fauxClient([texte('Bien noté, Monsieur.')]);
+  await J.demanderAJarvis(c, { texte: 'le garage-témoin rappelle demain', notee: true });
+  assert.match(c.appels[0].system, /DÉJÀ inscrite, mot pour mot, au carnet/);
+  assert.match(c.appels[0].system, /Ne la note pas une seconde fois/);
+  const sans = fauxClient([texte('Bien.')]);
+  await J.demanderAJarvis(sans, { texte: 'bonjour' });
+  assert.doesNotMatch(sans.appels[0].system, /carnet de BrainDebugger/);
+  assert.match(J.consigneNotee('en'), /ALREADY written/);
+});
+
 test('Claude consulté reçoit les projets', async () => {
   const c = fauxClient([texte('Réponse.')]);
   await J.consulterClaude(c, 'Une idée pour le nom du jeu ?', 'fr', '- Irontide : robots');

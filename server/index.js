@@ -532,6 +532,8 @@ async function traiter(req, res) {
         initiatives: corps?.initiatives === true,
         // ses mises a jour : les annoncer, les lancer (Machi Tool demande « oui ? »)
         mise_a_jour: corps?.mise_a_jour === true,
+        // Ctrl+Maj+Espace : la phrase est déjà au carnet, il y répond
+        notee: corps?.notee === true,
         projets: typeof corps?.projets === 'string' ? corps.projets.slice(0, 4000) : '',
         souvenirs: Array.isArray(corps?.souvenirs) ? corps.souvenirs : [],
         onglets_ouverts: typeof corps?.onglets_ouverts === 'string' ? corps.onglets_ouverts : '',
