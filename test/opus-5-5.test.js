@@ -74,7 +74,7 @@ test('on n’impose pas d’outil à Opus 5.5 — on le lui demande, et on le di
 });
 
 test('aux modèles qui l’acceptent, on continue d’imposer — et sans consigne', () => {
-  for (const m of ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5']) {
+  for (const m of ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-5-5', 'claude-haiku-4-5']) {
     const d = demanderOutil(m, 'rendre_verdict');
     assert.deepEqual(d.tool_choice, { type: 'tool', name: 'rendre_verdict' }, m);
     assert.equal(d.consigne, '', m);
@@ -117,8 +117,9 @@ test('le juge de veille suit la même règle, sans que son défaut bouge', () =>
   const passage = { date: '2026-08-12', avant: '', texte: 'je raconte une vieille histoire', apres: '' };
 
   const parDefaut = requeteJugement(passage);
-  assert.equal(parDefaut.model, 'claude-sonnet-5', 'le juge reste sur Sonnet : c’est un lot, à moitié prix');
-  assert.deepEqual(parDefaut.tool_choice, { type: 'tool', name: OUTIL_VERDICT.name });
+  assert.equal(parDefaut.model, 'claude-sonnet-5-5', 'le juge reste sur Sonnet : c’est un lot, à moitié prix');
+  // Sonnet 5.5 refuse lui aussi l'outil force
+  assert.deepEqual(parDefaut.tool_choice, { type: 'auto' });
 
   const surOpus = requeteJugement(passage, { anthropicModelVeille: OPUS55 });
   assert.deepEqual(surOpus.tool_choice, { type: 'auto' });
@@ -148,7 +149,7 @@ test('la jauge connaît son prix — sinon elle facture 25 % de trop en silence'
 test('il est proposé dans Réglages, donc on peut en revenir en un clic', () => {
   const ids = ANTHROPIC_MODELS.map(m => m.id);
   assert.equal(ids[0], OPUS55, 'en tête, puisque c’est le défaut');
-  for (const m of ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5']) {
+  for (const m of ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-haiku-4-5']) {
     assert.ok(ids.includes(m), `${m} reste atteignable`);
   }
 });

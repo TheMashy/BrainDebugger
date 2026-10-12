@@ -89,7 +89,7 @@ test('les deux routes du compagnon passent la gravité', () => {
   const api = readFileSync(new URL('../server/api.js', import.meta.url), 'utf8');
   assert.equal((api.match(/grave: conversationGrave\(history\)/g) ?? []).length, 2);
   const chat = readFileSync(new URL('../server/chat.js', import.meta.url), 'utf8');
-  assert.match(chat, /optionsDuModele\(s\.anthropicModelChat \|\| 'claude-sonnet-5', reglageDuTour\(s, grave\)\)/);
+  assert.match(chat, /optionsDuModele\(s\.anthropicModelChat \|\| 'claude-sonnet-5-5', reglageDuTour\(s, grave\)\)/);
   assert.match(chat, /anthropicReply\(history, settings, memory, onText, outils, onPense, echos, blocsMemoire, grave\)/);
 });
 

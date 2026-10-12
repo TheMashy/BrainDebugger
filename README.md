@@ -359,7 +359,7 @@ Sans clé, il ne se passe rien de tout ça : les relances sont scriptées et la 
 affiche qu'elle a besoin d'une clé. Le reste — la journée, le calendrier, les similitudes,
 les épisodes — est du calcul local et ne fait aucun appel réseau.
 
-Requête : `claude-opus-5`, réflexion adaptative, effort réglable (bas par défaut — la
+Requête : `claude-opus-5-5`, réflexion adaptative, effort réglable (bas par défaut — la
 latence compte plus que la profondeur quand quelqu'un attend une réponse le soir), et le
 repli serveur `fallbacks: "default"` armé. Ce dernier point n'est pas cosmétique : sur ce
 produit, un refus de modèle tomberait exactement au pire moment.

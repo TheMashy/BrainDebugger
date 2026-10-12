@@ -1450,11 +1450,16 @@ export const CAPACITES = {
   'claude-opus-4-8':   { pense: true, effort: true, coupe: 'explicite' },
   'claude-opus-4-7':   { pense: true, effort: true, coupe: 'explicite' },
   'claude-opus-4-6':   { pense: true, effort: true, coupe: 'explicite' },
+  // Sonnet 5.5 : `disabled` rend 400 ; on eteint par `between_tools` (seul,
+  // sans autre champ, a l'effort `high` ou en dessous). L'outil force est
+  // refuse, comme sur Opus 5.5 ; le repli serveur `default` est accepte.
+  'claude-sonnet-5-5': { pense: true, effort: true, repli: true, coupe: 'entre_outils', outilForce: false },
   'claude-sonnet-5':   { pense: true, effort: true, coupe: 'explicite' },
   'claude-sonnet-4-6': { pense: true, effort: true, coupe: 'explicite' },
   // Haiku 4.5 : ni l'un ni l'autre. Sa pensee se pilote par `budget_tokens`,
   // que ce produit n'utilise pas, et l'effort y rend une erreur.
-  // Haiku 5.5 : on suppose le comportement de Sonnet 5 (a verifier sur l'API).
+  // Haiku 5.5 : reflexion adaptative active par defaut, `disabled` accepte a
+  // l'effort `high` ou en dessous ; son effort par defaut est `medium`.
   'claude-haiku-5-5':  { pense: true, effort: true, coupe: 'explicite' },
   'claude-haiku-4-5':  {}
 };
@@ -1495,6 +1500,9 @@ export function optionsDuModele(model, { effort = null, repli = true, pense = tr
                      && !EFFORTS_SANS_COUPURE.has(effort);
     if (!coupable) out.thinking = { type: 'adaptive' };
     else if (c.coupe === 'explicite') out.thinking = { type: 'disabled' };
+    // `coupe: 'entre_outils'` (Sonnet 5.5) : ni `disabled` ni `display` --
+    // `between_tools` tout seul, ce qui l'eteint hors des appels d'outils.
+    else if (c.coupe === 'entre_outils') out.thinking = { type: 'between_tools' };
     // `coupe: 'omettre'` : rien du tout, c'est l'absence qui eteint.
   }
   if (c.effort && effort) out.output_config = { effort };
@@ -1552,9 +1560,8 @@ export const repliServeur = model =>
  * promettre une economie qui n'arrive pas.
  */
 export const ANTHROPIC_MODELS = [
-  { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'le plus capable, et moins cher qu’Opus 5' },
-  { id: 'claude-opus-5',   label: 'Opus 5',   note: 'la génération d’avant' },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'plus rapide, moins cher' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'le plus capable' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'plus rapide, moins cher' },
   { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'le plus rapide' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'la génération d’avant' }
 ].map(m => ({ ...m, penseToujours: capacitesDe(m.id).coupe === 'jamais' }));
@@ -1760,7 +1767,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
     return true;
   };
 
-  const optionsCompagnon = optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5', reglageDuTour(s, grave));
+  const optionsCompagnon = optionsDuModele(s.anthropicModelChat || 'claude-sonnet-5-5', reglageDuTour(s, grave));
 
   // Combien d'appels cette réponse a demandés. Un tour d'outil en relance un,
   // et la dépense d'un échange est leur somme -- sans ce compte, un prompt qui
@@ -1789,7 +1796,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
          * defaut, deux fois et demie moins cher) et la lecture garde
          * `anthropicModel`. Deux reglages, parce que c'est deux metiers.
          */
-        model: s.anthropicModelChat || 'claude-sonnet-5',
+        model: s.anthropicModelChat || 'claude-sonnet-5-5',
         max_tokens: plafondDuCompagnon(optionsCompagnon),
         /* `thinking` et `output_config` sont montes par `optionsDuModele`
            ci-dessus : ils n'existent pas sur tous les modeles du menu. */

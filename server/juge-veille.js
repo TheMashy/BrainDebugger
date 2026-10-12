@@ -221,9 +221,9 @@ export function motifsQuiTiennent(passage, verdicts = null) {
  * moitié prix par-dessus.
  */
 export function requeteJugement(passage, settings = {}) {
-  const demande = demanderOutil(settings.anthropicModelVeille || 'claude-sonnet-5', OUTIL_VERDICT.name);
+  const demande = demanderOutil(settings.anthropicModelVeille || 'claude-sonnet-5-5', OUTIL_VERDICT.name);
   return {
-    model: settings.anthropicModelVeille || 'claude-sonnet-5',
+    model: settings.anthropicModelVeille || 'claude-sonnet-5-5',
     max_tokens: 400,
     system: [{ type: 'text', text: CONSIGNE, cache_control: { type: 'ephemeral' } }],
     tools: [OUTIL_VERDICT],

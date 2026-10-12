@@ -771,6 +771,9 @@ export const DEFAULT_SETTINGS = {
   chatSince: null             // ISO 8601, ou null = tout le fil
 };
 
+/** Les modeles retires du menu, et celui qui les remplace. */
+export const MODELES_REMPLACES = { 'claude-opus-5': 'claude-opus-5-5', 'claude-sonnet-5': 'claude-sonnet-5-5' };
+
 export function getSettings(userId = OWNER) {
   const rows = db.prepare('SELECT key, value FROM settings WHERE user_id = ?').all(userId);
   const stored = new Set(rows.map(r => r.key));
@@ -782,6 +785,11 @@ export function getSettings(userId = OWNER) {
   // Claude. Sinon la cle est en place, tout fonctionne, et il faut quand meme
   // deviner qu'il reste une case a cocher quelque part.
   if (!stored.has('chatBackend') && process.env.ANTHROPIC_API_KEY) out.chatBackend = 'anthropic';
+  // Opus 5 et Sonnet 5 ne sont plus au menu : un reglage qui les nommait passe
+  // a leur successeur, plutot que de rester sur un choix qu'on ne voit plus.
+  for (const k of ['anthropicModel', 'anthropicModelChat']) {
+    if (MODELES_REMPLACES[out[k]]) out[k] = MODELES_REMPLACES[out[k]];
+  }
   return out;
 }
 

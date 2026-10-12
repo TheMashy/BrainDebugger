@@ -27,7 +27,7 @@ import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePr
          OUTILS_APPLI, OUTIL_MISE_A_JOUR, consigneAppli, OUTILS_TACHES, consigneProjets } from './jarvis-outils.js';
 import { projetsPropres } from './taches.js';
 
-export const JARVIS_MODELE = 'claude-sonnet-5';
+export const JARVIS_MODELE = 'claude-sonnet-5-5';
 export const JARVIS_EFFORT = 'low';
 export const JARVIS_PLAFOND = 400;
 

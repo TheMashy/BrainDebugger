@@ -29,8 +29,12 @@ export const PRICES = {
   // -- c'est-a-dire l'essentiel de chaque message.
   'claude-opus-5-5': { in: 4,  out: 20, lu: 0.05 },
   'claude-opus-5':   { in: 5,  out: 25 },
+  'claude-sonnet-5-5': { in: 2, out: 10 },
+  // Haiku 5.5 : 0,10 / 0,50 jusqu'a 100 000 jetons d'entree (0,50 / 2,50 au-dela)
+  'claude-haiku-5-5':{ in: 0.1, out: 0.5 },
+  // Opus 5 et Sonnet 5 ne sont plus proposes ; leurs lignes restent pour
+  // compter ce qui a deja ete depense avec eux.
   'claude-sonnet-5': { in: 2,  out: 10 },
-  'claude-haiku-5-5':{ in: 1,  out: 5 },   // tarif de Haiku 4.5 en attendant le vrai
   'claude-haiku-4-5':{ in: 1,  out: 5 }
 };
 

@@ -203,9 +203,12 @@ test('la clé du lot fait l’aller-retour : sans elle on ne sait plus ce qu’o
   assert.equal(lireCleLot('n’importe quoi'), null);
 });
 
-test('la requête force l’outil et reste courte', () => {
+test('la requête demande l’outil et reste courte', () => {
   const r = requeteJugement({ date: '2026-09-09', texte: 'x', avant: [], apres: [] });
-  assert.equal(r.tool_choice.type, 'tool', 'sinon il faudrait analyser du texte libre');
+  // Sonnet 5.5 refuse l'outil force (400) : `auto`, et la consigne le demande
+  assert.equal(r.tool_choice.type, 'auto');
+  assert.deepEqual(r.tools.map(t => t.name), ['rendre_verdict'], 'sinon il faudrait analyser du texte libre');
+  assert.match(r.messages[0].content[0].text, /^Réponds en appelant l’outil « rendre_verdict »/);
   assert.ok(r.max_tokens <= 400, 'la question est fermée : la réponse n’a pas à être longue');
   assert.ok(!r.thinking, 'et elle ne demande pas de réflexion étendue, facturée en sortie');
 });

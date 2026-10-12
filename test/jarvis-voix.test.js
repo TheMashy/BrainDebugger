@@ -131,7 +131,7 @@ test('le mode psychologue de Jarvis tourne sur Sonnet, effort bas ; un message g
   const { reglageDuTour } = await import('../server/chat.js');
   const choisis = { chatBackend: 'anthropic', anthropicModelChat: 'claude-opus-5-5', anthropicEffort: 'high', chatPensee: true };
   const v = reglagesDeLaVoix(choisis);
-  assert.equal(v.anthropicModelChat, 'claude-sonnet-5');
+  assert.equal(v.anthropicModelChat, 'claude-sonnet-5-5');
   assert.deepEqual(reglageDuTour(v, false), { effort: 'low', pense: false });
   assert.deepEqual(reglageDuTour(v, true), { effort: 'high', pense: true }, 'la section crise garde son effort');
   assert.equal(v.chatBackend, 'anthropic');

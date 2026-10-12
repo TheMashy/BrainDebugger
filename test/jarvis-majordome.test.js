@@ -45,11 +45,12 @@ function fauxClient(texte = 'Tous les systèmes sont opérationnels.') {
 }
 
 test('Sonnet, effort bas, sans réflexion', () => {
-  assert.equal(J.JARVIS_MODELE, 'claude-sonnet-5');
+  assert.equal(J.JARVIS_MODELE, 'claude-sonnet-5-5');
   assert.equal(J.JARVIS_EFFORT, 'low');
   const o = optionsDuModele(J.JARVIS_MODELE, { effort: J.JARVIS_EFFORT, pense: false, repli: false });
   assert.deepEqual(o.output_config, { effort: 'low' });
-  assert.deepEqual(o.thinking, { type: 'disabled' });
+  // Sonnet 5.5 rend 400 sur `disabled` : c'est `between_tools` qui l'eteint
+  assert.deepEqual(o.thinking, { type: 'between_tools' });
 });
 
 test('la consigne : Jarvis d’Iron Man, pour un PC, lu à voix haute', () => {
@@ -74,7 +75,7 @@ test('la réponse du majordome, avec la conversation en cours', async () => {
       noter: (u, m) => notes.push([u, m]) });
   assert.deepEqual(r, { texte: 'Tous les systèmes sont opérationnels.', mode: 'jarvis' });
   const req = client.appels[0];
-  assert.equal(req.model, 'claude-sonnet-5');
+  assert.equal(req.model, 'claude-sonnet-5-5');
   assert.deepEqual(req.messages.map(m => m.role), ['user', 'assistant', 'user']);
   assert.equal(req.messages[2].content, 'et en hexadécimal ?');
   // Des réponses parlées, courtes : c'est la consigne qui les tient. Le plafond

@@ -7992,8 +7992,8 @@ async function peindreReglages() {
    * réglage d'urgence. Il reste en haut, entier, avec son raccourci.
    * ==================================================================
    */
-  const MODELES = { 'claude-opus-5-5': 'Opus 5.5', 'claude-opus-5': 'Opus 5',
-                    'claude-sonnet-5': 'Sonnet 5', 'claude-haiku-4-5': 'Haiku 4.5' };
+  const MODELES = { 'claude-opus-5-5': 'Opus 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5',
+                    'claude-haiku-5-5': 'Haiku 5.5', 'claude-haiku-4-5': 'Haiku 4.5' };
   const etatModele = s.chatBackend === 'anthropic'
     ? `Claude ${MODELES[s.anthropicModelChat] ?? s.anthropicModelChat ?? ''}`.trim()
     : s.chatBackend === 'ollama' ? 'Ollama, sur cette machine' : 'hors-ligne, relances scriptées';
