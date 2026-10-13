@@ -2151,3 +2151,25 @@ export function setAnchor(note, label, descr, userId = OWNER) {
     ON CONFLICT(user_id, note) DO UPDATE SET label = excluded.label, descr = excluded.descr
   `).run(userId, note, label, descr);
 }
+
+/**
+ * LES ÉCHANGES AVEC JARVIS, tels que Machi Tool les a versés dans le fil
+ * (`via = 'Jarvis'`, voir connecteur.verserEchange) : d'un jour vécu, depuis
+ * un instant, ou contenant un mot. Dans l'ordre du temps. Rien d'autre du
+ * journal : ce sont ses conversations à lui, pas ce que la personne écrit.
+ */
+export function echangesJarvis({ jour = null, depuis = null, recherche = null, depuisJour = null,
+                                  limite = 200 } = {}, userId = OWNER) {
+  let sql = "SELECT id, ts, date, role, text FROM messages WHERE user_id = ? AND via = 'Jarvis'";
+  const args = [userId];
+  if (jour) { sql += ' AND date = ?'; args.push(jour); }
+  if (depuisJour) { sql += ' AND date >= ?'; args.push(depuisJour); }
+  if (depuis) { sql += ' AND ts >= ?'; args.push(depuis); }
+  if (recherche) {
+    sql += " AND text LIKE ? ESCAPE '\\'";
+    args.push('%' + String(recherche).replace(/[\\%_]/g, c => '\\' + c) + '%');
+  }
+  sql += ' ORDER BY ts DESC, id DESC LIMIT ?';
+  args.push(limite);
+  return db.prepare(sql).all(...args).reverse();
+}

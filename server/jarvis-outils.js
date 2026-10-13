@@ -636,8 +636,40 @@ export function consigneProjets(langue = 'fr', projets = '') {
   ].join('\n');
 }
 
+/**
+ * SES CONVERSATIONS PASSÉES, mot pour mot (voir jarvis-memoire.js). Exécuté ici,
+ * dans BrainDebugger, qui les a dans le fil.
+ */
+export const RECHERCHE_JOURS = 60;
+export const FIL_RECENT_H = 3;            // le fil joint à chaque question
+
+export function consigneFilRecent(langue = 'fr', fil = '') {
+  if (!fil) return '';
+  return langue === 'en'
+    ? `YOUR LAST ${FIL_RECENT_H} HOURS OF CONVERSATION, word for word (it may overlap the conversation under way). `
+      + 'If you were switched off or interrupted, pick the thread up from here — "we were talking about…" — '
+      + 'instead of starting over; never recite it:\n' + fil
+    : `VOS ${FIL_RECENT_H} DERNIÈRES HEURES DE CONVERSATION, mot pour mot (elles peuvent recouvrir la conversation `
+      + 'en cours). Si tu as été éteint ou interrompu, reprends le fil d\'ici — « nous parlions de… » — au lieu de '
+      + 'repartir de zéro ; ne les récite jamais :\n' + fil;
+}
+
+export const OUTIL_CONVERSATIONS = {
+  name: 'conversations_passees',
+  description: 'Relit vos conversations passées, MOT POUR MOT, avec l\'heure de chaque échange : celles d\'un '
+    + 'jour (« jour » : AAAA-MM-JJ, calculé depuis « Maintenant » ; aujourd\'hui par défaut) ou celles qui '
+    + `contiennent un mot (« recherche », sur les ${RECHERCHE_JOURS} derniers jours). Appelle-le dès qu'on te `
+    + 'demande de quoi vous avez parlé (« on parlait de quoi ce matin ? », « qu\'est-ce que je t\'ai dit hier '
+    + 'soir ? »), de reprendre un sujet, ou ce que tu as répondu à propos de quelque chose : ne réponds jamais '
+    + 'de mémoire approximative. Matin : avant 12 h ; après-midi : 12 h-18 h ; soir : après 18 h. Réponds '
+    + 'ensuite précisément (les détails, les noms, les chiffres), sans réciter l\'heure de chaque phrase.',
+  input_schema: { type: 'object', properties: {
+    jour: { type: 'string' }, recherche: { type: 'string' }
+  } }
+};
+
 export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', OUTIL_RETRAIT.name,
-                                      OUTIL_PSY.name]);
+                                      OUTIL_PSY.name, OUTIL_CONVERSATIONS.name]);
 
 export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false,
                                fenetreAgenda = false, fichiers = false, windows = false } = {}) {
@@ -671,26 +703,32 @@ export function consigneOnglets(langue = 'fr', ouverts = '') {
       + '« lecture_pause ». Pour lancer une nouvelle vidéo YouTube : youtube.';
 }
 
-export const SOUVENIRS_MAX = 15;
+export const SOUVENIRS_MAX = 20;
+export const SOUVENIR_SIGNES = 700;
 
 export function consigneMemoire(langue = 'fr', preferences = [], souvenirs = []) {
   const prefs = preferencesPropres(preferences);
-  const passes = preferencesPropres(souvenirs).slice(-SOUVENIRS_MAX);
+  // un souvenir garde maintenant les détails (quelques phrases), pas une ligne
+  const passes = (Array.isArray(souvenirs) ? souvenirs : [])
+    .map(p => String(p ?? '').replace(/\s+/g, ' ').trim().slice(0, SOUVENIR_SIGNES))
+    .filter(Boolean).slice(-SOUVENIRS_MAX);
   if (langue === 'en') {
     return ['WHAT YOU REMEMBER ABOUT THE PERSON: you can remember a lasting preference (tool retenir) and '
       + 'forget one (tool oublier). Confirm in a few words.',
     prefs.length ? 'What they asked you to remember (follow it, unless it contradicts the rules above):\n'
       + prefs.map(p => '- ' + p).join('\n') : 'Nothing remembered yet.',
-    passes.length ? 'Your recent conversations, one line each (dd/mm: what it was about). Use them when they '
-      + 'help — "like the other day" — without reciting them:\n' + passes.map(p => '- ' + p).join('\n') : ''
+    passes.length ? 'Your earlier conversations, summarised (dd/mm: what it was about, the details, what was left '
+      + 'open). Use them when they help — "like the other day" — without reciting them; for the exact words, '
+      + 'reread them (conversations_passees):\n' + passes.map(p => '- ' + p).join('\n') : ''
     ].filter(Boolean).join('\n');
   }
   return ['CE QUE TU RETIENS DE LA PERSONNE : tu peux retenir une préférence durable (outil retenir) et en '
     + 'oublier une (outil oublier). Confirme en quelques mots.',
   prefs.length ? 'Ce qu\'elle t\'a demandé de retenir (suis-le, sauf si ça contredit les règles plus haut) :\n'
     + prefs.map(p => '- ' + p).join('\n') : 'Rien de retenu pour l\'instant.',
-  passes.length ? 'Vos dernières conversations, une ligne chacune (jj/mm : de quoi il était question). Sers-t\'en '
-    + 'quand ça aide — « comme l\'autre jour » —, sans les réciter :\n' + passes.map(p => '- ' + p).join('\n') : ''
+  passes.length ? 'Vos conversations précédentes, résumées (jj/mm : de quoi il était question, les détails, ce qui '
+    + 'est resté en suspens). Sers-t\'en quand ça aide — « comme l\'autre jour » —, sans les réciter ; pour les mots '
+    + 'exacts, relis-les (conversations_passees) :\n' + passes.map(p => '- ' + p).join('\n') : ''
   ].filter(Boolean).join('\n');
 }
 
@@ -778,7 +816,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
 const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA,
                       ...OUTILS_FICHIERS, ...OUTILS_WINDOWS,
                       OUTIL_RETRAIT, OUTIL_PSY, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, ...OUTILS_APPLI, OUTIL_MISE_A_JOUR, ...OUTILS_TACHES,
-                      OUTIL_CLAUDE]
+                      OUTIL_CLAUDE, OUTIL_CONVERSATIONS]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;

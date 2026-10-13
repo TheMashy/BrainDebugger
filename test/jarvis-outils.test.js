@@ -291,7 +291,7 @@ test('ses souvenirs : une phrase par conversation, jamais après un message grav
   const r1 = await J.repondreJarvis({ transition: 'resume', historique }, dep);
   assert.equal(r1.texte, 'A cherché un restaurant italien à Lyon ; il n\'a rien trouvé ouvert le lundi.',
     '« rien » dans une vraie phrase ne l\'efface pas');
-  assert.equal(c.appels[0].max_tokens, 100);
+  assert.equal(c.appels[0].max_tokens, 400);
   assert.ok(!c.appels[0].tools, 'le résumé ne prend pas d\'outils');
   assert.match(c.appels[0].system, /Jamais la santé/);
   const r2 = await J.repondreJarvis({ transition: 'resume', historique: [{ role: 'user', texte: 'allume la lumière' }] }, dep);
@@ -303,7 +303,7 @@ test('ses souvenirs : une phrase par conversation, jamais après un message grav
   assert.equal(c.appels.length, avant, 'grave : on ne le demande même pas au modèle');
   await J.repondreJarvis({ texte: 'et pour mardi ?', memoire: true,
                            souvenirs: ['24/09 : A cherché un restaurant italien à Lyon.'] }, dep);
-  assert.match(c.appels.at(-1).system, /Vos dernières conversations[^]*- 24\/09 : A cherché un restaurant italien/);
+  assert.match(c.appels.at(-1).system, /Vos conversations précédentes, résumées[^]*- 24\/09 : A cherché un restaurant italien/);
   assert.ok(notes.length >= 1, 'le résumé est compté dans la dépense');
 });
 

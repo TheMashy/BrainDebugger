@@ -23,7 +23,7 @@
 import { messageGrave, graveMajordome } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
-         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE,
+         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_CONVERSATIONS, consigneFilRecent, SOUVENIR_SIGNES, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE,
          OUTILS_APPLI, OUTIL_MISE_A_JOUR, consigneAppli, OUTILS_TACHES, consigneProjets } from './jarvis-outils.js';
 import { projetsPropres } from './taches.js';
 
@@ -160,7 +160,7 @@ async function appelJarvis(client, { system, messages, tools, web, avance = null
     throw err;
   }
 }
-export const HISTORIQUE_MAX = 12;
+export const HISTORIQUE_MAX = 40;
 
 /**
  * EN ANGLAIS : « make him speak like Jarvis… and in English as well ». La même
@@ -371,7 +371,8 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                                               application = false, routines = '',
                                               taches = false, projets = '',
                                               fichiers = false, windows = false, initiatives = false,
-                                              miseAJour = false, notee = false, web = true, enAvance = null }) {
+                                              miseAJour = false, notee = false, web = true, enAvance = null,
+                                              conversations = null, fil = '' }) {
   // une seule phrase d'avance par demande, la toute première qu'il écrit
   const avance = enAvance ? { libre: true, dire: enAvance } : null;
   let messages;
@@ -411,13 +412,15 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
              taches ? consigneProjets(langue, projets) : '',
              outils && ouverts ? consigneOnglets(langue, ouverts) : '',
              notee && !suite ? consigneNotee(langue) : '',
+             fil && !suite ? consigneFilRecent(langue, fil) : '',
              maintenant ? (langue === 'en' ? `Now: ${maintenant}.` : `Maintenant : ${maintenant}.`) : '']
         .filter(Boolean).join('\n\n') }
   ].filter(b => b.text);
   const tools = [...(outils ? outilsPermis({ ecran, navigation, spotify, onglets, fenetreAgenda, fichiers, windows }) : []),
                  ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, OUTIL_PSY, ...(memoire ? OUTILS_MEMOIRE : []),
                  ...(application ? OUTILS_APPLI : []), ...(application && miseAJour ? [OUTIL_MISE_A_JOUR] : []),
-                 ...(taches ? OUTILS_TACHES : []), OUTIL_CLAUDE];
+                 ...(taches ? OUTILS_TACHES : []), ...(conversations?.lire ? [OUTIL_CONVERSATIONS] : []),
+                 OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web, avance });
   const usage = usageDe(r);
   const details = [];
@@ -441,10 +444,11 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
         continue;
       }
       if (d.nom !== 'consulter_claude') {
-        // L'agenda : dans la base de BrainDebugger, tout de suite.
+        // L'agenda, ses conversations passées : dans la base de BrainDebugger, tout de suite.
         try {
-          const f = d.nom === 'agenda_poser' ? agenda?.poser : agenda?.lire;
-          if (!f) throw new Error('agenda indisponible');
+          const f = d.nom === OUTIL_CONVERSATIONS.name ? conversations?.lire
+            : d.nom === 'agenda_poser' ? agenda?.poser : agenda?.lire;
+          if (!f) throw new Error(d.nom === OUTIL_CONVERSATIONS.name ? 'mémoire indisponible' : 'agenda indisponible');
           locaux.push({ id: d.id, texte: String(await f(d.entree ?? {})) });
           if (d.nom === 'agenda_poser') agendaModifie = true;   // Machi Tool relira sa fenêtre Agenda
         } catch (err) {
@@ -571,18 +575,22 @@ export async function resumerConversation(client, { historique = [], langue = 'f
   const qui = langue === 'en' ? { user: 'Person', assistant: 'Jarvis' } : { user: 'La personne', assistant: 'Jarvis' };
   const r = await (await client()).messages.create({
     model: JARVIS_MODELE,
-    max_tokens: 100,
+    max_tokens: 400,
     system: langue === 'en'
-      ? 'Summarise this conversation with JARVIS in ONE short factual sentence, so he can remember it later: '
-        + 'the topic, and what was done or decided. Never health, feelings or anything intimate. If nothing '
-        + `is worth remembering (a command, a greeting, small talk), reply exactly: ${RIEN}`
-      : 'Résume cette conversation avec JARVIS en UNE phrase courte et factuelle, pour qu\'il s\'en souvienne '
-        + 'plus tard : le sujet, et ce qui a été fait ou décidé. Jamais la santé, les émotions ni l\'intime. Si '
-        + `rien ne vaut d'être retenu (une commande, un bonjour, du bavardage), réponds exactement : ${RIEN}`,
+      ? 'Summarise this conversation with JARVIS in two to four factual sentences, so he can pick it up later '
+        + 'with the details: the topic, the specifics that matter (names, titles, figures, places, what was '
+        + 'found or answered), what was done or decided, and what was left open. Never health, feelings or '
+        + 'anything intimate. If nothing is worth remembering (a command, a greeting, small talk), reply '
+        + `exactly: ${RIEN}`
+      : 'Résume cette conversation avec JARVIS en deux à quatre phrases factuelles, pour qu\'il puisse la '
+        + 'reprendre plus tard avec les détails : le sujet, les précisions qui comptent (noms, titres, chiffres, '
+        + 'lieux, ce qui a été trouvé ou répondu), ce qui a été fait ou décidé, et ce qui est resté en suspens. '
+        + 'Jamais la santé, les émotions ni l\'intime. Si rien ne vaut d\'être retenu (une commande, un bonjour, '
+        + `du bavardage), réponds exactement : ${RIEN}`,
     messages: [{ role: 'user', content: conv.map(m => `${qui[m.role]}: ${m.content}`).join('\n') }],
     ...optionsDuModele(JARVIS_MODELE, { effort: JARVIS_EFFORT, pense: false, repli: false })
   });
-  let dit = texteDe(r).replace(/\s+/g, ' ').trim().slice(0, 200);
+  let dit = texteDe(r).replace(/\s+/g, ' ').trim().slice(0, SOUVENIR_SIGNES);
   // RIEN, dit seul (un « il n'a rien trouvé » est un vrai résumé).
   if (r.stop_reason === 'refusal' || !dit || dit.replace(/[^a-z]/gi, '').toUpperCase() === RIEN) dit = '';
   return { texte: dit, model: r.model ?? JARVIS_MODELE, usage: usageDe(r) };
@@ -639,6 +647,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        fichiers = false, windows = false, initiatives = false, mise_a_jour = false,
                                        notee = false },
                                      { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null,
+                                       conversations = null,
                                        enAvance = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'resume') {
@@ -669,7 +678,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       ecran: !!(outils && ecran), navigation: !!(outils && navigation),
                                                       memoire: !!memoire, preferences, spotify: !!(outils && spotify),
                                                       onglets: !!(outils && onglets), fenetreAgenda: !!(outils && fenetreAgenda),
-                                                      agenda,
+                                                      agenda, conversations,
                                                       souvenirs, application: !!application, routines,
                                                       taches: !!taches, projets: String(projets ?? ''),
                                                       fichiers: !!(outils && fichiers), windows: !!(outils && windows),
@@ -699,7 +708,8 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     taches: !!taches, projets: String(projets ?? ''),
                                                     fichiers: !!(outils && fichiers), windows: !!(outils && windows),
                                                     initiatives: !!initiatives, miseAJour: !!mise_a_jour,
-                                                    notee: !!notee, enAvance });
+                                                    notee: !!notee, enAvance, conversations,
+                                                    fil: String(conversations?.recent?.() ?? '') });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
   if (r.psy) {

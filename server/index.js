@@ -18,6 +18,7 @@ import * as auth from './auth.js';
 import * as discord from './discord.js';
 import { commitDeploye, versionDuPaquet, DEMARRE_LE } from './version.js';
 import { repondreJarvis, maintenantDans, raisonErreurApi } from './jarvis.js';
+import * as memoireJarvis from './jarvis-memoire.js';
 import { creerRegistre } from './taches.js';
 
 import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans, bilanDesJours } from './agenda.js';
@@ -550,6 +551,13 @@ async function traiter(req, res) {
         agenda: {
           poser: e => poserRendezVous({ titre: e.titre, date: e.date, heure: e.heure, fin: e.fin }, userId).texte,
           lire: e => agendaEnTexte(lireAgenda({ depuis: e.depuis, jours: e.jours }, userId, jourDans(zoneCourante())))
+        },
+        // SES CONVERSATIONS PASSÉES : le fil récent avec chaque question, et
+        // l'outil pour relire un jour (« on parlait de quoi ce matin ? »)
+        conversations: {
+          lire: e => memoireJarvis.lireConversations(e, { userId, zone: zoneCourante(), langue,
+                                                          jourDefaut: () => jourVecu(userId) }),
+          recent: () => memoireJarvis.filRecent({ userId, zone: zoneCourante(), langue })
         },
         enAvance
       });
