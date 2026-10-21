@@ -664,6 +664,42 @@ export const jourVecu = (userId = OWNER, quand = Date.now()) => {
 };
 
 /**
+ * NOTER UNE JOURNÉE, EN LE DISANT À JARVIS.
+ *
+ * « Fais en sorte qu'on puisse noter les journées passées directement à
+ * travers Jarvis en disant « note la journée » avec la note qui suit ; si
+ * Jarvis comprend une note sur une journée, il la rajoutera à cet instant T. »
+ * La même écriture que l'échelle de l'écran (`POST /api/note`) : tout de suite,
+ * sur la journée vécue par défaut, ou sur une journée passée ; jamais une
+ * journée qui n'a pas encore eu lieu. Rend le texte du résultat, ou lève.
+ */
+export function noterJournee({ note, jour } = {}, userId = OWNER) {
+  const n = Number(note);
+  if (!Number.isFinite(n) || n < 0 || n > 10) throw new Error('Il faut une note de 0 à 10.');
+  const v = Math.round(n * 2) / 2;                    // un demi-point au plus fin : « six et demi »
+  const aujourdhui = jourVecu(userId);
+  const j = String(jour ?? '').trim() || aujourdhui;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(j) || Number.isNaN(Date.parse(j + 'T00:00:00Z'))) {
+    throw new Error('Jour illisible : il faut AAAA-MM-JJ.');
+  }
+  if (j > aujourdhui) throw new Error('Cette journée n\'a pas encore eu lieu : on ne la note pas d\'avance.');
+  const avant = getEntry(j, userId)?.note ?? null;
+  setNote(j, v, userId);
+  invalidate(userId);
+  const quand = j === aujourdhui ? 'La journée' : `La journée du ${jourLisibleCourt(j)}`;
+  return `${quand} est notée ${String(v).replace('.', ',')}/10`
+    + (avant !== null && avant !== v ? ` (elle était à ${String(avant).replace('.', ',')}).` : '.');
+}
+
+const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+const MOIS_ANNEE = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre',
+                    'octobre', 'novembre', 'décembre'];
+function jourLisibleCourt(d) {
+  const t = new Date(d + 'T00:00:00Z');
+  return `${JOURS_SEMAINE[t.getUTCDay()]} ${t.getUTCDate()} ${MOIS_ANNEE[t.getUTCMonth()]}`;
+}
+
+/**
  * CE QUE CE MESSAGE DIT DE SON LEVER OU DE SON COUCHER, ENREGISTRE.
  *
  * Le chemin sans modele et sans application tierce : « je viens de me lever »

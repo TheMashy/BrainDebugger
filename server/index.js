@@ -5,7 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
-         reprendreLesNuits, reparerLesNotesDites, jourVecu } from './api.js';
+         reprendreLesNuits, reparerLesNotesDites, jourVecu, noterJournee } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle, synchroHonoree } from './passerelle.js';
 import * as connecteur from './connecteur.js';
 import { analyser, apercuDe } from './mesures.js';
@@ -555,6 +555,8 @@ async function traiter(req, res) {
         },
         // SES CONVERSATIONS PASSÉES : le fil récent avec chaque question, et
         // l'outil pour relire un jour (« on parlait de quoi ce matin ? »)
+        // « note la journée 7 » : la note du jour (ou d'un jour passé), tout de suite
+        journee: { noter: e => noterJournee({ note: e.note, jour: e.jour }, userId) },
         conversations: {
           lire: e => memoireJarvis.lireConversations(e, { userId, zone: zoneCourante(), langue,
                                                           jourDefaut: () => jourVecu(userId) }),

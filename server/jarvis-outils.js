@@ -686,8 +686,24 @@ export const OUTIL_CONVERSATIONS = {
   } }
 };
 
+/**
+ * NOTER UNE JOURNÉE. « Note la journée 7 », « mets 6 à hier ». Exécuté ici, dans
+ * BrainDebugger, comme l'échelle de l'écran.
+ */
+export const OUTIL_NOTE_JOURNEE = {
+  name: 'noter_journee',
+  description: 'Note une journée de 0 à 10 dans son journal, tout de suite : « note la journée 7 », « mets 6 à '
+    + 'hier », « lundi c\'était un 4 », « ma journée vaut 8 ». « note » : le chiffre dit (un demi-point est '
+    + 'possible) ; « jour » : AAAA-MM-JJ calculé depuis « Maintenant » — absent, c\'est la journée en cours. '
+    + 'Une journée passée se note aussi ; une journée à venir, jamais. Appelle-le dès que tu comprends une note '
+    + 'donnée à une journée, puis confirme en une phrase ; ne commente pas la note.',
+  input_schema: { type: 'object', properties: {
+    note: { type: 'number', minimum: 0, maximum: 10 }, jour: { type: 'string' }
+  }, required: ['note'] }
+};
+
 export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', OUTIL_RETRAIT.name,
-                                      OUTIL_PSY.name, OUTIL_CONVERSATIONS.name]);
+                                      OUTIL_PSY.name, OUTIL_CONVERSATIONS.name, OUTIL_NOTE_JOURNEE.name]);
 
 export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false,
                                fenetreAgenda = false, fichiers = false, windows = false } = {}) {
@@ -834,7 +850,7 @@ export function consigneOutils(langue = 'fr', { ecran = false, navigation = fals
 const NOMS = new Set([...OUTILS_PC, OUTIL_ECRAN, OUTIL_HISTORIQUE, OUTIL_ONGLETS, ...OUTILS_AGENDA, OUTIL_MONTRER_AGENDA,
                       ...OUTILS_FICHIERS, ...OUTILS_WINDOWS,
                       OUTIL_RETRAIT, OUTIL_PSY, ...OUTILS_SPOTIFY, ...OUTILS_MEMOIRE, ...OUTILS_APPLI, OUTIL_MISE_A_JOUR, ...OUTILS_TACHES,
-                      OUTIL_CLAUDE, OUTIL_CONVERSATIONS]
+                      OUTIL_CLAUDE, OUTIL_CONVERSATIONS, OUTIL_NOTE_JOURNEE]
   .map(o => o.name));
 const SUITE_MAX = 40;
 const TEXTE_MAX = 20000;

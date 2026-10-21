@@ -23,7 +23,7 @@
 import { messageGrave, graveMajordome } from './gravite.js';
 import { optionsDuModele } from './chat.js';
 import { outilsPermis, consigneOutils, consigneMemoire, consigneOnglets, suitePropre, resultatsEnBlocs, outilsDemandes,
-         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_CONVERSATIONS, consigneFilRecent, SOUVENIR_SIGNES, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE,
+         OUTIL_CLAUDE, OUTILS_LOCAUX, OUTILS_MEMOIRE, OUTILS_AGENDA, OUTIL_CONVERSATIONS, consigneFilRecent, SOUVENIR_SIGNES, OUTIL_NOTE_JOURNEE, OUTIL_RETRAIT, OUTIL_PSY, CLAUDE_CONSULTE,
          OUTILS_APPLI, OUTIL_MISE_A_JOUR, consigneAppli, OUTILS_TACHES, consigneProjets } from './jarvis-outils.js';
 import { projetsPropres } from './taches.js';
 
@@ -372,7 +372,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                                               taches = false, projets = '',
                                               fichiers = false, windows = false, initiatives = false,
                                               miseAJour = false, notee = false, web = true, enAvance = null,
-                                              conversations = null, fil = '' }) {
+                                              conversations = null, fil = '', journee = null }) {
   // une seule phrase d'avance par demande, la toute première qu'il écrit
   const avance = enAvance ? { libre: true, dire: enAvance } : null;
   let messages;
@@ -420,6 +420,7 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
                  ...(agenda ? OUTILS_AGENDA : []), OUTIL_RETRAIT, OUTIL_PSY, ...(memoire ? OUTILS_MEMOIRE : []),
                  ...(application ? OUTILS_APPLI : []), ...(application && miseAJour ? [OUTIL_MISE_A_JOUR] : []),
                  ...(taches ? OUTILS_TACHES : []), ...(conversations?.lire ? [OUTIL_CONVERSATIONS] : []),
+                 ...(journee?.noter ? [OUTIL_NOTE_JOURNEE] : []),
                  OUTIL_CLAUDE];
   let r = await appelJarvis(client, { system, messages, tools, web, avance });
   const usage = usageDe(r);
@@ -447,8 +448,10 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
         // L'agenda, ses conversations passées : dans la base de BrainDebugger, tout de suite.
         try {
           const f = d.nom === OUTIL_CONVERSATIONS.name ? conversations?.lire
+            : d.nom === OUTIL_NOTE_JOURNEE.name ? journee?.noter
             : d.nom === 'agenda_poser' ? agenda?.poser : agenda?.lire;
-          if (!f) throw new Error(d.nom === OUTIL_CONVERSATIONS.name ? 'mémoire indisponible' : 'agenda indisponible');
+          if (!f) throw new Error(d.nom === OUTIL_CONVERSATIONS.name ? 'mémoire indisponible'
+            : d.nom === OUTIL_NOTE_JOURNEE.name ? 'journal indisponible' : 'agenda indisponible');
           locaux.push({ id: d.id, texte: String(await f(d.entree ?? {})) });
           if (d.nom === 'agenda_poser') agendaModifie = true;   // Machi Tool relira sa fenêtre Agenda
         } catch (err) {
@@ -647,7 +650,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                        fichiers = false, windows = false, initiatives = false, mise_a_jour = false,
                                        notee = false },
                                      { client, versLeCompagnon, noter = () => {}, carnet = null, agenda = null,
-                                       conversations = null,
+                                       conversations = null, journee = null,
                                        enAvance = null }) {
   const L = langue === 'en' ? 'en' : 'fr';
   if (transition === 'resume') {
@@ -678,7 +681,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                       ecran: !!(outils && ecran), navigation: !!(outils && navigation),
                                                       memoire: !!memoire, preferences, spotify: !!(outils && spotify),
                                                       onglets: !!(outils && onglets), fenetreAgenda: !!(outils && fenetreAgenda),
-                                                      agenda, conversations,
+                                                      agenda, conversations, journee,
                                                       souvenirs, application: !!application, routines,
                                                       taches: !!taches, projets: String(projets ?? ''),
                                                       fichiers: !!(outils && fichiers), windows: !!(outils && windows),
@@ -708,7 +711,7 @@ export async function repondreJarvis({ texte, historique = [], appellation = '',
                                                     taches: !!taches, projets: String(projets ?? ''),
                                                     fichiers: !!(outils && fichiers), windows: !!(outils && windows),
                                                     initiatives: !!initiatives, miseAJour: !!mise_a_jour,
-                                                    notee: !!notee, enAvance, conversations,
+                                                    notee: !!notee, enAvance, conversations, journee,
                                                     fil: String(conversations?.recent?.() ?? '') });
   noter(r.usage, r.model);
   for (const c of r.consultations ?? []) noter(c.usage, c.model);
