@@ -518,6 +518,22 @@ export const OUTILS_APPLI = [
     }, required: ['action'] }
   },
   {
+    name: 'minuteurs',
+    description: 'Minuteurs, alarmes et chronomètres qui tournent en fond dans Machi Tool (ils survivent à un '
+      + 'redémarrage et se voient dans la fenêtre Agenda) : « minuteur » (« secondes », « nom » facultatif : « les '
+      + 'pâtes ») ; « alarme » (« heure » HH:MM, « jour » AAAA-MM-JJ facultatif — sinon la prochaine fois qu\'il est '
+      + 'cette heure-là —, « nom ») : « réveille-moi à 7 h », « une alarme à 14 h 30 pour la réunion » ; '
+      + '« chrono_lancer » (« nom ») ; « chrono_arreter » (« id » ou « nom ») : il rend le temps écoulé ; « lister » : '
+      + 'ce qui tourne, avec le temps qui reste (« il reste combien sur les pâtes ? ») ; « annuler » (« id », « nom », '
+      + '« genre », ou « tout »). Un rappel à une date ou un rendez-vous, c\'est l\'agenda, pas ici.',
+    input_schema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['minuteur', 'alarme', 'chrono_lancer', 'chrono_arreter', 'lister', 'annuler'] },
+      secondes: { type: 'integer', minimum: 1, maximum: 86400 }, heure: { type: 'string' }, jour: { type: 'string' },
+      nom: { type: 'string' }, id: { type: 'integer' },
+      genre: { type: 'string', enum: ['minuteur', 'alarme', 'chrono'] }, tout: { type: 'boolean' }
+    }, required: ['action'] }
+  },
+  {
     name: 'reglages_machi',
     description: 'Les réglages de Machi Tool : « lire » (tous ceux que tu peux changer, ou ceux dont la clé contient '
       + '« cle ») ; « changer » (« cle », « valeur ») ; « couleur_appli » : la couleur d\'une appli ou d\'un site dans '
@@ -553,7 +569,8 @@ export function consigneAppli(langue = 'fr', routines = '') {
   const liste = String(routines ?? '').slice(0, 3000).trim();
   if (langue === 'en') {
     return ['MACHI TOOL IS YOURS: you have every right over the app itself — the light strip (tool lumiere), your '
-      + 'light routines (routine_lumiere) and its settings (reglages_machi).',
+      + 'light routines (routine_lumiere), its settings (reglages_machi), and timers, alarms and stopwatches '
+      + 'running in the background (minuteurs).',
     '- Routines are habits and running gags. Create one when asked; you may also create one ON YOUR OWN when a '
       + 'habit or a running joke clearly settles in (they say the same thing every night, a joke keeps coming back) '
       + '— at most one per conversation, say so in one sentence, keep it light (chance and pause_min for gags).',
@@ -562,7 +579,8 @@ export function consigneAppli(langue = 'fr', routines = '') {
     ].join('\n');
   }
   return ['MACHI TOOL EST À TOI : tu as tous les droits sur l\'application elle-même — la guirlande (outil lumiere), '
-    + 'tes routines de lumière (routine_lumiere) et ses réglages (reglages_machi).',
+    + 'tes routines de lumière (routine_lumiere), ses réglages (reglages_machi), et les minuteurs, alarmes et '
+    + 'chronomètres qui tournent en fond (minuteurs).',
   '- Les routines sont des habitudes et des running gags. Crée-en une quand on te le demande ; tu peux aussi en '
     + 'créer une DE TOI-MÊME quand une habitude ou une blague récurrente s\'installe clairement (la même phrase '
     + 'chaque soir, une blague qui revient) — une par conversation au plus, dis-le en une phrase, reste léger '

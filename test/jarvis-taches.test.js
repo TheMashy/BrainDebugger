@@ -182,3 +182,18 @@ test('Claude consulté reçoit les projets', async () => {
   await J.consulterClaude(sans, 'x');
   assert.doesNotMatch(sans.appels[0].system, /projets/);
 });
+
+test('minuteurs, alarmes et chronomètres : un outil de Machi Tool, offert avec l’application', async () => {
+  // « Fais en sorte que je puisse demander à Jarvis de mettre un minuteur, un
+  // chronomètre ou une alarme qui tourne en fond. »
+  const c = fauxClient([texte('Bien.')]);
+  await J.demanderAJarvis(c, { texte: 'réveille-moi à 7 h', application: true });
+  const outil = c.appels[0].tools.find(t => t.name === 'minuteurs');
+  assert.ok(outil, 'offert avec l’application');
+  assert.deepEqual(outil.input_schema.properties.action.enum,
+                   ['minuteur', 'alarme', 'chrono_lancer', 'chrono_arreter', 'lister', 'annuler']);
+  assert.match(c.appels[0].system, /minuteurs, alarmes et chronomètres qui tournent en fond/);
+  const sans = fauxClient([texte('Bien.')]);
+  await J.demanderAJarvis(sans, { texte: 'bonjour' });
+  assert.ok(!sans.appels[0].tools.some(t => t.name === 'minuteurs'), 'un vieux Machi Tool ne l’a pas');
+});
