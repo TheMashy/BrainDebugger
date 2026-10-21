@@ -116,3 +116,27 @@ test('un rendez-vous refusé ne passe pas pour posé', async () => {
   const resultat = appels[1].messages.at(-1).content[0];
   assert.equal(resultat.is_error, true, 'l’erreur revient au modèle, qui la dit');
 });
+
+test('synchro avec Machi Tool : retirer et corriger un rendez-vous, jamais un repère « psy »', () => {
+  // « Fais en sorte que l'agenda soit synchro sur BrainDebugger »
+  const { evenement } = A.poserRendezVous({ titre: 'Kiné-témoin', date: '2027-03-04', heure: '18:00' }, OWNER);
+  const psy = addEvent({ date: '2027-03-04', label: 'un fait-témoin', genre: 'psy', userId: OWNER });
+  const lire = () => A.lireAgenda({ depuis: '2027-03-01', jours: 10 }, OWNER).rendezVous;
+  assert.ok(lire()[0].id, 'chaque rendez-vous porte son identifiant');
+  assert.match(A.modifierRendezVous(evenement.id, { heure: '18:30', date: '2027-03-05' }, OWNER).texte,
+               /Kiné-témoin.*vendredi 5 mars à 18:30/);
+  assert.deepEqual(lire().map(r => [r.label, r.date, r.heure]), [['Kiné-témoin', '2027-03-05', '18:30']]);
+  assert.throws(() => A.modifierRendezVous(evenement.id, { heure: '9h' }, OWNER), /Heure/);
+  assert.throws(() => A.retirerRendezVous(psy.id, OWNER), /introuvable/, 'un « psy » ne se retire pas d’ici');
+  assert.throws(() => A.retirerRendezVous(evenement.id, 'quelqu-un-d-autre'), /introuvable/);
+  assert.match(A.retirerRendezVous(evenement.id, OWNER).texte, /Retiré de l'agenda : « Kiné-témoin »/);
+  assert.deepEqual(lire(), []);
+  assert.ok(allEvents(OWNER).some(e => e.id === psy.id), 'le « psy » est toujours là');
+});
+
+test('un repère dans le futur se pose, et se lit dans l’agenda', () => {
+  // « Fais aussi en sorte qu'il soit possible d'ajouter des repères pour le futur »
+  const r = routes['POST /api/events']({ body: { date: '2031-06-01', label: 'mariage-témoin', genre: 'agenda' }, userId: OWNER });
+  assert.ok(r.events.some(e => e.label === 'mariage-témoin' && e.date === '2031-06-01'));
+  assert.deepEqual(A.lireAgenda({ depuis: '2031-06-01', jours: 1 }, OWNER).rendezVous.map(x => x.label), ['mariage-témoin']);
+});

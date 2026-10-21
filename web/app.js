@@ -2842,9 +2842,12 @@ function wireReperes(year) {
   const bdate = $('#evdate');
   if (bdate) bdate.onclick = () => {
     if (POP === 'date') { POP = null; return redessiner(); }
-    // Un rendez-vous est dans l'avenir ; un fait de sa vie, jamais.
+    // « Fais en sorte qu'il soit possible d'ajouter des repères pour le futur » :
+    // le calendrier va jusqu'en 2100 quel que soit le genre. Un jour à venir
+    // choisi sur un repère « psy » le fait passer en agenda (voir plus bas) :
+    // un fait de sa vie ne peut pas être dans l'avenir, un rendez-vous si.
     ouvrirCal('date', { debut: EV.debut, fin: EV.fin, plage: !!EV.fin,
-                        min: '1900-01-01', max: EV.genre === 'agenda' ? '2100-12-31' : jourCivil() });
+                        min: '1900-01-01', max: '2100-12-31' });
     redessiner();
   };
 
@@ -2880,6 +2883,10 @@ function wireReperes(year) {
         }
       } else if (POP === 'date') {
         EV.debut = CAL.debut; EV.fin = CAL.plage ? CAL.fin : null;
+        if (EV.debut > jourCivil() && EV.genre !== 'agenda') {
+          EV.genre = 'agenda';
+          toast('Dans l’avenir : rangé dans l’agenda');
+        }
         // Une plage se ferme quand elle est complète ; un jour, tout de suite.
         if (c.dataset.cal === 'jour' && (!CAL.plage || CAL.fin)) POP = null;
       }
@@ -3140,7 +3147,9 @@ function friseMarkup(events) {
             ? ` style="color:hsl(${teinteDe({ ...ev, theme: t })} 62% 62%)"` : ''}>${icone(t, 18)}</span>
           <span class="repdate mono faint">${quand}</span>
           <span class="replabel">${esc(ev.label)}${ev.genre === 'agenda'
-            ? ' <span class="repgenre-tag" title="Dans l’agenda de Machi Tool">agenda</span>' : ''}</span>
+            ? ' <span class="repgenre-tag" title="Dans l’agenda de Machi Tool">agenda</span>' : ''}${
+            (ev.fin ?? ev.date) >= S.today && ev.date > S.today
+              ? ' <span class="repgenre-tag" title="Pas encore arrivé">à venir</span>' : ''}</span>
           <button class="repdel" data-delev="${ev.id}" title="Retirer ce repère" aria-label="Retirer ${esc(ev.label)}">${ico('fermer', 11)}</button>
         </div>`;
       }).join('')}

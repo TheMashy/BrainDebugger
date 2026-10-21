@@ -7,10 +7,11 @@
  * l'agenda de Machi Tool). »
  *
  * Ce module ne touche QUE les repères de genre « agenda » : ni Jarvis ni Machi
- * Tool ne voient jamais un repère « psy ». Il pose et il lit ; il n'efface rien
- * (on retire un rendez-vous dans « Année », à la main).
+ * Tool ne voient jamais un repère « psy ». Il pose, il lit, et — « fais en sorte
+ * que l'agenda soit synchro sur BrainDebugger » — Machi Tool peut aussi retirer
+ * ou corriger un rendez-vous : seulement un repère « agenda », jamais un « psy ».
  */
-import { addEvent, agendaEntre, db, OWNER } from './db.js';
+import { addEvent, agendaEntre, db, OWNER, deleteEvent, updateEvent } from './db.js';
 import { nuits, sommeilHabituel } from './nuits.js';
 
 const ISO_JOUR = /^\d{4}-\d{2}-\d{2}$/;
@@ -55,6 +56,36 @@ export function poserRendezVous({ titre, date, heure = null, fin = null } = {}, 
   const evenement = addEvent({ date: d, fin: f && f !== d ? f : null, label, genre: 'agenda', heure: h, userId });
   return { evenement, texte: `Ajouté à l'agenda : « ${label} », ${jourLisible(d)}${h ? ` à ${h}` : ''}`
                             + `${evenement.fin ? ` jusqu'au ${jourLisible(evenement.fin)}` : ''}.` };
+}
+
+/** Un rendez-vous de l'agenda (genre « agenda », à cet utilisateur), ou null. */
+function rendezVousDe(id, userId) {
+  return db.prepare("SELECT id, date, fin, label, heure FROM events WHERE id = ? AND user_id = ? AND genre = 'agenda'")
+    .get(Number(id), userId) ?? null;
+}
+
+/** Retirer un rendez-vous. Un repère « psy » n'est jamais touché d'ici. */
+export function retirerRendezVous(id, userId = OWNER) {
+  const r = rendezVousDe(id, userId);
+  if (!r) throw new Error('Rendez-vous introuvable dans l\'agenda.');
+  deleteEvent(r.id, userId);
+  return { texte: `Retiré de l'agenda : « ${r.label} ».` };
+}
+
+/** Corriger un rendez-vous : titre, date, heure, fin (absents : inchangés). */
+export function modifierRendezVous(id, { titre, date, heure, fin } = {}, userId = OWNER) {
+  const r = rendezVousDe(id, userId);
+  if (!r) throw new Error('Rendez-vous introuvable dans l\'agenda.');
+  const label = titre === undefined ? r.label : String(titre ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!label) throw new Error('Il faut un titre au rendez-vous.');
+  const d = date === undefined ? r.date : String(date ?? '').trim();
+  if (!valide(d)) throw new Error('Date illisible : il faut AAAA-MM-JJ.');
+  const h = heure === undefined ? r.heure : (heure ? String(heure).trim() : null);
+  if (h && !HEURE.test(h)) throw new Error('Heure illisible : il faut HH:MM.');
+  const f = fin === undefined ? r.fin : (fin ? String(fin).trim() : null);
+  if (f && (!valide(f) || f < d)) throw new Error('Fin illisible, ou avant le début.');
+  updateEvent(r.id, { label, date: d, heure: h, fin: f && f !== d ? f : null }, userId);
+  return { texte: `Modifié : « ${label} », ${jourLisible(d)}${h ? ` à ${h}` : ''}.` };
 }
 
 /** Les rendez-vous de `depuis` à `depuis + jours - 1`. */

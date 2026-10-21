@@ -21,7 +21,8 @@ import { repondreJarvis, maintenantDans, raisonErreurApi } from './jarvis.js';
 import * as memoireJarvis from './jarvis-memoire.js';
 import { creerRegistre } from './taches.js';
 
-import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans, bilanDesJours } from './agenda.js';
+import { poserRendezVous, lireAgenda, agendaEnTexte, jourDans, bilanDesJours, retirerRendezVous,
+         modifierRendezVous } from './agenda.js';
 import { clientDe } from './lecture.js';
 import { record as noterDepense } from './usage.js';
 import { zoneCourante } from './temps.js';
@@ -676,6 +677,13 @@ async function traiter(req, res) {
     try {
       if (req.method === 'POST') {
         const corps = await readBody(req);
+        // retirer, corriger (un repère « agenda » seulement), ou poser
+        if (corps?.supprimer) return json(res, 200, { ok: true, ...retirerRendezVous(corps.supprimer, userId) });
+        if (corps?.id) {
+          const champs = Object.fromEntries(['titre', 'date', 'heure', 'fin']
+            .filter(k => k in corps).map(k => [k, corps[k]]));
+          return json(res, 200, { ok: true, ...modifierRendezVous(corps.id, champs, userId) });
+        }
         const r = poserRendezVous({ titre: corps?.titre, date: corps?.date, heure: corps?.heure, fin: corps?.fin }, userId);
         return json(res, 200, { ok: true, evenement: r.evenement, texte: r.texte });
       }
