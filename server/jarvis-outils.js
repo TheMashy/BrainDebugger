@@ -343,6 +343,26 @@ export const OUTILS_AGENDA = [
     input_schema: { type: 'object', properties: {
       depuis: { type: 'string' }, jours: { type: 'integer', minimum: 1, maximum: 92 }
     } }
+  },
+  // « Jarvis doit pouvoir modifier ou supprimer des rendez-vous. » Par leur
+  // numéro (#12), qu'agenda_lire donne : on relit d'abord, puis on touche.
+  {
+    name: 'agenda_modifier',
+    description: 'Corrige un rendez-vous de son agenda : « id » (le numéro #… donné par agenda_lire — relis '
+      + 'd\'abord si tu ne l\'as pas), et seulement ce qui change : « titre », « date » (AAAA-MM-JJ), « heure » '
+      + '(HH:MM, ou "" pour l\'enlever), « fin » (AAAA-MM-JJ, ou "" pour un seul jour). « Décale le dentiste à '
+      + '15 h », « renomme la réunion ». Ne dis jamais que c\'est fait sans l\'avoir appelé.',
+    input_schema: { type: 'object', properties: {
+      id: { type: 'integer' }, titre: { type: 'string' }, date: { type: 'string' }, heure: { type: 'string' },
+      fin: { type: 'string' }
+    }, required: ['id'] }
+  },
+  {
+    name: 'agenda_supprimer',
+    description: 'Retire un rendez-vous de son agenda : « id » (le numéro #… donné par agenda_lire — relis '
+      + 'd\'abord si tu ne l\'as pas). « Annule le dentiste », « supprime la réunion de demain ». S\'il y a '
+      + 'plusieurs candidats, demande lequel avant. Ne dis jamais que c\'est fait sans l\'avoir appelé.',
+    input_schema: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] }
   }
 ];
 
@@ -534,6 +554,14 @@ export const OUTILS_APPLI = [
     }, required: ['action'] }
   },
   {
+    // « Fais en sorte de pouvoir rejouer le résumé sur demande. »
+    name: 'resume_du_jour',
+    description: 'Le résumé de la journée, comme au démarrage du PC : ce qui reste aujourd\'hui, dans l\'ordre, et '
+      + 'le programme affiché sur le panneau LED. « Résume-moi ma journée », « refais le résumé », « qu\'est-ce '
+      + 'qui m\'attend aujourd\'hui ? ». Il rend le texte : dis-le tel quel, sans rien ajouter.',
+    input_schema: { type: 'object', properties: {} }
+  },
+  {
     name: 'reglages_machi',
     description: 'Les réglages de Machi Tool : « lire » (tous ceux que tu peux changer, ou ceux dont la clé contient '
       + '« cle ») ; « changer » (« cle », « valeur ») ; « couleur_appli » : la couleur d\'une appli ou d\'un site dans '
@@ -570,7 +598,7 @@ export function consigneAppli(langue = 'fr', routines = '') {
   if (langue === 'en') {
     return ['MACHI TOOL IS YOURS: you have every right over the app itself — the light strip (tool lumiere), your '
       + 'light routines (routine_lumiere), its settings (reglages_machi), and timers, alarms and stopwatches '
-      + 'running in the background (minuteurs).',
+      + 'running in the background (minuteurs), and the summary of the day (resume_du_jour).',
     '- Routines are habits and running gags. Create one when asked; you may also create one ON YOUR OWN when a '
       + 'habit or a running joke clearly settles in (they say the same thing every night, a joke keeps coming back) '
       + '— at most one per conversation, say so in one sentence, keep it light (chance and pause_min for gags).',
@@ -580,7 +608,7 @@ export function consigneAppli(langue = 'fr', routines = '') {
   }
   return ['MACHI TOOL EST À TOI : tu as tous les droits sur l\'application elle-même — la guirlande (outil lumiere), '
     + 'tes routines de lumière (routine_lumiere), ses réglages (reglages_machi), et les minuteurs, alarmes et '
-    + 'chronomètres qui tournent en fond (minuteurs).',
+    + 'chronomètres qui tournent en fond (minuteurs), et le résumé du jour (resume_du_jour).',
   '- Les routines sont des habitudes et des running gags. Crée-en une quand on te le demande ; tu peux aussi en '
     + 'créer une DE TOI-MÊME quand une habitude ou une blague récurrente s\'installe clairement (la même phrase '
     + 'chaque soir, une blague qui revient) — une par conversation au plus, dis-le en une phrase, reste léger '
@@ -702,7 +730,8 @@ export const OUTIL_NOTE_JOURNEE = {
   }, required: ['note'] }
 };
 
-export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', OUTIL_RETRAIT.name,
+export const OUTILS_LOCAUX = new Set([OUTIL_CLAUDE.name, 'agenda_poser', 'agenda_lire', 'agenda_modifier',
+                                      'agenda_supprimer', OUTIL_RETRAIT.name,
                                       OUTIL_PSY.name, OUTIL_CONVERSATIONS.name, OUTIL_NOTE_JOURNEE.name]);
 
 export function outilsPermis({ ecran = false, navigation = false, spotify = false, onglets = false,

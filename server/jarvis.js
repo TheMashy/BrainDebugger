@@ -449,11 +449,14 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
         try {
           const f = d.nom === OUTIL_CONVERSATIONS.name ? conversations?.lire
             : d.nom === OUTIL_NOTE_JOURNEE.name ? journee?.noter
-            : d.nom === 'agenda_poser' ? agenda?.poser : agenda?.lire;
+            : d.nom === 'agenda_poser' ? agenda?.poser
+            : d.nom === 'agenda_modifier' ? agenda?.modifier
+            : d.nom === 'agenda_supprimer' ? agenda?.supprimer : agenda?.lire;
           if (!f) throw new Error(d.nom === OUTIL_CONVERSATIONS.name ? 'mémoire indisponible'
             : d.nom === OUTIL_NOTE_JOURNEE.name ? 'journal indisponible' : 'agenda indisponible');
           locaux.push({ id: d.id, texte: String(await f(d.entree ?? {})) });
-          if (d.nom === 'agenda_poser') agendaModifie = true;   // Machi Tool relira sa fenêtre Agenda
+          // posé, corrigé ou retiré : Machi Tool relira sa fenêtre Agenda (et son panneau)
+          if (['agenda_poser', 'agenda_modifier', 'agenda_supprimer'].includes(d.nom)) agendaModifie = true;
         } catch (err) {
           locaux.push({ id: d.id, erreur: String(err?.message ?? err).slice(0, 300) });
         }

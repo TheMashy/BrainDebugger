@@ -102,7 +102,7 @@ export function agendaEnTexte({ depuis, jusqua, rendezVous }) {
     return `Rien à l'agenda ${depuis === jusqua ? `le ${jourLisible(depuis)}` : `du ${jourLisible(depuis)} au ${jourLisible(jusqua)}`}.`;
   }
   return `${rendezVous.length} à l'agenda du ${jourLisible(depuis)} au ${jourLisible(jusqua)} :\n`
-    + rendezVous.map(r => `- ${jourLisible(r.date)}${r.heure ? ` à ${r.heure}` : ''} : ${r.label}`
+    + rendezVous.map(r => `- #${r.id} ${jourLisible(r.date)}${r.heure ? ` à ${r.heure}` : ''} : ${r.label}`
                           + `${r.fin ? ` (jusqu'au ${jourLisible(r.fin)})` : ''}`).join('\n');
 }
 

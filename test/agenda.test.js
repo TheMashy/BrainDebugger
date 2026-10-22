@@ -140,3 +140,43 @@ test('un repère dans le futur se pose, et se lit dans l’agenda', () => {
   assert.ok(r.events.some(e => e.label === 'mariage-témoin' && e.date === '2031-06-01'));
   assert.deepEqual(A.lireAgenda({ depuis: '2031-06-01', jours: 1 }, OWNER).rendezVous.map(x => x.label), ['mariage-témoin']);
 });
+
+test('Jarvis corrige et retire un rendez-vous, par son numéro -- jamais un repère « psy »', async () => {
+  // « Jarvis doit pouvoir modifier ou supprimer des rendez-vous »
+  const dentiste = A.poserRendezVous({ titre: 'Dentiste-témoin', date: '2027-05-04', heure: '10:15' }, OWNER).evenement;
+  const reunion = A.poserRendezVous({ titre: 'Réunion-témoin', date: '2027-05-04', heure: '14:30' }, OWNER).evenement;
+  const psy = addEvent({ date: '2027-05-04', label: 'un fait-témoin', genre: 'psy', userId: OWNER });
+  // la lecture donne les numéros : c'est par eux qu'il touche
+  const lu = A.agendaEnTexte(A.lireAgenda({ depuis: '2027-05-04', jours: 1 }, OWNER));
+  assert.match(lu, new RegExp(`#${dentiste.id} .*Dentiste-témoin`));
+  assert.match(lu, new RegExp(`#${reunion.id} .*Réunion-témoin`));
+  const usage = { input_tokens: 10, output_tokens: 5 };
+  const reponses = [
+    { content: [{ type: 'tool_use', id: 'm1', name: 'agenda_modifier', input: { id: dentiste.id, heure: '15:00' } },
+                { type: 'tool_use', id: 's1', name: 'agenda_supprimer', input: { id: reunion.id } },
+                { type: 'tool_use', id: 's2', name: 'agenda_supprimer', input: { id: psy.id } }],
+      stop_reason: 'tool_use', model: 'claude-sonnet-5', usage },
+    { content: [{ type: 'text', text: 'Dentiste à 15 h, réunion annulée.' }], stop_reason: 'end_turn', model: 'claude-sonnet-5', usage }];
+  const appels = [];
+  const client = { messages: { create: async req => { appels.push(JSON.parse(JSON.stringify(req))); return reponses.shift(); } } };
+  // le meme branchement que server/index.js
+  const dep = { client: async () => client, versLeCompagnon: async () => '',
+                agenda: { poser: () => '', lire: () => lu,
+                          modifier: e => A.modifierRendezVous(e.id, Object.fromEntries(['titre', 'date', 'heure', 'fin']
+                            .filter(k => e[k] !== undefined).map(k => [k, e[k]])), OWNER).texte,
+                          supprimer: e => A.retirerRendezVous(e.id, OWNER).texte } };
+  const r = await J.repondreJarvis({ texte: 'décale le dentiste à 15 h et annule la réunion' }, dep);
+  assert.equal(r.texte, 'Dentiste à 15 h, réunion annulée.');
+  assert.equal(r.outils, undefined, 'rien ne part au PC : c’est la base de BrainDebugger');
+  assert.equal(r.agenda_modifie, true, 'Machi Tool relit son agenda (et son panneau)');
+  const resultats = appels[1].messages.at(-1).content;
+  assert.match(resultats.find(x => x.tool_use_id === 'm1').content, /Modifié : « Dentiste-témoin », .* à 15:00/);
+  assert.match(resultats.find(x => x.tool_use_id === 's1').content, /Retiré de l'agenda : « Réunion-témoin »/);
+  assert.equal(resultats.find(x => x.tool_use_id === 's2').is_error, true, 'un repère « psy » : introuvable pour lui');
+  const apres = A.lireAgenda({ depuis: '2027-05-04', jours: 1 }, OWNER).rendezVous;
+  assert.deepEqual(apres.map(x => [x.label, x.heure]), [['Dentiste-témoin', '15:00']]);
+  assert.ok(allEvents(OWNER).some(e => e.id === psy.id), 'le repère « psy » est intact');
+  for (const nom of ['agenda_modifier', 'agenda_supprimer']) {
+    assert.match(appels[0].tools.find(t => t.name === nom).description, /agenda_lire/);
+  }
+});

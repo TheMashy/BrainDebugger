@@ -551,6 +551,10 @@ async function traiter(req, res) {
         // L'AGENDA : les repères « agenda » de BrainDebugger, jamais les « psy ».
         agenda: {
           poser: e => poserRendezVous({ titre: e.titre, date: e.date, heure: e.heure, fin: e.fin }, userId).texte,
+          // corriger, retirer : un repère « agenda » seulement (rendezVousDe), jamais un « psy »
+          modifier: e => modifierRendezVous(e.id, Object.fromEntries(['titre', 'date', 'heure', 'fin']
+            .filter(k => e[k] !== undefined).map(k => [k, e[k]])), userId).texte,
+          supprimer: e => retirerRendezVous(e.id, userId).texte,
           lire: e => agendaEnTexte(lireAgenda({ depuis: e.depuis, jours: e.jours }, userId, jourDans(zoneCourante())))
         },
         // SES CONVERSATIONS PASSÉES : le fil récent avec chaque question, et
