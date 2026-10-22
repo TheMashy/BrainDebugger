@@ -6,7 +6,9 @@ import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
          reprendreLesNuits, reparerLesNotesDites, jourVecu, noterJournee } from './api.js';
-import { attente, cleDeLaRequete, proprietaireDeLaCle, synchroHonoree } from './passerelle.js';
+import { attente, cleDeLaRequete, proprietaireDeLaCle, proprietaireDeLaCleBulle,
+         synchroHonoree } from './passerelle.js';
+import * as BULLE from './bulle-claude.js';
 import * as connecteur from './connecteur.js';
 import { analyser, apercuDe } from './mesures.js';
 import { oublierRythme } from './nuits.js';
@@ -606,6 +608,37 @@ async function traiter(req, res) {
     } catch (err) {
       return json(res, err.statut ?? 400, { error: String(err.message ?? err).slice(0, 200) });
     }
+  }
+
+  /* ---------- LA BULLE DE CLAUDE CODE ----------
+   *
+   * Les crochets d'une session Claude Code dans le cloud posent ici l'étape où
+   * elle en est (POST, clé de la bulle : en-tête X-Machitool-Bulle) ; Machi
+   * Tool vient la lire (GET, clé de la passerelle) pour la bulle du panneau
+   * LED. Voir server/bulle-claude.js. Un BrainDebugger d'avant répond 404.
+   */
+  if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/api/machitool/claude') {
+    if (req.method === 'POST') {
+      const userId = proprietaireDeLaCleBulle(String(req.headers['x-machitool-bulle'] ?? '').trim());
+      if (!userId) return json(res, 401, {
+        error: 'clé de la bulle absente ou inconnue',
+        indice: 'La page Panneau LED de Machi Tool la donne, pour la variable MACHITOOL_BULLE_CLE.'
+      });
+      try {
+        const r = BULLE.poserEtape(userId, await readBody(req));
+        if (r.erreur) return json(res, 400, { error: r.erreur });
+        res.writeHead(204, { 'Cache-Control': 'no-store' });
+        return res.end();
+      } catch (err) {
+        return json(res, 400, { error: String(err.message ?? err).slice(0, 200) });
+      }
+    }
+    const userId = proprietaireDeLaCle(cleDeLaRequete(req, url));
+    if (!userId) return json(res, 401, {
+      error: 'clé absente ou inconnue',
+      indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
+    });
+    return json(res, 200, { sessions: BULLE.lireEtapes(userId) });
   }
 
   /* ---------- UNE NOTE DICTÉE À JARVIS ----------

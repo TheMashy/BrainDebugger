@@ -18,7 +18,7 @@
  * lampe peut porter — une couleur, une note sur dix, un titre de repère. Une
  * guirlande qui montrerait le texte du soir serait une fuite avec un joli nom.
  */
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { db, getSettings, setSettings, OWNER, allEntries, allEvents, getLecture, derniereSynchro } from './db.js';
 import { deltaColor } from '../web/charts.js';
 import { SENS, DEFAUT } from './mood.js';
@@ -109,6 +109,33 @@ export function proprietaireDeLaCle(cle) {
     let v = null;
     try { v = JSON.parse(l.value); } catch { continue; }
     if (memeCle(v, cle)) return l.user_id;
+  }
+  return null;
+}
+
+/**
+ * LA CLÉ DE LA BULLE DE CLAUDE CODE, TIRÉE DE CELLE DE LA PASSERELLE.
+ *
+ * Une session Claude Code dans le cloud la garde dans une variable
+ * d'environnement (MACHITOOL_BULLE_CLE) : elle ne doit rien ouvrir d'autre.
+ * Tirée (HMAC) de la clé de la passerelle, elle ne sert qu'à poser l'étape
+ * d'une session (voir bulle-claude.js) ; Machi Tool la calcule de son côté,
+ * la même, et la montre à recopier.
+ */
+export function cleDeLaBulle(cleDePasserelle) {
+  if (!cleDePasserelle) return '';
+  return createHmac('sha256', String(cleDePasserelle)).update('bulle-claude').digest('hex').slice(0, 32);
+}
+
+export function proprietaireDeLaCleBulle(cle) {
+  if (!cle) return null;
+  const lignes = db.prepare(
+    "SELECT user_id, value FROM settings WHERE key = 'passerelleCle'"
+  ).all();
+  for (const l of lignes) {
+    let v = null;
+    try { v = JSON.parse(l.value); } catch { continue; }
+    if (v && memeCle(cleDeLaBulle(v), cle)) return l.user_id;
   }
   return null;
 }
