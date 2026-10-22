@@ -59,6 +59,9 @@ export function raisonErreurApi(err) {
 }
 
 /** Claude consulté : la demande que Jarvis a écrite, et la réponse complète. */
+export const TOURS_LOCAUX = 5;
+export const CLAUDE_PAR_QUESTION = 2;
+
 export async function consulterClaude(client, demande, langue = 'fr', projets = '') {
   // « Réfléchir sur des idées simples avec un peu de contexte des projets » :
   // ce que Machi Tool sait de ses projets vient avec la demande.
@@ -435,8 +438,11 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
   if (demandes.some(d => d.nom === OUTIL_PSY.name)) {
     return { texte: '', psy: true, consultations, model: r.model ?? JARVIS_MODELE, usage };
   }
-  // Claude consulté : ici, tout de suite ; deux fois au plus par question.
-  for (let tour = 0; tour < 2 && demandes.some(d => OUTILS_LOCAUX.has(d.nom)); tour++) {
+  // Les outils d'ici (l'agenda, sa mémoire, Claude) : jusqu'à TOURS_LOCAUX
+  // tours. « Jarvis ne peut toujours pas retirer de choses dans l'agenda » : à
+  // deux tours, lire, relire puis retirer perdait le retrait, jeté en silence.
+  // Claude consulté, lui : deux fois au plus par question (CLAUDE_PAR_QUESTION).
+  for (let tour = 0; tour < TOURS_LOCAUX && demandes.some(d => OUTILS_LOCAUX.has(d.nom)); tour++) {
     const locaux = [];
     for (const d of demandes.filter(d => OUTILS_LOCAUX.has(d.nom))) {
       if (d.nom === 'se_retirer') {
@@ -460,6 +466,10 @@ export async function demanderAJarvis(client, { texte, historique = [], appellat
         } catch (err) {
           locaux.push({ id: d.id, erreur: String(err?.message ?? err).slice(0, 300) });
         }
+        continue;
+      }
+      if (consultations.length >= CLAUDE_PAR_QUESTION) {
+        locaux.push({ id: d.id, erreur: 'Claude a déjà été consulté deux fois pour cette question : réponds avec ce que tu as.' });
         continue;
       }
       try {

@@ -180,3 +180,26 @@ test('Jarvis corrige et retire un rendez-vous, par son numéro -- jamais un rep�
     assert.match(appels[0].tools.find(t => t.name === nom).description, /agenda_lire/);
   }
 });
+
+test('retirer un rendez-vous en trois tours (lire, relire, retirer) : le retrait n’est pas perdu', async () => {
+  // « Jarvis ne peut toujours pas retirer de choses dans l'agenda » : les outils
+  // internes ne tournaient que deux tours ; le troisième (le retrait) était jeté
+  const kine = A.poserRendezVous({ titre: 'Kiné-trois-tours', date: '2027-06-08', heure: '18:00' }, OWNER).evenement;
+  const usage = { input_tokens: 10, output_tokens: 5 };
+  const outil = (id, name, input) => ({ content: [{ type: 'tool_use', id, name, input }], stop_reason: 'tool_use',
+                                       model: 'claude-sonnet-5', usage });
+  const reponses = [
+    outil('l1', 'agenda_lire', { depuis: '2027-06-07', jours: 1 }),
+    outil('l2', 'agenda_lire', { depuis: '2027-06-08', jours: 1 }),
+    outil('s1', 'agenda_supprimer', { id: kine.id }),
+    { content: [{ type: 'text', text: 'Le kiné est annulé.' }], stop_reason: 'end_turn', model: 'claude-sonnet-5', usage }];
+  const client = { messages: { create: async () => reponses.shift() } };
+  const lire = e => A.agendaEnTexte(A.lireAgenda({ depuis: e.depuis, jours: e.jours }, OWNER));
+  const dep = { client: async () => client, versLeCompagnon: async () => '',
+                agenda: { poser: () => '', lire, modifier: () => '', supprimer: e => A.retirerRendezVous(e.id, OWNER).texte } };
+  const r = await J.repondreJarvis({ texte: 'annule le kiné de mardi' }, dep);
+  assert.equal(r.texte, 'Le kiné est annulé.');
+  assert.equal(r.agenda_modifie, true);
+  assert.ok(!A.lireAgenda({ depuis: '2027-06-08', jours: 1 }, OWNER).rendezVous.some(x => x.id === kine.id),
+            'il est vraiment retiré');
+});
