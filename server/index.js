@@ -288,7 +288,8 @@ async function traiter(req, res) {
       indice: 'Crée-la dans Réglages › La passerelle, puis colle-la dans l’application.'
     });
     try {
-      return json(res, 200, attente(userId, { ambiance: ambiance(userId) }));
+      // la journée VÉCUE : à 1 h du matin, aujourd'hui est encore la veille
+      return json(res, 200, attente(userId, { ambiance: ambiance(userId), aujourdhui: jourVecu(userId) }));
     } catch (err) {
       console.error('[passerelle]', err);
       return json(res, 500, { error: String(err.message ?? err).slice(0, 200) });

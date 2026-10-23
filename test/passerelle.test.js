@@ -144,7 +144,10 @@ test('LE JOURNAL NE PASSE PAS', () => {
   setNote(jour(0), 7, 'journal-fuite');
   const a = P.attente('journal-fuite', { ambiance: { scene: 'brume', force: 1 } });
   assert.deepEqual(Object.keys(a).sort(),
-                   ['humeur', 'jours', 'lecture', 'rappels', 'reperes', 'synchro']);
+                   ['a_noter', 'humeur', 'jours', 'lecture', 'rappels', 'reperes', 'synchro']);
+  // Les journées à noter : des dates, rien d'autre.
+  assert.deepEqual(Object.keys(a.a_noter).sort(), ['aujourdhui', 'aujourdhui_notee', 'jours']);
+  for (const d of a.a_noter.jours) assert.match(d, /^\d{4}-\d{2}-\d{2}$/);
   // `synchro` ne porte que des horodatages : la demande déposée, et ce que le
   // site a reçu en dernier. Rien du journal ne passe par là non plus.
   assert.deepEqual(Object.keys(a.synchro).sort(), ['demande_le', 'recu_le']);
@@ -156,6 +159,26 @@ test('LE JOURNAL NE PASSE PAS', () => {
   // Et rien, nulle part, qui ressemble au texte d'une journée.
   const tout = JSON.stringify(a);
   assert.equal(/"text"|"texte_journal"|"message"|"synthese"/.test(tout), false);
+});
+
+test('les journées pas encore notées : les sept d’avant la journée vécue', () => {
+  // « Rajoute une interface sur le panneau quand des notes ne sont pas encore
+  // posées sur des journées. »
+  setNote('2026-10-20', 6, 'journal-a-noter');
+  setNote('2026-10-17', 4, 'journal-a-noter');
+  setNote('2026-10-10', 8, 'journal-a-noter');          // hors de la semaine : ne compte pas
+  const r = P.aNoterPour('journal-a-noter', '2026-10-23');
+  assert.equal(r.aujourdhui, '2026-10-23');
+  assert.equal(r.aujourdhui_notee, false);
+  assert.deepEqual(r.jours, ['2026-10-22', '2026-10-21', '2026-10-19', '2026-10-18', '2026-10-16']);
+  setNote('2026-10-23', 7, 'journal-a-noter');
+  assert.equal(P.aNoterPour('journal-a-noter', '2026-10-23').aujourdhui_notee, true);
+  // le passage d'un mois, d'une année : des dates, pas des soustractions de chaînes
+  assert.deepEqual(P.aNoterPour('personne', '2026-01-02').jours.slice(0, 3), ['2026-01-01', '2025-12-31', '2025-12-30']);
+  assert.equal(P.aNoterPour('personne', '2026-03-01').jours.length, P.JOURS_A_NOTER);
+  // la journée vécue vient d'index.js : par défaut, celle de l'horloge
+  const a = P.attente('journal-a-noter', { aujourdhui: '2026-10-23' });
+  assert.deepEqual(a.a_noter, P.aNoterPour('journal-a-noter', '2026-10-23'));
 });
 
 test('les journées envoyées sont bornées : une lampe n’a pas besoin de quatre ans', () => {

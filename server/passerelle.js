@@ -186,6 +186,37 @@ export function rappelsPour(userId = OWNER, maintenant = new Date()) {
   return out;
 }
 
+/** Combien de journées, derrière la journée vécue, peuvent encore se rattraper. */
+export const JOURS_A_NOTER = 7;
+
+const decalerJour = (iso, n) => {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * LES JOURNÉES PAS ENCORE NOTÉES, pour le panneau LED de Machi Tool.
+ *
+ * « Rajoute une interface sur le panneau quand des notes ne sont pas encore
+ * posées sur des journées. » Les mêmes que la rangée de Parler (`aNoter`,
+ * api.js) : les sept jours d'avant la journée vécue, sans note — au-delà, on
+ * ne se souvient plus de sa journée. Et si celle d'aujourd'hui l'est : le
+ * soir, c'est l'heure de Machi Tool qui le dit, pas celle du serveur.
+ *
+ * Des DATES, et rien d'autre : ni la note des autres jours, ni un mot du
+ * texte. Un panneau se voit de toute la pièce.
+ */
+export function aNoterPour(userId = OWNER, aujourdhui = jourISO(new Date())) {
+  const notees = new Set(allEntries(userId).filter(e => e.note != null).map(e => e.date));
+  const jours = [];
+  for (let k = 1; k <= JOURS_A_NOTER; k++) {
+    const d = decalerJour(aujourdhui, -k);
+    if (!notees.has(d)) jours.push(d);
+  }
+  return { aujourdhui, aujourdhui_notee: notees.has(aujourdhui), jours };
+}
+
 /**
  * L'HUMEUR DU MOMENT, en une couleur.
  *
@@ -280,7 +311,7 @@ export function synchroHonoree(userId = OWNER) {
   if (getSettings(userId).demandeSynchro) setSettings({ demandeSynchro: null }, userId);
 }
 
-export function attente(userId = OWNER, { ambiance = null, maintenant = new Date() } = {}) {
+export function attente(userId = OWNER, { ambiance = null, maintenant = new Date(), aujourdhui = null } = {}) {
   const l = getLecture(userId);
   return {
     synchro: {
@@ -289,6 +320,7 @@ export function attente(userId = OWNER, { ambiance = null, maintenant = new Date
     },
     humeur: humeurPour(userId, ambiance, maintenant),
     rappels: rappelsPour(userId, maintenant),
+    a_noter: aNoterPour(userId, aujourdhui ?? jourISO(maintenant)),
     jours: joursPour(userId),
     reperes: reperesPour(userId),
     // De quoi savoir si la lampe parle à un journal vivant, sans rien en dire.
