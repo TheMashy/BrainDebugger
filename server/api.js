@@ -13,8 +13,12 @@ import {
   allSeances, addSeance, updateSeance, deleteSeance, motifsEntre,
   toutesMesures, signatureQS, activiteJours, activiteDuJour, derniereSynchro, versionMachiTool, joursEcrits,
   mesuresEntre, poserMesure, normaliserTs,
-  redaterMessages, rebuildEntryText, tousMessagesUtilisateur
+  redaterMessages, rebuildEntryText, tousMessagesUtilisateur,
+  addDemandeNote, demandesDepuis, toutesDemandesNote, repondreDemandeNote
 } from './db.js';
+import { peutDemander, peutDemanderSiBascule, demandeOuverte, formulesRecentes } from './demande-note.js';
+import { PRESETS as PRESETS_KOKORO, PRESET_DEFAUT as PRESET_KOKORO, manque as manqueKokoro, synthetiser, enWav, kokoro as chargerKokoro,
+         fournisseurActif, nomFournisseur, fournisseurs } from './kokoro.js';
 import { usageFor, record as recordUsage, serieUsage, profilUsage, FENETRES,
          coutsParMessage } from './usage.js';
 import { buildSeries, episodes, followUp, yearGrid, streak, indexByDate, addDays, median, medianeLisse, CONTRAST_SATURATION, DEFAULT_ETALON } from './stats.js';
@@ -53,6 +57,7 @@ import { JARVIS_MODELE } from './jarvis.js';
 const { presence, presenceNote } = sessions;
 import { buildIndex, search, tokenize, termesDuDoc } from './search.js';
 import { saillant, poids as poidsMot, lisible } from './lexique.js';
+import { correlations } from './correlations.js';
 // Partage avec le navigateur : le theme d'un repere doit etre le meme des deux
 // cotes, sinon l'icone annoncee n'est pas celle qui s'affiche. Voir l'en-tete
 // de web/reperes.js.
@@ -63,7 +68,7 @@ import { themeDe, ICONES } from '../web/reperes.js';
 import { voies, etendue, estPeriode, finEffective } from '../web/frise.js';
 import { reply, resolveKey, echoBlock, ECHO_CAR, memoryBlock, sommaireBlock, anchorBlock, fenetreBlock, grilleExtrait, bornerPeriode, jalonBlock, motifBlock, carnetBlock, prisesBlock, demanderConsoBlock, posteBlock,
          CARNET_CAR, ANTHROPIC_MODELS, testKey, demanderOutil, optionsDuModele,
-         plafondDuCompagnon } from './chat.js';
+         plafondDuCompagnon, prechaufferAnthropic } from './chat.js';
 // L'heure de celui qui ecrit, pas celle du processus. Voir server/temps.js.
 import { jourLocal, heureLocale, etatDuTemps } from './temps.js';
 import { comparaisons } from './comparer.js';
@@ -2301,6 +2306,49 @@ export const routes = {
   },
 
   /** Les N dernieres journees ecrites, pour donner de la continuite au compagnon. */
+  /*
+   * Appele par la page quand on ouvre « Parler » ou qu'on commence a taper.
+   * Ne rend jamais d'erreur a l'ecran : un prechauffage rate coute un premier
+   * message un peu plus lent, pas un toast.
+   */
+  'POST /api/compagnon/prechauffer': async ({ userId }) => {
+    try { return await prechaufferCompagnon(userId); }
+    catch (err) { return { fait: false, pourquoi: String(err?.message ?? err).slice(0, 200) }; }
+  },
+
+  /*
+   * LA VOIX KOKORO. L'etat dit si elle est installee et ce qui manque ; la
+   * synthese rend une phrase en WAV. Les phrases passent une par une : deux
+   * syntheses en meme temps se partageraient le processeur et la premiere
+   * phrase -- celle qu'on attend -- arriverait plus tard.
+   */
+  'GET /api/voix/kokoro': () => {
+    const m = manqueKokoro();
+    return { disponible: !m.length, manque: m, defaut: PRESET_KOKORO,
+             // Ce qui calcule : connu une fois le modele charge, sinon ce qu'on essaiera.
+             calcul: fournisseurActif ? nomFournisseur(fournisseurActif) : null,
+             essaiera: fournisseurs().map(nomFournisseur),
+             presets: Object.entries(PRESETS_KOKORO).map(([id, p]) => ({ id, nom: p.nom })) };
+  },
+
+  // Charger le modele (une seconde ou deux) quand on ouvre « Parler », pas a
+  // la premiere phrase : sinon c'est la premiere reponse qui paie l'attente.
+  'POST /api/voix/kokoro/charger': async () => {
+    if (manqueKokoro().length) return { charge: false };
+    await chargerKokoro();
+    return { charge: true, calcul: nomFournisseur(fournisseurActif) };
+  },
+
+  'POST /api/voix/kokoro': async ({ body }) => {
+    const texte = String(body.texte ?? '').trim().slice(0, 600);
+    if (!texte) return { error: 'rien à dire' };
+    const preset = PRESETS_KOKORO[body.preset] ? body.preset : PRESET_KOKORO;
+    const multiple = Math.max(0.7, Math.min(1.4, Number(body.debit) || 1));
+    const tour = fileKokoro.then(() => synthetiser(texte, { preset, debit: PRESETS_KOKORO[preset].debit * multiple }));
+    fileKokoro = tour.catch(() => {});
+    return { audio: enWav(await tour), type: 'audio/wav' };
+  },
+
   'GET /api/models': () => ({ models: ANTHROPIC_MODELS, hasEnvKey: !!process.env.ANTHROPIC_API_KEY }),
 
   /** Vérifie la clé sans consommer de jetons (API des modèles, pas de génération). */
@@ -2442,6 +2490,23 @@ export const routes = {
    * cherche ce que la PERSONNE a écrit, jamais les réponses du compagnon.
    */
   'GET /api/chercher': ({ query, userId }) => chercher(query.q ?? '', userId),
+
+  /**
+   * CORRÉLER LE LOG DES JOURNÉES À LEUR NOTE -- la recherche stat « profonde ».
+   *
+   * La recherche rend des jours ; celle-ci rend un LIEN : les mots du log entier
+   * de chaque journée mis en face de la note de ce jour, sur tout le corpus. Les
+   * `rows` sont déjà en cache (c'est `series()` qui les garde) -- rien n'est
+   * recalculé ni relu sur le disque, on ne fait que corréler ce qui est là.
+   *
+   * Tout reste sur la machine : aucune donnée ne sort, c'est du calcul local sur
+   * la base locale.
+   */
+  'GET /api/correle': ({ query, userId }) => {
+    const { rows } = series(userId);
+    const min = Math.max(2, Math.min(30, Number(query?.min) || 4));
+    return correlations(rows, { min, limit: 15 });
+  },
 
   /** Serie compacte pour les courbes : tableaux paralleles, ~5x plus leger que des objets. */
   'GET /api/series': ({ userId }) => {
@@ -4214,7 +4279,10 @@ export const routes = {
     carnet: allCarnet(userId),
     releves: db.prepare('SELECT id, message_id, date, ts, valeur, quoi, source FROM releves WHERE user_id = ? ORDER BY ts, id').all(userId),
     suivis: lesSuivis(userId),
-    objectifs: allObjectifs(userId)
+    objectifs: allObjectifs(userId),
+    // Les chiffres qu'il a donnés quand le compagnon les lui a demandés : à part
+    // de ses notes du soir, comme dans la base.
+    demandesNote: toutesDemandesNote(userId)
   }),
 
   /** La jauge de jetons : ce qu'il reste ce mois-ci, et ce que ça a coûté. */
@@ -4601,6 +4669,68 @@ export function raisonDuRepli(r) {
   return null;
 }
 
+/*
+ * L'INDICATION DU TOUR : CE QUE LE COMPAGNON A LE DROIT DE DEMANDER, MAINTENANT.
+ *
+ * Elle part dans le dernier tour, avec les echos -- jamais dans le systeme, ou
+ * elle invaliderait le cache a chaque message. Deux cas seulement :
+ *   - une question « combien, la ? » serait accordee si une bascule arrivait :
+ *     le compagnon peut alors relever ET demander dans le meme appel, au lieu
+ *     d'enchainer deux allers-retours avant d'ecrire sa premiere lettre ;
+ *   - une question est ouverte : le chiffre qu'il donne se range avec
+ *     noter_moment.
+ * Le reste du temps, rien : une indication negative a chaque tour finirait
+ * par faire de la question un sujet.
+ */
+function indicationDuTour(userId) {
+  const etat = {
+    demandes: demandesDepuis(new Date(Date.now() - 48 * 3600_000).toISOString(), userId),
+    releves: relevesDuJour(today(), userId),
+    date: today()
+  };
+  if (demandeOuverte(etat.demandes, etat.date)) {
+    return "INDICATION DU TOUR — Tu lui as demandé son chiffre juste avant. S'il en donne un, range-le avec noter_moment.";
+  }
+  if (peutDemanderSiBascule(etat).ok) {
+    const f = formulesRecentes(etat.demandes);
+    return 'INDICATION DU TOUR — La question est ouverte : si tu relèves une bascule à ce tour, tu peux lui demander '
+      + 'son chiffre (relever_humeur et demander_note dans le même tour).'
+      + (f.length ? ` Pas avec ces mots-là : ${f.map(x => `« ${x} »`).join(', ')}.` : '');
+  }
+  return null;
+}
+
+/*
+ * QUAND LE COMPAGNON A PARLE POUR LA DERNIERE FOIS, PAR PERSONNE.
+ *
+ * Sert au prechauffage : un cache se garde cinq minutes et chaque lecture le
+ * prolonge. Tant qu'on parle, la conversation le tient chaud toute seule, et
+ * un prechauffage ne serait qu'une ecriture de plus a payer. En memoire et pas
+ * en base : apres un redemarrage le cache est froid de toute facon.
+ */
+const dernierAppelCompagnon = new Map();
+/** La file des syntheses Kokoro : une phrase a la fois, dans l'ordre d'arrivee. */
+let fileKokoro = Promise.resolve();
+export const PRECHAUFFE_APRES_MS = 4 * 60_000;
+
+export async function prechaufferCompagnon(userId = OWNER, maintenant = Date.now()) {
+  const settings = getSettings(userId);
+  if (settings.chatBackend !== 'anthropic') return { fait: false, pourquoi: 'pas de modèle distant' };
+  if (usageFor(userId).exhausted) return { fait: false, pourquoi: 'enveloppe épuisée' };
+  const dernier = dernierAppelCompagnon.get(userId) ?? 0;
+  if (maintenant - dernier < PRECHAUFFE_APRES_MS) return { fait: false, pourquoi: 'déjà chaud' };
+  // On le note AVANT l'appel : deux onglets qui s'ouvrent ensemble ne doivent
+  // pas payer deux ecritures.
+  dernierAppelCompagnon.set(userId, maintenant);
+  const memoire = recentMemory(jourVecu(userId), userId, null);
+  // `chauffe` et pas `r` : ce n'est pas une réponse du compagnon, elle n'a
+  // aucun message auquel attacher sa dépense (voir cout-par-message.test.js).
+  const chauffe = await prechaufferAnthropic(settings, { memory: memoire.stable, outils: outilsPour(userId, null) });
+  const u = chauffe.usage;
+  recordUsage(userId, chauffe.model, u.input, u.output, u.cacheLu, u.cacheEcrit, 'chat');
+  return { fait: true, cacheEcrit: u.cacheEcrit, cacheLu: u.cacheLu };
+}
+
 export async function streamMessage(body, send, userId = OWNER) {
   const pieces = piecesDe(body);
   let text = String(body.text ?? '').trim();
@@ -4659,9 +4789,11 @@ export async function streamMessage(body, send, userId = OWNER) {
   // reste de la memoire, parce qu'ils changent a chaque phrase et que le reste
   // tient la journee (voir `recentMemory`).
   const memoire = recentMemory(date, userId, text);
+  dernierAppelCompagnon.set(userId, Date.now());
+  const indication = indicationDuTour(userId);
   const r = await reply(history, settings, {
     memory: memoire.stable,
-    echos: memoire.echos,
+    echos: [memoire.echos, indication].filter(Boolean).join('\n\n---\n\n') || null,
     blocsMemoire: memoire.tailles,
     onText: chunk => send('delta', { text: chunk }),
     onPense: chunk => send('pense', { text: chunk }),
@@ -4732,6 +4864,17 @@ export async function streamMessage(body, send, userId = OWNER) {
  * corriger -- c'est pour ca qu'il rend une phrase et pas un code d'erreur.
  */
 export function outilsPour(userId, messageId, send = () => {}) {
+  // Les questions « combien, là ? » des dernières 48 h et les relevés du jour :
+  // tout ce dont `peutDemander` a besoin pour trancher.
+  const etatDemandes = () => ({
+    demandes: demandesDepuis(new Date(Date.now() - 48 * 3600_000).toISOString(), userId),
+    releves: relevesDuJour(today(), userId),
+    date: today()
+  });
+  const rappelFormules = () => {
+    const f = formulesRecentes(etatDemandes().demandes);
+    return f.length ? ` Formule-la autrement que : ${f.map(x => `« ${x} »`).join(', ')}.` : '';
+  };
   return {
     poser_repere: ({ date, label }) => {
       const d = String(date ?? '').trim();
@@ -4888,7 +5031,54 @@ export function outilsPour(userId, messageId, send = () => {}) {
         return { erreur: 'Assez de relevés pour aujourd\'hui.' };
       }
       const r = addReleve({ messageId, date: today(), valeur: v, quoi: q, userId });
-      return { message: `Relevé posé (${v}/10). N'en parle pas.`, fait: null, silencieux: true, r };
+      /*
+       * LE RELEVÉ PEUT OUVRIR UNE QUESTION -- PARFOIS.
+       *
+       * C'est le seul moment où le compagnon apprend qu'il a le droit de
+       * demander son chiffre à la personne : juste après une bascule, et
+       * seulement si `peutDemander` l'accorde. Le reste du temps, la phrase
+       * qu'il reçoit ne dit rien de la question, pour ne pas la lui souffler.
+       */
+      const verdict = peutDemander(etatDemandes());
+      const suite = verdict.ok
+        ? ` Tu PEUX, si ça vient naturellement, lui demander où il en est lui-même, de 0 à 10 : appelle d'abord demander_note avec ta question.${rappelFormules()}`
+        : '';
+      return { message: `Relevé posé (${v}/10). N'en parle pas.${suite}`, fait: null, silencieux: true, r };
+    },
+
+    /*
+     * DEMANDER SON CHIFFRE, AU LIEU DE LE DEVINER.
+     *
+     * Le compagnon annonce ici la question qu'il va poser, AVANT de l'écrire.
+     * Le code a le dernier mot : sans bascule récente, trop tôt, trop souvent,
+     * ou après une question restée sans réponse, c'est non -- et il ne la pose
+     * pas. La formule est gardée pour qu'il ne répète jamais la même.
+     */
+    demander_note: ({ formule }) => {
+      const f = String(formule ?? '').trim().replace(/\s+/g, ' ');
+      if (f.length < 6) return { erreur: 'Écris la question telle que tu vas la poser.' };
+      const verdict = peutDemander(etatDemandes());
+      if (!verdict.ok) return { erreur: `Pas maintenant (${verdict.pourquoi}). Ne pose pas la question, continue la conversation.` };
+      const recentes = formulesRecentes(etatDemandes().demandes).map(x => x.toLowerCase());
+      if (recentes.includes(f.toLowerCase())) return { erreur: `Tu l'as déjà formulée exactement comme ça. Dis-le autrement.${rappelFormules()}` };
+      addDemandeNote({ messageId, date: today(), formule: f, userId });
+      return { message: 'Tu peux la poser. Une seule fois, en passant ; s\'il ne répond pas, tu laisses.', silencieux: true };
+    },
+
+    /*
+     * SA RÉPONSE, ET SEULEMENT SA RÉPONSE.
+     *
+     * N'écrit que si une question est ouverte : le compagnon ne peut pas
+     * « enregistrer » un chiffre qu'on ne lui a pas donné. Ce n'est ni sa note
+     * du soir ni un relevé -- c'est sa parole à cet instant, rangée à part.
+     */
+    noter_moment: ({ valeur }) => {
+      const v = Number(valeur);
+      if (!Number.isInteger(v) || v < 0 || v > 10) return { erreur: 'La valeur est un entier de 0 à 10, celui qu\'il a donné.' };
+      const ouverte = demandeOuverte(etatDemandes().demandes, today());
+      if (!ouverte) return { erreur: "Aucune question ouverte : n'enregistre que le chiffre qu'il donne en réponse à demander_note." };
+      repondreDemandeNote(ouverte.id, v, userId);
+      return { message: `Noté (${v}/10), à part de sa note du soir. Ne commente pas le chiffre.`, silencieux: true };
     },
 
     ranger_notes: ({ jour, quand }) => {
