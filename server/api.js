@@ -115,6 +115,65 @@ function prisesDe(userId = OWNER) {
                           suivis: lesSuivis(userId) });
   return _prises.get(userId);
 }
+/**
+ * PRÉCHAUFFER LES JOURNAUX DES PERSONNES VUES CES SEPT DERNIERS JOURS.
+ *
+ * Appelé une fois au démarrage, avant toute requête : la série, les écarts de
+ * « Moi » et les prises sont les trois calculs que l'ouverture paie à froid.
+ * Borné aux personnes récentes — préchauffer un compte abandonné depuis un an
+ * coûterait du démarrage pour personne.
+ */
+export async function prechaufferMemoires({ jours = 7, max = 20 } = {}) {
+  const depuis = new Date(Date.now() - jours * 86400000).toISOString();
+  const ids = new Set([OWNER]);
+  try {
+    for (const r of db.prepare('SELECT id FROM users WHERE seen_at >= ? ORDER BY seen_at DESC LIMIT ?').all(depuis, max)) ids.add(r.id);
+  } catch { /* pas de table users : la machine n'a que son propriétaire */ }
+  /* UNE ÉTAPE À LA FOIS, ET LA MAIN RENDUE ENTRE CHAQUE. Chaque calcul est
+     synchrone ; enchaînés d'un bloc, ils retenaient toute requête arrivée
+     pendant ce temps — y compris la vérification de santé de l'hébergeur.
+     `setImmediate` laisse passer ce qui attend avant l'étape suivante. */
+  const souffler = () => new Promise(r => setImmediate(r));
+  let n = 0;
+  for (const u of ids) {
+    if (!db.prepare('SELECT 1 FROM entries WHERE user_id = ? LIMIT 1').get(u)) continue;
+    for (const etape of [series, ecartsDe, prisesDe, x => fonctionnementsDe(x, 180)]) { await souffler(); etape(u); }
+    n++;
+  }
+  return n;
+}
+
+/*
+ * LES FONCTIONNEMENTS, MÉMOÏSÉS SUR CE QU'ILS LISENT.
+ *
+ * Deux cents millisecondes de calcul à chaque ouverture de « Ma carte », sur
+ * le fil du serveur : les deux autres routes de la page attendaient derrière.
+ * Le calcul lit les journées, les messages (pour la veille), les mesures, les
+ * digests de Machi Tool et les réglages (le rythme). La clé est faite de
+ * sommes sur ces cinq tables — un ajout, une correction, une suppression les
+ * déplace — plus le jour courant, puisqu'une fenêtre sans fin explicite
+ * s'arrête aujourd'hui. Pas d'invalidation à ne pas oublier : la clé suffit.
+ */
+const _fonct = new Map();
+function cleFonctionnements(userId, jours) {
+  const un = sql => JSON.stringify(db.prepare(sql).get(userId));
+  return [jours, today(),
+    un('SELECT COUNT(*) n, MAX(date) d, TOTAL(note * julianday(date)) s, TOTAL(LENGTH(text)) l FROM entries WHERE user_id = ?'),
+    un('SELECT COUNT(*) n, MAX(id) m, TOTAL(LENGTH(text)) l, TOTAL(id * LENGTH(text)) il, TOTAL(COALESCE(rangee, 0)) r FROM messages WHERE user_id = ?'),
+    un('SELECT COUNT(*) n, MAX(recu_le) d, TOTAL(valeur) v FROM mesures WHERE user_id = ?'),
+    un('SELECT COUNT(*) n, MAX(recu_le) d, TOTAL(LENGTH(digest)) l FROM activite_jours WHERE user_id = ?'),
+    JSON.stringify(getSettings(userId))].join('|');
+}
+function fonctionnementsDe(userId = OWNER, jours = 180) {
+  const cle = cleFonctionnements(userId, jours);
+  const k = `${userId}|${jours}`;
+  const vu = _fonct.get(k);
+  if (vu?.cle === cle) return vu.res;
+  const res = fonctionnements(userId, { jours });
+  _fonct.set(k, { cle, res });
+  return res;
+}
+
 function series(userId = OWNER) {
   if (!_cache.has(userId)) {
     const rows = allEntries(userId);
@@ -3855,7 +3914,7 @@ export const routes = {
 
   'GET /api/fonctionnements': ({ query, userId }) => {
     const jours = Math.max(60, Math.min(730, parseInt(query.jours ?? '180', 10) || 180));
-    return fonctionnements(userId, { jours });
+    return fonctionnementsDe(userId, jours);
   },
 
   /*

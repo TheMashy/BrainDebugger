@@ -108,3 +108,37 @@ test('le fil et les messages d’un jour se lisent par index, sans tri temporair
     assert.doesNotMatch(plan, /TEMP B-TREE/, plan);
   }
 });
+
+/* ============ LE DÉMARRAGE SUR CHROME ============ */
+
+test('le fond compile une scène à la fois, jamais les dix ensemble', async () => {
+  const { SCENES, SCENE_IDS } = await import('../web/scenes.js');
+  const { readFileSync } = await import('node:fs');
+  const amb = readFileSync(new URL('../web/ambiance.js', import.meta.url), 'utf8');
+  assert.deepEqual(Object.keys(SCENES).sort(), [...SCENE_IDS].sort());
+  for (const id of SCENE_IDS) {
+    const src = SCENES[id];
+    assert.match(src, new RegExp(`vec3\\s+scene_${id}\\s*\\(`), `${id} définit sa scène`);
+    assert.ok(src.length < 8000, `${id} : ${src.length} signes — une scène seule doit rester petite`);
+    for (const autre of SCENE_IDS.filter(x => x !== id))
+      assert.doesNotMatch(src, new RegExp(`\\bscene_${autre}\\b`), `${id} ne doit pas embarquer ${autre}`);
+  }
+  assert.doesNotMatch(amb, /SCENES_GLSL|sceneAt\(/, 'plus de shader unique ni de répartiteur');
+  assert.match(amb, /KHR_parallel_shader_compile/, 'la compilation part en fond quand le navigateur le permet');
+  assert.match(amb, /COMPLETION_STATUS_KHR/, 'et on ne lit le statut qu’une fois la compilation finie');
+});
+
+test('les fonctionnements sont mémoïsés, et un message les fait recalculer', async () => {
+  const { addMessage } = await import('../server/db.js');
+  const r = p => api.routes['GET /api/fonctionnements']({ userId: OWNER, query: p });
+  const a = r({}), b = r({});
+  assert.equal(a, b, 'deux ouvertures de suite rendent le même objet');
+  assert.notEqual(r({ jours: '90' }), a, 'une autre fenêtre est un autre calcul');
+  addMessage({ ts: '2025-03-10T20:00:00.000Z', date: '2025-03-10', role: 'user', text: 'une journée de plus', userId: OWNER });
+  assert.notEqual(r({}), a, 'un message ajouté change la clé');
+});
+
+test('le préchauffage des journaux tourne sans bloquer, et rend la main', async () => {
+  const n = await api.prechaufferMemoires();
+  assert.ok(n >= 1, 'le journal du propriétaire est préchauffé');
+});

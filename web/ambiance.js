@@ -20,7 +20,7 @@
  * Aucune dépendance : WebGL 1, GLSL ES 1.00, un quad plein écran.
  */
 
-import { SCENES_GLSL, SCENE_IDS } from './scenes.js';
+import { SCENES, SCENE_IDS } from './scenes.js';
 
 /* Les aides communes à toutes les scènes. Elles sont ici et pas dans les
    fichiers de scène : deux définitions du même `fbm` ne compilent pas. */
@@ -29,9 +29,6 @@ precision highp float;
 
 uniform vec2  uRes;
 uniform float uTime;
-uniform int   uA;
-uniform int   uB;
-uniform float uMix;
 uniform float uEnergy;
 
 float hash11(float p) {
@@ -69,25 +66,27 @@ float smin(float a, float b, float k) {
 }
 `;
 
-/* Le répartiteur. Une chaîne de `if` sur un uniform entier : le branchement est
-   uniforme sur tout l'écran, donc le GPU n'en exécute qu'une seule. */
-function dispatcher(ids) {
-  const branches = ids
-    .map((id, i) => `  if (n == ${i}) return scene_${id}(uv, t, e);`)
-    .join('\n');
-  return `
-vec3 sceneAt(int n, vec2 uv, float t, float e) {
-${branches}
-  return vec3(0.0);
-}
-
+/*
+ * UN PROGRAMME PAR SCÈNE, PLUS DE RÉPARTITEUR.
+ *
+ * Les dix scènes étaient compilées ensemble, derrière une chaîne de `if` sur
+ * un uniform : un seul shader de 58 ko. Sur Chrome/Windows, ANGLE le traduit
+ * pour Direct3D en dépliant chaque branche, et la compilation se compte alors
+ * en secondes — page figée à l'ouverture, et parfois le processus GPU qui
+ * tombe (le chien de garde de Windows coupe ce qui tient la carte trop
+ * longtemps), Chrome avec lui. Une seule scène est à l'écran : on ne compile
+ * qu'elle (2 à 4 ko), et la suivante seulement quand on y va.
+ *
+ * Le fondu ne mélange plus deux scènes dans le même pixel : on peint l'une,
+ * puis l'autre par-dessus avec une opacité constante (`blendColor`). Le
+ * traitement final (gain, voile central, plafond, grain) est appliqué à
+ * chacune ; le plafond étant le même des deux côtés, le mélange reste dessous.
+ */
+function sourceDe(id) {
+  return PREAMBULE + SCENES[id] + `
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
-  vec3 a = sceneAt(uA, uv, uTime, uEnergy);
-  vec3 c = a;
-  // On n'évalue la seconde scène que pendant la transition : hors fondu, ça
-  // doublerait le coût du pixel pour rien.
-  if (uMix > 0.001) c = mix(a, sceneAt(uB, uv, uTime, uEnergy), uMix);
+  vec3 c = scene_${id}(uv, uTime, uEnergy);
 
   // Les scenes sont ecrites tres sombres par contrat (0.28 maximum). Telles
   // quelles, derriere l'interface, elles ne se voyaient tout simplement pas :
@@ -158,11 +157,11 @@ function ecrireMemo(raison) {
 function oublierMemo() { try { localStorage.removeItem(MEMO); } catch { /* idem */ } }
 
 export const Ambiance = {
-  gl: null, prog: null, u: {}, canvas: null,
+  gl: null, progs: new Map(), canvas: null, parallele: null,
   coupe: false, raison: null,
   a: 0, b: 0, mixDebut: 0, enFondu: false,
   energie: 0.35, cibleEnergie: 0.35,
-  t0: 0, raf: null, actif: false,
+  t0: 0, raf: null, actif: false, peint: false,
 
   /** @returns {boolean} false si WebGL est indisponible — l'app marche sans. */
   start({ forcer = false } = {}) {
@@ -197,23 +196,22 @@ export const Ambiance = {
       this.couper('la carte graphique a été réinitialisée', true);
     });
 
-    const src = PREAMBULE + SCENES_GLSL + dispatcher(SCENE_IDS);
-    const prog = compile(gl, VERT, src);
-    if (!prog) { c.remove(); return false; }
+    // Compilation EN FOND quand le navigateur sait le faire : la page ne
+    // s'arrête pas le temps que la carte graphique digère le shader.
+    this.parallele = gl.getExtension('KHR_parallel_shader_compile');
 
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, 'aPos');
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
 
-    gl.useProgram(prog);
-    for (const n of ['uRes', 'uTime', 'uA', 'uB', 'uMix', 'uEnergy']) {
-      this.u[n] = gl.getUniformLocation(prog, n);
-    }
+    this.gl = gl;
+    // La scène de départ, lancée tout de suite ; elle sera dessinée dès prête.
+    if (!this.programme(this.a)) { c.remove(); this.gl = null; return false; }
 
-    this.gl = gl; this.prog = prog; this.canvas = c;
+    this.canvas = c;
     this.t0 = performance.now();
     this.resize();
     addEventListener('resize', () => this.resize(), { passive: true });
@@ -246,14 +244,47 @@ export const Ambiance = {
     if (energie !== undefined && energie !== null) this.cibleEnergie = energie;
     const n = SCENE_IDS.indexOf(sceneId);
     if (n < 0 || !this.gl) return;
+    // Rien n'est encore à l'écran : on va droit à la bonne scène. Fondre depuis
+    // la scène par défaut obligerait à en compiler deux au démarrage pour un
+    // fondu que personne n'a vu commencer.
+    if (!this.peint) { this.a = n; this.enFondu = false; this.programme(n); return; }
     const courante = this.enFondu ? this.b : this.a;
     if (n === courante) return;
     // Un fondu en cours : on repart de l'image telle qu'elle est maintenant
     // plutôt que de sauter à sa destination.
     if (this.enFondu) this.a = courante;
     this.b = n;
-    this.mixDebut = performance.now();
+    this.programme(n);              // compilée pendant qu'on attend le fondu
+    this.mixDebut = null;           // le fondu part quand elle est prête
     this.enFondu = true;
+  },
+
+  /**
+   * Le programme d'une scène, compilé au premier besoin. Rend l'entrée (prête
+   * ou en cours), ou null si la scène ne compile pas — alors le fond se coupe,
+   * comme avant quand le shader unique était refusé.
+   */
+  programme(n) {
+    if (this.progs.has(n)) return this.progs.get(n);
+    const id = SCENE_IDS[n];
+    const p = id && SCENES[id] ? lancer(this.gl, VERT, sourceDe(id)) : null;
+    if (!p) { this.couper?.('le fond animé ne compile pas sur cet appareil'); return null; }
+    const e = { prog: p.prog, v: p.v, f: p.f, pret: false, u: {} };
+    this.progs.set(n, e);
+    return e;
+  },
+
+  /** Prête à dessiner ? Vérifie sans bloquer quand la compilation est en fond. */
+  pret(n) {
+    const e = this.progs.get(n);
+    if (!e) return false;
+    if (e.pret) return true;
+    const gl = this.gl;
+    if (this.parallele && !gl.getProgramParameter(e.prog, this.parallele.COMPLETION_STATUS_KHR)) return false;
+    if (!finir(gl, e)) { this.progs.delete(n); this.couper('le fond animé ne compile pas sur cet appareil'); return false; }
+    for (const k of ['uRes', 'uTime', 'uEnergy']) e.u[k] = gl.getUniformLocation(e.prog, k);
+    e.pret = true;
+    return true;
   },
 
   pause() { if (this.raf) { cancelAnimationFrame(this.raf); this.raf = null; } this.actif = false; },
@@ -287,49 +318,67 @@ export const Ambiance = {
 
   frame(now) {
     const gl = this.gl;
+    // Rien n'est peint tant que la scène n'est pas prête : le fond reste noir
+    // une fraction de seconde, la page, elle, n'attend pas.
+    if (!this.pret(this.a)) return;
     let m = 0;
     if (this.enFondu) {
-      m = Math.min(1, (now - this.mixDebut) / DUREE_FONDU);
-      // Courbe douce aux deux bouts : un fondu linéaire se voit démarrer.
-      m = m * m * (3.0 - 2.0 * m);
-      if (m >= 1) { this.a = this.b; this.enFondu = false; m = 0; }
+      if (!this.pret(this.b)) { this.mixDebut = null; }
+      else {
+        this.mixDebut ??= now;
+        m = Math.min(1, (now - this.mixDebut) / DUREE_FONDU);
+        // Courbe douce aux deux bouts : un fondu linéaire se voit démarrer.
+        m = m * m * (3.0 - 2.0 * m);
+        if (m >= 1) { this.a = this.b; this.enFondu = false; m = 0; }
+      }
     }
     // L'énergie glisse elle aussi : elle change avec la note, et une note posée
     // ne doit pas faire bondir le fond.
     this.energie += (this.cibleEnergie - this.energie) * 0.02;
 
-    gl.uniform2f(this.u.uRes, this.canvas.width, this.canvas.height);
-    gl.uniform1f(this.u.uTime, (now - this.t0) / 1000);
-    gl.uniform1i(this.u.uA, this.a);
-    gl.uniform1i(this.u.uB, this.enFondu ? this.b : this.a);
-    gl.uniform1f(this.u.uMix, m);
-    gl.uniform1f(this.u.uEnergy, this.energie);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const peindre = (n, alpha) => {
+      const e = this.progs.get(n);
+      gl.useProgram(e.prog);
+      gl.uniform2f(e.u.uRes, this.canvas.width, this.canvas.height);
+      gl.uniform1f(e.u.uTime, (now - this.t0) / 1000);
+      gl.uniform1f(e.u.uEnergy, this.energie);
+      if (alpha < 1) { gl.enable(gl.BLEND); gl.blendColor(0, 0, 0, alpha); }
+      else gl.disable(gl.BLEND);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    peindre(this.a, 1);
+    this.peint = true;
+    // La seconde scène n'est peinte que pendant la transition : hors fondu,
+    // ça doublerait le coût du pixel pour rien.
+    if (m > 0.001) peindre(this.b, m);
   }
 };
 
-function compile(gl, vsrc, fsrc) {
-  const sh = (type, src) => {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      // On journalise et on renonce : un fond absent est sans conséquence,
-      // une page blanche ne l'est pas.
-      console.warn('[ambiance] shader refusé :', gl.getShaderInfoLog(s));
-      return null;
-    }
-    return s;
-  };
+/*
+ * Compiler en deux temps. `lancer` envoie les sources et l'édition de liens
+ * SANS lire le résultat : lire un statut force le navigateur à attendre la fin
+ * de la compilation, et c'est cette attente qui figeait la page. `finir` lit
+ * le statut une fois la compilation terminée (ou tout de suite si le
+ * navigateur ne sait pas compiler en fond).
+ */
+function lancer(gl, vsrc, fsrc) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
   const v = sh(gl.VERTEX_SHADER, vsrc);
   const f = sh(gl.FRAGMENT_SHADER, fsrc);
-  if (!v || !f) return null;
-  const p = gl.createProgram();
-  gl.attachShader(p, v); gl.attachShader(p, f);
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    console.warn('[ambiance] édition de liens refusée :', gl.getProgramInfoLog(p));
-    return null;
+  const prog = gl.createProgram();
+  gl.attachShader(prog, v); gl.attachShader(prog, f);
+  gl.bindAttribLocation(prog, 0, 'aPos');
+  gl.linkProgram(prog);
+  return { prog, v, f };
+}
+
+function finir(gl, e) {
+  if (gl.getProgramParameter(e.prog, gl.LINK_STATUS)) return true;
+  // On journalise et on renonce : un fond absent est sans conséquence,
+  // une page blanche ne l'est pas.
+  for (const s of [e.v, e.f]) {
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.warn('[ambiance] shader refusé :', gl.getShaderInfoLog(s));
   }
-  return p;
+  console.warn('[ambiance] édition de liens refusée :', gl.getProgramInfoLog(e.prog));
+  return false;
 }

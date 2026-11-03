@@ -1,12 +1,14 @@
 import { PLATFORM } from './preflight.js';     // en premier : contrôle de version de Node
 import { createServer } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
-import { gzipSync, brotliCompressSync, constants as ZLIB } from 'node:zlib';
-import { readFile, stat } from 'node:fs/promises';
+import { gzip, brotliCompress, constants as ZLIB } from 'node:zlib';
+import { promisify } from 'node:util';
+import { readFile, stat, readdir } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { routes, streamMessage, retisser, ambiance, recalerSurBornes,
-         reprendreLesNuits, reparerLesNotesDites, jourVecu, noterJournee } from './api.js';
+         reprendreLesNuits, reparerLesNotesDites, jourVecu, noterJournee,
+         prechaufferMemoires } from './api.js';
 import { attente, cleDeLaRequete, proprietaireDeLaCle, proprietaireDeLaCleBulle,
          synchroHonoree } from './passerelle.js';
 import * as BULLE from './bulle-claude.js';
@@ -120,22 +122,53 @@ const MIME = {
  */
 const SERVIS = new Map();
 const TEXTE = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest']);
+const gzipA = promisify(gzip), brotliA = promisify(brotliCompress);
+/* Une préparation en cours est partagée : vingt requêtes qui arrivent ensemble
+   pour le même fichier n'en lancent qu'une. */
+const EN_COURS = new Map();
 
+/*
+ * ET LA COMPRESSION NE BLOQUE PLUS LE SERVEUR.
+ *
+ * Elle était synchrone : au premier passage après un déploiement, les
+ * vingt-trois fichiers se compressaient l'un après l'autre SUR LE FIL du
+ * serveur — un tiers de seconde où plus rien ne répondait, ni les fichiers
+ * suivants ni l'API. Mesuré : des modules à 900 ms et les deux premières
+ * routes de « Ma carte » à une seconde. En asynchrone, zlib travaille sur ses
+ * propres fils et le serveur continue de répondre ; et `prechauffer()` fait
+ * tout ce travail au démarrage, avant que quiconque ouvre la page.
+ */
 async function fichierServi(file, s) {
   const vu = SERVIS.get(file);
   if (vu && vu.taille === s.size && vu.date === s.mtimeMs) return vu;
-  const brut = await readFile(file);
-  const etag = `"${createHash('sha1').update(brut).digest('base64url').slice(0, 22)}"`;
-  const texte = TEXTE.has(extname(file)) && brut.length > 1024;
-  const f = {
-    taille: s.size, date: s.mtimeMs, etag, brut,
-    gz: texte ? gzipSync(brut, { level: 9 }) : null,
-    // Brotli à 9 et pas à 11 : 11 coûte des secondes sur `app.js` pour
-    // quelques pour cent de plus, payés à chaque déploiement.
-    br: texte ? brotliCompressSync(brut, { params: { [ZLIB.BROTLI_PARAM_QUALITY]: 9 } }) : null
-  };
-  SERVIS.set(file, f);
-  return f;
+  const cle = `${file}|${s.size}|${s.mtimeMs}`;
+  if (!EN_COURS.has(cle)) {
+    EN_COURS.set(cle, (async () => {
+      const brut = await readFile(file);
+      const etag = `"${createHash('sha1').update(brut).digest('base64url').slice(0, 22)}"`;
+      const texte = TEXTE.has(extname(file)) && brut.length > 1024;
+      const [gz, br] = texte ? await Promise.all([
+        gzipA(brut, { level: 9 }),
+        // Brotli à 9 et pas à 11 : 11 coûte des secondes sur `app.js` pour
+        // quelques pour cent de plus, payés à chaque déploiement.
+        brotliA(brut, { params: { [ZLIB.BROTLI_PARAM_QUALITY]: 9 } })
+      ]) : [null, null];
+      const f = { taille: s.size, date: s.mtimeMs, etag, brut, gz, br };
+      SERVIS.set(file, f);
+      return f;
+    })().finally(() => EN_COURS.delete(cle)));
+  }
+  return EN_COURS.get(cle);
+}
+
+/** Tout le site préparé d'avance, en arrière-plan, dès que le serveur écoute. */
+async function prechaufferFichiers() {
+  const t0 = Date.now();
+  const noms = (await readdir(WEB, { recursive: true, withFileTypes: true }))
+    .filter(d => d.isFile() && TEXTE.has(extname(d.name)))
+    .map(d => join(d.parentPath ?? d.path, d.name));
+  await Promise.all(noms.map(async f => { try { await fichierServi(f, await stat(f)); } catch { /* fichier parti */ } }));
+  return { n: noms.length, ms: Date.now() - t0 };
 }
 
 function json(res, code, payload) {
@@ -1099,6 +1132,21 @@ server.listen(PORT, HOST, () => {
   santé       /healthz
   ─────────────────────────────────────────
 `);
+  /*
+   * LE PREMIER QUI OUVRE LA PAGE APRÈS UN DÉPLOIEMENT NE PAIE RIEN.
+   *
+   * Les fichiers se compressent, et les calculs mémoïsés des personnes vues
+   * récemment (la série, les prises — un quart de seconde sur un gros
+   * journal) se font maintenant, pendant que personne n'attend. Sans ça, la
+   * première ouverture les payait tous, d'un coup, en file derrière les autres.
+   */
+  prechaufferFichiers()
+    .then(r => console.log(`  préchauffé  ${r.n} fichiers en ${r.ms} ms`))
+    .catch(e => console.log(`  préchauffage des fichiers ignoré : ${e.message}`));
+  const t0 = Date.now();
+  prechaufferMemoires()
+    .then(n => console.log(`  préchauffé  ${n} journal${n > 1 ? 'aux' : ''} en ${Date.now() - t0} ms`))
+    .catch(e => console.log(`  préchauffage des journaux ignoré : ${e.message}`));
   if (!local && !process.env.BD_DB) {
     console.warn('  ATTENTION : BD_DB non défini. La base vit dans le conteneur\n' +
                  '  et sera PERDUE au prochain déploiement. Monte un volume et\n' +
