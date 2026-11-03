@@ -5016,3 +5016,15 @@ details.jpecol .jpetop { margin-top: 5px; }
 }
 .voixmode button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); border-color: var(--accent-dk); }
 .voixmode button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* RAPPORTER UNE CONVERSATION : l'aperçu avant écriture. */
+.convapercu { border-top: 1px solid var(--line-soft); margin-top: 14px; padding-top: 14px; }
+.convliste { display: flex; flex-direction: column; max-height: 280px; overflow-y: auto; margin-bottom: 12px; }
+.convligne { display: grid; grid-template-columns: 124px 110px minmax(0, 1fr); gap: 10px; align-items: baseline;
+  padding: 6px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+.convligne b { font-weight: 500; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.convligne.moi b { color: var(--accent); }
+.convligne .convtexte { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.convligne.doublon { opacity: .4; }
+.convligne .mono { font-size: 11.5px; color: var(--ink-faint); }
+@media (max-width: 560px) { .convligne { grid-template-columns: 1fr; gap: 2px; } }

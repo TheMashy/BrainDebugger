@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   db, getSettings, setSettings, publicSettings, allEntries, getEntry, setNote,
   addMessage, poserApercus, messagesForDate, recentMessages, filAncre, allEvents, deleteEvent,
@@ -43,6 +44,8 @@ import { occasionDeDemanderConso } from './demander-conso.js';
 import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import * as connecteur from './connecteur.js';
+import { transcrire, placerMessages, marquerDoublons, ecrireMessages, apercu as apercuImport,
+         devinerMoi, PDF_OCTETS_MAX, TEXTE_MAX } from './import-conversation.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE, clientDe } from './lecture.js';
 import { sensDesLiens } from './sens.js';
 import { etats as etatsMotifs, injecterPromus, SEUILS_PROMOTION } from './promotion.js';
@@ -154,6 +157,9 @@ function series(userId = OWNER) {
  * c'est tout ce que la grille affiche.
  */
 const _veilles = new Map();
+/* Les transcriptions lues et pas encore écrites, une heure au plus. En mémoire :
+   un redémarrage fait relancer l'import, ce qui ne perd rien. */
+const IMPORTS_EN_COURS = new Map();
 function niveauVeille(date, userId = OWNER) {
   const msgs = messagesForDate(date, userId);
   const cle = JSON.stringify(msgs.map(m => [m.role, m.rangee, m.text]));
@@ -2787,6 +2793,53 @@ export const routes = {
    *
    * Meme regle qu'ailleurs : un apercu qui ne touche a rien, puis l'ecriture.
    */
+  /**
+   * IMPORTER UNE CONVERSATION (PDF ou texte) DANS LE FIL.
+   *
+   * Deux temps, comme l'import de notes. Sans `jeton` : le modèle lit le
+   * document une fois, la transcription est gardée en mémoire et l'aperçu part
+   * (qui parle, de quand à quand, ce qui est déjà là). Avec `jeton` : on
+   * replace avec ce que la personne a corrigé — qui elle est, le jour de
+   * référence pour « hier » — sans relire, et `apply` écrit.
+   */
+  'POST /api/import-conversation': async ({ body, userId }) => {
+    const s = getSettings(userId);
+    let tenu = body.jeton ? IMPORTS_EN_COURS.get(`${userId}|${body.jeton}`) : null;
+    if (body.jeton && !tenu) return { error: 'Cette lecture a expiré — relance l’import du fichier.' };
+
+    if (!tenu) {
+      const pdf = body.pdf ? String(body.pdf).replace(/^data:[^,]*,/, '') : null;
+      const texte = body.texte ? String(body.texte).slice(0, TEXTE_MAX) : null;
+      if (!pdf && !texte?.trim()) return { error: 'Rien à lire : choisis un PDF ou colle la conversation.' };
+      if (pdf && pdf.length * 0.75 > PDF_OCTETS_MAX) return { error: `Le PDF dépasse ${PDF_OCTETS_MAX / 1048576} Mo — coupe-le en morceaux.` };
+      if (!resolveKey(s).key) return { error: 'La lecture d’un document demande un modèle : pose une clé API dans Réglages › Le compagnon.' };
+      if (usageFor(userId).exhausted) return { error: 'L’enveloppe de jetons du mois est épuisée.' };
+      let r;
+      try {
+        r = await transcrire({ pdf, texte }, s, { client: await clientDe(s), demanderOutil, optionsDuModele });
+      } catch (err) { return { error: err.message }; }
+      recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'import');
+      if (!r.transcription.messages.length) return { error: 'Aucun message reconnu dans ce document.' };
+      const jeton = randomUUID();
+      tenu = { jeton, transcription: r.transcription, coupee: r.coupee, nom: String(body.nom ?? '').slice(0, 120) };
+      IMPORTS_EN_COURS.set(`${userId}|${jeton}`, tenu);
+      setTimeout(() => IMPORTS_EN_COURS.delete(`${userId}|${jeton}`), 3600_000).unref?.();
+    }
+
+    const t = tenu.transcription;
+    const noms = new Set(t.participants.map(p => p.nom));
+    const moi = noms.has(body.moi) ? body.moi : devinerMoi(t.participants, { pseudo: publicUser(userId).username });
+    const reference = /^\d{4}-\d{2}-\d{2}$/.test(body.reference ?? '') ? body.reference : jourVecu(userId);
+    const places = marquerDoublons(placerMessages(t, { moi, reference, jourDe: ts => jourVecu(userId, ts) }), userId);
+    const vu = { jeton: tenu.jeton, moi, reference, coupee: tenu.coupee, ...apercuImport(t, places) };
+    if (!body.apply) return { apercu: vu };
+
+    const ecrit = ecrireMessages(places, userId);
+    IMPORTS_EN_COURS.delete(`${userId}|${tenu.jeton}`);
+    invalidate(userId);
+    return { ...ecrit, apercu: vu };
+  },
+
   'POST /api/import-notes': ({ body, userId }) => {
     const texte = String(body.text ?? '');
     if (!texte.trim()) return { error: 'rien à importer' };
