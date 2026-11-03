@@ -865,7 +865,11 @@ export function dessinerRelations(ctx, G, dispo,
    * d'abord, les rues ensuite -- jamais les deux a pleine encre.
    */
   const fondu = (a, b, x) => Math.max(0, Math.min(1, (x - a) / (b - a)));
-  const aIlot  = 1 - 0.85 * fondu(1.4, 2.6, v.k);   // les pistes s'effacent en approchant
+  /* Les zones s'ATTÉNUENT en approchant, elles ne disparaissent plus : de près
+     on lit les noeuds, mais on doit encore voir dans quelle zone on est —
+     c'est ce que l'animation de tissage montre à la fin, et la carte ne doit
+     pas reprendre en zoomant ce que l'animation vient de donner. */
+  const aIlot  = 1 - 0.45 * fondu(1.4, 2.6, v.k);
   const aNoeud = 0.28 + 0.72 * fondu(0.9, 1.8, v.k); // les noms de noeuds montent
 
   const ilots = [];
@@ -933,14 +937,23 @@ export function dessinerRelations(ctx, G, dispo,
        * la seule chose vraie a dire, la, est qu'on n'en sait rien. Les noeuds
        * restent, leurs liens restent ; c'est la forme qui s'en va.
        */
+      /*
+       * TOUTES LES ZONES SE VOIENT, ET L'APPUI SE LIT DANS LEUR FORCE.
+       *
+       * Une zone sans appui disparaissait. Résultat : la carte finie montrait
+       * moins de zones que l'animation qui la tissait — trois îlots à la fin
+       * du tissage, un seul pointillé à peine visible sur la carte. On garde
+       * la distinction, mais en intensité : une zone que ses liens tiennent
+       * est pleine (comme à la fin de l'animation), une zone qui tient mal est
+       * plus pâle et son contour plus ajouré. Elle reste une zone.
+       */
       const t = tenueDe(a);
-      if (t <= 0) continue;
       const f = (eteint(a) ? aIlot * 0.25 : (a.i === ilotVise ? 1 : aIlot))
-        * (anonyme ? 0.75 : 1) * (0.34 + 0.66 * t);
+        * (anonyme ? 0.75 : 1) * (0.6 + 0.4 * t);
       if (f < 0.02) continue;
       tracer(ctx, a.bord);
-      ctx.fillStyle = `hsl(${a.teinte} 60% 58% / ${
-        (0.085 * f * (a.i === ilotVise ? 2.1 : 1) * (anonyme ? 0.6 : 1)).toFixed(3)})`;
+      ctx.fillStyle = `hsl(${a.teinte} 58% 58% / ${
+        (0.26 * f * (a.i === ilotVise ? 1.4 : 1) * (anonyme ? 0.5 : 1)).toFixed(3)})`;
       ctx.fill();
       // CONTOUR POINTILLE, jamais plein : un ilot est DECLARE par le modele,
       // et la regle de couleur du produit tient jusqu'ici. Une grappe sans nom
@@ -950,9 +963,9 @@ export function dessinerRelations(ctx, G, dispo,
       // plus le trait est continu. C'est la meme grammaire que le reste du
       // produit -- ce qui est plein est mesure, ce qui est ajoure l'est moins
       // -- appliquee cette fois a l'interieur d'une meme forme.
-      ctx.globalAlpha = (anonyme ? 0.44 : 0.45) * f;
+      ctx.globalAlpha = (anonyme ? 0.44 : 0.75) * f;
       ctx.strokeStyle = `hsl(${a.teinte} 60% 62%)`;
-      ctx.lineWidth = (a.i === ilotVise ? 1.6 : 1) / v.k;
+      ctx.lineWidth = (a.i === ilotVise ? 2 : 1.4) / v.k;
       const trait = anonyme ? 2 : 3 + 5 * t;
       const vide = (anonyme ? 6 : 10 - 3 * t);
       ctx.setLineDash([trait / v.k, vide / v.k]);
@@ -1406,13 +1419,12 @@ export function dessinerRelations(ctx, G, dispo,
     /*
      * Les grappes sans nom n'ont rien a ecrire : c'est tout leur propos.
      *
-     * ET UN ILOT SANS ENVELOPPE N'A PAS DE TITRE NON PLUS. Un nom en capitales
-     * flottant au-dessus de noeuds qui ne se touchent pas est la forme la plus
-     * affirmative que puisse prendre cette carte, et c'est celle qui a le moins
-     * de quoi la soutenir. Le nom reste dans la liste sous la carte, ou il est
-     * lu comme une lecture ; sur la toile il serait lu comme un fait.
+     * Chaque zone nommée garde son titre : depuis que toutes les zones se
+     * dessinent, un titre absent laisserait une forme colorée sans nom, que
+     * personne ne saurait rattacher à la liste sous la carte. Le peu d'appui
+     * se lit dans la zone elle-même, plus pâle et plus ajourée.
      */
-    for (const a of ilots.filter(x => x.nom != null && tenueDe(x) > 0)
+    for (const a of ilots.filter(x => x.nom != null)
                          .sort((p, q) => p.haut - q.haut)) {
       const t = mot(a.nom).toUpperCase();
       /*
