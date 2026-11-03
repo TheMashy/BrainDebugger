@@ -619,7 +619,10 @@ function tracer(ctx, bord) {
   ctx.closePath();
 }
 
-const RAYON = n => 4 + n.poids * 2.6;
+/* Un `poids` absent (lecture enregistrée avant ce champ, ou modèle qui l'a
+   oublié) donnait NaN, et un seul NaN dans `createRadialGradient` lève : la
+   carte ENTIÈRE ne se peignait plus. Un nœud sans poids est un petit nœud. */
+const RAYON = n => 4 + (Number.isFinite(+n.poids) ? +n.poids : 0) * 2.6;
 
 /*
  * LA POINTE D'UNE FLÈCHE, AU BORD DU NŒUD D'ARRIVÉE.
