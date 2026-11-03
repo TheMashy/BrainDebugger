@@ -8335,6 +8335,17 @@ async function peindreReglages() {
           <button class="btn" id="exFriseMuet">${ico('sortir')}Sans les phrases</button>
           <button class="btn ghost" id="exFrise">${ico('sortir')}Avec mes phrases</button>
         </div>
+        <h3>Rapporter une conversation</h3>
+        <p class="sub">Un salon Discord imprimé en PDF, une conversation avec Claude exportée,
+          une messagerie : le modèle la lit, retrouve qui parle, le jour et l'heure, et chaque
+          message rejoint « Parler » à sa place — tes phrases comptent dans ta journée, celles des
+          autres restent marquées d'où elles viennent.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <label class="field" style="margin:0"><span>Fichier PDF ou texte</span>
+            <input type="file" id="convFile" accept="application/pdf,.pdf,.txt,text/plain"></label>
+        </div>
+        <p class="sub" style="font-size:12px;margin:6px 0 0">Une lecture coûte des jetons (le document entier passe au modèle). Rien n'est écrit avant que tu aies vu l'aperçu.</p>
+        <div id="convReport"></div>
         <h3>Importer un historique</h3>
                 <p class="sub">L'export d'une grille annuelle depuis un tableur : une ligne par mois,
           les notes en colonnes 1 à 31. Les repères d'étalonnage présents dans la feuille sont
@@ -8547,6 +8558,8 @@ async function peindreReglages() {
       b.disabled = false; b.textContent = 'Analyser';
     }
   });
+
+  wireImportConversation();
 
   $('#csvFile')?.addEventListener('change', async e => {
     const f = e.target.files?.[0];
@@ -9389,6 +9402,98 @@ let NOTES_PASTE = null;
  * miroir des mots qui n'ont pas été écrits ce jour-là. C'est pour ça que chaque
  * date interprétée est affichée en clair.
  */
+/*
+ * RAPPORTER UNE CONVERSATION — le fichier, l'aperçu, puis l'écriture.
+ *
+ * Le fichier est lu UNE fois par le modèle ; le serveur garde la transcription
+ * sous un jeton. Changer « qui est toi » ou le jour de référence replace les
+ * messages sans relire — ce sont des corrections gratuites, elles doivent
+ * l'être aussi en temps.
+ */
+function wireImportConversation() {
+  const input = $('#convFile'), box = $('#convReport');
+  if (!input || !box) return;
+  let dernier = null;
+
+  const lireEnBase64 = f => new Promise((ok, ko) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).replace(/^data:[^,]*,/, ''));
+    r.onerror = () => ko(new Error('lecture du fichier impossible'));
+    r.readAsDataURL(f);
+  });
+
+  const heure = iso => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const dessiner = a => {
+    dernier = a;
+    const aPoser = a.total - a.doublons;
+    box.innerHTML = `<div class="convapercu">
+      <div class="statgrid" style="margin-bottom:12px">
+        <div><div class="k">Messages</div><div class="v">${a.total}</div></div>
+        <div><div class="k">À ajouter</div><div class="v" style="color:var(--accent)">${aPoser}</div></div>
+        <div><div class="k">Déjà là</div><div class="v">${a.doublons}</div></div>
+        <div><div class="k">Journées</div><div class="v">${a.jours}</div></div>
+      </div>
+      <p class="sub" style="margin:0 0 10px">${esc(a.plateforme)}${a.titre ? ` · ${esc(a.titre)}` : ''}
+        · <span class="mono">${esc(a.du ?? '?')}</span> → <span class="mono">${esc(a.au ?? '?')}</span></p>
+      ${a.coupee ? `<p class="sub" style="color:var(--warn);margin:0 0 10px">Le document était trop long pour une lecture : seule la première partie a été transcrite. Coupe le PDF pour le reste.</p>` : ''}
+      <div class="row" style="gap:12px;align-items:flex-end;margin-bottom:10px">
+        <label class="field" style="margin:0"><span>Toi, dans cette conversation</span>
+          <select id="convMoi">${a.participants.map(p => `<option value="${esc(p.nom)}" ${p.nom === a.moi ? 'selected' : ''}>${esc(p.nom)} — ${p.n} message${p.n > 1 ? 's' : ''}${p.est_un_modele ? ' (modèle)' : ''}</option>`).join('')}</select></label>
+        <label class="field" style="margin:0"><span>« Aujourd'hui » dans le document</span>
+          <input type="date" id="convRef" value="${esc(a.reference)}"></label>
+      </div>
+      ${a.sansDate ? `<p class="sub" style="font-size:12.5px;margin:0 0 8px">${a.sansDate} message${a.sansDate > 1 ? 's' : ''} sans date écrite : placé${a.sansDate > 1 ? 's' : ''} au jour ci-dessus.</p>` : ''}
+      ${a.sansHeure ? `<p class="sub" style="font-size:12.5px;margin:0 0 8px">${a.sansHeure} sans heure écrite : une minute après le précédent, dans l'ordre du document.</p>` : ''}
+      <div class="convliste">
+        ${a.extrait.map(m => `<div class="convligne${m.doublon ? ' doublon' : ''}${m.role === 'user' ? ' moi' : ''}">
+          <span class="mono">${esc(m.date)} ${heure(m.ts)}</span>
+          <b>${esc(m.auteur)}</b>
+          <span class="convtexte">${esc(m.text)}</span>
+        </div>`).join('')}
+        ${a.total > a.extrait.length ? `<p class="sub" style="margin:6px 0 0;font-size:12px">… et ${a.total - a.extrait.length} de plus.</p>` : ''}
+      </div>
+      ${aPoser
+        ? `<button class="btn primary" id="convFaire">${ico('plus')}Ajouter ${aPoser} message${aPoser > 1 ? 's' : ''} à « Parler »</button>`
+        : `<p class="sub" style="margin:0">Tout est déjà dans le fil. Rien à ajouter.</p>`}
+    </div>`;
+
+    const replacer = async () => {
+      try {
+        const r = await api('/api/import-conversation', { jeton: a.jeton, moi: $('#convMoi').value, reference: $('#convRef').value });
+        dessiner(r.apercu);
+      } catch (err) { toast(err.message); }
+    };
+    $('#convMoi').addEventListener('change', replacer);
+    $('#convRef').addEventListener('change', replacer);
+    $('#convFaire')?.addEventListener('click', async e => {
+      const b = e.currentTarget;
+      b.disabled = true; b.textContent = 'Ajout…';
+      try {
+        const r = await api('/api/import-conversation', { jeton: dernier.jeton, moi: dernier.moi, reference: dernier.reference, apply: true });
+        box.innerHTML = `<p class="sub" style="margin:12px 0 0;color:var(--accent)">${r.poses} message${r.poses > 1 ? 's' : ''} ajouté${r.poses > 1 ? 's' : ''} au fil, sur ${r.jours.length} journée${r.jours.length > 1 ? 's' : ''} écrite${r.jours.length > 1 ? 's' : ''}.</p>`;
+        input.value = '';
+        S = await api('/api/state');
+      } catch (err) { b.disabled = false; b.textContent = 'Réessayer'; toast(err.message); }
+    });
+  };
+
+  input.addEventListener('change', async () => {
+    const f = input.files?.[0];
+    if (!f) return;
+    const pdf = /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name);
+    if (f.size > 8 * 1024 * 1024) return toast('Fichier trop lourd (8 Mo au plus) — coupe-le en morceaux.');
+    box.innerHTML = '<p class="sub" style="margin:12px 0 0">Lecture par le modèle… une longue conversation prend une minute ou deux.</p>';
+    try {
+      const corps = pdf ? { pdf: await lireEnBase64(f), nom: f.name } : { texte: await f.text(), nom: f.name };
+      const r = await api('/api/import-conversation', corps);
+      dessiner(r.apercu);
+    } catch (err) {
+      box.innerHTML = `<p class="sub" style="margin:12px 0 0;color:var(--warn)">${esc(err.message)}</p>`;
+    }
+  });
+}
+
 function drawNotesPreview(p) {
   const box = $('#notesReport');
   if (!box) return;
