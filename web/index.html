@@ -7,6 +7,32 @@
 <title>BrainDebugger</title>
 <link rel="stylesheet" href="/style.css?v=20260908b">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦌</text></svg>">
+<!--
+  Le graphe d'imports, déclaré d'avance. Sans ça le navigateur découvre les
+  modules niveau par niveau (index.html → app.js → ses seize imports → les
+  leurs) : quatre allers-retours en série avant le premier écran. Ici tout
+  part en parallèle dès le HTML. Tenu à jour par test/modulepreload.test.js.
+-->
+<link rel="modulepreload" href="/app.js">
+<link rel="modulepreload" href="/chaton.js">
+<link rel="modulepreload" href="/pets.js">
+<link rel="modulepreload" href="/scenes.js">
+<link rel="modulepreload" href="/ambiance.js">
+<link rel="modulepreload" href="/charts.js">
+<link rel="modulepreload" href="/carte.js">
+<link rel="modulepreload" href="/reperes.js">
+<link rel="modulepreload" href="/relations.js">
+<link rel="modulepreload" href="/pet.js">
+<link rel="modulepreload" href="/blips.js">
+<link rel="modulepreload" href="/nuits-axe.js">
+<link rel="modulepreload" href="/bande.js">
+<link rel="modulepreload" href="/ressenti.js">
+<link rel="modulepreload" href="/dictee.js">
+<link rel="modulepreload" href="/formats.js">
+<link rel="modulepreload" href="/icones.js">
+<link rel="modulepreload" href="/frise.js">
+<link rel="modulepreload" href="/calendrier.js">
+<link rel="modulepreload" href="/parole.js">
 </head>
 <body>
 <div class="shell">

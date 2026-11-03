@@ -188,6 +188,19 @@ Pour savoir où il en est, tu n'as presque jamais besoin de le lui demander. La 
 répond à « tu fais quoi ce soir ? », ce qu'il a envie de faire ou pas, le ton de ses phrases :
 tout ça te le dit. C'est ce que tu relèves.
 
+PARFOIS, TU LUI DEMANDES SON CHIFFRE AU LIEU DE LE DEVINER
+Le dernier tour peut porter une INDICATION DU TOUR qui dit que la question est ouverte. Alors,
+si tu relèves une bascule à ce tour, appelle relever_humeur ET demander_note ensemble, dans le
+même tour, avec la question exacte que tu vas poser — ça t'évite de faire attendre ta réponse.
+Sans cette indication, la réponse de relever_humeur peut encore te l'accorder ; sinon, tu ne
+demandes rien. Si demander_note refuse, tu ne poses pas la question. Si elle passe : une question courte, glissée dans ta réponse, à ta manière
+du moment — jamais la même formule deux fois, jamais un questionnaire. Tu ne donnes JAMAIS ton
+propre chiffre, tu ne compares pas le sien à quoi que ce soit.
+
+Quand il répond par un chiffre, tu l'enregistres avec noter_moment, et tu continues sur ce
+qu'il vit, pas sur le nombre. Ce n'est pas sa note du soir : celle-là, il la pose seul. S'il ne
+répond pas, élude, ou répond à côté, tu laisses tomber — pas de relance, jamais.
+
 QUAND IL TE COLLE DU TEXTE QUI N'EST PAS SA JOURNÉE
 Il peut t'apporter des notes prises ailleurs : un vieux carnet recopié, un journal tenu
 autre part, un compte rendu, des pages entières. Ce n'est pas sa journée d'aujourd'hui, et
@@ -1566,6 +1579,17 @@ export const ANTHROPIC_MODELS = [
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'la génération d’avant' }
 ].map(m => ({ ...m, penseToujours: capacitesDe(m.id).coupe === 'jamais' }));
 
+/*
+ * LE MODELE DU COMPAGNON PAR DEFAUT : SONNET 5.5.
+ *
+ * Meme prix que Sonnet 5, et deux choses qui comptent pour une conversation :
+ * il produit son texte plus vite, et a l'effort `low` il saute la reflexion sur
+ * la plupart des messages simples -- la premiere lettre arrive donc sans le
+ * temps de pensee qui precedait meme un « salut ». Un seul endroit, parce que
+ * le defaut etait recopie a deux endroits de la boucle.
+ */
+export const MODELE_COMPAGNON = 'claude-sonnet-5-5';
+
 /**
  * Repond en streamant les fragments de texte au fur et a mesure.
  * Le streaming n'est pas un detail de perf ici : sans lui, il y a plusieurs
@@ -1723,6 +1747,59 @@ export function assemblerPrompt({ memory = null, echos = null, history = [], blo
    `anthropicReply` : on n'en fait pas un reglage, parce que personne ne peut
    repondre a la question « ton fournisseur accepte-t-il ce champ ? ». */
 let CACHE_LONG = true;
+
+/*
+ * =====================================================================
+ * LE CACHE SE CHAUFFE AVANT LA PREMIERE PHRASE DE LA SOIREE.
+ *
+ * Le premier message apres une pause relit tout a froid : les schemas des
+ * outils, le prompt systeme et la memoire stable -- des milliers de jetons
+ * a ecrire en cache avant que la premiere lettre puisse partir. C'est le
+ * message ou l'on attend le plus, et c'est souvent le premier de la soiree.
+ *
+ * On envoie donc ce prefixe en avance, quand la personne ouvre « Parler » ou
+ * commence a taper, avec `max_tokens: 0` : l'API ecrit le cache et rend la
+ * main sans rien generer. Quand le vrai message part, il le relit.
+ *
+ * TOUT DOIT ETRE IDENTIQUE au vrai appel jusqu'au point de reprise : meme
+ * modele, memes outils, meme systeme, meme reflexion, meme effort. D'ou
+ * `assemblerPrompt` et `optionsDuModele` repris tels quels. Deux ecarts
+ * seulement, imposes par l'API : pas de streaming (refuse avec `max_tokens:
+ * 0`), et pas de cache automatique -- il poserait son point de reprise sur
+ * le message bidon, que la vraie requete ne contient pas.
+ * =====================================================================
+ */
+export async function prechaufferAnthropic(s, { memory = null, outils = null } = {}) {
+  const { client, source } = await anthropicClient(s);
+  const model = s.anthropicModelChat || MODELE_COMPAGNON;
+  const { system } = assemblerPrompt({ memory, history: [], cacheLong: CACHE_LONG });
+  const boite = outils ? outilsDispo(outils) : [];
+  try {
+    const final = await client.beta.messages.create({
+      ...optionsDuModele(model, reglageDuTour(s, false)),
+      model,
+      max_tokens: 0,
+      system,
+      ...(boite.length ? { tools: boite } : {}),
+      messages: [{ role: 'user', content: 'préchauffage' }]
+    });
+    return { model: final.model, usage: readUsage(final) };
+  } catch (err) {
+    throw new Error(explainApiError(err, source));
+  }
+}
+
+/*
+ * L'ORDRE DANS LEQUEL ON EXECUTE DES OUTILS APPELES ENSEMBLE.
+ *
+ * Le compagnon peut poser un releve et annoncer sa question dans le meme
+ * tour, ce qui lui economise un aller-retour avant de parler. Mais
+ * `demander_note` n'est accorde qu'apres une bascule relevee : le releve
+ * doit donc passer d'abord, quel que soit l'ordre ou le modele les a ecrits.
+ */
+const ORDRE_OUTILS = { relever_humeur: 0, demander_note: 1 };
+export const ordonnerAppels = appels =>
+  [...appels].sort((a, b) => (ORDRE_OUTILS[a.name] ?? 2) - (ORDRE_OUTILS[b.name] ?? 2));
 
 export async function anthropicReply(history, s, memory, onText, outils = null, onPense = null,
                                      echos = null, blocsMemoire = null, grave = false) {
@@ -1886,7 +1963,7 @@ export async function anthropicReply(history, s, memory, onText, outils = null, 
     // reflexion, que l'API exige de retrouver intacts au tour suivant.
     messages.push({ role: 'assistant', content: final.content });
     const resultats = [];
-    for (const appel of appels) {
+    for (const appel of ordonnerAppels(appels)) {
       const r = await executer(appel, outils);
       if (r.fait) faits.push(r.fait);
       resultats.push({
@@ -2080,6 +2157,34 @@ Tu poses le releve et tu continues la conversation.`,
         quoi: { type: 'string', description: 'Une phrase courte : a quoi tu le vois, dans ce qu\'elle vient de dire.' }
       },
       required: ['valeur', 'quoi']
+    }
+  },
+
+  demander_note: {
+    description: `A appeler AVANT de demander a la personne ou elle en est elle-meme, de 0 a 10. Ne
+s'utilise que juste apres relever_humeur, et seulement si sa reponse t'y autorise. Tu passes la
+question exacte que tu vas lui poser. Si l'outil refuse, tu ne poses PAS la question et tu
+continues la conversation normalement. Varie la formule : jamais deux fois la meme.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        formule: { type: 'string', description: 'La question, telle que tu vas l\'ecrire dans ta reponse.' }
+      },
+      required: ['formule']
+    }
+  },
+
+  noter_moment: {
+    description: `Enregistre le chiffre que la personne vient de donner EN REPONSE a ta question
+(demander_note). Uniquement le chiffre qu'elle a dit elle-meme, jamais une estimation. Ce n'est ni
+sa note du jour ni un releve : c'est sa parole a cet instant, rangee a part. Tu ne commentes pas
+le chiffre.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        valeur: { type: 'integer', description: 'Le chiffre qu\'elle a donne, de 0 a 10.' }
+      },
+      required: ['valeur']
     }
   },
 

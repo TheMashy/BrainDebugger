@@ -22,3 +22,7 @@ tools/banc-carte/systeme.txt
 tools/banc-carte/lectures.json
 tools/banc-approches/scores_patients.json
 tools/banc-approches/banc-rapide.log
+
+# La voix Kokoro : le modèle et les voix (≈ 350 Mo), téléchargés par
+# `npm run voix:installer`. Ils ne sont pas à nous et se retéléchargent.
+data/kokoro/

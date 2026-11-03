@@ -13,10 +13,13 @@
     "test": "node --test test/*.test.js",
     "banc:carte": "node tools/banc-carte/rapport.mjs",
     "banc:synth": "node tools/banc-carte/banc.mjs",
-    "cout:cache": "node tools/cout-cache.mjs"
+    "cout:cache": "node tools/cout-cache.mjs",
+    "voix:installer": "node tools/voix-kokoro/installer.mjs"
   },
   "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "espeak-ng": "^1.0.2",
+    "onnxruntime-node": "^1.30.0"
   }
 }
