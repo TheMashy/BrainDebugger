@@ -121,6 +121,20 @@ export function ensureUserTables(db) {
 
     CREATE INDEX IF NOT EXISTS idx_messages_user_date ON messages(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_events_user_date   ON events(user_id, date);
+
+    -- Le fil (recentMessages) se lit « les 80 derniers par ts ». Sans cet
+    -- index, SQLite relit TOUS les messages de la personne, texte compris, et
+    -- les trie : 15 ms sur dix mille messages, à chaque ouverture, et ça
+    -- grandit avec le journal. Avec lui : 0,2 ms. Il n'était créé que par
+    -- attribuerLesAnciensAppels, et seulement s'il restait des appels à
+    -- attribuer — une base née après cette colonne ne l'avait jamais.
+    CREATE INDEX IF NOT EXISTS idx_messages_user_ts   ON messages(user_id, ts);
+    -- Et il faut celui-ci AVEC lui : sans statistiques, SQLite préfère
+    -- (user_id, ts) pour « les messages d'un jour, par ts » — il évite le tri,
+    -- et relit toute la personne pour trouver une journée. La grille de
+    -- l'année, qui en demande 365, passait de 25 à 600 ms. Avec la date dans
+    -- l'index, le jour se trouve ET se lit dans l'ordre.
+    CREATE INDEX IF NOT EXISTS idx_messages_user_date_ts ON messages(user_id, date, ts);
   `);
 
   /*

@@ -127,6 +127,46 @@ function series(userId = OWNER) {
   }
   return _cache.get(userId);
 }
+/*
+ * LES ÉCARTS DE « MOI » SONT MÉMOÏSÉS DANS L'ENTRÉE DE LA SÉRIE.
+ *
+ * `comparaisons()` teste chaque candidate par décalage sur toutes les notes :
+ * 150 à 340 ms sur 1700 journées, refaits à CHAQUE ouverture de l'onglet, pour
+ * rendre six phrases. Le résultat ne dépend que des journées (l'entrée de
+ * `_cache` meurt avec elles, à chaque écriture) et des DATES des repères — et
+ * les écritures de repères n'invalident pas `_cache`. D'où la signature : les
+ * dates triées. Un repère ajouté, déplacé ou retiré change la clé.
+ */
+/*
+ * LE NIVEAU DE VEILLE D'UN JOUR, MÉMOÏSÉ SUR SES MESSAGES.
+ *
+ * La grille de l'année demande `veilleDuJour` pour chacun des 365 jours : les
+ * expressions de la veille repassent sur toute l'année, ~180 ms à chaque
+ * ouverture de l'onglet, pour un résultat qui ne change que si les messages du
+ * jour changent. La clé est donc le CONTENU lu par `veilleDuJour` (rôle, texte,
+ * rangement) : un message ajouté, corrigé, rangé ou effacé la change, sans
+ * dépendre d'aucune invalidation à ne pas oublier. Seul le niveau est gardé —
+ * c'est tout ce que la grille affiche.
+ */
+const _veilles = new Map();
+function niveauVeille(date, userId = OWNER) {
+  const msgs = messagesForDate(date, userId);
+  const cle = JSON.stringify(msgs.map(m => [m.role, m.rangee, m.text]));
+  const k = `${userId}|${date}`;
+  const vu = _veilles.get(k);
+  if (vu && vu.cle === cle) return vu.niveau;
+  const niveau = veilleDuJour(date, userId, { messages: msgs })?.niveau ?? null;
+  _veilles.set(k, { cle, niveau });
+  return niveau;
+}
+function ecartsDe(userId = OWNER) {
+  const entree = series(userId);
+  const sig = allEvents(userId).map(e => e?.date ?? '').sort().join(',');
+  if (!entree.ecarts || entree.ecarts.sig !== sig)
+    entree.ecarts = { sig, liste: comparaisons(entree.rows, allEvents(userId))
+      .sort((a, b) => a.p - b.p).slice(0, 6) };
+  return entree.ecarts.liste;
+}
 
 /**
  * Les journees ecrites les plus recentes, dans les mots exacts de l'utilisateur.
@@ -2383,7 +2423,7 @@ export const routes = {
     const grille = yearGrid(series(userId).series, an);
     for (const mo of grille.months) {
       for (const j of mo.days) {
-        if (j?.date) j.veille = veilleDuJour(j.date, userId)?.niveau ?? null;
+        if (j?.date) j.veille = niveauVeille(j.date, userId);
       }
     }
     return grille;
@@ -2499,7 +2539,7 @@ export const routes = {
          * porte le NIVEAU, et rien d'autre — le détail s'ouvre en cliquant le
          * jour, avec la phrase qui l'a déclenché.
          */
-        veille: veilleDuJour(j, userId)?.niveau ?? null
+        veille: niveauVeille(j, userId)
       });
     }
 
@@ -3104,11 +3144,9 @@ export const routes = {
   'GET /api/moi': ({ userId }) => {
     const { rows, series: ser } = series(userId);
     const l = getLecture(userId);
-    const ecarts = comparaisons(rows, allEvents(userId))
-      // Les mieux établies d'abord (p), et non plus les plus gros écarts : trier
-      // par |écart| mettait en tête le plus petit groupe, le plus extrême par hasard.
-      .sort((a, b) => a.p - b.p)
-      .slice(0, 6);
+    // Les mieux établies d'abord (p), et non plus les plus gros écarts : trier
+    // par |écart| mettait en tête le plus petit groupe, le plus extrême par hasard.
+    const ecarts = ecartsDe(userId);
     const dernier = ser.length ? ser[ser.length - 1] : null;
     // La même série que /api/state : depuis aujourd'hui s'il est noté, sinon
     // depuis hier. `streak(ser)` sans date rendait 0 sur 1732 jours notés.

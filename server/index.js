@@ -1,6 +1,7 @@
 import { PLATFORM } from './preflight.js';     // en premier : contrôle de version de Node
 import { createServer } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
+import { gzipSync, brotliCompressSync, constants as ZLIB } from 'node:zlib';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,6 +96,47 @@ const MIME = {
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json'
 };
+
+/*
+ * LES FICHIERS DU SITE, PRÉPARÉS UNE FOIS PAR VERSION.
+ *
+ * Chaque ouverture relisait les vingt-trois fichiers sur le disque et les
+ * renvoyait bruts — 1,2 Mo, dont 551 Ko pour `app.js` seul — sans rien qui
+ * permette au navigateur de dire « j'ai déjà celui-là ». Il les retéléchargeait
+ * donc tous, à chaque ouverture, et c'était l'essentiel de la lenteur.
+ *
+ * Ici chaque fichier est lu, haché et compressé UNE fois, puis gardé tant que
+ * sa taille et sa date ne bougent pas. Une modification sur le disque — un
+ * déploiement, un fichier édité en local — change l'une ou l'autre, et la
+ * version suivante est reconstruite à la première demande : rien ne peut
+ * rester périmé en mémoire.
+ *
+ * L'ETag vient du CONTENU et non de la date : sur Railway chaque déploiement
+ * réécrit les dates de tous les fichiers, et une étiquette tirée de la date
+ * ferait retélécharger tout le site pour un seul fichier changé.
+ *
+ * On ne compresse que le texte : une image PNG l'est déjà, et la recompresser
+ * coûterait du calcul pour un gain nul.
+ */
+const SERVIS = new Map();
+const TEXTE = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest']);
+
+async function fichierServi(file, s) {
+  const vu = SERVIS.get(file);
+  if (vu && vu.taille === s.size && vu.date === s.mtimeMs) return vu;
+  const brut = await readFile(file);
+  const etag = `"${createHash('sha1').update(brut).digest('base64url').slice(0, 22)}"`;
+  const texte = TEXTE.has(extname(file)) && brut.length > 1024;
+  const f = {
+    taille: s.size, date: s.mtimeMs, etag, brut,
+    gz: texte ? gzipSync(brut, { level: 9 }) : null,
+    // Brotli à 9 et pas à 11 : 11 coûte des secondes sur `app.js` pour
+    // quelques pour cent de plus, payés à chaque déploiement.
+    br: texte ? brotliCompressSync(brut, { params: { [ZLIB.BROTLI_PARAM_QUALITY]: 9 } }) : null
+  };
+  SERVIS.set(file, f);
+  return f;
+}
 
 function json(res, code, payload) {
   const body = JSON.stringify(payload);
@@ -938,13 +980,34 @@ async function traiter(req, res) {
   try {
     const s = await stat(file);
     if (!s.isFile()) throw new Error('not a file');
-    const data = await readFile(file);
-    res.writeHead(200, {
+    const f = await fichierServi(file, s);
+    /*
+     * `no-cache` RESTE, ET C'EST VOULU : il ne veut pas dire « ne garde rien »
+     * mais « redemande avant de t'en resservir ». C'est ce qui fait qu'un
+     * déploiement est vu à la seconde — voir le cache CSS cassé à la main
+     * avant (#86). Ce qui manquait, c'était de quoi REDEMANDER : sans ETag, le
+     * navigateur n'a rien à présenter, et revalider veut dire retélécharger.
+     * Avec, la réponse est un 304 de quelques octets.
+     */
+    const entetes = {
       'Content-Type': MIME[extname(file)] ?? 'application/octet-stream',
-      'Content-Length': data.length,
-      'Cache-Control': 'no-cache'
-    });
-    res.end(data);
+      'Cache-Control': 'no-cache',
+      'ETag': f.etag,
+      'Vary': 'Accept-Encoding'
+    };
+    // Un navigateur peut présenter plusieurs étiquettes, séparées par des virgules.
+    const presentees = String(req.headers['if-none-match'] ?? '').split(',').map(x => x.trim());
+    if (presentees.includes(f.etag)) {
+      res.writeHead(304, entetes);
+      return res.end();
+    }
+    const accepte = String(req.headers['accept-encoding'] ?? '');
+    const [corps, codage] = f.br && /\bbr\b/.test(accepte) ? [f.br, 'br']
+      : f.gz && /\bgzip\b/.test(accepte) ? [f.gz, 'gzip'] : [f.brut, null];
+    if (codage) entetes['Content-Encoding'] = codage;
+    entetes['Content-Length'] = corps.length;
+    res.writeHead(200, entetes);
+    res.end(corps);
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('404');
