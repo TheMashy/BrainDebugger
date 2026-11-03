@@ -8337,8 +8337,8 @@ async function peindreReglages() {
         </div>
         <h3>Rapporter une conversation</h3>
         <p class="sub">Un salon Discord imprimé en PDF, une conversation avec Claude exportée,
-          une messagerie : le modèle la lit, retrouve qui parle, le jour et l'heure, et chaque
-          message rejoint « Parler » à sa place — tes phrases comptent dans ta journée, celles des
+          une messagerie — ou un journal, un résumé jour par jour : le modèle le lit, retrouve qui
+          parle, le jour et l'heure, et chaque message rejoint « Parler » à sa place — tes phrases comptent dans ta journée, celles des
           autres restent marquées d'où elles viennent.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <label class="field" style="margin:0"><span>Fichier PDF ou texte</span>
@@ -9426,52 +9426,61 @@ function wireImportConversation() {
 
   const dessiner = a => {
     dernier = a;
+    const journal = a.genre === 'journal';
     const aPoser = a.total - a.doublons;
+    const unite = n => journal ? `journée${n > 1 ? 's' : ''}` : `message${n > 1 ? 's' : ''}`;
     box.innerHTML = `<div class="convapercu">
       <div class="statgrid" style="margin-bottom:12px">
-        <div><div class="k">Messages</div><div class="v">${a.total}</div></div>
+        <div><div class="k">${journal ? 'Journées' : 'Messages'}</div><div class="v">${a.total}</div></div>
         <div><div class="k">À ajouter</div><div class="v" style="color:var(--accent)">${aPoser}</div></div>
         <div><div class="k">Déjà là</div><div class="v">${a.doublons}</div></div>
-        <div><div class="k">Journées</div><div class="v">${a.jours}</div></div>
+        ${journal ? `<div><div class="k">Au carnet</div><div class="v">${a.notes?.length ?? 0}</div></div>`
+                  : `<div><div class="k">Journées</div><div class="v">${a.jours}</div></div>`}
       </div>
       <p class="sub" style="margin:0 0 10px">${esc(a.plateforme)}${a.titre ? ` · ${esc(a.titre)}` : ''}
         · <span class="mono">${esc(a.du ?? '?')}</span> → <span class="mono">${esc(a.au ?? '?')}</span></p>
       ${a.coupee ? `<p class="sub" style="color:var(--warn);margin:0 0 10px">Le document était trop long pour une lecture : seule la première partie a été transcrite. Coupe le PDF pour le reste.</p>` : ''}
+      ${/* Un journal n'a qu'une voix, la sienne : pas de « qui est toi ». Et la
+            date de référence ne sert qu'à « Hier » / « Aujourd'hui » — sans
+            eux, elle ne ferait qu'inviter à corriger ce qui est juste. */''}
       <div class="row" style="gap:12px;align-items:flex-end;margin-bottom:10px">
-        <label class="field" style="margin:0"><span>Toi, dans cette conversation</span>
-          <select id="convMoi">${a.participants.map(p => `<option value="${esc(p.nom)}" ${p.nom === a.moi ? 'selected' : ''}>${esc(p.nom)} — ${p.n} message${p.n > 1 ? 's' : ''}${p.est_un_modele ? ' (modèle)' : ''}</option>`).join('')}</select></label>
-        <label class="field" style="margin:0"><span>« Aujourd'hui » dans le document</span>
-          <input type="date" id="convRef" value="${esc(a.reference)}"></label>
+        ${journal ? '' : `<label class="field" style="margin:0"><span>Toi, dans cette conversation</span>
+          <select id="convMoi">${a.participants.map(p => `<option value="${esc(p.nom)}" ${p.nom === a.moi ? 'selected' : ''}>${esc(p.nom)} — ${p.n} message${p.n > 1 ? 's' : ''}${p.est_un_modele ? ' (modèle)' : ''}</option>`).join('')}</select></label>`}
+        ${a.relatifs || a.sansDate ? `<label class="field" style="margin:0"><span>« Aujourd'hui » dans le document</span>
+          <input type="date" id="convRef" value="${esc(a.reference)}"></label>` : ''}
       </div>
       ${a.sansDate ? `<p class="sub" style="font-size:12.5px;margin:0 0 8px">${a.sansDate} message${a.sansDate > 1 ? 's' : ''} sans date écrite : placé${a.sansDate > 1 ? 's' : ''} au jour ci-dessus.</p>` : ''}
-      ${a.sansHeure ? `<p class="sub" style="font-size:12.5px;margin:0 0 8px">${a.sansHeure} sans heure écrite : une minute après le précédent, dans l'ordre du document.</p>` : ''}
+      ${journal
+        ? `<p class="sub" style="font-size:12.5px;margin:0 0 8px">Une journée du document = un message de toi ce jour-là, posé à 21 h quand aucune heure n'est écrite.</p>`
+        : a.sansHeure ? `<p class="sub" style="font-size:12.5px;margin:0 0 8px">${a.sansHeure} sans heure écrite : une minute après le précédent, dans l'ordre du document.</p>` : ''}
+      ${a.notes?.length ? `<p class="sub" style="font-size:12.5px;margin:0 0 8px">Rangé au <b>carnet</b>, pas sur un jour — ${a.notes.length} partie${a.notes.length > 1 ? 's' : ''} qui parle${a.notes.length > 1 ? 'nt' : ''} de toute la période : ${a.notes.map(n => `« ${esc(n.titre)} »`).join(', ')}.</p>` : ''}
       <div class="convliste">
         ${a.extrait.map(m => `<div class="convligne${m.doublon ? ' doublon' : ''}${m.role === 'user' ? ' moi' : ''}">
-          <span class="mono">${esc(m.date)} ${heure(m.ts)}</span>
+          <span class="mono">${esc(m.date)} ${m.heureConnue ? heure(m.ts) : (journal ? '' : heure(m.ts))}</span>
           <b>${esc(m.auteur)}</b>
           <span class="convtexte">${esc(m.text)}</span>
         </div>`).join('')}
         ${a.total > a.extrait.length ? `<p class="sub" style="margin:6px 0 0;font-size:12px">… et ${a.total - a.extrait.length} de plus.</p>` : ''}
       </div>
-      ${aPoser
-        ? `<button class="btn primary" id="convFaire">${ico('plus')}Ajouter ${aPoser} message${aPoser > 1 ? 's' : ''} à « Parler »</button>`
+      ${aPoser || a.notes?.length
+        ? `<button class="btn primary" id="convFaire">${ico('plus')}${aPoser ? `Ajouter ${aPoser} ${unite(aPoser)} à « Parler »` : 'Ranger au carnet'}</button>`
         : `<p class="sub" style="margin:0">Tout est déjà dans le fil. Rien à ajouter.</p>`}
     </div>`;
 
     const replacer = async () => {
       try {
-        const r = await api('/api/import-conversation', { jeton: a.jeton, moi: $('#convMoi').value, reference: $('#convRef').value });
+        const r = await api('/api/import-conversation', { jeton: a.jeton, moi: $('#convMoi')?.value ?? a.moi, reference: $('#convRef')?.value ?? a.reference });
         dessiner(r.apercu);
       } catch (err) { toast(err.message); }
     };
-    $('#convMoi').addEventListener('change', replacer);
-    $('#convRef').addEventListener('change', replacer);
+    $('#convMoi')?.addEventListener('change', replacer);
+    $('#convRef')?.addEventListener('change', replacer);
     $('#convFaire')?.addEventListener('click', async e => {
       const b = e.currentTarget;
       b.disabled = true; b.textContent = 'Ajout…';
       try {
         const r = await api('/api/import-conversation', { jeton: dernier.jeton, moi: dernier.moi, reference: dernier.reference, apply: true });
-        box.innerHTML = `<p class="sub" style="margin:12px 0 0;color:var(--accent)">${r.poses} message${r.poses > 1 ? 's' : ''} ajouté${r.poses > 1 ? 's' : ''} au fil, sur ${r.jours.length} journée${r.jours.length > 1 ? 's' : ''} écrite${r.jours.length > 1 ? 's' : ''}.</p>`;
+        box.innerHTML = `<p class="sub" style="margin:12px 0 0;color:var(--accent)">${r.poses} message${r.poses > 1 ? 's' : ''} ajouté${r.poses > 1 ? 's' : ''} au fil, sur ${r.jours.length} journée${r.jours.length > 1 ? 's' : ''} écrite${r.jours.length > 1 ? 's' : ''}${r.rangees ? ` · ${r.rangees} note${r.rangees > 1 ? 's' : ''} au carnet` : ''}.</p>`;
         input.value = '';
         S = await api('/api/state');
       } catch (err) { b.disabled = false; b.textContent = 'Réessayer'; toast(err.message); }

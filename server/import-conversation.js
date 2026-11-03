@@ -21,7 +21,7 @@
  * (qui parle, combien, de quand à quand, ce qui sera sauté), la personne dit
  * qui elle est, et seulement ensuite on écrit.
  */
-import { db, OWNER, rebuildEntryText } from './db.js';
+import { db, OWNER, rebuildEntryText, addCarnet } from './db.js';
 import { jourLocal, heureLocale, zoneCourante } from './temps.js';
 
 /** Un PDF de plus n'est plus une conversation, c'est une archive. */
@@ -31,14 +31,18 @@ export const MESSAGE_MAX = 12_000;
 
 export const OUTIL_TRANSCRIPTION = {
   name: 'transcrire_conversation',
-  description: 'Rend la conversation du document, message par message, dans l’ordre.',
+  description: 'Rend le document : soit les messages d’une conversation, soit les journées d’un journal, dans l’ordre.',
   input_schema: {
     type: 'object',
     properties: {
-      plateforme: { type: 'string', description: 'D’où vient la conversation : « Discord », « Claude », « WhatsApp », « Messenger »… ou « une conversation » si rien ne le dit.' },
-      titre: { type: 'string', description: 'Le nom du salon, du fil ou de la conversation s’il est écrit, sinon vide.' },
+      genre: { type: 'string', enum: ['conversation', 'journal'],
+               description: '« conversation » : des messages entre plusieurs auteurs (Discord, Claude, une messagerie). « journal » : ce qu’une seule personne a écrit ou fait résumer, rangé par journées (un journal, un résumé jour par jour, des notes datées).' },
+      plateforme: { type: 'string', description: 'D’où vient le document : « Discord », « Claude », « WhatsApp »… ; pour un journal, ce qu’il est en deux ou trois mots (« résumé », « journal », « notes de séance »).' },
+      titre: { type: 'string', description: 'Le titre du document, du salon ou de la conversation s’il est écrit, sinon vide.' },
+      annee: { type: 'integer', description: 'L’année du document si elle est écrite quelque part (titre, une date complète). Sert aux dates écrites sans année.' },
       participants: {
         type: 'array',
+        description: 'Conversation : les auteurs. Journal : un seul, « moi ».',
         items: {
           type: 'object',
           properties: {
@@ -50,34 +54,59 @@ export const OUTIL_TRANSCRIPTION = {
       },
       messages: {
         type: 'array',
+        description: 'Conversation : un élément par message. Journal : un élément par JOURNÉE (ou par plage de journées).',
         items: {
           type: 'object',
           properties: {
-            auteur: { type: 'string', description: 'Exactement un des noms de `participants`.' },
-            date: { type: 'string', description: 'AAAA-MM-JJ si une date complète est écrite pour ce message ou son groupe. Vide sinon.' },
+            auteur: { type: 'string', description: 'Exactement un des noms de `participants`. Journal : « moi ».' },
+            date: { type: 'string', description: 'AAAA-MM-JJ quand une date est écrite pour ce message, son groupe ou cette journée — année déduite du document si elle manque. Vide sinon.' },
+            date_fin: { type: 'string', description: 'Journal seulement : AAAA-MM-JJ du dernier jour quand la section couvre une plage (« Du 27/10 au 30/10 »).' },
             jour_relatif: { type: 'integer', description: '0 pour « Aujourd’hui », -1 pour « Hier », -2 pour « avant-hier ». Absent sinon.' },
             heure: { type: 'string', description: 'HH:MM (24 h) si une heure est écrite pour ce message ou son groupe. Vide sinon.' },
-            texte: { type: 'string', description: 'Le texte du message, mot pour mot.' }
+            texte: { type: 'string', description: 'Le texte, mot pour mot.' }
           },
           required: ['auteur', 'texte']
         }
+      },
+      hors_jours: {
+        type: 'array',
+        description: 'Journal seulement : les parties qui ne sont rattachées à AUCUNE journée (synthèse, « l’essentiel », « ce que j’ai compris », conclusions sur toute la période).',
+        items: {
+          type: 'object',
+          properties: { titre: { type: 'string' }, texte: { type: 'string' } },
+          required: ['texte']
+        }
       }
     },
-    required: ['plateforme', 'participants', 'messages']
+    required: ['genre', 'plateforme', 'participants', 'messages']
   }
 };
 
-export const CONSIGNE = `Tu transcris une conversation contenue dans un document (un salon Discord imprimé, une conversation avec Claude ou un autre modèle exportée, une messagerie). Tu ne la résumes pas, tu ne la commentes pas : tu la recopies.
+export const CONSIGNE = `Tu transcris un document pour le ranger dans le journal de la personne, chaque chose à son jour. Tu ne résumes pas, tu ne commentes pas : tu recopies, et tu dis à quel jour chaque morceau appartient.
 
-Règles :
+D'abord, le GENRE du document :
+- « conversation » : des messages échangés (un salon Discord imprimé, une conversation avec Claude ou un autre modèle exportée, une messagerie) ;
+- « journal » : ce qu'une seule personne a écrit ou fait résumer, rangé par journées — un journal, un résumé « jour par jour », des notes datées, un compte rendu de période.
+
+POUR UNE CONVERSATION
 - Un élément de « messages » par message, dans l'ordre du document. Sur Discord, plusieurs messages groupés sous un seul nom et une seule heure restent des messages distincts : chacun reprend l'auteur, et l'heure du groupe.
-- Le texte MOT POUR MOT, fautes comprises. Garde les retours à la ligne entre paragraphes. Ne traduis rien.
-- Laisse de côté l'interface : boutons, « (modifié) », compteurs de réactions, noms de salons répétés en en-tête de page, numéros de page, pieds de page d'impression, URL d'impression, horodatages d'impression du PDF lui-même.
-- Une pièce jointe ou une image : écris « [image] » ou « [pièce jointe : nom] » à sa place.
-- La date : si une date complète est écrite (séparateur « 12 mars 2025 », « 12/03/2025 », en-tête de groupe), mets-la en AAAA-MM-JJ sur ce message ET sur les suivants jusqu'à la prochaine. Si c'est « Aujourd'hui » ou « Hier », mets jour_relatif (0 ou -1) au lieu de date. Si rien n'est écrit, laisse vide : ne devine jamais une date.
-- L'heure : HH:MM en 24 h si elle est écrite (« 21:04 », « 9:04 PM » → « 21:04 »). Si rien n'est écrit, laisse vide.
-- Les noms des auteurs tels qu'affichés. Dans une conversation avec Claude ou un autre modèle, la personne est souvent étiquetée « Vous », « You », « Moi » ou par son initiale : garde l'étiquette telle quelle ; le modèle s'appelle « Claude » (ou son nom affiché).
-- Marque est_un_modele pour Claude, ChatGPT et les bots.`;
+- Laisse de côté l'interface : boutons, « (modifié) », compteurs de réactions, en-têtes de page répétés, numéros de page, pieds de page et horodatages d'impression.
+- Une pièce jointe ou une image : « [image] » ou « [pièce jointe : nom] ».
+- Les noms des auteurs tels qu'affichés. Dans une conversation avec un modèle, la personne est souvent « Vous », « You », « Moi » ou son initiale : garde l'étiquette ; le modèle s'appelle « Claude » (ou son nom affiché). Marque est_un_modele pour les modèles et les bots.
+- La date se reporte : mets-la sur le message où elle est écrite ET sur les suivants jusqu'à la prochaine. « Aujourd'hui » / « Hier » → jour_relatif (0 / -1).
+- L'heure en HH:MM 24 h si elle est écrite (« 9:04 PM » → « 21:04 »), vide sinon.
+
+POUR UN JOURNAL
+- Un seul participant, « moi ». Tous les éléments ont auteur « moi ».
+- Un élément de « messages » par JOURNÉE : tout ce qui est rangé sous la date de ce jour (paragraphes, citations, notes de séance, encadrés), dans l'ordre, séparé par des lignes vides. Le titre de la section n'est pas recopié, sauf ce qu'il dit de plus que la date (« séance avec la psy » → commence le texte par « Séance avec la psy. »).
+- Une section qui couvre une plage (« Du 27/10 au 30/10 ») : date = premier jour, date_fin = dernier.
+- Les dates sans année (« 19/10 », « lundi 19 octobre ») prennent l'année du document (titre, autres dates) ; reporte-la dans « annee ».
+- Les parties qui ne sont rattachées à aucune journée — « L'essentiel », une synthèse, « ce que j'ai compris », des conclusions sur toute la période — vont dans « hors_jours », PAS dans « messages », même si elles citent des dates : elles parlent de la période, pas d'un jour.
+- L'heure seulement si elle est écrite pour la journée ; « le soir », « matin » ne sont pas des heures.
+
+DANS LES DEUX CAS
+- Le texte MOT POUR MOT, fautes et guillemets compris. Ne traduis rien, n'ajoute rien, ne corrige rien.
+- Ne devine jamais une date qui n'est pas dans le document.`;
 
 /* ============================== LIRE ============================== */
 
@@ -109,7 +138,7 @@ export async function transcrire({ pdf = null, texte = null }, s, { client, dema
     tool_choice: demande.tool_choice,
     messages: [{ role: 'user', content: [
       contenuDuDocument({ pdf, texte }),
-      { type: 'text', text: demande.consigne + 'Transcris cette conversation avec l’outil transcrire_conversation.' }
+      { type: 'text', text: demande.consigne + 'Transcris ce document avec l’outil transcrire_conversation.' }
     ] }]
   };
   // En flux : une longue conversation se transcrit en plusieurs minutes, et
@@ -136,28 +165,47 @@ const HEURE_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
 /** Ce que le modèle rend n'est jamais pris au mot : formes vérifiées, le reste jeté. */
 export function validerTranscription(brut) {
+  const journal = brut?.genre === 'journal';
+  const annee = Number.isInteger(brut?.annee) && brut.annee > 1990 && brut.annee < 2100 ? brut.annee : null;
   const noms = new Map();
   for (const p of Array.isArray(brut?.participants) ? brut.participants : []) {
     const nom = String(p?.nom ?? '').trim().slice(0, 60);
     if (nom && !noms.has(nom)) noms.set(nom, { nom, est_un_modele: !!p?.est_un_modele });
   }
+  const dateOk = d => DATE_RE.test(String(d ?? '')) && Number.isFinite(Date.parse(d)) ? d : null;
+  const horsJours = [];
+  for (const h of Array.isArray(brut?.hors_jours) ? brut.hors_jours : []) {
+    const texte = String(h?.texte ?? '').trim().slice(0, MESSAGE_MAX);
+    if (texte) horsJours.push({ titre: String(h?.titre ?? '').trim().slice(0, 80), texte });
+  }
   const messages = [];
   for (const m of Array.isArray(brut?.messages) ? brut.messages : []) {
     const texte = String(m?.texte ?? '').trim().slice(0, MESSAGE_MAX);
-    const auteur = String(m?.auteur ?? '').trim().slice(0, 60);
+    const auteur = journal ? 'moi' : String(m?.auteur ?? '').trim().slice(0, 60);
     if (!texte || !auteur) continue;
-    if (!noms.has(auteur)) noms.set(auteur, { nom: auteur, est_un_modele: false });
-    const date = DATE_RE.test(String(m?.date ?? '')) && Number.isFinite(Date.parse(m.date)) ? m.date : null;
+    const date = dateOk(m?.date);
     const rel = Number.isInteger(m?.jour_relatif) && m.jour_relatif <= 0 && m.jour_relatif >= -7 ? m.jour_relatif : null;
+    /* UN MORCEAU DE JOURNAL SANS DATE N'APPARTIENT À AUCUN JOUR. Le poser au
+       jour de référence ferait écrire à la personne, ce jour-là, une synthèse
+       de deux semaines : la carte compterait ses mots sur une journée qui ne
+       les porte pas. Il rejoint le carnet, avec les autres parties hors jours. */
+    if (journal && !date && rel == null) { horsJours.push({ titre: '', texte }); continue; }
+    if (!noms.has(auteur)) noms.set(auteur, { nom: auteur, est_un_modele: false });
+    const fin = journal ? dateOk(m?.date_fin) : null;
     const h = HEURE_RE.exec(String(m?.heure ?? '').trim());
     messages.push({ auteur, texte, date, jour_relatif: date ? null : rel,
+                    date_fin: fin && date && fin > date ? fin : null,
                     heure: h ? `${h[1].padStart(2, '0')}:${h[2]}` : null });
   }
+  if (journal) for (const k of [...noms.keys()]) if (k !== 'moi') noms.delete(k);
   return {
-    plateforme: String(brut?.plateforme ?? '').trim().slice(0, 40) || 'une conversation',
+    genre: journal ? 'journal' : 'conversation',
+    annee,
+    plateforme: String(brut?.plateforme ?? '').trim().slice(0, 40) || (journal ? 'journal' : 'une conversation'),
     titre: String(brut?.titre ?? '').trim().slice(0, 80),
     participants: [...noms.values()].map(p => ({ ...p, n: messages.filter(m => m.auteur === p.nom).length })),
-    messages
+    messages,
+    horsJours
   };
 }
 
@@ -217,17 +265,28 @@ export function instantLocal(date, heure, zone = zoneCourante()) {
  */
 export function placerMessages(transcription, { moi, reference, zone = zoneCourante(), jourDe = null }) {
   const plateforme = transcription.plateforme;
+  const journal = transcription.genre === 'journal';
+  /* Un journal sans heure se pose à 21 h, comme l'import de notes : ces
+     journées ont été écrites le soir, et c'est l'ordre dans la journée qui
+     compte, pas la minute. Midi aurait fait d'un bilan du soir un message de
+     la pause déjeuner. */
+  const HEURE_PAR_DEFAUT = journal ? '21:00' : '12:00';
   let date = null, heure = null, dernierTs = null;
   const out = [];
   for (const m of transcription.messages) {
     let dateConnue = true;
-    if (m.date) date = m.date;
-    else if (m.jour_relatif != null) date = ajouterJours(reference, m.jour_relatif);
-    else if (!date) { date = reference; dateConnue = false; }
+    const nouvelleDate = m.date ?? (m.jour_relatif != null ? ajouterJours(reference, m.jour_relatif) : null);
+    if (nouvelleDate) {
+      // UN NOUVEAU JOUR REMET L'HEURE À ZÉRO. Elle se reportait d'un jour au
+      // suivant : un message daté du 20 sans heure héritait du 21:04 du 19.
+      if (nouvelleDate !== date) heure = null;
+      date = nouvelleDate;
+    } else if (!date) { date = reference; dateConnue = false; }
     const heureConnue = !!m.heure;
     if (m.heure) heure = m.heure;
-    let ts = Date.parse(instantLocal(date, heure ?? '12:00', zone));
-    if (!heureConnue && dernierTs != null && m.date == null && m.jour_relatif == null) ts = dernierTs + 60_000;
+    let ts = Date.parse(instantLocal(date, heure ?? HEURE_PAR_DEFAUT, zone));
+    // Sans heure dans le MÊME jour : une minute après le précédent.
+    if (!heureConnue && !nouvelleDate && dernierTs != null) ts = dernierTs + 60_000;
     // L'ordre du document prime : jamais avant le message précédent du même jour.
     if (dernierTs != null && ts <= dernierTs && ts > dernierTs - 6 * 3600_000) ts = dernierTs + 1000;
     dernierTs = ts;
@@ -237,13 +296,33 @@ export function placerMessages(transcription, { moi, reference, zone = zoneCoura
       ts: iso,
       date: (jourDe ? jourDe(iso) : null) ?? jourLocal(iso, zone),
       role: deMoi ? 'user' : 'pet',
-      text: m.texte,
+      // Une plage de jours garde sa plage écrite en tête : posée sur son
+      // premier jour, elle doit dire qu'elle en couvre plusieurs.
+      text: m.date_fin ? `(du ${m.date} au ${m.date_fin}) ${m.texte}` : m.texte,
       // La bulle dit d'où ça vient ; pour les autres, QUI parlait.
       via: (deMoi ? plateforme : `${plateforme} · ${m.auteur}`).slice(0, 60),
       auteur: m.auteur, heureConnue, dateConnue
     });
   }
   return out;
+}
+
+/**
+ * LES PARTIES HORS JOURS, AU CARNET.
+ *
+ * « L'essentiel », « ce que j'ai compris » : une synthèse de la période. Ce
+ * n'est la parole d'aucun jour, c'est ce qu'on a retenu — exactement ce que
+ * le carnet range, et il ne transforme jamais une journée en journée écrite.
+ * Pas de `jour` (elle ne parle pas d'un jour), mais sa période dans `quand`,
+ * le champ fait pour les mots qui situent sans dater.
+ */
+export function notesHorsJours(transcription, places) {
+  const dates = places.map(p => p.date).sort();
+  const quand = dates.length ? (dates[0] === dates.at(-1) ? `le ${dates[0]}` : `du ${dates[0]} au ${dates.at(-1)}`) : null;
+  return (transcription.horsJours ?? []).map(h => ({
+    quand, titre: h.titre,
+    texte: h.titre ? `${h.titre}\n\n${h.texte}` : h.texte
+  }));
 }
 
 /* ============================== ÉCRIRE ============================== */
@@ -261,11 +340,17 @@ export function marquerDoublons(places, userId = OWNER) {
 }
 
 /** Écrit tout, ou rien. Rend le nombre posé et les journées touchées. */
-export function ecrireMessages(places, userId = OWNER) {
+export function ecrireMessages(places, userId = OWNER, notes = []) {
   const jours = new Set();
-  let n = 0;
+  let n = 0, rangees = 0;
+  const dejaNote = db.prepare('SELECT 1 FROM carnet WHERE user_id = ? AND TRIM(texte) = ? LIMIT 1');
   db.exec('BEGIN');
   try {
+    for (const no of notes) {
+      if (dejaNote.get(userId, no.texte.trim())) continue;   // réimporter ne double pas
+      addCarnet({ texte: no.texte, jour: null, quand: no.quand, source: 'import', userId });
+      rangees++;
+    }
     for (const p of places) {
       if (p.doublon) continue;
       // `addMessage` refait le texte de la journée à chaque message de la
@@ -281,14 +366,17 @@ export function ecrireMessages(places, userId = OWNER) {
     db.exec('ROLLBACK');
     throw e;
   }
-  return { poses: n, jours: [...jours].sort() };
+  return { poses: n, rangees, jours: [...jours].sort() };
 }
 
 /** L'aperçu : ce que la personne doit voir avant de dire oui. */
-export function apercu(transcription, places) {
+export function apercu(transcription, places, notes = []) {
   const a_poser = places.filter(p => !p.doublon);
   const dates = places.map(p => p.date).sort();
   return {
+    genre: transcription.genre ?? 'conversation',
+    notes: notes.map(n => ({ titre: n.titre || n.texte.slice(0, 60), signes: n.texte.length, quand: n.quand })),
+    relatifs: transcription.messages.some(m => m.jour_relatif != null),
     plateforme: transcription.plateforme,
     titre: transcription.titre,
     participants: transcription.participants,
@@ -298,8 +386,9 @@ export function apercu(transcription, places) {
     sansDate: places.filter(p => !p.dateConnue).length,
     du: dates[0] ?? null, au: dates.at(-1) ?? null,
     jours: new Set(a_poser.filter(p => p.role === 'user').map(p => p.date)).size,
-    extrait: places.slice(0, 40).map(p => ({ ts: p.ts, date: p.date, auteur: p.auteur, role: p.role,
-                                              text: p.text.slice(0, 220), doublon: p.doublon }))
+    extrait: places.slice(0, 60).map(p => ({ ts: p.ts, date: p.date, auteur: p.auteur, role: p.role,
+                                              text: p.text.slice(0, 220), doublon: p.doublon,
+                                              heureConnue: p.heureConnue }))
   };
 }
 

@@ -45,7 +45,7 @@ import { horizonBlock } from './horizons.js';
 import { attente, poserCle, retirerCle, synchroDemandee } from './passerelle.js';
 import * as connecteur from './connecteur.js';
 import { transcrire, placerMessages, marquerDoublons, ecrireMessages, apercu as apercuImport,
-         devinerMoi, PDF_OCTETS_MAX, TEXTE_MAX } from './import-conversation.js';
+         devinerMoi, notesHorsJours, PDF_OCTETS_MAX, TEXTE_MAX } from './import-conversation.js';
 import { corpusPour, lire, lireEnFlux, lancerLot, releverLot, MIN_JOURS as LECTURE_MIN, VERSION_LECTURE, clientDe } from './lecture.js';
 import { sensDesLiens } from './sens.js';
 import { etats as etatsMotifs, injecterPromus, SEUILS_PROMOTION } from './promotion.js';
@@ -2819,7 +2819,8 @@ export const routes = {
         r = await transcrire({ pdf, texte }, s, { client: await clientDe(s), demanderOutil, optionsDuModele });
       } catch (err) { return { error: err.message }; }
       recordUsage(userId, r.modele, r.usage.input, r.usage.output, r.usage.cacheLu, r.usage.cacheEcrit, 'import');
-      if (!r.transcription.messages.length) return { error: 'Aucun message reconnu dans ce document.' };
+      if (!r.transcription.messages.length && !r.transcription.horsJours.length)
+        return { error: 'Rien de daté ni de transcriptible dans ce document.' };
       const jeton = randomUUID();
       tenu = { jeton, transcription: r.transcription, coupee: r.coupee, nom: String(body.nom ?? '').slice(0, 120) };
       IMPORTS_EN_COURS.set(`${userId}|${jeton}`, tenu);
@@ -2831,10 +2832,11 @@ export const routes = {
     const moi = noms.has(body.moi) ? body.moi : devinerMoi(t.participants, { pseudo: publicUser(userId).username });
     const reference = /^\d{4}-\d{2}-\d{2}$/.test(body.reference ?? '') ? body.reference : jourVecu(userId);
     const places = marquerDoublons(placerMessages(t, { moi, reference, jourDe: ts => jourVecu(userId, ts) }), userId);
-    const vu = { jeton: tenu.jeton, moi, reference, coupee: tenu.coupee, ...apercuImport(t, places) };
+    const notes = notesHorsJours(t, places);
+    const vu = { jeton: tenu.jeton, moi, reference, coupee: tenu.coupee, ...apercuImport(t, places, notes) };
     if (!body.apply) return { apercu: vu };
 
-    const ecrit = ecrireMessages(places, userId);
+    const ecrit = ecrireMessages(places, userId, notes);
     IMPORTS_EN_COURS.delete(`${userId}|${tenu.jeton}`);
     invalidate(userId);
     return { ...ecrit, apercu: vu };

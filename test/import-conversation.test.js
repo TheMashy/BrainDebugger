@@ -154,3 +154,63 @@ test('la route : lit une fois, montre, n’écrit qu’avec apply, et ne double 
     serveur.close();
   }
 });
+
+/* ============ UN JOURNAL, PAS UNE CONVERSATION ============
+ * Un résumé « jour par jour » : des sections datées, une plage de jours, et
+ * des parties qui parlent de toute la période. Contenu inventé, même forme. */
+
+const resume = {
+  genre: 'journal', plateforme: 'résumé', titre: 'Du 5 au 9 mars 2026', annee: 2026,
+  participants: [{ nom: 'moi' }],
+  messages: [
+    { auteur: 'moi', date: '2026-03-05', texte: 'Journée lente. « je suis fatigué ».' },
+    { auteur: 'moi', date: '2026-03-06', texte: 'Séance avec la psy.\n\nNotes de séance : pourquoi je remets la faute sur moi ?' },
+    { auteur: 'moi', date: '2026-03-07', date_fin: '2026-03-08', texte: 'Pas de notes.' },
+    { auteur: 'Claude', date: '2026-03-09', heure: '08:15', texte: 'Matin : café, puis le travail.' },
+    { auteur: 'moi', texte: 'L’essentiel : beaucoup de fatigue sur la période.' }
+  ],
+  hors_jours: [{ titre: 'Ce que j’ai compris', texte: 'Le cadre m’aide.' }]
+};
+
+test('journal : une journée par message, à 21 h, à elle ; le hors-jours va au carnet', () => dansLaZone('Europe/Paris', () => {
+  const t = IC.validerTranscription(resume);
+  assert.equal(t.genre, 'journal');
+  assert.deepEqual(t.participants.map(p => p.nom), ['moi'], 'un journal n’a qu’une voix');
+  assert.equal(t.messages.length, 4);
+  assert.equal(t.horsJours.length, 2, 'la section sans date rejoint les parties hors jours');
+  const moi = IC.devinerMoi(t.participants);
+  assert.equal(moi, 'moi');
+  const p = IC.placerMessages(t, { moi, reference: '2026-11-03', zone: 'Europe/Paris' });
+  assert.deepEqual(p.map(m => m.date), ['2026-03-05', '2026-03-06', '2026-03-07', '2026-03-09']);
+  assert.ok(p.every(m => m.role === 'user'));
+  assert.equal(heureLocale(p[0].ts, 'Europe/Paris'), '21:00', 'un journal sans heure est écrit le soir');
+  assert.equal(heureLocale(p[1].ts, 'Europe/Paris'), '21:00', 'chaque NOUVEAU jour repart de son heure, pas de la minute d’après');
+  assert.equal(heureLocale(p[3].ts, 'Europe/Paris'), '08:15', 'une heure écrite est gardée');
+  assert.match(p[2].text, /^\(du 2026-03-07 au 2026-03-08\)/, 'une plage dit qu’elle en est une');
+  const notes = IC.notesHorsJours(t, p);
+  assert.equal(notes.length, 2);
+  assert.equal(notes[0].quand, 'du 2026-03-05 au 2026-03-09');
+  assert.match(notes[0].texte, /^Ce que j’ai compris\n\nLe cadre/);
+}));
+
+test('conversation : l’heure ne passe pas d’un jour au suivant', () => {
+  const t = IC.validerTranscription({ plateforme: 'Discord', participants: [{ nom: 'a' }, { nom: 'b' }], messages: [
+    { auteur: 'a', date: '2026-01-01', heure: '23:10', texte: 'un' },
+    { auteur: 'b', date: '2026-01-02', texte: 'deux' }] });
+  const p = IC.placerMessages(t, { moi: 'a', reference: '2026-01-05', zone: 'UTC' });
+  assert.equal(p[1].ts, '2026-01-02T12:00:00.000Z', 'le 2 sans heure : midi, pas 23:10');
+});
+
+test('journal écrit : messages au fil, synthèses au carnet, et rien en double au second passage', () => dansLaZone('Europe/Paris', () => {
+  const t = IC.validerTranscription(resume);
+  const p = IC.marquerDoublons(IC.placerMessages(t, { moi: 'moi', reference: '2026-11-03', zone: 'Europe/Paris' }), OWNER);
+  const notes = IC.notesHorsJours(t, p);
+  const r = IC.ecrireMessages(p, OWNER, notes);
+  assert.equal(r.poses, 4);
+  assert.equal(r.rangees, 2);
+  assert.match(getEntry('2026-03-06', OWNER)?.text ?? '', /faute sur moi/);
+  assert.doesNotMatch(getEntry('2026-03-09', OWNER)?.text ?? '', /essentiel/, 'la synthèse n’est la journée de personne');
+  const p2 = IC.marquerDoublons(IC.placerMessages(t, { moi: 'moi', reference: '2026-11-03', zone: 'Europe/Paris' }), OWNER);
+  const r2 = IC.ecrireMessages(p2, OWNER, IC.notesHorsJours(t, p2));
+  assert.deepEqual([r2.poses, r2.rangees], [0, 0]);
+}));
